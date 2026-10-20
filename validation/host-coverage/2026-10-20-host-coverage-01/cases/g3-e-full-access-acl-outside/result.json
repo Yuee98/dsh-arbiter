@@ -1,0 +1,98 @@
+{
+  "caseId": "g3-e-full-access-acl-outside",
+  "group": "3",
+  "title": "danger-full-access 下同一文件工具写同一路径：成功（模式对照）",
+  "task": "HOSTCOV G3-E file tool outside full access",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "danger-full-access",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 364,
+  "exitCode": 0,
+  "stdout": "G3E-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {
+    "outside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/outside/outside-tool-full.txt",
+      "content": "G3E\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1573
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-e-full-access-acl-outside-ws--/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-e-full-access-acl-outside-ws--/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d/session.v4.jsonl.zstd",
+      "bytes": 15004
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d.json",
+      "bytes": 4138
+    },
+    {
+      "path": "outside/outside-tool-full.txt",
+      "bytes": 4
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3678
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2367
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 437
+    },
+    {
+      "path": "sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd",
+      "bytes": 15004
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

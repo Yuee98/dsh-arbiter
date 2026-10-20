@@ -1,0 +1,6 @@
+[driver] case g7-a-bash-escalate-tool-allow
+[driver] case g7-b-run-code-escalate-tool-allow
+[driver] case g7-c-bash-escalate-no-tool-rule
+[driver] case g7-d-bash-escalate-sim-allowed
+[driver] case g7-e-run-code-escalate-sim-allowed
+[driver] case g7-f-bash-escalate-sim-rejected

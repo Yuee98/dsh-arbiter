@@ -1,0 +1,423 @@
+[
+  {
+    "caseId": "g2-a-outer-allow",
+    "group": "2",
+    "title": "外层 run_code allow 对照：程序启动并写出标记",
+    "task": "HOSTCOV G2-A outer allow",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 584,
+    "exitCode": 0,
+    "stdout": "G2A-DONE\n",
+    "stderrTail": "(node:75084) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 17,
+    "markers": {
+      "program": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws/program-started.txt",
+        "content": "program body started\n"
+      },
+      "inner": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws/inner.txt",
+        "content": "OUTER-ALLOW-MARK\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1817
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-a-outer-allow-ws--/session-2693a7e2-7797-4384-950c-6acd27c20c99/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-a-outer-allow-ws--/session-2693a7e2-7797-4384-950c-6acd27c20c99/session.v4.jsonl.zstd",
+        "bytes": 18154
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99.json",
+        "bytes": 4080
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 5866
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2339
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 568
+      },
+      {
+        "path": "sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "bytes": 18154
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inner.txt",
+        "bytes": 17
+      },
+      {
+        "path": "ws/program-started.txt",
+        "bytes": 21
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g2-b-outer-deny",
+    "group": "2",
+    "title": "外层 run_code deny：程序未启动，program-started 不存在",
+    "task": "HOSTCOV G2-B outer deny",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 408,
+    "exitCode": 0,
+    "stdout": "G2B-DONE\n",
+    "stderrTail": "",
+    "probeEventCount": 11,
+    "markers": {
+      "program": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/ws/program-started.txt"
+      },
+      "inner": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/ws/inner.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-b-outer-deny/sessions/session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1876
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-b-outer-deny-ws--/session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-b-outer-deny-ws--/session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac/session.v4.jsonl.zstd",
+        "bytes": 17378
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac.json",
+        "bytes": 4076
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3097
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2246
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 546
+      },
+      {
+        "path": "sessions/session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac__session.v4.jsonl.zstd",
+        "bytes": 17378
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g2-c-inner-deny-catch",
+    "group": "2",
+    "title": "内层 tools.bash deny：仅该 body 未执行，程序 catch 后继续",
+    "task": "HOSTCOV G2-C inner deny catch",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 515,
+    "exitCode": 0,
+    "stdout": "G2C-DONE\n",
+    "stderrTail": "(node:75113) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 21,
+    "markers": {
+      "program": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/program-started.txt",
+        "content": "program body started\n"
+      },
+      "denied": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/inner-denied.txt"
+      },
+      "allowed": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/inner-allowed.txt",
+        "content": "INNER-ALLOW-MARK\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1892
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-c-inner-deny-catch-ws--/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-c-inner-deny-catch-ws--/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b/session.v4.jsonl.zstd",
+        "bytes": 18434
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b.json",
+        "bytes": 4100
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 7478
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2357
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 885
+      },
+      {
+        "path": "sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "bytes": 18434
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inner-allowed.txt",
+        "bytes": 17
+      },
+      {
+        "path": "ws/program-started.txt",
+        "bytes": 21
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g2-d-concurrent-inner",
+    "group": "2",
+    "title": "两个并发内层调用：一个被拒绝、一个放行，记录 callId/rootCallId/parent",
+    "task": "HOSTCOV G2-D concurrent inner",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 490,
+    "exitCode": 0,
+    "stdout": "G2D-DONE\n",
+    "stderrTail": "(node:75132) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 21,
+    "markers": {
+      "program": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws/program-started.txt",
+        "content": "program body started\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1906
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-d-concurrent-inner-ws--/session-553e8295-bb90-4afc-9bce-6770dadc7f42/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-d-concurrent-inner-ws--/session-553e8295-bb90-4afc-9bce-6770dadc7f42/session.v4.jsonl.zstd",
+        "bytes": 18167
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42.json",
+        "bytes": 4100
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 7547
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2352
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 821
+      },
+      {
+        "path": "sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "bytes": 18167
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/parallel-allow.txt",
+        "bytes": 15
+      },
+      {
+        "path": "ws/parallel-deny.txt",
+        "bytes": 14
+      },
+      {
+        "path": "ws/program-started.txt",
+        "bytes": 21
+      }
+    ],
+    "notes": ""
+  }
+]

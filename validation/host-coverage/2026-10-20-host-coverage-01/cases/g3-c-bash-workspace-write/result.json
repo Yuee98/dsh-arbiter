@@ -1,0 +1,112 @@
+{
+  "caseId": "g3-c-bash-workspace-write",
+  "group": "3",
+  "title": "workspace-write 下 bash 工具：允许根内/外写入对比",
+  "task": "HOSTCOV G3-C bash sandbox",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 630,
+  "exitCode": 0,
+  "stdout": "G3C-DONE\n",
+  "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home/profiles/hostcov/#include\n",
+  "probeEventCount": 13,
+  "markers": {
+    "inside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws/inside-bash.txt",
+      "content": "IN\n"
+    },
+    "outsideRel": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/outside/outside-bash.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [
+    "{\"t\":\"2026-10-20T14:53:24.562Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nHost: 127.0.0.1:63766\\r\\nUser-Agent: curl/8.7.1\\r\\nAccept: */*\\r\\n\\r\\n\"}"
+  ],
+  "receiverPort": "63766",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1558
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-c-bash-workspace-write-ws--/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-c-bash-workspace-write-ws--/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8/session.v4.jsonl.zstd",
+      "bytes": 15235
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8.json",
+      "bytes": 3856
+    },
+    {
+      "path": "network-port.txt",
+      "bytes": 5
+    },
+    {
+      "path": "network-receipt.jsonl",
+      "bytes": 139
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3650
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2330
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 594
+    },
+    {
+      "path": "sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd",
+      "bytes": 15235
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 1002
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inside-bash.txt",
+      "bytes": 3
+    }
+  ],
+  "notes": ""
+}

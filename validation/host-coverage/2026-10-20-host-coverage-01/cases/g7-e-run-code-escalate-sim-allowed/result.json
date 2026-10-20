@@ -1,0 +1,119 @@
+{
+  "caseId": "g7-e-run-code-escalate-sim-allowed",
+  "group": "7",
+  "title": "模拟应答：run_code 工具 allow 后 body 内升权被模拟批准（标注 simulated）",
+  "task": "HOSTCOV G7-E run_code escalation simulated allow",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": "allowed-once",
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 501,
+  "exitCode": 0,
+  "stdout": "G7E-DONE\n",
+  "stderrTail": "(node:75463) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 12,
+  "markers": {
+    "outside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/outside/g7e-out.txt",
+      "content": "G7E-PROGRAM\n"
+    }
+  },
+  "approvalSimLog": [
+    {
+      "event": "approval-sim/mounted",
+      "simulated": true,
+      "outcome": "allowed-once",
+      "t": "2026-10-20T14:53:35.553Z"
+    },
+    {
+      "event": "approval-sim/answer",
+      "simulated": true,
+      "outcome": "allowed-once",
+      "toolName": "run_code",
+      "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+      "reason": "escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated approval",
+      "agentSessionId": "session-09c061ce-de3a-4945-825a-9d60e59a460e",
+      "t": "2026-10-20T14:53:35.661Z"
+    }
+  ],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/sessions/session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "approval-sim.jsonl",
+      "bytes": 489
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 2319
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-e-run-code-escalate-sim-allowed-ws--/session-09c061ce-de3a-4945-825a-9d60e59a460e/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-e-run-code-escalate-sim-allowed-ws--/session-09c061ce-de3a-4945-825a-9d60e59a460e/session.v4.jsonl.zstd",
+      "bytes": 17850
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-09c061ce-de3a-4945-825a-9d60e59a460e.json",
+      "bytes": 4156
+    },
+    {
+      "path": "outside/g7e-out.txt",
+      "bytes": 12
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3446
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2279
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 757
+    },
+    {
+      "path": "sessions/session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+      "bytes": 17850
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

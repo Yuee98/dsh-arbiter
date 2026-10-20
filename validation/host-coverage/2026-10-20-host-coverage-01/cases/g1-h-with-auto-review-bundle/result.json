@@ -1,0 +1,98 @@
+{
+  "caseId": "g1-h-with-auto-review-bundle",
+  "group": "1",
+  "title": "并存官方 auto-review bundle 时的监听集与放行（非 auto 预设）",
+  "task": "HOSTCOV G1-H coexistence with official auto-review",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 454,
+  "exitCode": 0,
+  "stdout": "G1H-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {
+    "marker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/ws/marker.txt",
+      "content": "G1H\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-h-with-auto-review-bundle/sessions/session-25625263-21ff-4cc2-a70f-a3b690a7a408__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1446
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 265
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-h-with-auto-review-bundle-ws--/session-25625263-21ff-4cc2-a70f-a3b690a7a408/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-h-with-auto-review-bundle-ws--/session-25625263-21ff-4cc2-a70f-a3b690a7a408/session.v4.jsonl.zstd",
+      "bytes": 15143
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-25625263-21ff-4cc2-a70f-a3b690a7a408.json",
+      "bytes": 4143
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3600
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2273
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 336
+    },
+    {
+      "path": "sessions/session-25625263-21ff-4cc2-a70f-a3b690a7a408__session.v4.jsonl.zstd",
+      "bytes": 15143
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 4
+    }
+  ],
+  "notes": ""
+}

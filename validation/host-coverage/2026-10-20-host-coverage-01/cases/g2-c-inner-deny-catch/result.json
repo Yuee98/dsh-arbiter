@@ -1,0 +1,111 @@
+{
+  "caseId": "g2-c-inner-deny-catch",
+  "group": "2",
+  "title": "内层 tools.bash deny：仅该 body 未执行，程序 catch 后继续",
+  "task": "HOSTCOV G2-C inner deny catch",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 515,
+  "exitCode": 0,
+  "stdout": "G2C-DONE\n",
+  "stderrTail": "(node:75113) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 21,
+  "markers": {
+    "program": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/program-started.txt",
+      "content": "program body started\n"
+    },
+    "denied": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/inner-denied.txt"
+    },
+    "allowed": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/ws/inner-allowed.txt",
+      "content": "INNER-ALLOW-MARK\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-c-inner-deny-catch/sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1892
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-c-inner-deny-catch-ws--/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-c-inner-deny-catch-ws--/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b/session.v4.jsonl.zstd",
+      "bytes": 18434
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b.json",
+      "bytes": 4100
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 7478
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2357
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 885
+    },
+    {
+      "path": "sessions/session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+      "bytes": 18434
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inner-allowed.txt",
+      "bytes": 17
+    },
+    {
+      "path": "ws/program-started.txt",
+      "bytes": 21
+    }
+  ],
+  "notes": ""
+}

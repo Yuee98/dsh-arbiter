@@ -1,0 +1,98 @@
+{
+  "caseId": "g1-g-prepend-order",
+  "group": "1",
+  "title": "探针 prepend 与默认挂载的监听顺序对照",
+  "task": "HOSTCOV G1-G prepend order",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": true,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 418,
+  "exitCode": 0,
+  "stdout": "G1G-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 12,
+  "markers": {
+    "marker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/ws/marker.txt",
+      "content": "G1G\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-g-prepend-order/sessions/session-fa65a898-99e0-43f9-94b1-daaccf514e0f__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1415
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-g-prepend-order-ws--/session-fa65a898-99e0-43f9-94b1-daaccf514e0f/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-g-prepend-order-ws--/session-fa65a898-99e0-43f9-94b1-daaccf514e0f/session.v4.jsonl.zstd",
+      "bytes": 15077
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-fa65a898-99e0-43f9-94b1-daaccf514e0f.json",
+      "bytes": 4087
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3366
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2220
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 338
+    },
+    {
+      "path": "sessions/session-fa65a898-99e0-43f9-94b1-daaccf514e0f__session.v4.jsonl.zstd",
+      "bytes": 15077
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 4
+    }
+  ],
+  "notes": ""
+}

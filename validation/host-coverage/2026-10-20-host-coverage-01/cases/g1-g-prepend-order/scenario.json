@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G1G\\n' > marker.txt; echo body-ran",
+            "description": "prepend order"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G1G-DONE"
+    }
+  ]
+}

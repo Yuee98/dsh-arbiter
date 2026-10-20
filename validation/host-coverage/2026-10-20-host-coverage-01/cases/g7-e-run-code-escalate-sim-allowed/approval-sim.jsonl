@@ -1,0 +1,2 @@
+{"event":"approval-sim/mounted","simulated":true,"outcome":"allowed-once","t":"2026-10-20T14:53:35.553Z"}
+{"event":"approval-sim/answer","simulated":true,"outcome":"allowed-once","toolName":"run_code","callId":"fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0","reason":"escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated approval","agentSessionId":"session-09c061ce-de3a-4945-825a-9d60e59a460e","t":"2026-10-20T14:53:35.661Z"}

@@ -1,0 +1,93 @@
+{
+  "caseId": "g7-b-run-code-escalate-tool-allow",
+  "group": "7",
+  "title": "run_code 工具 allow 但 body 内请求升权：never 下原生审批拒绝",
+  "task": "HOSTCOV G7-B run_code escalation never",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 393,
+  "exitCode": 0,
+  "stdout": "G7B-DONE\n",
+  "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/home/profiles/hostcov/#include\n",
+  "probeEventCount": 12,
+  "markers": {
+    "outside": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/outside/g7-program-out.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/sessions/session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1893
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-b-run-code-escalate-tool-allow-ws--/session-b3986965-af96-47a6-9419-34f2000ae1c6/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-b-run-code-escalate-tool-allow-ws--/session-b3986965-af96-47a6-9419-34f2000ae1c6/session.v4.jsonl.zstd",
+      "bytes": 17757
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-b3986965-af96-47a6-9419-34f2000ae1c6.json",
+      "bytes": 3899
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3705
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2361
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 747
+    },
+    {
+      "path": "sessions/session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd",
+      "bytes": 17757
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 1018
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

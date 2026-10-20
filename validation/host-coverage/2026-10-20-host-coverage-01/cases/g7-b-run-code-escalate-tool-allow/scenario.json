@@ -1,0 +1,22 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "G7-ESCALATE-PROGRAM write outside",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "host coverage fixture: write to a controlled sibling of the test workspace",
+            "code": "const fs = await import(\"node:fs/promises\");\nawait fs.writeFile(\"/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-b-run-code-escalate-tool-allow/outside/g7-program-out.txt\", \"G7-PROGRAM\\n\");\nreturn { ok: true };"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G7B-DONE"
+    }
+  ]
+}

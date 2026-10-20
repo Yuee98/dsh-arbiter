@@ -1,0 +1,188 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792507999181,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 23,
+        "val": "HOSTCOV G1-E guard vs allow"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 23,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "HOSTCOV G1-E guard vs allow"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 23,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 23,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 23,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 23,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 23,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 23,
+        "val": {
+          "surfaceTokens": 1828,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1818
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 23,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 1828,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1184
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 23,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 23,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 20,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 22
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 23,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 23,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 23,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 23,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 23,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 23,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 23,
+        "val": {}
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 23,
+        "val": null
+      }
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "caseId": "g3-b-workspace-write",
+  "group": "3",
+  "title": "workspace-write：同一程序写允许根内成功、受控同级目录失败",
+  "task": "HOSTCOV G3-B workspace write",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 698,
+  "exitCode": 0,
+  "stdout": "G3B-DONE\n",
+  "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home/profiles/hostcov/#include\n(node:75176) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 13,
+  "markers": {
+    "inside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt",
+      "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt\n"
+    },
+    "outsideRel": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/outside/outside-node.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [
+    "{\"t\":\"2026-10-20T14:53:23.845Z\",\"payload\":\"HOSTCOV-G3-FIXED-PAYLOAD\\n\"}",
+    "{\"t\":\"2026-10-20T14:53:23.860Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nhost: 127.0.0.1:63761\\r\\nconnection: keep-alive\\r\\naccept: */*\\r\\naccept-language: *\\r\\nsec-fetch-mode: cors\\r\\nuser-agent: node\\r\\naccept-encoding: gzip, deflate\\r\\n\\r\\n\"}"
+  ],
+  "receiverPort": "63761",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1646
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-b-workspace-write-ws--/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-b-workspace-write-ws--/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d/session.v4.jsonl.zstd",
+      "bytes": 18416
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d.json",
+      "bytes": 3853
+    },
+    {
+      "path": "network-port.txt",
+      "bytes": 5
+    },
+    {
+      "path": "network-receipt.jsonl",
+      "bytes": 311
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 4363
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2341
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 2538
+    },
+    {
+      "path": "sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd",
+      "bytes": 18416
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 1187
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inside-node.txt",
+      "bytes": 147
+    }
+  ],
+  "notes": ""
+}

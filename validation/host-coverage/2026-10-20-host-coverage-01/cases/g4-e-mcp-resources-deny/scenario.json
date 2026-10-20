@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "read_mcp_resource",
+          "arguments": {
+            "server": "hostcov",
+            "uri": "hostcov://fixture/alpha"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G4E-DONE"
+    }
+  ]
+}

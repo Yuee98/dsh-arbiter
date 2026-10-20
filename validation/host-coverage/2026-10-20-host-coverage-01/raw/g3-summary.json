@@ -1,0 +1,908 @@
+[
+  {
+    "caseId": "g3-a-full-access",
+    "group": "3",
+    "title": "danger-full-access：run_code 直接 Node fs 写允许根内/外均成功",
+    "task": "HOSTCOV G3-A full access",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 718,
+    "exitCode": 0,
+    "stdout": "G3A-DONE\n",
+    "stderrTail": "(node:75143) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 13,
+    "markers": {
+      "inside": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws/inside-node.txt",
+        "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws/inside-node.txt\n"
+      },
+      "outsideRel": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside/outside-node.txt",
+        "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside/outside-node.txt\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [
+      "{\"t\":\"2026-10-20T14:53:23.089Z\",\"payload\":\"HOSTCOV-G3-FIXED-PAYLOAD\\n\"}",
+      "{\"t\":\"2026-10-20T14:53:23.104Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nhost: 127.0.0.1:63755\\r\\nconnection: keep-alive\\r\\naccept: */*\\r\\naccept-language: *\\r\\nsec-fetch-mode: cors\\r\\nuser-agent: node\\r\\naccept-encoding: gzip, deflate\\r\\n\\r\\n\"}"
+    ],
+    "receiverPort": "63755",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1633
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-a-full-access-ws--/session-60926d9a-adec-4685-8bf3-31241104f1ae/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-a-full-access-ws--/session-60926d9a-adec-4685-8bf3-31241104f1ae/session.v4.jsonl.zstd",
+        "bytes": 18467
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae.json",
+        "bytes": 4091
+      },
+      {
+        "path": "network-port.txt",
+        "bytes": 5
+      },
+      {
+        "path": "network-receipt.jsonl",
+        "bytes": 311
+      },
+      {
+        "path": "outside/outside-node.txt",
+        "bytes": 149
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 4126
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2329
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 2526
+      },
+      {
+        "path": "sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd",
+        "bytes": 18467
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inside-node.txt",
+        "bytes": 143
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-b-workspace-write",
+    "group": "3",
+    "title": "workspace-write：同一程序写允许根内成功、受控同级目录失败",
+    "task": "HOSTCOV G3-B workspace write",
+    "cliArgs": [],
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 698,
+    "exitCode": 0,
+    "stdout": "G3B-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/home/profiles/hostcov/#include\n(node:75176) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 13,
+    "markers": {
+      "inside": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt",
+        "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt\n"
+      },
+      "outsideRel": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/outside/outside-node.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [
+      "{\"t\":\"2026-10-20T14:53:23.845Z\",\"payload\":\"HOSTCOV-G3-FIXED-PAYLOAD\\n\"}",
+      "{\"t\":\"2026-10-20T14:53:23.860Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nhost: 127.0.0.1:63761\\r\\nconnection: keep-alive\\r\\naccept: */*\\r\\naccept-language: *\\r\\nsec-fetch-mode: cors\\r\\nuser-agent: node\\r\\naccept-encoding: gzip, deflate\\r\\n\\r\\n\"}"
+    ],
+    "receiverPort": "63761",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1646
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-b-workspace-write-ws--/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-b-workspace-write-ws--/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d/session.v4.jsonl.zstd",
+        "bytes": 18416
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d.json",
+        "bytes": 3853
+      },
+      {
+        "path": "network-port.txt",
+        "bytes": 5
+      },
+      {
+        "path": "network-receipt.jsonl",
+        "bytes": 311
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 4363
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2341
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 2538
+      },
+      {
+        "path": "sessions/session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd",
+        "bytes": 18416
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1187
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inside-node.txt",
+        "bytes": 147
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-c-bash-workspace-write",
+    "group": "3",
+    "title": "workspace-write 下 bash 工具：允许根内/外写入对比",
+    "task": "HOSTCOV G3-C bash sandbox",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 630,
+    "exitCode": 0,
+    "stdout": "G3C-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/home/profiles/hostcov/#include\n",
+    "probeEventCount": 13,
+    "markers": {
+      "inside": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/ws/inside-bash.txt",
+        "content": "IN\n"
+      },
+      "outsideRel": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/outside/outside-bash.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [
+      "{\"t\":\"2026-10-20T14:53:24.562Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nHost: 127.0.0.1:63766\\r\\nUser-Agent: curl/8.7.1\\r\\nAccept: */*\\r\\n\\r\\n\"}"
+    ],
+    "receiverPort": "63766",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1558
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-c-bash-workspace-write-ws--/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-c-bash-workspace-write-ws--/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8/session.v4.jsonl.zstd",
+        "bytes": 15235
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8.json",
+        "bytes": 3856
+      },
+      {
+        "path": "network-port.txt",
+        "bytes": 5
+      },
+      {
+        "path": "network-receipt.jsonl",
+        "bytes": 139
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3650
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2330
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 594
+      },
+      {
+        "path": "sessions/session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd",
+        "bytes": 15235
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1002
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inside-bash.txt",
+        "bytes": 3
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-d-workspace-write-acl-outside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写受控同级目录：被原生 fs 沙箱拒绝（非探针）",
+    "task": "HOSTCOV G3-D file tool outside",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 391,
+    "exitCode": 0,
+    "stdout": "G3D-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/home/profiles/hostcov/#include\n",
+    "probeEventCount": 13,
+    "markers": {
+      "outside": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/outside/outside-tool.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-d-workspace-write-acl-outside/sessions/session-0180e103-7eeb-4060-8bca-a5a6c11a8208__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1586
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-d-workspace-write-acl-outside-ws--/session-0180e103-7eeb-4060-8bca-a5a6c11a8208/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-d-workspace-write-acl-outside-ws--/session-0180e103-7eeb-4060-8bca-a5a6c11a8208/session.v4.jsonl.zstd",
+        "bytes": 14926
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-0180e103-7eeb-4060-8bca-a5a6c11a8208.json",
+        "bytes": 3880
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3943
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2345
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 436
+      },
+      {
+        "path": "sessions/session-0180e103-7eeb-4060-8bca-a5a6c11a8208__session.v4.jsonl.zstd",
+        "bytes": 14926
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1016
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-e-full-access-acl-outside",
+    "group": "3",
+    "title": "danger-full-access 下同一文件工具写同一路径：成功（模式对照）",
+    "task": "HOSTCOV G3-E file tool outside full access",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 364,
+    "exitCode": 0,
+    "stdout": "G3E-DONE\n",
+    "stderrTail": "",
+    "probeEventCount": 13,
+    "markers": {
+      "outside": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/outside/outside-tool-full.txt",
+        "content": "G3E\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1573
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-e-full-access-acl-outside-ws--/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-e-full-access-acl-outside-ws--/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d/session.v4.jsonl.zstd",
+        "bytes": 15004
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d.json",
+        "bytes": 4138
+      },
+      {
+        "path": "outside/outside-tool-full.txt",
+        "bytes": 4
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3678
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2367
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 437
+      },
+      {
+        "path": "sessions/session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd",
+        "bytes": 15004
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-f-workspace-write-acl-inside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写允许根内：成功",
+    "task": "HOSTCOV G3-F file tool inside",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 446,
+    "exitCode": 0,
+    "stdout": "G3F-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home/profiles/hostcov/#include\n",
+    "probeEventCount": 13,
+    "markers": {
+      "inside": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws/inside-tool.txt",
+        "content": "G3F\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1582
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-f-workspace-write-acl-inside-ws--/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-f-workspace-write-acl-inside-ws--/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f/session.v4.jsonl.zstd",
+        "bytes": 14790
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f.json",
+        "bytes": 3876
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3667
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2339
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 301
+      },
+      {
+        "path": "sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd",
+        "bytes": 14790
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1014
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/inside-tool.txt",
+        "bytes": 4
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-g-workspace-write-tmp",
+    "group": "3",
+    "title": "workspace-write 下写 /tmp：成功（证明 /tmp 在实际允许根内，不能当根外）",
+    "task": "HOSTCOV G3-G tmp write",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 399,
+    "exitCode": 0,
+    "stdout": "G3G-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/home/profiles/hostcov/#include\n",
+    "probeEventCount": 13,
+    "markers": {
+      "tmp": {
+        "exists": true,
+        "path": "/tmp/hostcov-g3g-probe.txt",
+        "content": "G3G\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-g-workspace-write-tmp/sessions/session-4da38bb8-50ac-43ce-bf12-6833b5e98e38__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1554
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-g-workspace-write-tmp-ws--/session-4da38bb8-50ac-43ce-bf12-6833b5e98e38/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-g-workspace-write-tmp-ws--/session-4da38bb8-50ac-43ce-bf12-6833b5e98e38/session.v4.jsonl.zstd",
+        "bytes": 15011
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-4da38bb8-50ac-43ce-bf12-6833b5e98e38.json",
+        "bytes": 3848
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3464
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2212
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 385
+      },
+      {
+        "path": "sessions/session-4da38bb8-50ac-43ce-bf12-6833b5e98e38__session.v4.jsonl.zstd",
+        "bytes": 15011
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1000
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-h-workspace-write-read-outside",
+    "group": "3",
+    "title": "workspace-write 下读取受控同级目录：读取不受文件沙箱限制",
+    "task": "HOSTCOV G3-H read outside",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 378,
+    "exitCode": 0,
+    "stdout": "G3H-DONE\n",
+    "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home/profiles/hostcov/#include\n",
+    "probeEventCount": 13,
+    "markers": {},
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1590
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-h-workspace-write-read-outside-ws--/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-h-workspace-write-read-outside-ws--/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25/session.v4.jsonl.zstd",
+        "bytes": 14929
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25.json",
+        "bytes": 3872
+      },
+      {
+        "path": "outside/outside-readable.txt",
+        "bytes": 17
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3714
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2327
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 408
+      },
+      {
+        "path": "sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd",
+        "bytes": 14929
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 1018
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g3-i-bash-full-access-child",
+    "group": "3",
+    "title": "danger-full-access 下 bash 子进程信号对照：status 0 与 stdout",
+    "task": "HOSTCOV G3-I child process control",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 369,
+    "exitCode": 0,
+    "stdout": "G3I-DONE\n",
+    "stderrTail": "",
+    "probeEventCount": 13,
+    "markers": {},
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1569
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-i-bash-full-access-child-ws--/session-b4e26916-4cd5-46dc-8af0-9612201b6f87/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-i-bash-full-access-child-ws--/session-b4e26916-4cd5-46dc-8af0-9612201b6f87/session.v4.jsonl.zstd",
+        "bytes": 15075
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87.json",
+        "bytes": 4132
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3483
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2262
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 340
+      },
+      {
+        "path": "sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd",
+        "bytes": 15075
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  }
+]

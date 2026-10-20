@@ -1,0 +1,278 @@
+{
+  "caseId": "g4-a-mcp-direct-allow",
+  "group": "4",
+  "title": "MCP 工具直接调用 allow：server 收到 tools/call",
+  "task": "HOSTCOV G4-A mcp direct allow",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-a-mcp-direct-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-a-mcp-direct-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-a-mcp-direct-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-a-mcp-direct-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 456,
+  "exitCode": 0,
+  "stdout": "G4A-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 12,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [
+    {
+      "t": "2026-10-20T14:53:27.540Z",
+      "pid": 75282,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "method": "server/discover",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "dsh-mcp-client",
+              "version": "0.0.1"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.541Z",
+      "pid": 75282,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "error": {
+          "code": -32601,
+          "message": "server/discover not implemented by hostcov fixture"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.567Z",
+      "pid": 75283,
+      "direction": "in",
+      "payload": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "dsh-mcp-client",
+            "version": "0.0.1"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.568Z",
+      "pid": 75283,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {
+              "listChanged": false
+            },
+            "resources": {
+              "listChanged": false,
+              "subscribe": false
+            }
+          },
+          "serverInfo": {
+            "name": "hostcov-mcp",
+            "version": "1.0.0"
+          },
+          "instructions": "hostcov fixture server"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.570Z",
+      "pid": 75283,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.570Z",
+      "pid": 75283,
+      "direction": "in",
+      "payload": {
+        "method": "tools/list",
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.570Z",
+      "pid": 75283,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "echo_marker",
+              "description": "Echo a fixed marker string. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "write_receipt",
+              "description": "Record a marker on the server side and return it. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.610Z",
+      "pid": 75283,
+      "direction": "in",
+      "payload": {
+        "method": "tools/call",
+        "params": {
+          "name": "echo_marker",
+          "arguments": {
+            "marker": "G4A"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.610Z",
+      "pid": 75283,
+      "direction": "tool-call",
+      "payload": {
+        "name": "echo_marker",
+        "arguments": {
+          "marker": "G4A"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.610Z",
+      "pid": 75283,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "echo:G4A"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-a-mcp-direct-allow/sessions/session-d0c34878-08b3-4135-ad2a-bddcf2296a86__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 2222
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-a-mcp-direct-allow-ws--/session-d0c34878-08b3-4135-ad2a-bddcf2296a86/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-a-mcp-direct-allow-ws--/session-d0c34878-08b3-4135-ad2a-bddcf2296a86/session.v4.jsonl.zstd",
+      "bytes": 15118
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-d0c34878-08b3-4135-ad2a-bddcf2296a86.json",
+      "bytes": 4099
+    },
+    {
+      "path": "mcp-receipt.jsonl",
+      "bytes": 2392
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3487
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2227
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 274
+    },
+    {
+      "path": "sessions/session-d0c34878-08b3-4135-ad2a-bddcf2296a86__session.v4.jsonl.zstd",
+      "bytes": 15118
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

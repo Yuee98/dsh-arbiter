@@ -1,0 +1,93 @@
+{
+  "caseId": "g6-a-workflow-tool-deny",
+  "group": "6",
+  "title": "workflow 工具入口 deny：脚本未启动，子任务未创建",
+  "task": "HOSTCOV G6-A workflow tool deny",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 368,
+  "exitCode": 0,
+  "stdout": "G6A-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 11,
+  "markers": {
+    "inner": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws/workflow-inner.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1519
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-a-workflow-tool-deny-ws--/session-5175e5ef-1b99-40e3-805b-a4173e45d62c/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-a-workflow-tool-deny-ws--/session-5175e5ef-1b99-40e3-805b-a4173e45d62c/session.v4.jsonl.zstd",
+      "bytes": 14803
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c.json",
+      "bytes": 4107
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3113
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2269
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 1067
+    },
+    {
+      "path": "sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd",
+      "bytes": 14803
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

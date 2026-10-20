@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "write",
+          "arguments": {
+            "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-e-full-access-acl-outside/outside/outside-tool-full.txt",
+            "content": "G3E\n"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G3E-DONE"
+    }
+  ]
+}

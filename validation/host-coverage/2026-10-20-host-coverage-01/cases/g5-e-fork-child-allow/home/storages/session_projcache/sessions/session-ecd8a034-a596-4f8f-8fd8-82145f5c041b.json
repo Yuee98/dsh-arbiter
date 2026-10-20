@@ -1,0 +1,199 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792508011624,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 32,
+        "val": "HOSTCOV G5-PARENT-E delegate fork"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "HOSTCOV G5-PARENT-E delegate fork"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 32,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 32,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 300,
+            "outputTokens": 30,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 2,
+            "step": 1,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 32,
+        "val": {
+          "surfaceTokens": 1901,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1885
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 1901,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1257
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 32,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 28,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 31
+          },
+          "lastTurn": 2
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 32,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "inheritedEventCount": 0,
+          "head": {
+            "values": [
+              {
+                "version": 0,
+                "childId": "9813717f-4f69-4a8d-8e2b-c7666d674082",
+                "childCreatedAt": 1792508011661,
+                "mode": "continuable",
+                "label": "g5 fork child"
+              }
+            ]
+          }
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 32,
+        "val": {}
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 32,
+        "val": null
+      }
+    }
+  }
+}

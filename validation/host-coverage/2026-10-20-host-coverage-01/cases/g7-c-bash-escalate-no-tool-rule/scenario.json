@@ -1,0 +1,22 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G7C\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/outside/g7c-bash-out.txt'; echo ran",
+            "description": "g7c escalate bash",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "host coverage fixture: controlled sibling write"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G7C-DONE"
+    }
+  ]
+}

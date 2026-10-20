@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "g2 inner deny and catch",
+            "code": "\nconst fs = await import(\"node:fs\");\nfs.writeFileSync(\"program-started.txt\", \"program body started\\n\");\n\nlet caught = null;\ntry {\n  await tools.bash({ command: \"printf 'INNER-DENY-MARK\\\\n' > inner-denied.txt; echo ran\", description: \"inner denied\" });\n} catch (error) {\n  caught = { name: error?.name ?? null, toolName: error?.toolName ?? null, message: String(error?.message ?? error) };\n}\nconst ok = await tools.bash({ command: \"printf 'INNER-ALLOW-MARK\\\\n' > inner-allowed.txt; echo ran\", description: \"inner allowed\" });\nreturn { caught, ok };\n"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G2C-DONE"
+    }
+  ]
+}

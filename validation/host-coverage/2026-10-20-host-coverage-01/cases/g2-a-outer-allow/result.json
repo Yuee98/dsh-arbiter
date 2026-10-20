@@ -1,0 +1,107 @@
+{
+  "caseId": "g2-a-outer-allow",
+  "group": "2",
+  "title": "外层 run_code allow 对照：程序启动并写出标记",
+  "task": "HOSTCOV G2-A outer allow",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 584,
+  "exitCode": 0,
+  "stdout": "G2A-DONE\n",
+  "stderrTail": "(node:75084) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 17,
+  "markers": {
+    "program": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws/program-started.txt",
+      "content": "program body started\n"
+    },
+    "inner": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/ws/inner.txt",
+      "content": "OUTER-ALLOW-MARK\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-a-outer-allow/sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1817
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-a-outer-allow-ws--/session-2693a7e2-7797-4384-950c-6acd27c20c99/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-a-outer-allow-ws--/session-2693a7e2-7797-4384-950c-6acd27c20c99/session.v4.jsonl.zstd",
+      "bytes": 18154
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99.json",
+      "bytes": 4080
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 5866
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2339
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 568
+    },
+    {
+      "path": "sessions/session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+      "bytes": 18154
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inner.txt",
+      "bytes": 17
+    },
+    {
+      "path": "ws/program-started.txt",
+      "bytes": 21
+    }
+  ],
+  "notes": ""
+}

@@ -1,0 +1,195 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792508010810,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 22,
+        "val": "HOSTCOV-CHILD G5-FORK run the marker"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "HOSTCOV-CHILD G5-FORK run the marker command\nYour parent agent id is \"session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn."
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 22,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 22,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 22,
+        "val": {
+          "surfaceTokens": 2122,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 2111
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 2122,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1478
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 22,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 19,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 21
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 22,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "preset": null,
+          "sandbox": "workspace-write",
+          "approval": "never",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 22,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "descriptorSeen": true,
+          "settledMs": 29,
+          "lastTurnCompleted": true
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "identity": {
+            "mode": "continuable",
+            "label": "g5 fork child",
+            "seq": 0
+          }
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 22,
+        "val": null
+      }
+    }
+  }
+}

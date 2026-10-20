@@ -1,0 +1,5 @@
+[driver] case g4-a-mcp-direct-allow
+[driver] case g4-b-mcp-direct-deny
+[driver] case g4-c-mcp-inside-run-code
+[driver] case g4-d-mcp-resources-allow
+[driver] case g4-e-mcp-resources-deny

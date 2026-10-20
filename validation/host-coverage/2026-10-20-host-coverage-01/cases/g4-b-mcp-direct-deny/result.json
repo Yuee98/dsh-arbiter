@@ -1,0 +1,234 @@
+{
+  "caseId": "g4-b-mcp-direct-deny",
+  "group": "4",
+  "title": "MCP 工具直接调用 deny：server 未收到 tools/call（RPC 未发出）",
+  "task": "HOSTCOV G4-B mcp direct deny",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-b-mcp-direct-deny/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-b-mcp-direct-deny/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-b-mcp-direct-deny/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-b-mcp-direct-deny/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 447,
+  "exitCode": 0,
+  "stdout": "G4B-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 11,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [
+    {
+      "t": "2026-10-20T14:53:27.995Z",
+      "pid": 75285,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "method": "server/discover",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "dsh-mcp-client",
+              "version": "0.0.1"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:27.996Z",
+      "pid": 75285,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "error": {
+          "code": -32601,
+          "message": "server/discover not implemented by hostcov fixture"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:28.020Z",
+      "pid": 75286,
+      "direction": "in",
+      "payload": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "dsh-mcp-client",
+            "version": "0.0.1"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:28.021Z",
+      "pid": 75286,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {
+              "listChanged": false
+            },
+            "resources": {
+              "listChanged": false,
+              "subscribe": false
+            }
+          },
+          "serverInfo": {
+            "name": "hostcov-mcp",
+            "version": "1.0.0"
+          },
+          "instructions": "hostcov fixture server"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:28.023Z",
+      "pid": 75286,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:28.023Z",
+      "pid": 75286,
+      "direction": "in",
+      "payload": {
+        "method": "tools/list",
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:28.023Z",
+      "pid": 75286,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "echo_marker",
+              "description": "Echo a fixed marker string. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "write_receipt",
+              "description": "Record a marker on the server side and return it. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-b-mcp-direct-deny/sessions/session-37e784e7-03ce-4346-9597-4de7c46d22b6__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 2275
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-b-mcp-direct-deny-ws--/session-37e784e7-03ce-4346-9597-4de7c46d22b6/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-b-mcp-direct-deny-ws--/session-37e784e7-03ce-4346-9597-4de7c46d22b6/session.v4.jsonl.zstd",
+      "bytes": 14976
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-37e784e7-03ce-4346-9597-4de7c46d22b6.json",
+      "bytes": 4095
+    },
+    {
+      "path": "mcp-receipt.jsonl",
+      "bytes": 1926
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3133
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2255
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 274
+    },
+    {
+      "path": "sessions/session-37e784e7-03ce-4346-9597-4de7c46d22b6__session.v4.jsonl.zstd",
+      "bytes": 14976
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

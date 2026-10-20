@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G3G\\n' > /tmp/hostcov-g3g-probe.txt && echo TMP-WRITE-OK || echo TMP-WRITE-FAIL",
+            "description": "tmp write probe"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G3G-DONE"
+    }
+  ]
+}

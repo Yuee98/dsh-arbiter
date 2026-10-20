@@ -1,0 +1,195 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792508013647,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 24,
+        "val": "HOSTCOV-CHILD G6D-WORKFLOW run the marke"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 24,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "HOSTCOV-CHILD G6D-WORKFLOW run the marker"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 24,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 24,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 24,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 24,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 24,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 24,
+        "val": {
+          "surfaceTokens": 2004,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1991
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 24,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 2004,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1360
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 24,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 24,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 21,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 23
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 24,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 24,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 24,
+        "val": {
+          "preset": null,
+          "sandbox": "workspace-write",
+          "approval": "never",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 24,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 24,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 24,
+        "val": {
+          "descriptorSeen": true,
+          "settledMs": 29,
+          "lastTurnCompleted": true
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 24,
+        "val": {
+          "identity": {
+            "mode": "continuable",
+            "label": "g6d-visibility child 1",
+            "seq": 0
+          }
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 24,
+        "val": null
+      }
+    }
+  }
+}

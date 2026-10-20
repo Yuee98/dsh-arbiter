@@ -1,0 +1,115 @@
+{
+  "caseId": "g5-a-spawn-child-allow",
+  "group": "5",
+  "title": "spawn 子任务内测试工具 allow：子会话身份与父会话关联",
+  "task": "HOSTCOV G5-PARENT-A delegate spawn",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 434,
+  "exitCode": 0,
+  "stdout": "[fixture] out of scripted steps\n",
+  "stderrTail": "",
+  "probeEventCount": 17,
+  "markers": {
+    "childMarker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/ws/child-marker.txt",
+      "content": "G5-SPAWN-ALLOW\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/sessions/fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-a-spawn-child-allow/sessions/session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1444
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-a-spawn-child-allow-ws--/fe22df9a-82c6-4f2c-8404-ed45cce75d3d/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-a-spawn-child-allow-ws--/fe22df9a-82c6-4f2c-8404-ed45cce75d3d/session.v4.jsonl.zstd",
+      "bytes": 15490
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-a-spawn-child-allow-ws--/session-f376e8ee-8f53-469b-a707-ca76db0251b3/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-a-spawn-child-allow-ws--/session-f376e8ee-8f53-469b-a707-ca76db0251b3/session.v4.jsonl.zstd",
+      "bytes": 16145
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/fe22df9a-82c6-4f2c-8404-ed45cce75d3d.json",
+      "bytes": 4764
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-f376e8ee-8f53-469b-a707-ca76db0251b3.json",
+      "bytes": 4441
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 5268
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 5734
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 843
+    },
+    {
+      "path": "sessions/fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+      "bytes": 15490
+    },
+    {
+      "path": "sessions/session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd",
+      "bytes": 16145
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 32
+    },
+    {
+      "path": "ws/child-marker.txt",
+      "bytes": 15
+    }
+  ],
+  "notes": ""
+}

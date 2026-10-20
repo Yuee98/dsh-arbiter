@@ -1,0 +1,93 @@
+{
+  "caseId": "g7-c-bash-escalate-no-tool-rule",
+  "group": "7",
+  "title": "bash 工具无探针规则（ask 模式）：原生审批记录与结果",
+  "task": "HOSTCOV G7-C bash escalation ask",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 369,
+  "exitCode": 0,
+  "stdout": "G7C-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {
+    "outside": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/outside/g7c-bash-out.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-c-bash-escalate-no-tool-rule/sessions/session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1580
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-c-bash-escalate-no-tool-rule-ws--/session-5fb8e517-7849-4678-ac32-07675015a00a/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-c-bash-escalate-no-tool-rule-ws--/session-5fb8e517-7849-4678-ac32-07675015a00a/session.v4.jsonl.zstd",
+      "bytes": 15171
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-5fb8e517-7849-4678-ac32-07675015a00a.json",
+      "bytes": 4125
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3650
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2335
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 615
+    },
+    {
+      "path": "sessions/session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+      "bytes": 15171
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

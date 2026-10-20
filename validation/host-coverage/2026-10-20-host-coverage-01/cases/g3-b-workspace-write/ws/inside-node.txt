@@ -1,0 +1,1 @@
+G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt

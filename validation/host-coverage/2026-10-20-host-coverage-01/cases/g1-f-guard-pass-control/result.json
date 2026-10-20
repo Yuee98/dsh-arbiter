@@ -1,0 +1,98 @@
+{
+  "caseId": "g1-f-guard-pass-control",
+  "group": "1",
+  "title": "同一 guard 存在但规则不匹配：guard 放行、body 执行（对照）",
+  "task": "HOSTCOV G1-F guard control",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 391,
+  "exitCode": 0,
+  "stdout": "G1F-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {
+    "marker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/ws/marker.txt",
+      "content": "G1F-BODY\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-f-guard-pass-control/sessions/session-bb594244-4a75-4bd5-88ec-a6206e93de7d__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1663
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-f-guard-pass-control-ws--/session-bb594244-4a75-4bd5-88ec-a6206e93de7d/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-f-guard-pass-control-ws--/session-bb594244-4a75-4bd5-88ec-a6206e93de7d/session.v4.jsonl.zstd",
+      "bytes": 15113
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-bb594244-4a75-4bd5-88ec-a6206e93de7d.json",
+      "bytes": 4097
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3780
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2220
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 343
+    },
+    {
+      "path": "sessions/session-bb594244-4a75-4bd5-88ec-a6206e93de7d__session.v4.jsonl.zstd",
+      "bytes": 15113
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

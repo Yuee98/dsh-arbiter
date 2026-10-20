@@ -1,0 +1,119 @@
+{
+  "caseId": "g7-d-bash-escalate-sim-allowed",
+  "group": "7",
+  "title": "模拟应答：工具 allow 后 body 内升权被模拟批准（标注 simulated）",
+  "task": "HOSTCOV G7-D bash escalation simulated allow",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": "allowed-once",
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 398,
+  "exitCode": 0,
+  "stdout": "G7D-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 12,
+  "markers": {
+    "outside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/outside/g7d-out.txt",
+      "content": "G7D\n"
+    }
+  },
+  "approvalSimLog": [
+    {
+      "event": "approval-sim/mounted",
+      "simulated": true,
+      "outcome": "allowed-once",
+      "t": "2026-10-20T14:53:35.142Z"
+    },
+    {
+      "event": "approval-sim/answer",
+      "simulated": true,
+      "outcome": "allowed-once",
+      "toolName": "bash",
+      "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+      "reason": "escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated approval",
+      "agentSessionId": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e",
+      "t": "2026-10-20T14:53:35.252Z"
+    }
+  ],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/sessions/session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "approval-sim.jsonl",
+      "bytes": 485
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 2175
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-d-bash-escalate-sim-allowed-ws--/session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g7-d-bash-escalate-sim-allowed-ws--/session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e/session.v4.jsonl.zstd",
+      "bytes": 15471
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e.json",
+      "bytes": 4141
+    },
+    {
+      "path": "outside/g7d-out.txt",
+      "bytes": 4
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3389
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2256
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 644
+    },
+    {
+      "path": "sessions/session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+      "bytes": 15471
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

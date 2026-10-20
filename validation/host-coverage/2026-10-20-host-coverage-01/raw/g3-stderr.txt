@@ -1,0 +1,9 @@
+[driver] case g3-a-full-access
+[driver] case g3-b-workspace-write
+[driver] case g3-c-bash-workspace-write
+[driver] case g3-d-workspace-write-acl-outside
+[driver] case g3-e-full-access-acl-outside
+[driver] case g3-f-workspace-write-acl-inside
+[driver] case g3-g-workspace-write-tmp
+[driver] case g3-h-workspace-write-read-outside
+[driver] case g3-i-bash-full-access-child

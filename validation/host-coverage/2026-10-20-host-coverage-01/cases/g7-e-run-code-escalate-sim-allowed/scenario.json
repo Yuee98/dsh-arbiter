@@ -1,0 +1,22 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "G7E-PROGRAM write outside under simulated approval",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "host coverage fixture: controlled sibling write under simulated approval",
+            "code": "const fs = await import(\"node:fs/promises\");\nawait fs.writeFile(\"/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-e-run-code-escalate-sim-allowed/outside/g7e-out.txt\", \"G7E-PROGRAM\\n\");\nreturn { ok: true };"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G7E-DONE"
+    }
+  ]
+}

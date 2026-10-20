@@ -1,0 +1,10 @@
+# Tool settings for this single-package project.
+packages:
+  - .
+engineStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+packageManagerStrictVersion: true
+saveExact: true
+strictPeerDependencies: true
+verifyDepsBeforeRun: error

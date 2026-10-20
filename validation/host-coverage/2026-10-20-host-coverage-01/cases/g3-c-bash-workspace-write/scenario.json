@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'IN\\n' > inside-bash.txt; printf 'OUT\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-c-bash-workspace-write/outside/outside-bash.txt'; curl -s -m 3 http://127.0.0.1:63766/fixed >/dev/null && echo NET-OK || echo NET-FAIL; echo done",
+            "description": "g3 bash write both"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G3C-DONE"
+    }
+  ]
+}

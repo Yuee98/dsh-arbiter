@@ -1,0 +1,22 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G7D\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-d-bash-escalate-sim-allowed/outside/g7d-out.txt'; echo ran",
+            "description": "g7d escalate bash simulated",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "host coverage fixture: controlled sibling write under simulated approval"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G7D-DONE"
+    }
+  ]
+}

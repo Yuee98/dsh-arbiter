@@ -1,0 +1,88 @@
+{
+  "caseId": "g1-d-order-snapshot",
+  "group": "1",
+  "title": "监听顺序与其他生效插件快照（无工具调用）",
+  "task": "HOSTCOV G1-D order",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-d-order-snapshot/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-d-order-snapshot/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-d-order-snapshot/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-d-order-snapshot/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 382,
+  "exitCode": 0,
+  "stdout": "G1D-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 6,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-d-order-snapshot/sessions/session-c81a33de-ee39-44d0-a6f8-6748395935c2__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1252
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-d-order-snapshot-ws--/session-c81a33de-ee39-44d0-a6f8-6748395935c2/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-d-order-snapshot-ws--/session-c81a33de-ee39-44d0-a6f8-6748395935c2/session.v4.jsonl.zstd",
+      "bytes": 14058
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-c81a33de-ee39-44d0-a6f8-6748395935c2.json",
+      "bytes": 4072
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 1124
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 1190
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 81
+    },
+    {
+      "path": "sessions/session-c81a33de-ee39-44d0-a6f8-6748395935c2__session.v4.jsonl.zstd",
+      "bytes": 14058
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

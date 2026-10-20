@@ -1,0 +1,43 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "subagent",
+          "arguments": {
+            "description": "g5 spawn child",
+            "prompt": "HOSTCOV-CHILD G5 run the marker command"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G5A-PARENT-DONE"
+    }
+  ],
+  "routes": [
+    {
+      "match": "HOSTCOV-CHILD G5",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'G5-SPAWN-ALLOW\\n' > child-marker.txt; echo child-body-ran",
+                "description": "child marker"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5-CHILD-DONE"
+        }
+      ]
+    }
+  ]
+}

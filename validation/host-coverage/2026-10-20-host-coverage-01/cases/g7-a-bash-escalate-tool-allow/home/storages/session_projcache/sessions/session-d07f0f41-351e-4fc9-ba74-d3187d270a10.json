@@ -1,0 +1,178 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792508014060,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-a-bash-escalate-tool-allow/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 22,
+        "val": "HOSTCOV G7-A bash escalation never"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "first": {
+            "seq": 5,
+            "text": "HOSTCOV G7-A bash escalation never"
+          },
+          "count": 1,
+          "lastSeq": 5
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 22,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 22,
+        "val": null
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 22,
+        "val": {
+          "surfaceTokens": 1927,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1917
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "systems": [
+            {
+              "seq": 4,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 1927,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1283
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 22,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 19,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 21
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 22,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 22,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 22,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-a-bash-escalate-tool-allow/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 22,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 22,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 22,
+        "val": {}
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 22,
+        "val": null
+      }
+    }
+  }
+}

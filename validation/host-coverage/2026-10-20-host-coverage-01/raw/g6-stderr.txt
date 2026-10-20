@@ -1,0 +1,4 @@
+[driver] case g6-a-workflow-tool-deny
+[driver] case g6-b-workflow-tool-allow-inner-deny
+[driver] case g6-c-workflow-tool-allow-inner-allow
+[driver] case g6-d-workflow-vs-direct-delegation

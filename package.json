@@ -1,0 +1,49 @@
+{
+  "name": "dsh-arbiter",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TypeScript and Node.js development scaffold for dsh-arbiter.",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24.21.0 <25"
+  },
+  "files": [
+    "lib"
+  ],
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node scripts/clean.ts",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:unused": "knip",
+    "check:workflows": "actionlint",
+    "check:build": "node scripts/check-build.ts",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run check:unused && pnpm run check:workflows && pnpm run test && pnpm run build && pnpm run check:build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@vitest/eslint-plugin": "1.6.27",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "knip": "6.42.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.2",
+    "vitest": "5.0.5"
+  }
+}

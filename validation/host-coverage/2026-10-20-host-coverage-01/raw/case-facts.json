@@ -1,0 +1,855 @@
+[
+  {
+    "id": "g1-a-bash-allow",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "marker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-b-bash-deny",
+    "pre": [
+      "bash:deny"
+    ],
+    "exec": [],
+    "errors": [
+      "bash:ERR"
+    ],
+    "markers": {
+      "marker": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-c-bash-pass",
+    "pre": [
+      "bash"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "marker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-d-order-snapshot",
+    "pre": [],
+    "exec": [],
+    "errors": [],
+    "markers": {},
+    "listeners": null,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-e-guard-vs-probe-allow",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [],
+    "errors": [
+      "bash:ERR"
+    ],
+    "markers": {
+      "marker": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-f-guard-pass-control",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "marker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-g-prepend-order",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "marker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g1-h-with-auto-review-bundle",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "marker": true
+    },
+    "listeners": 4,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g2-a-outer-allow",
+    "pre": [
+      "run_code:allow",
+      "bash (ptc)"
+    ],
+    "exec": [
+      "run_code",
+      "bash"
+    ],
+    "errors": [
+      "bash:ok",
+      "run_code:ok"
+    ],
+    "markers": {
+      "program": true,
+      "inner": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g2-b-outer-deny",
+    "pre": [
+      "run_code:deny"
+    ],
+    "exec": [],
+    "errors": [
+      "run_code:ERR"
+    ],
+    "markers": {
+      "program": false,
+      "inner": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g2-c-inner-deny-catch",
+    "pre": [
+      "run_code",
+      "bash:deny (ptc)",
+      "bash (ptc)"
+    ],
+    "exec": [
+      "run_code",
+      "bash"
+    ],
+    "errors": [
+      "bash:ERR",
+      "bash:ok",
+      "run_code:ok"
+    ],
+    "markers": {
+      "program": true,
+      "denied": false,
+      "allowed": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g2-d-concurrent-inner",
+    "pre": [
+      "run_code",
+      "read (ptc)",
+      "read:deny (ptc)"
+    ],
+    "exec": [
+      "run_code",
+      "read"
+    ],
+    "errors": [
+      "read:ok",
+      "read:ERR",
+      "run_code:ok"
+    ],
+    "markers": {
+      "program": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-a-full-access",
+    "pre": [
+      "run_code"
+    ],
+    "exec": [
+      "run_code"
+    ],
+    "errors": [
+      "run_code:ok"
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 2,
+    "sim": []
+  },
+  {
+    "id": "g3-b-workspace-write",
+    "pre": [
+      "run_code"
+    ],
+    "exec": [
+      "run_code"
+    ],
+    "errors": [
+      "run_code:ok"
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 2,
+    "sim": []
+  },
+  {
+    "id": "g3-c-bash-workspace-write",
+    "pre": [
+      "bash"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 1,
+    "sim": []
+  },
+  {
+    "id": "g3-d-workspace-write-acl-outside",
+    "pre": [
+      "write"
+    ],
+    "exec": [
+      "write"
+    ],
+    "errors": [
+      "write:ERR"
+    ],
+    "markers": {
+      "outside": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-e-full-access-acl-outside",
+    "pre": [
+      "write"
+    ],
+    "exec": [
+      "write"
+    ],
+    "errors": [
+      "write:ok"
+    ],
+    "markers": {
+      "outside": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-f-workspace-write-acl-inside",
+    "pre": [
+      "write"
+    ],
+    "exec": [
+      "write"
+    ],
+    "errors": [
+      "write:ok"
+    ],
+    "markers": {
+      "inside": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-g-workspace-write-tmp",
+    "pre": [
+      "bash"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "tmp": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-h-workspace-write-read-outside",
+    "pre": [
+      "read"
+    ],
+    "exec": [
+      "read"
+    ],
+    "errors": [
+      "read:ok"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g3-i-bash-full-access-child",
+    "pre": [
+      "bash"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g4-a-mcp-direct-allow",
+    "pre": [
+      "mcp__hostcov__echo_marker:allow"
+    ],
+    "exec": [
+      "mcp__hostcov__echo_marker"
+    ],
+    "errors": [
+      "mcp__hostcov__echo_marker:ok"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [
+      "echo_marker"
+    ],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g4-b-mcp-direct-deny",
+    "pre": [
+      "mcp__hostcov__echo_marker:deny"
+    ],
+    "exec": [],
+    "errors": [
+      "mcp__hostcov__echo_marker:ERR"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g4-c-mcp-inside-run-code",
+    "pre": [
+      "run_code",
+      "mcp__hostcov__echo_marker (ptc)",
+      "mcp__hostcov__write_receipt:deny (ptc)"
+    ],
+    "exec": [
+      "run_code",
+      "mcp__hostcov__echo_marker"
+    ],
+    "errors": [
+      "mcp__hostcov__echo_marker:ok",
+      "mcp__hostcov__write_receipt:ERR",
+      "run_code:ok"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [
+      "echo_marker"
+    ],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g4-d-mcp-resources-allow",
+    "pre": [
+      "list_mcp_resources:allow",
+      "read_mcp_resource:allow"
+    ],
+    "exec": [
+      "list_mcp_resources",
+      "read_mcp_resource"
+    ],
+    "errors": [
+      "list_mcp_resources:ok",
+      "read_mcp_resource:ok"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [],
+    "res": [
+      "hostcov://fixture/alpha"
+    ],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g4-e-mcp-resources-deny",
+    "pre": [
+      "read_mcp_resource:deny"
+    ],
+    "exec": [],
+    "errors": [
+      "read_mcp_resource:ERR"
+    ],
+    "markers": {},
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g5-a-spawn-child-allow",
+    "pre": [
+      "subagent",
+      "bash:allow"
+    ],
+    "exec": [
+      "subagent",
+      "bash"
+    ],
+    "errors": [
+      "subagent:ok",
+      "bash:ok"
+    ],
+    "markers": {
+      "childMarker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g5-b-spawn-child-deny",
+    "pre": [
+      "subagent",
+      "bash:deny"
+    ],
+    "exec": [
+      "subagent"
+    ],
+    "errors": [
+      "subagent:ok",
+      "bash:ERR"
+    ],
+    "markers": {
+      "childMarker": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g5-c-fork-child-deny",
+    "pre": [
+      "subagent_fork",
+      "bash:deny"
+    ],
+    "exec": [
+      "subagent_fork"
+    ],
+    "errors": [
+      "subagent_fork:ok",
+      "bash:ERR"
+    ],
+    "markers": {
+      "forkMarker": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g5-d-child-ask-never",
+    "pre": [
+      "subagent",
+      "bash:ask"
+    ],
+    "exec": [
+      "subagent"
+    ],
+    "errors": [
+      "subagent:ok",
+      "bash:ERR"
+    ],
+    "markers": {
+      "askMarker": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g5-e-fork-child-allow",
+    "pre": [
+      "subagent_fork",
+      "bash:allow"
+    ],
+    "exec": [
+      "subagent_fork",
+      "bash"
+    ],
+    "errors": [
+      "subagent_fork:ok",
+      "bash:ok"
+    ],
+    "markers": {
+      "forkMarker": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g6-a-workflow-tool-deny",
+    "pre": [
+      "workflow:deny"
+    ],
+    "exec": [],
+    "errors": [
+      "workflow:ERR"
+    ],
+    "markers": {
+      "inner": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g6-b-workflow-tool-allow-inner-deny",
+    "pre": [
+      "workflow:allow",
+      "bash:deny"
+    ],
+    "exec": [
+      "workflow"
+    ],
+    "errors": [
+      "bash:ERR",
+      "workflow:ok"
+    ],
+    "markers": {
+      "inner": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g6-c-workflow-tool-allow-inner-allow",
+    "pre": [
+      "workflow:allow",
+      "bash:allow"
+    ],
+    "exec": [
+      "workflow",
+      "bash"
+    ],
+    "errors": [
+      "bash:ok",
+      "workflow:ok"
+    ],
+    "markers": {
+      "inner": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g6-d-workflow-vs-direct-delegation",
+    "pre": [
+      "subagent:allow",
+      "workflow:allow",
+      "bash:allow",
+      "bash:allow"
+    ],
+    "exec": [
+      "subagent",
+      "workflow",
+      "bash",
+      "bash"
+    ],
+    "errors": [
+      "subagent:ok",
+      "bash:ok",
+      "bash:ok",
+      "workflow:ok"
+    ],
+    "markers": {
+      "direct": true,
+      "workflow": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g7-a-bash-escalate-tool-allow",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ERR"
+    ],
+    "markers": {
+      "outside": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g7-b-run-code-escalate-tool-allow",
+    "pre": [
+      "run_code:allow"
+    ],
+    "exec": [
+      "run_code"
+    ],
+    "errors": [
+      "run_code:ERR"
+    ],
+    "markers": {
+      "outside": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g7-c-bash-escalate-no-tool-rule",
+    "pre": [
+      "bash"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ERR"
+    ],
+    "markers": {
+      "outside": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": []
+  },
+  {
+    "id": "g7-d-bash-escalate-sim-allowed",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ok"
+    ],
+    "markers": {
+      "outside": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": [
+      "allowed-once"
+    ]
+  },
+  {
+    "id": "g7-e-run-code-escalate-sim-allowed",
+    "pre": [
+      "run_code:allow"
+    ],
+    "exec": [
+      "run_code"
+    ],
+    "errors": [
+      "run_code:ok"
+    ],
+    "markers": {
+      "outside": true
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": [
+      "allowed-once"
+    ]
+  },
+  {
+    "id": "g7-f-bash-escalate-sim-rejected",
+    "pre": [
+      "bash:allow"
+    ],
+    "exec": [
+      "bash"
+    ],
+    "errors": [
+      "bash:ERR"
+    ],
+    "markers": {
+      "outside": false
+    },
+    "listeners": 3,
+    "mcp": [],
+    "res": [],
+    "net": 0,
+    "sim": [
+      "rejected"
+    ]
+  }
+]

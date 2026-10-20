@@ -1,0 +1,88 @@
+{
+  "caseId": "g3-i-bash-full-access-child",
+  "group": "3",
+  "title": "danger-full-access 下 bash 子进程信号对照：status 0 与 stdout",
+  "task": "HOSTCOV G3-I child process control",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "danger-full-access",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 369,
+  "exitCode": 0,
+  "stdout": "G3I-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-i-bash-full-access-child/sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1569
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-i-bash-full-access-child-ws--/session-b4e26916-4cd5-46dc-8af0-9612201b6f87/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-i-bash-full-access-child-ws--/session-b4e26916-4cd5-46dc-8af0-9612201b6f87/session.v4.jsonl.zstd",
+      "bytes": 15075
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87.json",
+      "bytes": 4132
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3483
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2262
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 340
+    },
+    {
+      "path": "sessions/session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd",
+      "bytes": 15075
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

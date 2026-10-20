@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "g3 workspace write node effects",
+            "code": "\nconst fs = await import(\"node:fs/promises\");\nconst net = await import(\"node:net\");\nconst cp = await import(\"node:child_process\");\n\nconst out = { writes: {}, network: {}, child: {} };\n\nfor (const target of [\"/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt\",\"/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/outside/outside-node.txt\"]) {\n  try {\n    await fs.writeFile(target, \"G3-NODE-WRITE \" + target + \"\\n\");\n    out.writes[target] = { ok: true };\n  } catch (error) {\n    out.writes[target] = { ok: false, code: error?.code ?? null, message: String(error?.message ?? error).slice(0, 300) };\n  }\n}\n\ntry {\n  const result = await new Promise((resolve) => {\n    const socket = net.connect({ host: \"127.0.0.1\", port: 63761 }, () => {\n      socket.write(\"HOSTCOV-G3-FIXED-PAYLOAD\\n\");\n    });\n    socket.setTimeout(2000);\n    socket.on(\"data\", (data) => { resolve({ ok: true, response: data.toString(\"utf8\").trim() }); socket.destroy(); });\n    socket.on(\"timeout\", () => { resolve({ ok: false, error: \"timeout\" }); socket.destroy(); });\n    socket.on(\"error\", (error) => resolve({ ok: false, code: error?.code ?? null, message: String(error?.message ?? error) }));\n  });\n  out.network = result;\n} catch (error) {\n  out.network = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const child = cp.spawnSync(\"/bin/sh\", [\"-c\", \"printf G3-CHILD-OK\"], { encoding: \"utf8\", timeout: 15000 });\n  out.child = { status: child.status, stdout: (child.stdout ?? \"\").trim(), stderr: (child.stderr ?? \"\").trim().slice(0, 200) };\n} catch (error) {\n  out.child = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const response = await fetch(\"http://127.0.0.1:63761/fixed\");\n  out.envEmpty = Object.keys(process.env).length;\nout.fetch = { ok: true, status: response.status, body: (await response.text()).trim() };\n} catch (error) {\n  out.fetch = { ok: false, code: error?.cause?.code ?? error?.code ?? null, message: String(error?.message ?? error) };\n}\n\nreturn out;\n"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G3B-DONE"
+    }
+  ]
+}

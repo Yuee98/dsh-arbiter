@@ -1,0 +1,118 @@
+{
+  "caseId": "g3-a-full-access",
+  "group": "3",
+  "title": "danger-full-access：run_code 直接 Node fs 写允许根内/外均成功",
+  "task": "HOSTCOV G3-A full access",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "danger-full-access",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 718,
+  "exitCode": 0,
+  "stdout": "G3A-DONE\n",
+  "stderrTail": "(node:75143) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 13,
+  "markers": {
+    "inside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws/inside-node.txt",
+      "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws/inside-node.txt\n"
+    },
+    "outsideRel": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside/outside-node.txt",
+      "content": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside/outside-node.txt\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [
+    "{\"t\":\"2026-10-20T14:53:23.089Z\",\"payload\":\"HOSTCOV-G3-FIXED-PAYLOAD\\n\"}",
+    "{\"t\":\"2026-10-20T14:53:23.104Z\",\"payload\":\"GET /fixed HTTP/1.1\\r\\nhost: 127.0.0.1:63755\\r\\nconnection: keep-alive\\r\\naccept: */*\\r\\naccept-language: *\\r\\nsec-fetch-mode: cors\\r\\nuser-agent: node\\r\\naccept-encoding: gzip, deflate\\r\\n\\r\\n\"}"
+  ],
+  "receiverPort": "63755",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1633
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-a-full-access-ws--/session-60926d9a-adec-4685-8bf3-31241104f1ae/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-a-full-access-ws--/session-60926d9a-adec-4685-8bf3-31241104f1ae/session.v4.jsonl.zstd",
+      "bytes": 18467
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae.json",
+      "bytes": 4091
+    },
+    {
+      "path": "network-port.txt",
+      "bytes": 5
+    },
+    {
+      "path": "network-receipt.jsonl",
+      "bytes": 311
+    },
+    {
+      "path": "outside/outside-node.txt",
+      "bytes": 149
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 4126
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2329
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 2526
+    },
+    {
+      "path": "sessions/session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd",
+      "bytes": 18467
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inside-node.txt",
+      "bytes": 143
+    }
+  ],
+  "notes": ""
+}

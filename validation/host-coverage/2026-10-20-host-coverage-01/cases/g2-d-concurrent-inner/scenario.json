@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "g2 concurrent inner reads",
+            "code": "\nconst fs = await import(\"node:fs\");\nfs.writeFileSync(\"program-started.txt\", \"program body started\\n\");\n\nconst results = await Promise.allSettled([\n  tools.read({ file_path: \"parallel-allow.txt\" }),\n  tools.read({ file_path: \"parallel-deny.txt\" })\n]);\nreturn results.map((entry) => entry.status === \"fulfilled\"\n  ? { status: entry.status, value: entry.value }\n  : { status: entry.status, toolName: entry.reason?.toolName ?? null, message: String(entry.reason?.message ?? entry.reason) });\n"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G2D-DONE"
+    }
+  ]
+}

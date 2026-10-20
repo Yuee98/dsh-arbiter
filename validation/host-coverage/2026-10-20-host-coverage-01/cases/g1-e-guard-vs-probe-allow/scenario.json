@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G1E-GUARD\\n' > marker.txt; echo body-ran",
+            "description": "guard fixture"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G1E-DONE"
+    }
+  ]
+}

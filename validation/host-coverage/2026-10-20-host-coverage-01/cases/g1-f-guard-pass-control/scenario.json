@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G1F-BODY\\n' > marker.txt; echo body-ran",
+            "description": "guard control"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G1F-DONE"
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "caseId": "g5-e-fork-child-allow",
+  "group": "5",
+  "title": "fork 子任务内测试工具 allow 对照：同一 fork 环境 body 执行",
+  "task": "HOSTCOV G5-PARENT-E delegate fork",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 444,
+  "exitCode": 0,
+  "stdout": "[fixture] out of scripted steps\n",
+  "stderrTail": "",
+  "probeEventCount": 17,
+  "markers": {
+    "forkMarker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/ws/fork-marker.txt",
+      "content": "G5-FORK-ALLOW\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/sessions/9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-e-fork-child-allow/sessions/session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1439
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-e-fork-child-allow-ws--/9813717f-4f69-4a8d-8e2b-c7666d674082/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-e-fork-child-allow-ws--/9813717f-4f69-4a8d-8e2b-c7666d674082/session.v4.jsonl.zstd",
+      "bytes": 15501
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-e-fork-child-allow-ws--/session-ecd8a034-a596-4f8f-8fd8-82145f5c041b/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-e-fork-child-allow-ws--/session-ecd8a034-a596-4f8f-8fd8-82145f5c041b/session.v4.jsonl.zstd",
+      "bytes": 16147
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/9813717f-4f69-4a8d-8e2b-c7666d674082.json",
+      "bytes": 4771
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-ecd8a034-a596-4f8f-8fd8-82145f5c041b.json",
+      "bytes": 4436
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 5286
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 5740
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 852
+    },
+    {
+      "path": "sessions/9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+      "bytes": 15501
+    },
+    {
+      "path": "sessions/session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd",
+      "bytes": 16147
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 32
+    },
+    {
+      "path": "ws/fork-marker.txt",
+      "bytes": 14
+    }
+  ],
+  "notes": ""
+}

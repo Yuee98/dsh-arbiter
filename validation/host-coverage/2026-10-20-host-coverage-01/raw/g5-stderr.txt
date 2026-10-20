@@ -1,0 +1,5 @@
+[driver] case g5-a-spawn-child-allow
+[driver] case g5-b-spawn-child-deny
+[driver] case g5-c-fork-child-deny
+[driver] case g5-d-child-ask-never
+[driver] case g5-e-fork-child-allow

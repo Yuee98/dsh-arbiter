@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "g4 mcp inside run_code",
+            "code": "\nconst ok = await tools.mcp__hostcov__echo_marker({ marker: \"G4C-ALLOW\" });\nlet denied = null;\ntry {\n  await tools.mcp__hostcov__write_receipt({ marker: \"G4C-DENY\" });\n} catch (error) {\n  denied = { toolName: error?.toolName ?? null, message: String(error?.message ?? error) };\n}\nreturn { ok, denied };"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G4C-DONE"
+    }
+  ]
+}

@@ -1,0 +1,461 @@
+[
+  {
+    "caseId": "g6-a-workflow-tool-deny",
+    "group": "6",
+    "title": "workflow 工具入口 deny：脚本未启动，子任务未创建",
+    "task": "HOSTCOV G6-A workflow tool deny",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 368,
+    "exitCode": 0,
+    "stdout": "G6A-DONE\n",
+    "stderrTail": "",
+    "probeEventCount": 11,
+    "markers": {
+      "inner": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/ws/workflow-inner.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-a-workflow-tool-deny/sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1519
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-a-workflow-tool-deny-ws--/session-5175e5ef-1b99-40e3-805b-a4173e45d62c/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-a-workflow-tool-deny-ws--/session-5175e5ef-1b99-40e3-805b-a4173e45d62c/session.v4.jsonl.zstd",
+        "bytes": 14803
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c.json",
+        "bytes": 4107
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 3113
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 2269
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 1067
+      },
+      {
+        "path": "sessions/session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd",
+        "bytes": 14803
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g6-b-workflow-tool-allow-inner-deny",
+    "group": "6",
+    "title": "workflow 工具 allow、子任务内 bash deny：编排本身无独立工具门禁",
+    "task": "HOSTCOV G6-B workflow inner deny",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 500,
+    "exitCode": 0,
+    "stdout": "G6B-DONE\n",
+    "stderrTail": "(node:75367) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 15,
+    "markers": {
+      "inner": {
+        "exists": false,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/ws/workflow-inner.txt"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/sessions/a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-b-workflow-tool-allow-inner-deny/sessions/session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-b-workflow-tool-allow-inner-deny-ws--/a73c7e8b-c222-4b0d-b43a-5e2e1b11de35/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-b-workflow-tool-allow-inner-deny-ws--/a73c7e8b-c222-4b0d-b43a-5e2e1b11de35/session.v4.jsonl.zstd",
+        "bytes": 14612
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-b-workflow-tool-allow-inner-deny-ws--/session-b7b0aafa-c758-4812-84d2-f61d0a7a2474/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-b-workflow-tool-allow-inner-deny-ws--/session-b7b0aafa-c758-4812-84d2-f61d0a7a2474/session.v4.jsonl.zstd",
+        "bytes": 15301
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/a73c7e8b-c222-4b0d-b43a-5e2e1b11de35.json",
+        "bytes": 4323
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-b7b0aafa-c758-4812-84d2-f61d0a7a2474.json",
+        "bytes": 4470
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 4990
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 4354
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 1075
+      },
+      {
+        "path": "sessions/a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+        "bytes": 14612
+      },
+      {
+        "path": "sessions/session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd",
+        "bytes": 15301
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g6-c-workflow-tool-allow-inner-allow",
+    "group": "6",
+    "title": "workflow 工具 allow、子任务内 bash allow 对照：效果实际发生",
+    "task": "HOSTCOV G6-C workflow inner allow",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 549,
+    "exitCode": 0,
+    "stdout": "G6C-DONE\n",
+    "stderrTail": "(node:75379) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 16,
+    "markers": {
+      "inner": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws/workflow-inner.txt",
+        "content": "G6-INNER-ALLOW\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/sessions/21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1678
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/21462862-8b7f-4c2e-8886-893bce0ef485/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/21462862-8b7f-4c2e-8886-893bce0ef485/session.v4.jsonl.zstd",
+        "bytes": 15075
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/session-13c26f45-a4b0-4748-a8c4-ce659161d108/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/session-13c26f45-a4b0-4748-a8c4-ce659161d108/session.v4.jsonl.zstd",
+        "bytes": 15290
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/21462862-8b7f-4c2e-8886-893bce0ef485.json",
+        "bytes": 4326
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108.json",
+        "bytes": 4475
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 5342
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 4328
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 1078
+      },
+      {
+        "path": "sessions/21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+        "bytes": 15075
+      },
+      {
+        "path": "sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+        "bytes": 15290
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/workflow-inner.txt",
+        "bytes": 15
+      }
+    ],
+    "notes": ""
+  },
+  {
+    "caseId": "g6-d-workflow-vs-direct-delegation",
+    "group": "6",
+    "title": "同一会话先直调 subagent 再用 workflow：比较委派工具门禁记录",
+    "task": "HOSTCOV G6-D visibility control",
+    "cliArgs": [],
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "approvalSim": null,
+    "probePrepend": false,
+    "env": {
+      "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/home",
+      "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws",
+      "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/outside",
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws",
+      "platform": "darwin",
+      "node": "v24.21.0"
+    },
+    "elapsedMs": 542,
+    "exitCode": 0,
+    "stdout": "G6D-DONE\n",
+    "stderrTail": "(node:75410) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+    "probeEventCount": 24,
+    "markers": {
+      "direct": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws/direct-inner.txt",
+        "content": "G6D-INNER direct\n"
+      },
+      "workflow": {
+        "exists": true,
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws/workflow-inner.txt",
+        "content": "G6D-INNER workflow\n"
+      }
+    },
+    "approvalSimLog": [],
+    "mcpReceipt": [],
+    "networkReceipt": [],
+    "receiverPort": "",
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+      "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd"
+    ],
+    "files": [
+      {
+        "path": "home/profiles/hostcov/cordis.patch.yml",
+        "bytes": 1836
+      },
+      {
+        "path": "home/profiles/hostcov/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/hostcov/package.json",
+        "bytes": 212
+      },
+      {
+        "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/2e46a12c-963b-4a13-8c60-6489effcdc16/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/2e46a12c-963b-4a13-8c60-6489effcdc16/session.v4.jsonl.zstd",
+        "bytes": 15055
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/a8aaf460-926a-4875-ae39-0fbac19f7ff8/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/a8aaf460-926a-4875-ae39-0fbac19f7ff8/session.v4.jsonl.zstd",
+        "bytes": 15512
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/session-280f07e6-f6a7-44be-9712-0fa952edce4f/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/session-280f07e6-f6a7-44be-9712-0fa952edce4f/session.v4.jsonl.zstd",
+        "bytes": 16843
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/2e46a12c-963b-4a13-8c60-6489effcdc16.json",
+        "bytes": 4322
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8.json",
+        "bytes": 4798
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f.json",
+        "bytes": 4729
+      },
+      {
+        "path": "probe.jsonl",
+        "bytes": 8735
+      },
+      {
+        "path": "requests.jsonl",
+        "bytes": 7866
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 1808
+      },
+      {
+        "path": "sessions/2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+        "bytes": 15055
+      },
+      {
+        "path": "sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+        "bytes": 15512
+      },
+      {
+        "path": "sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "bytes": 16843
+      },
+      {
+        "path": "stderr.txt",
+        "bytes": 195
+      },
+      {
+        "path": "stdout.txt",
+        "bytes": 9
+      },
+      {
+        "path": "ws/direct-inner.txt",
+        "bytes": 17
+      },
+      {
+        "path": "ws/workflow-inner.txt",
+        "bytes": 19
+      }
+    ],
+    "notes": ""
+  }
+]

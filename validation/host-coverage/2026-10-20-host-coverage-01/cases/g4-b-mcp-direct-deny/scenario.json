@@ -1,0 +1,19 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "mcp__hostcov__echo_marker",
+          "arguments": {
+            "marker": "G4B"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G4B-DONE"
+    }
+  ]
+}

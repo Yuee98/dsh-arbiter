@@ -1,0 +1,310 @@
+[
+  {
+    "id": "g5-a-spawn-child-allow",
+    "group": "5",
+    "title": "spawn 子任务内测试工具 allow：子会话身份与父会话关联",
+    "task": "HOSTCOV G5-PARENT-A delegate spawn",
+    "approvalPolicy": "ask",
+    "rules": [
+      {
+        "id": "g5-spawn-allow",
+        "tool": "bash",
+        "contains": "G5-SPAWN-ALLOW",
+        "action": "allow"
+      }
+    ],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "subagent",
+              "arguments": {
+                "description": "g5 spawn child",
+                "prompt": "HOSTCOV-CHILD G5 run the marker command"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5A-PARENT-DONE"
+        }
+      ],
+      "routes": [
+        {
+          "match": "HOSTCOV-CHILD G5",
+          "steps": [
+            {
+              "type": "calls",
+              "calls": [
+                {
+                  "name": "bash",
+                  "arguments": {
+                    "command": "printf 'G5-SPAWN-ALLOW\\n' > child-marker.txt; echo child-body-ran",
+                    "description": "child marker"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "G5-CHILD-DONE"
+            }
+          ]
+        }
+      ]
+    },
+    "markers": {
+      "childMarker": "child-marker.txt"
+    }
+  },
+  {
+    "id": "g5-b-spawn-child-deny",
+    "group": "5",
+    "title": "spawn 子任务内同一测试工具 deny：子 hook 触发、body 未执行",
+    "task": "HOSTCOV G5-PARENT-B delegate spawn",
+    "approvalPolicy": "ask",
+    "rules": [
+      {
+        "id": "g5-spawn-deny",
+        "tool": "bash",
+        "contains": "G5-SPAWN-DENY",
+        "action": "deny",
+        "reason": "hostcov fixture: child bash denied"
+      }
+    ],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "subagent",
+              "arguments": {
+                "description": "g5 spawn child",
+                "prompt": "HOSTCOV-CHILD G5 run the marker command"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5B-PARENT-DONE"
+        }
+      ],
+      "routes": [
+        {
+          "match": "HOSTCOV-CHILD G5",
+          "steps": [
+            {
+              "type": "calls",
+              "calls": [
+                {
+                  "name": "bash",
+                  "arguments": {
+                    "command": "printf 'G5-SPAWN-DENY\\n' > child-marker.txt; echo child-body-ran",
+                    "description": "child marker"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "G5-CHILD-DONE"
+            }
+          ]
+        }
+      ]
+    },
+    "markers": {
+      "childMarker": "child-marker.txt"
+    }
+  },
+  {
+    "id": "g5-c-fork-child-deny",
+    "group": "5",
+    "title": "fork 子任务内测试工具 deny：继承历史下的子 hook 判定",
+    "task": "HOSTCOV G5-PARENT-C delegate fork",
+    "approvalPolicy": "ask",
+    "rules": [
+      {
+        "id": "g5-fork-deny",
+        "tool": "bash",
+        "contains": "G5-FORK-DENY",
+        "action": "deny",
+        "reason": "hostcov fixture: fork child bash denied"
+      }
+    ],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "subagent_fork",
+              "arguments": {
+                "description": "g5 fork child",
+                "prompt": "HOSTCOV-CHILD G5-FORK run the marker command"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5C-PARENT-DONE"
+        }
+      ],
+      "routes": [
+        {
+          "match": "HOSTCOV-CHILD G5-FORK",
+          "steps": [
+            {
+              "type": "calls",
+              "calls": [
+                {
+                  "name": "bash",
+                  "arguments": {
+                    "command": "printf 'G5-FORK-DENY\\n' > fork-marker.txt; echo fork-body-ran",
+                    "description": "fork marker"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "G5-FORK-DONE"
+            }
+          ]
+        }
+      ]
+    },
+    "markers": {
+      "forkMarker": "fork-marker.txt"
+    }
+  },
+  {
+    "id": "g5-d-child-ask-never",
+    "group": "5",
+    "title": "子任务 ask 判定：创建时 never 审批策略下的原生拒绝路径",
+    "task": "HOSTCOV G5-PARENT-D delegate spawn",
+    "approvalPolicy": "ask",
+    "rules": [
+      {
+        "id": "g5-child-ask",
+        "tool": "bash",
+        "contains": "G5-CHILD-ASK",
+        "action": "ask",
+        "reason": "hostcov fixture: child ask reaches host approval"
+      }
+    ],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "subagent",
+              "arguments": {
+                "description": "g5 ask child",
+                "prompt": "HOSTCOV-CHILD G5-ASK run the marker command"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5D-PARENT-DONE"
+        }
+      ],
+      "routes": [
+        {
+          "match": "HOSTCOV-CHILD G5-ASK",
+          "steps": [
+            {
+              "type": "calls",
+              "calls": [
+                {
+                  "name": "bash",
+                  "arguments": {
+                    "command": "printf 'G5-CHILD-ASK\\n' > ask-marker.txt; echo ask-body-ran",
+                    "description": "ask marker"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "G5-ASK-CHILD-DONE"
+            }
+          ]
+        }
+      ]
+    },
+    "markers": {
+      "askMarker": "ask-marker.txt"
+    }
+  },
+  {
+    "id": "g5-e-fork-child-allow",
+    "group": "5",
+    "title": "fork 子任务内测试工具 allow 对照：同一 fork 环境 body 执行",
+    "task": "HOSTCOV G5-PARENT-E delegate fork",
+    "approvalPolicy": "ask",
+    "rules": [
+      {
+        "id": "g5-fork-allow",
+        "tool": "bash",
+        "contains": "G5-FORK-ALLOW",
+        "action": "allow"
+      }
+    ],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "subagent_fork",
+              "arguments": {
+                "description": "g5 fork child",
+                "prompt": "HOSTCOV-CHILD G5-FORK run the marker command"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5E-PARENT-DONE"
+        }
+      ],
+      "routes": [
+        {
+          "match": "HOSTCOV-CHILD G5-FORK",
+          "steps": [
+            {
+              "type": "calls",
+              "calls": [
+                {
+                  "name": "bash",
+                  "arguments": {
+                    "command": "printf 'G5-FORK-ALLOW\\n' > fork-marker.txt; echo fork-body-ran",
+                    "description": "fork marker"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": "G5-FORK-DONE"
+            }
+          ]
+        }
+      ]
+    },
+    "markers": {
+      "forkMarker": "fork-marker.txt"
+    }
+  }
+]

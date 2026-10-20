@@ -1,0 +1,98 @@
+{
+  "caseId": "g3-f-workspace-write-acl-inside",
+  "group": "3",
+  "title": "workspace-write 下文件工具写允许根内：成功",
+  "task": "HOSTCOV G3-F file tool inside",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 446,
+  "exitCode": 0,
+  "stdout": "G3F-DONE\n",
+  "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/home/profiles/hostcov/#include\n",
+  "probeEventCount": 13,
+  "markers": {
+    "inside": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/ws/inside-tool.txt",
+      "content": "G3F\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-f-workspace-write-acl-inside/sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1582
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-f-workspace-write-acl-inside-ws--/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-f-workspace-write-acl-inside-ws--/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f/session.v4.jsonl.zstd",
+      "bytes": 14790
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f.json",
+      "bytes": 3876
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3667
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2339
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 301
+    },
+    {
+      "path": "sessions/session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd",
+      "bytes": 14790
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 1014
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/inside-tool.txt",
+      "bytes": 4
+    }
+  ],
+  "notes": ""
+}

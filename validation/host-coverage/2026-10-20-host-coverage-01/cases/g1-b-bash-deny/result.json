@@ -1,0 +1,93 @@
+{
+  "caseId": "g1-b-bash-deny",
+  "group": "1",
+  "title": "同一动作 deny：hook 触发，body 未执行，标记文件不存在",
+  "task": "HOSTCOV G1-B deny",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 400,
+  "exitCode": 0,
+  "stdout": "G1B-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 11,
+  "markers": {
+    "marker": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/ws/marker.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-b-bash-deny/sessions/session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1467
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-b-bash-deny-ws--/session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-b-bash-deny-ws--/session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e/session.v4.jsonl.zstd",
+      "bytes": 14654
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e.json",
+      "bytes": 4061
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3046
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2218
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 345
+    },
+    {
+      "path": "sessions/session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e__session.v4.jsonl.zstd",
+      "bytes": 14654
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

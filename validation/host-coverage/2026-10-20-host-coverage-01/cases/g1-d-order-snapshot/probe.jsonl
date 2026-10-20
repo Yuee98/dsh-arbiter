@@ -1,0 +1,6 @@
+{"event":"probe/mounted","plugin":"hostcov-probe","prepend":false,"ruleCount":0,"guardRuleCount":0,"rules":[],"guardRules":[],"fiberId":"hostcov-probe","probeSeq":1,"t":"2026-10-20T14:53:18.712Z"}
+{"event":"probe/services","at":"mount","toolsMode":"native","sandboxDefaultMode":null,"approvalPolicy":"ask","approvalPresent":true,"probeSeq":2,"t":"2026-10-20T14:53:18.712Z"}
+{"event":"probe/order-snapshot","note":"array order of live tools/pre-execute listeners; the probe's own listener is identified by the registration log lines","order":[],"probeSeq":3,"t":"2026-10-20T14:53:18.712Z"}
+{"event":"probe/listener-registered","eventName":"tools/pre-execute","label":"decide","isProbe":true,"prepend":false,"byGlobal":false,"probeSeq":4,"t":"2026-10-20T14:53:18.712Z"}
+{"event":"probe/listener-registered","eventName":"tools/pre-execute","label":"sentinel","isProbe":true,"prepend":false,"byGlobal":false,"probeSeq":5,"t":"2026-10-20T14:53:18.712Z"}
+{"event":"probe/listener-registered","eventName":"tools/pre-execute","label":null,"isProbe":false,"prepend":true,"byGlobal":false,"probeSeq":6,"t":"2026-10-20T14:53:18.713Z"}

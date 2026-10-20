@@ -1,0 +1,199 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792508012973,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 28,
+        "val": "HOSTCOV G6-C workflow inner allow"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "HOSTCOV G6-C workflow inner allow"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 28,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 28,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 28,
+        "val": {
+          "surfaceTokens": 1889,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1879
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 1889,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1245
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 28,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 25,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 27
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 28,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 28,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "inheritedEventCount": 0,
+          "head": {
+            "values": [
+              {
+                "version": 0,
+                "childId": "21462862-8b7f-4c2e-8886-893bce0ef485",
+                "childCreatedAt": 1792508013101,
+                "mode": "continuable",
+                "label": "g6-inner-allow child 1"
+              }
+            ]
+          }
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 28,
+        "val": {}
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 28,
+        "val": null
+      }
+    }
+  }
+}

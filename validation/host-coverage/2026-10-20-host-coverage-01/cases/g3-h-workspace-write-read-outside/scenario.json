@@ -1,0 +1,19 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "read",
+          "arguments": {
+            "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/outside/outside-readable.txt"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G3H-DONE"
+    }
+  ]
+}

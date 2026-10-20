@@ -1,0 +1,110 @@
+{
+  "caseId": "g5-c-fork-child-deny",
+  "group": "5",
+  "title": "fork 子任务内测试工具 deny：继承历史下的子 hook 判定",
+  "task": "HOSTCOV G5-PARENT-C delegate fork",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 413,
+  "exitCode": 0,
+  "stdout": "[fixture] out of scripted steps\n",
+  "stderrTail": "",
+  "probeEventCount": 16,
+  "markers": {
+    "forkMarker": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/ws/fork-marker.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/sessions/2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-c-fork-child-deny/sessions/session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1500
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-c-fork-child-deny-ws--/2983762e-c375-4168-a2ef-7cd1944d5489/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-c-fork-child-deny-ws--/2983762e-c375-4168-a2ef-7cd1944d5489/session.v4.jsonl.zstd",
+      "bytes": 15065
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-c-fork-child-deny-ws--/session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-c-fork-child-deny-ws--/session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7/session.v4.jsonl.zstd",
+      "bytes": 16160
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/2983762e-c375-4168-a2ef-7cd1944d5489.json",
+      "bytes": 4769
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7.json",
+      "bytes": 4434
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 4944
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 5771
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 851
+    },
+    {
+      "path": "sessions/2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+      "bytes": 15065
+    },
+    {
+      "path": "sessions/session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd",
+      "bytes": 16160
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 32
+    }
+  ],
+  "notes": ""
+}

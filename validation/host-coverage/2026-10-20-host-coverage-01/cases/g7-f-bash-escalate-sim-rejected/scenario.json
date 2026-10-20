@@ -1,0 +1,22 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "printf 'G7F\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g7-f-bash-escalate-sim-rejected/outside/g7f-out.txt'; echo ran",
+            "description": "g7f escalate bash simulated reject",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "host coverage fixture: controlled sibling write under simulated rejection"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G7F-DONE"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "subagent",
+          "arguments": {
+            "description": "g5 ask child",
+            "prompt": "HOSTCOV-CHILD G5-ASK run the marker command"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G5D-PARENT-DONE"
+    }
+  ],
+  "routes": [
+    {
+      "match": "HOSTCOV-CHILD G5-ASK",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'G5-CHILD-ASK\\n' > ask-marker.txt; echo ask-body-ran",
+                "description": "ask marker"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G5-ASK-CHILD-DONE"
+        }
+      ]
+    }
+  ]
+}

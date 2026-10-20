@@ -1,0 +1,297 @@
+[
+  {
+    "id": "g3-a-full-access",
+    "group": "3",
+    "title": "danger-full-access：run_code 直接 Node fs 写允许根内/外均成功",
+    "task": "HOSTCOV G3-A full access",
+    "toolsMode": "ptc",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "rules": [],
+    "needsPort": true,
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "run_code",
+              "arguments": {
+                "description": "g3 full access node effects",
+                "code": "\nconst fs = await import(\"node:fs/promises\");\nconst net = await import(\"node:net\");\nconst cp = await import(\"node:child_process\");\n\nconst out = { writes: {}, network: {}, child: {} };\n\nfor (const target of [\"{{WS}}/inside-node.txt\",\"{{OUTSIDE}}/outside-node.txt\"]) {\n  try {\n    await fs.writeFile(target, \"G3-NODE-WRITE \" + target + \"\\n\");\n    out.writes[target] = { ok: true };\n  } catch (error) {\n    out.writes[target] = { ok: false, code: error?.code ?? null, message: String(error?.message ?? error).slice(0, 300) };\n  }\n}\n\ntry {\n  const result = await new Promise((resolve) => {\n    const socket = net.connect({ host: \"127.0.0.1\", port: {{PORT}} }, () => {\n      socket.write(\"HOSTCOV-G3-FIXED-PAYLOAD\\n\");\n    });\n    socket.setTimeout(2000);\n    socket.on(\"data\", (data) => { resolve({ ok: true, response: data.toString(\"utf8\").trim() }); socket.destroy(); });\n    socket.on(\"timeout\", () => { resolve({ ok: false, error: \"timeout\" }); socket.destroy(); });\n    socket.on(\"error\", (error) => resolve({ ok: false, code: error?.code ?? null, message: String(error?.message ?? error) }));\n  });\n  out.network = result;\n} catch (error) {\n  out.network = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const child = cp.spawnSync(\"/bin/sh\", [\"-c\", \"printf G3-CHILD-OK\"], { encoding: \"utf8\", timeout: 15000 });\n  out.child = { status: child.status, stdout: (child.stdout ?? \"\").trim(), stderr: (child.stderr ?? \"\").trim().slice(0, 200) };\n} catch (error) {\n  out.child = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const response = await fetch(\"http://127.0.0.1:{{PORT}}/fixed\");\n  out.envEmpty = Object.keys(process.env).length;\nout.fetch = { ok: true, status: response.status, body: (await response.text()).trim() };\n} catch (error) {\n  out.fetch = { ok: false, code: error?.cause?.code ?? error?.code ?? null, message: String(error?.message ?? error) };\n}\n\nreturn out;\n"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3A-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "inside": "inside-node.txt",
+      "outsideRel": "{{OUTSIDE}}/outside-node.txt"
+    }
+  },
+  {
+    "id": "g3-b-workspace-write",
+    "group": "3",
+    "title": "workspace-write：同一程序写允许根内成功、受控同级目录失败",
+    "task": "HOSTCOV G3-B workspace write",
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "needsPort": true,
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "run_code",
+              "arguments": {
+                "description": "g3 workspace write node effects",
+                "code": "\nconst fs = await import(\"node:fs/promises\");\nconst net = await import(\"node:net\");\nconst cp = await import(\"node:child_process\");\n\nconst out = { writes: {}, network: {}, child: {} };\n\nfor (const target of [\"{{WS}}/inside-node.txt\",\"{{OUTSIDE}}/outside-node.txt\"]) {\n  try {\n    await fs.writeFile(target, \"G3-NODE-WRITE \" + target + \"\\n\");\n    out.writes[target] = { ok: true };\n  } catch (error) {\n    out.writes[target] = { ok: false, code: error?.code ?? null, message: String(error?.message ?? error).slice(0, 300) };\n  }\n}\n\ntry {\n  const result = await new Promise((resolve) => {\n    const socket = net.connect({ host: \"127.0.0.1\", port: {{PORT}} }, () => {\n      socket.write(\"HOSTCOV-G3-FIXED-PAYLOAD\\n\");\n    });\n    socket.setTimeout(2000);\n    socket.on(\"data\", (data) => { resolve({ ok: true, response: data.toString(\"utf8\").trim() }); socket.destroy(); });\n    socket.on(\"timeout\", () => { resolve({ ok: false, error: \"timeout\" }); socket.destroy(); });\n    socket.on(\"error\", (error) => resolve({ ok: false, code: error?.code ?? null, message: String(error?.message ?? error) }));\n  });\n  out.network = result;\n} catch (error) {\n  out.network = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const child = cp.spawnSync(\"/bin/sh\", [\"-c\", \"printf G3-CHILD-OK\"], { encoding: \"utf8\", timeout: 15000 });\n  out.child = { status: child.status, stdout: (child.stdout ?? \"\").trim(), stderr: (child.stderr ?? \"\").trim().slice(0, 200) };\n} catch (error) {\n  out.child = { ok: false, message: String(error?.message ?? error) };\n}\n\ntry {\n  const response = await fetch(\"http://127.0.0.1:{{PORT}}/fixed\");\n  out.envEmpty = Object.keys(process.env).length;\nout.fetch = { ok: true, status: response.status, body: (await response.text()).trim() };\n} catch (error) {\n  out.fetch = { ok: false, code: error?.cause?.code ?? error?.code ?? null, message: String(error?.message ?? error) };\n}\n\nreturn out;\n"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3B-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "inside": "inside-node.txt",
+      "outsideRel": "{{OUTSIDE}}/outside-node.txt"
+    }
+  },
+  {
+    "id": "g3-c-bash-workspace-write",
+    "group": "3",
+    "title": "workspace-write 下 bash 工具：允许根内/外写入对比",
+    "task": "HOSTCOV G3-C bash sandbox",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'IN\\n' > inside-bash.txt; printf 'OUT\\n' > '{{OUTSIDE}}/outside-bash.txt'; curl -s -m 3 http://127.0.0.1:{{PORT}}/fixed >/dev/null && echo NET-OK || echo NET-FAIL; echo done",
+                "description": "g3 bash write both"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3C-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "inside": "inside-bash.txt",
+      "outsideRel": "{{OUTSIDE}}/outside-bash.txt"
+    },
+    "needsPort": true
+  },
+  {
+    "id": "g3-d-workspace-write-acl-outside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写受控同级目录：被原生 fs 沙箱拒绝（非探针）",
+    "task": "HOSTCOV G3-D file tool outside",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "write",
+              "arguments": {
+                "file_path": "{{OUTSIDE}}/outside-tool.txt",
+                "content": "G3D\n"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3D-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "outside": "{{OUTSIDE}}/outside-tool.txt"
+    }
+  },
+  {
+    "id": "g3-e-full-access-acl-outside",
+    "group": "3",
+    "title": "danger-full-access 下同一文件工具写同一路径：成功（模式对照）",
+    "task": "HOSTCOV G3-E file tool outside full access",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "write",
+              "arguments": {
+                "file_path": "{{OUTSIDE}}/outside-tool-full.txt",
+                "content": "G3E\n"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3E-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "outside": "{{OUTSIDE}}/outside-tool-full.txt"
+    }
+  },
+  {
+    "id": "g3-f-workspace-write-acl-inside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写允许根内：成功",
+    "task": "HOSTCOV G3-F file tool inside",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "write",
+              "arguments": {
+                "file_path": "inside-tool.txt",
+                "content": "G3F\n"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3F-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "inside": "inside-tool.txt"
+    }
+  },
+  {
+    "id": "g3-g-workspace-write-tmp",
+    "group": "3",
+    "title": "workspace-write 下写 /tmp：成功（证明 /tmp 在实际允许根内，不能当根外）",
+    "task": "HOSTCOV G3-G tmp write",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'G3G\\n' > /tmp/hostcov-g3g-probe.txt && echo TMP-WRITE-OK || echo TMP-WRITE-FAIL",
+                "description": "tmp write probe"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3G-DONE"
+        }
+      ]
+    },
+    "markers": {
+      "tmp": "/tmp/hostcov-g3g-probe.txt"
+    }
+  },
+  {
+    "id": "g3-h-workspace-write-read-outside",
+    "group": "3",
+    "title": "workspace-write 下读取受控同级目录：读取不受文件沙箱限制",
+    "task": "HOSTCOV G3-H read outside",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "read",
+              "arguments": {
+                "file_path": "{{OUTSIDE}}/outside-readable.txt"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3H-DONE"
+        }
+      ]
+    },
+    "fixtureFiles": [
+      {
+        "target": "outside/outside-readable.txt",
+        "content": "G3H-READ-OUTSIDE\n"
+      }
+    ]
+  },
+  {
+    "id": "g3-i-bash-full-access-child",
+    "group": "3",
+    "title": "danger-full-access 下 bash 子进程信号对照：status 0 与 stdout",
+    "task": "HOSTCOV G3-I child process control",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "rules": [],
+    "scenario": {
+      "default": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'CHILD-CONTROL\\n'; echo CHILD-CONTROL",
+                "description": "child control"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "G3I-DONE"
+        }
+      ]
+    }
+  }
+]

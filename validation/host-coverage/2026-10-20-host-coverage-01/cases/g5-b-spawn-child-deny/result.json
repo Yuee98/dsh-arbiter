@@ -1,0 +1,110 @@
+{
+  "caseId": "g5-b-spawn-child-deny",
+  "group": "5",
+  "title": "spawn 子任务内同一测试工具 deny：子 hook 触发、body 未执行",
+  "task": "HOSTCOV G5-PARENT-B delegate spawn",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 426,
+  "exitCode": 0,
+  "stdout": "[fixture] out of scripted steps\n",
+  "stderrTail": "",
+  "probeEventCount": 16,
+  "markers": {
+    "childMarker": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/ws/child-marker.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/sessions/d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g5-b-spawn-child-deny/sessions/session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1500
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-b-spawn-child-deny-ws--/d3b0ce42-b16e-4750-b691-835283e489bb/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-b-spawn-child-deny-ws--/d3b0ce42-b16e-4750-b691-835283e489bb/session.v4.jsonl.zstd",
+      "bytes": 15032
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-b-spawn-child-deny-ws--/session-b313d591-d0d6-40d1-8a04-d21fe2c6027c/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g5-b-spawn-child-deny-ws--/session-b313d591-d0d6-40d1-8a04-d21fe2c6027c/session.v4.jsonl.zstd",
+      "bytes": 16147
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/d3b0ce42-b16e-4750-b691-835283e489bb.json",
+      "bytes": 4762
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-b313d591-d0d6-40d1-8a04-d21fe2c6027c.json",
+      "bytes": 4439
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 4909
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 5759
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 842
+    },
+    {
+      "path": "sessions/d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+      "bytes": 15032
+    },
+    {
+      "path": "sessions/session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd",
+      "bytes": 16147
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 32
+    }
+  ],
+  "notes": ""
+}

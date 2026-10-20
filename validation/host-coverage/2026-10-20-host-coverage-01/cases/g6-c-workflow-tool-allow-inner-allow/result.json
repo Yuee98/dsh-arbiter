@@ -1,0 +1,115 @@
+{
+  "caseId": "g6-c-workflow-tool-allow-inner-allow",
+  "group": "6",
+  "title": "workflow 工具 allow、子任务内 bash allow 对照：效果实际发生",
+  "task": "HOSTCOV G6-C workflow inner allow",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 549,
+  "exitCode": 0,
+  "stdout": "G6C-DONE\n",
+  "stderrTail": "(node:75379) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 16,
+  "markers": {
+    "inner": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/ws/workflow-inner.txt",
+      "content": "G6-INNER-ALLOW\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/sessions/21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-c-workflow-tool-allow-inner-allow/sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1678
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/21462862-8b7f-4c2e-8886-893bce0ef485/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/21462862-8b7f-4c2e-8886-893bce0ef485/session.v4.jsonl.zstd",
+      "bytes": 15075
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/session-13c26f45-a4b0-4748-a8c4-ce659161d108/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-c-workflow-tool-allow-inner-allow-ws--/session-13c26f45-a4b0-4748-a8c4-ce659161d108/session.v4.jsonl.zstd",
+      "bytes": 15290
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/21462862-8b7f-4c2e-8886-893bce0ef485.json",
+      "bytes": 4326
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108.json",
+      "bytes": 4475
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 5342
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 4328
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 1078
+    },
+    {
+      "path": "sessions/21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+      "bytes": 15075
+    },
+    {
+      "path": "sessions/session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+      "bytes": 15290
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/workflow-inner.txt",
+      "bytes": 15
+    }
+  ],
+  "notes": ""
+}

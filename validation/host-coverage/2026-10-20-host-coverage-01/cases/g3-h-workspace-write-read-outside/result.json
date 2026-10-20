@@ -1,0 +1,92 @@
+{
+  "caseId": "g3-h-workspace-write-read-outside",
+  "group": "3",
+  "title": "workspace-write 下读取受控同级目录：读取不受文件沙箱限制",
+  "task": "HOSTCOV G3-H read outside",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "never",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 378,
+  "exitCode": 0,
+  "stdout": "G3H-DONE\n",
+  "stderrTail": "dsh: warning: 1 entry did not activate\npermission (@deepseek-ai/dsh-permission-presets): Error: permission: composed sandbox and approval defaults match no preset; configure defaultPreset explicitly\n    at new PermissionPresetService (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js:180:42)\n    at Fiber.execute (file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1068:24)\n    at file:///Applications/DeepSeek%20Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/cordis/lib/index.js:1142:34\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home/profiles/hostcov/#permission\n    at file:///Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/home/profiles/hostcov/#include\n",
+  "probeEventCount": 13,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-h-workspace-write-read-outside/sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1590
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-h-workspace-write-read-outside-ws--/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g3-h-workspace-write-read-outside-ws--/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25/session.v4.jsonl.zstd",
+      "bytes": 14929
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25.json",
+      "bytes": 3872
+    },
+    {
+      "path": "outside/outside-readable.txt",
+      "bytes": 17
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3714
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2327
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 408
+    },
+    {
+      "path": "sessions/session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd",
+      "bytes": 14929
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 1018
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

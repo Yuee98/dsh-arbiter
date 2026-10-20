@@ -1,0 +1,106 @@
+{
+  "caseId": "g2-d-concurrent-inner",
+  "group": "2",
+  "title": "两个并发内层调用：一个被拒绝、一个放行，记录 callId/rootCallId/parent",
+  "task": "HOSTCOV G2-D concurrent inner",
+  "cliArgs": [],
+  "toolsMode": "ptc",
+  "sandboxMode": "workspace-write",
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 490,
+  "exitCode": 0,
+  "stdout": "G2D-DONE\n",
+  "stderrTail": "(node:75132) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 21,
+  "markers": {
+    "program": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/ws/program-started.txt",
+      "content": "program body started\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g2-d-concurrent-inner/sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1906
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-d-concurrent-inner-ws--/session-553e8295-bb90-4afc-9bce-6770dadc7f42/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g2-d-concurrent-inner-ws--/session-553e8295-bb90-4afc-9bce-6770dadc7f42/session.v4.jsonl.zstd",
+      "bytes": 18167
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42.json",
+      "bytes": 4100
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 7547
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2352
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 821
+    },
+    {
+      "path": "sessions/session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+      "bytes": 18167
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/parallel-allow.txt",
+      "bytes": 15
+    },
+    {
+      "path": "ws/parallel-deny.txt",
+      "bytes": 14
+    },
+    {
+      "path": "ws/program-started.txt",
+      "bytes": 21
+    }
+  ],
+  "notes": ""
+}

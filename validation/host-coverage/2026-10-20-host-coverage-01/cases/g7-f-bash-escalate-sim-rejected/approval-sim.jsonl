@@ -1,0 +1,2 @@
+{"event":"approval-sim/mounted","simulated":true,"outcome":"rejected","t":"2026-10-20T14:53:36.034Z"}
+{"event":"approval-sim/answer","simulated":true,"outcome":"rejected","toolName":"bash","callId":"fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0","reason":"escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated rejection","agentSessionId":"session-0177a54e-fb55-4d24-a625-a5e7ab512c27","t":"2026-10-20T14:53:36.131Z"}

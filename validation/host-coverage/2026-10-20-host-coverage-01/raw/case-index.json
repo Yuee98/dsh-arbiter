@@ -1,0 +1,5923 @@
+[
+  {
+    "caseId": "g1-a-bash-allow",
+    "group": "1",
+    "title": "普通工具 allow 对照：探针 fixed-allow，bash body 执行并写出标记",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-91394789-6677-454b-adfe-32efe5c68cb8-0-0",
+        "rootCallId": "fixture-session-91394789-6677-454b-adfe-32efe5c68cb8-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-91394789-6677-454b-adfe-32efe5c68cb8",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1-allow-bash",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1-allow-bash",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-91394789-6677-454b-adfe-32efe5c68cb8-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": true
+    },
+    "markerContents": {
+      "marker": "G1A-OK\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-91394789-6677-454b-adfe-32efe5c68cb8__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-91394789-6677-454b-adfe-32efe5c68cb8__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-91394789-6677-454b-adfe-32efe5c68cb8-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-91394789-6677-454b-adfe-32efe5c68cb8__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-b-bash-deny",
+    "group": "1",
+    "title": "同一动作 deny：hook 触发，body 未执行，标记文件不存在",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e-0-0",
+        "rootCallId": "fixture-session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1-deny-bash",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1-deny-bash",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov fixture: G1-B denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": false
+    },
+    "markerContents": {
+      "marker": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-6c7f69d5-1dca-4e6f-a103-e8b09f4adb9e__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-c-bash-pass",
+    "group": "1",
+    "title": "探针不处理时交还原链路：hook 记录 next 结果，body 正常执行",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-99431e2d-3e41-4170-b679-dec894e683e0-0-0",
+        "rootCallId": "fixture-session-99431e2d-3e41-4170-b679-dec894e683e0-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-99431e2d-3e41-4170-b679-dec894e683e0",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-99431e2d-3e41-4170-b679-dec894e683e0-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": true
+    },
+    "markerContents": {
+      "marker": "G1C-PASS\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-99431e2d-3e41-4170-b679-dec894e683e0__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-99431e2d-3e41-4170-b679-dec894e683e0__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-99431e2d-3e41-4170-b679-dec894e683e0-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-99431e2d-3e41-4170-b679-dec894e683e0__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-d-order-snapshot",
+    "group": "1",
+    "title": "监听顺序与其他生效插件快照（无工具调用）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [],
+    "decisions": [],
+    "executed": [],
+    "resultErrors": [],
+    "listeners": null,
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-c81a33de-ee39-44d0-a6f8-6748395935c2__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-e-guard-vs-probe-allow",
+    "group": "1",
+    "title": "原生 guard 与探针 allow 分离：插件 allow 不能绕过 guard",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88-0-0",
+        "rootCallId": "fixture-session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1e-probe-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1e-probe-allow",
+        "name": "bash",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/guard",
+        "ruleId": "g1e-native-guard",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov guard fixture: blocked after probe allow"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": false
+    },
+    "markerContents": {
+      "marker": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-f-guard-pass-control",
+    "group": "1",
+    "title": "同一 guard 存在但规则不匹配：guard 放行、body 执行（对照）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-bb594244-4a75-4bd5-88ec-a6206e93de7d-0-0",
+        "rootCallId": "fixture-session-bb594244-4a75-4bd5-88ec-a6206e93de7d-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-bb594244-4a75-4bd5-88ec-a6206e93de7d",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1f-probe-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1f-probe-allow",
+        "name": "bash",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/guard",
+        "ruleId": null,
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-bb594244-4a75-4bd5-88ec-a6206e93de7d-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": true
+    },
+    "markerContents": {
+      "marker": "G1F-BODY\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-bb594244-4a75-4bd5-88ec-a6206e93de7d__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-bb594244-4a75-4bd5-88ec-a6206e93de7d__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-bb594244-4a75-4bd5-88ec-a6206e93de7d-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-bb594244-4a75-4bd5-88ec-a6206e93de7d__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-g-prepend-order",
+    "group": "1",
+    "title": "探针 prepend 与默认挂载的监听顺序对照",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": true,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-fa65a898-99e0-43f9-94b1-daaccf514e0f-0-0",
+        "rootCallId": "fixture-session-fa65a898-99e0-43f9-94b1-daaccf514e0f-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-fa65a898-99e0-43f9-94b1-daaccf514e0f",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1g-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1g-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-fa65a898-99e0-43f9-94b1-daaccf514e0f-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": true,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": true
+    },
+    "markerContents": {
+      "marker": "G1G\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-fa65a898-99e0-43f9-94b1-daaccf514e0f__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-fa65a898-99e0-43f9-94b1-daaccf514e0f__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-fa65a898-99e0-43f9-94b1-daaccf514e0f-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-fa65a898-99e0-43f9-94b1-daaccf514e0f__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g1-h-with-auto-review-bundle",
+    "group": "1",
+    "title": "并存官方 auto-review bundle 时的监听集与放行（非 auto 预设）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-25625263-21ff-4cc2-a70f-a3b690a7a408-0-0",
+        "rootCallId": "fixture-session-25625263-21ff-4cc2-a70f-a3b690a7a408-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-25625263-21ff-4cc2-a70f-a3b690a7a408",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g1h-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g1h-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-25625263-21ff-4cc2-a70f-a3b690a7a408-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 3,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "marker": true
+    },
+    "markerContents": {
+      "marker": "G1H\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-25625263-21ff-4cc2-a70f-a3b690a7a408__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-25625263-21ff-4cc2-a70f-a3b690a7a408__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-25625263-21ff-4cc2-a70f-a3b690a7a408-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-25625263-21ff-4cc2-a70f-a3b690a7a408__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g2-a-outer-allow",
+    "group": "2",
+    "title": "外层 run_code allow 对照：程序启动并写出标记",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "rootCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-2693a7e2-7797-4384-950c-6acd27c20c99",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g2-outer-allow",
+        "action": "allow"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0:ptc:1",
+        "rootCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-2693a7e2-7797-4384-950c-6acd27c20c99",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g2-outer-allow",
+        "name": "run_code",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0:ptc:1"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "program": true,
+      "inner": true
+    },
+    "markerContents": {
+      "program": "program body started\n",
+      "inner": "OUTER-ALLOW-MARK\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0:ptc:1",
+        "parentCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "rootCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0:ptc:1",
+        "parentCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "rootCallId": "fixture-session-2693a7e2-7797-4384-950c-6acd27c20c99-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2693a7e2-7797-4384-950c-6acd27c20c99__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g2-b-outer-deny",
+    "group": "2",
+    "title": "外层 run_code deny：程序未启动，program-started 不存在",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac-0-0",
+        "rootCallId": "fixture-session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g2-outer-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g2-outer-deny",
+        "name": "run_code",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "run_code",
+        "isError": true,
+        "errorMessage": "hostcov fixture: outer run_code denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "program": false,
+      "inner": false
+    },
+    "markerContents": {
+      "program": null,
+      "inner": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-2cbf98d1-1891-4789-b0d3-10d2f1cf5bac__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g2-c-inner-deny-catch",
+    "group": "2",
+    "title": "内层 tools.bash deny：仅该 body 未执行，程序 catch 后继续",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:1",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g2-inner-deny",
+        "action": "deny"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:2",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g2-inner-deny",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:2"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov fixture: inner bash denied"
+      },
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "program": true,
+      "denied": false,
+      "allowed": true
+    },
+    "markerContents": {
+      "program": "program body started\n",
+      "denied": null,
+      "allowed": "INNER-ALLOW-MARK\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:1",
+        "parentCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:1",
+        "parentCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:2",
+        "parentCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0:ptc:2",
+        "parentCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "rootCallId": "fixture-session-645a7a8c-3048-4e4b-8e27-4868679f8d6b-0-0",
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-645a7a8c-3048-4e4b-8e27-4868679f8d6b__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g2-d-concurrent-inner",
+    "group": "2",
+    "title": "两个并发内层调用：一个被拒绝、一个放行，记录 callId/rootCallId/parent",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-553e8295-bb90-4afc-9bce-6770dadc7f42",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "read",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:1",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-553e8295-bb90-4afc-9bce-6770dadc7f42",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "read",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:2",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-553e8295-bb90-4afc-9bce-6770dadc7f42",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g2-inner-parallel-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g2-inner-parallel-deny",
+        "name": "read",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0"
+      },
+      {
+        "name": "read",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:1"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "read",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "read",
+        "isError": true,
+        "errorMessage": "hostcov fixture: parallel read denied"
+      },
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "program": true
+    },
+    "markerContents": {
+      "program": "program body started\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:1",
+        "parentCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "name": "read",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:2",
+        "parentCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "name": "read",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:1",
+        "parentCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "name": "read",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0:ptc:2",
+        "parentCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "rootCallId": "fixture-session-553e8295-bb90-4afc-9bce-6770dadc7f42-0-0",
+        "name": "read",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-553e8295-bb90-4afc-9bce-6770dadc7f42__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-a-full-access",
+    "group": "3",
+    "title": "danger-full-access：run_code 直接 Node fs 写允许根内/外均成功",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-60926d9a-adec-4685-8bf3-31241104f1ae-0-0",
+        "rootCallId": "fixture-session-60926d9a-adec-4685-8bf3-31241104f1ae-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-60926d9a-adec-4685-8bf3-31241104f1ae",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-60926d9a-adec-4685-8bf3-31241104f1ae-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": true
+    },
+    "markerContents": {
+      "inside": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/ws/inside-node.txt\n",
+      "outsideRel": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-a-full-access/outside/outside-node.txt\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 2,
+    "durable": [
+      {
+        "file": "session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-60926d9a-adec-4685-8bf3-31241104f1ae-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-60926d9a-adec-4685-8bf3-31241104f1ae__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-b-workspace-write",
+    "group": "3",
+    "title": "workspace-write：同一程序写允许根内成功、受控同级目录失败",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d-0-0",
+        "rootCallId": "fixture-session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": false
+    },
+    "markerContents": {
+      "inside": "G3-NODE-WRITE /Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g3-b-workspace-write/ws/inside-node.txt\n",
+      "outsideRel": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 2,
+    "durable": [
+      {
+        "file": "session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-af246952-af2f-42d0-b0fd-2cae5ecf3d3d__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-c-bash-workspace-write",
+    "group": "3",
+    "title": "workspace-write 下 bash 工具：允许根内/外写入对比",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-b2d7a99d-0a21-4c99-889d-f35c084b99e8-0-0",
+        "rootCallId": "fixture-session-b2d7a99d-0a21-4c99-889d-f35c084b99e8-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-b2d7a99d-0a21-4c99-889d-f35c084b99e8",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-b2d7a99d-0a21-4c99-889d-f35c084b99e8-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inside": true,
+      "outsideRel": false
+    },
+    "markerContents": {
+      "inside": "IN\n",
+      "outsideRel": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 1,
+    "durable": [
+      {
+        "file": "session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-b2d7a99d-0a21-4c99-889d-f35c084b99e8-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b2d7a99d-0a21-4c99-889d-f35c084b99e8__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-d-workspace-write-acl-outside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写受控同级目录：被原生 fs 沙箱拒绝（非探针）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "write",
+        "callId": "fixture-session-0180e103-7eeb-4060-8bca-a5a6c11a8208-0-0",
+        "rootCallId": "fixture-session-0180e103-7eeb-4060-8bca-a5a6c11a8208-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-0180e103-7eeb-4060-8bca-a5a6c11a8208",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "write",
+        "callId": "fixture-session-0180e103-7eeb-4060-8bca-a5a6c11a8208-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "write",
+        "isError": true,
+        "errorMessage": "[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact operation once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": false
+    },
+    "markerContents": {
+      "outside": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-0180e103-7eeb-4060-8bca-a5a6c11a8208__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-0180e103-7eeb-4060-8bca-a5a6c11a8208-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "write",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-0180e103-7eeb-4060-8bca-a5a6c11a8208__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-e-full-access-acl-outside",
+    "group": "3",
+    "title": "danger-full-access 下同一文件工具写同一路径：成功（模式对照）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "write",
+        "callId": "fixture-session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d-0-0",
+        "rootCallId": "fixture-session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "write",
+        "callId": "fixture-session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "write",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": true
+    },
+    "markerContents": {
+      "outside": "G3E\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "write",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-507b7ca3-2e8f-4fef-81cc-4f20b5e5927d__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-f-workspace-write-acl-inside",
+    "group": "3",
+    "title": "workspace-write 下文件工具写允许根内：成功",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "write",
+        "callId": "fixture-session-c0fabdc1-6a1a-4493-a68a-43b817bc958f-0-0",
+        "rootCallId": "fixture-session-c0fabdc1-6a1a-4493-a68a-43b817bc958f-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-c0fabdc1-6a1a-4493-a68a-43b817bc958f",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "write",
+        "callId": "fixture-session-c0fabdc1-6a1a-4493-a68a-43b817bc958f-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "write",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inside": true
+    },
+    "markerContents": {
+      "inside": "G3F\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-c0fabdc1-6a1a-4493-a68a-43b817bc958f-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "write",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-c0fabdc1-6a1a-4493-a68a-43b817bc958f__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-g-workspace-write-tmp",
+    "group": "3",
+    "title": "workspace-write 下写 /tmp：成功（证明 /tmp 在实际允许根内，不能当根外）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-4da38bb8-50ac-43ce-bf12-6833b5e98e38-0-0",
+        "rootCallId": "fixture-session-4da38bb8-50ac-43ce-bf12-6833b5e98e38-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-4da38bb8-50ac-43ce-bf12-6833b5e98e38",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-4da38bb8-50ac-43ce-bf12-6833b5e98e38-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "tmp": true
+    },
+    "markerContents": {
+      "tmp": "G3G\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-4da38bb8-50ac-43ce-bf12-6833b5e98e38__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-4da38bb8-50ac-43ce-bf12-6833b5e98e38-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-4da38bb8-50ac-43ce-bf12-6833b5e98e38__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-h-workspace-write-read-outside",
+    "group": "3",
+    "title": "workspace-write 下读取受控同级目录：读取不受文件沙箱限制",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "read",
+        "callId": "fixture-session-8bfefdf5-7132-44e1-a54a-84297a5c4c25-0-0",
+        "rootCallId": "fixture-session-8bfefdf5-7132-44e1-a54a-84297a5c4c25-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-8bfefdf5-7132-44e1-a54a-84297a5c4c25",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "read",
+        "callId": "fixture-session-8bfefdf5-7132-44e1-a54a-84297a5c4c25-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "read",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-8bfefdf5-7132-44e1-a54a-84297a5c4c25-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "read",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-8bfefdf5-7132-44e1-a54a-84297a5c4c25__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g3-i-bash-full-access-child",
+    "group": "3",
+    "title": "danger-full-access 下 bash 子进程信号对照：status 0 与 stdout",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-b4e26916-4cd5-46dc-8af0-9612201b6f87-0-0",
+        "rootCallId": "fixture-session-b4e26916-4cd5-46dc-8af0-9612201b6f87-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-b4e26916-4cd5-46dc-8af0-9612201b6f87",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-b4e26916-4cd5-46dc-8af0-9612201b6f87-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-b4e26916-4cd5-46dc-8af0-9612201b6f87-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b4e26916-4cd5-46dc-8af0-9612201b6f87__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g4-a-mcp-direct-allow",
+    "group": "4",
+    "title": "MCP 工具直接调用 allow：server 收到 tools/call",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "callId": "fixture-session-d0c34878-08b3-4135-ad2a-bddcf2296a86-0-0",
+        "rootCallId": "fixture-session-d0c34878-08b3-4135-ad2a-bddcf2296a86-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-d0c34878-08b3-4135-ad2a-bddcf2296a86",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-mcp-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-mcp-allow",
+        "name": "mcp__hostcov__echo_marker",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "callId": "fixture-session-d0c34878-08b3-4135-ad2a-bddcf2296a86-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call"
+    ],
+    "mcpToolCalls": [
+      {
+        "name": "echo_marker",
+        "arguments": {
+          "marker": "G4A"
+        }
+      }
+    ],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-d0c34878-08b3-4135-ad2a-bddcf2296a86__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-d0c34878-08b3-4135-ad2a-bddcf2296a86__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-d0c34878-08b3-4135-ad2a-bddcf2296a86-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "mcp__hostcov__echo_marker",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-d0c34878-08b3-4135-ad2a-bddcf2296a86__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g4-b-mcp-direct-deny",
+    "group": "4",
+    "title": "MCP 工具直接调用 deny：server 未收到 tools/call（RPC 未发出）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "callId": "fixture-session-37e784e7-03ce-4346-9597-4de7c46d22b6-0-0",
+        "rootCallId": "fixture-session-37e784e7-03ce-4346-9597-4de7c46d22b6-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-37e784e7-03ce-4346-9597-4de7c46d22b6",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-mcp-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-mcp-deny",
+        "name": "mcp__hostcov__echo_marker",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "isError": true,
+        "errorMessage": "hostcov fixture: MCP tool denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list"
+    ],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-37e784e7-03ce-4346-9597-4de7c46d22b6__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-37e784e7-03ce-4346-9597-4de7c46d22b6__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-37e784e7-03ce-4346-9597-4de7c46d22b6-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "mcp__hostcov__echo_marker",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-37e784e7-03ce-4346-9597-4de7c46d22b6__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g4-c-mcp-inside-run-code",
+    "group": "4",
+    "title": "run_code 内调用 MCP：放行一个、拒绝一个，核对 server 收件",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:1",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "mcp__hostcov__write_receipt",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:2",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "parentToken": "Symbol(dsh.tool.execution)",
+        "agentSessionId": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-mcp-inner-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-mcp-inner-deny",
+        "name": "mcp__hostcov__write_receipt",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0"
+      },
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:1"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "mcp__hostcov__echo_marker",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "mcp__hostcov__write_receipt",
+        "isError": true,
+        "errorMessage": "hostcov fixture: MCP inner denied"
+      },
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call"
+    ],
+    "mcpToolCalls": [
+      {
+        "name": "echo_marker",
+        "arguments": {
+          "marker": "G4C-ALLOW"
+        }
+      }
+    ],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:1",
+        "parentCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "name": "mcp__hostcov__echo_marker",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:1",
+        "parentCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "name": "mcp__hostcov__echo_marker",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch-start",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:2",
+        "parentCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "name": "mcp__hostcov__write_receipt",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/ptc-dispatch",
+        "callId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0:ptc:2",
+        "parentCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "rootCallId": "fixture-session-812e6c12-0efa-4c5a-978b-04a9e0857c50-0-0",
+        "name": "mcp__hostcov__write_receipt",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-812e6c12-0efa-4c5a-978b-04a9e0857c50__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g4-d-mcp-resources-allow",
+    "group": "4",
+    "title": "MCP 资源工具 allow：list/read 到达 server",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "list_mcp_resources",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-0",
+        "rootCallId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-res-list-allow",
+        "action": "allow"
+      },
+      {
+        "name": "read_mcp_resource",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-2",
+        "rootCallId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-2",
+        "parentToken": null,
+        "agentSessionId": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-res-read-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-res-list-allow",
+        "name": "list_mcp_resources",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-res-read-allow",
+        "name": "read_mcp_resource",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "list_mcp_resources",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-0"
+      },
+      {
+        "name": "read_mcp_resource",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-2"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "list_mcp_resources",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "read_mcp_resource",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "resources/list",
+      "resources/read"
+    ],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [
+      {
+        "uri": "hostcov://fixture/alpha"
+      }
+    ],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "list_mcp_resources",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "read_mcp_resource",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g4-e-mcp-resources-deny",
+    "group": "4",
+    "title": "MCP 资源 read deny：server 未收到 resources/read",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "read_mcp_resource",
+        "callId": "fixture-session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8-0-0",
+        "rootCallId": "fixture-session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g4-res-read-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g4-res-read-deny",
+        "name": "read_mcp_resource",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "read_mcp_resource",
+        "isError": true,
+        "errorMessage": "hostcov fixture: resource read denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {},
+    "markerContents": {},
+    "mcpInbound": [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list"
+    ],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "read_mcp_resource",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-05a8ecd2-e4a0-428d-9dbf-870ba6ff36e8__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g5-a-spawn-child-allow",
+    "group": "5",
+    "title": "spawn 子任务内测试工具 allow：子会话身份与父会话关联",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-f376e8ee-8f53-469b-a707-ca76db0251b3-0-0",
+        "rootCallId": "fixture-session-f376e8ee-8f53-469b-a707-ca76db0251b3-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-f376e8ee-8f53-469b-a707-ca76db0251b3",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-fe22df9a-82c6-4f2c-8404-ed45cce75d3d-0-2",
+        "rootCallId": "fixture-fe22df9a-82c6-4f2c-8404-ed45cce75d3d-0-2",
+        "parentToken": null,
+        "agentSessionId": "fe22df9a-82c6-4f2c-8404-ed45cce75d3d",
+        "sessionParent": "session-f376e8ee-8f53-469b-a707-ca76db0251b3",
+        "sessionOrigin": "subagent",
+        "ruleId": "g5-spawn-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g5-spawn-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-f376e8ee-8f53-469b-a707-ca76db0251b3-0-0"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-fe22df9a-82c6-4f2c-8404-ed45cce75d3d-0-2"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "childMarker": true
+    },
+    "markerContents": {
+      "childMarker": "G5-SPAWN-ALLOW\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 spawn child",
+        "provider": "spawn"
+      },
+      {
+        "file": "fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-fe22df9a-82c6-4f2c-8404-ed45cce75d3d-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "fe22df9a-82c6-4f2c-8404-ed45cce75d3d__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-f376e8ee-8f53-469b-a707-ca76db0251b3-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 spawn child",
+        "provider": null
+      },
+      {
+        "file": "session-f376e8ee-8f53-469b-a707-ca76db0251b3__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g5-b-spawn-child-deny",
+    "group": "5",
+    "title": "spawn 子任务内同一测试工具 deny：子 hook 触发、body 未执行",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-b313d591-d0d6-40d1-8a04-d21fe2c6027c-0-0",
+        "rootCallId": "fixture-session-b313d591-d0d6-40d1-8a04-d21fe2c6027c-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-d3b0ce42-b16e-4750-b691-835283e489bb-0-2",
+        "rootCallId": "fixture-d3b0ce42-b16e-4750-b691-835283e489bb-0-2",
+        "parentToken": null,
+        "agentSessionId": "d3b0ce42-b16e-4750-b691-835283e489bb",
+        "sessionParent": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c",
+        "sessionOrigin": "subagent",
+        "ruleId": "g5-spawn-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g5-spawn-deny",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-b313d591-d0d6-40d1-8a04-d21fe2c6027c-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov fixture: child bash denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "childMarker": false
+    },
+    "markerContents": {
+      "childMarker": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 spawn child",
+        "provider": "spawn"
+      },
+      {
+        "file": "d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-d3b0ce42-b16e-4750-b691-835283e489bb-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "d3b0ce42-b16e-4750-b691-835283e489bb__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-b313d591-d0d6-40d1-8a04-d21fe2c6027c-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 spawn child",
+        "provider": null
+      },
+      {
+        "file": "session-b313d591-d0d6-40d1-8a04-d21fe2c6027c__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g5-c-fork-child-deny",
+    "group": "5",
+    "title": "fork 子任务内测试工具 deny：继承历史下的子 hook 判定",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent_fork",
+        "callId": "fixture-session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7-0-0",
+        "rootCallId": "fixture-session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-2983762e-c375-4168-a2ef-7cd1944d5489-0-2",
+        "rootCallId": "fixture-2983762e-c375-4168-a2ef-7cd1944d5489-0-2",
+        "parentToken": null,
+        "agentSessionId": "2983762e-c375-4168-a2ef-7cd1944d5489",
+        "sessionParent": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7",
+        "sessionOrigin": "subagent",
+        "ruleId": "g5-fork-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g5-fork-deny",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent_fork",
+        "callId": "fixture-session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent_fork",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov fixture: fork child bash denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "forkMarker": false
+    },
+    "markerContents": {
+      "forkMarker": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 fork child",
+        "provider": "fork"
+      },
+      {
+        "file": "2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-2983762e-c375-4168-a2ef-7cd1944d5489-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "2983762e-c375-4168-a2ef-7cd1944d5489__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent_fork",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 fork child",
+        "provider": null
+      },
+      {
+        "file": "session-4af8e2c7-7183-48b0-9f2b-de5f9fb675f7__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g5-d-child-ask-never",
+    "group": "5",
+    "title": "子任务 ask 判定：创建时 never 审批策略下的原生拒绝路径",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1-0-0",
+        "rootCallId": "fixture-session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-1950a664-3588-4993-8ec5-aa34e7b52621-0-2",
+        "rootCallId": "fixture-1950a664-3588-4993-8ec5-aa34e7b52621-0-2",
+        "parentToken": null,
+        "agentSessionId": "1950a664-3588-4993-8ec5-aa34e7b52621",
+        "sessionParent": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1",
+        "sessionOrigin": "subagent",
+        "ruleId": "g5-child-ask",
+        "action": "ask"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g5-child-ask",
+        "name": "bash",
+        "action": "ask"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "the user rejected tool \"bash\""
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "askMarker": false
+    },
+    "markerContents": {
+      "askMarker": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 ask child",
+        "provider": "spawn"
+      },
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-1950a664-3588-4993-8ec5-aa34e7b52621-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-1950a664-3588-4993-8ec5-aa34e7b52621-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "rejected",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "1950a664-3588-4993-8ec5-aa34e7b52621__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 ask child",
+        "provider": null
+      },
+      {
+        "file": "session-dc4a33b9-a1ac-4061-a91d-839dd33bd4e1__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g5-e-fork-child-allow",
+    "group": "5",
+    "title": "fork 子任务内测试工具 allow 对照：同一 fork 环境 body 执行",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent_fork",
+        "callId": "fixture-session-ecd8a034-a596-4f8f-8fd8-82145f5c041b-0-0",
+        "rootCallId": "fixture-session-ecd8a034-a596-4f8f-8fd8-82145f5c041b-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-9813717f-4f69-4a8d-8e2b-c7666d674082-0-2",
+        "rootCallId": "fixture-9813717f-4f69-4a8d-8e2b-c7666d674082-0-2",
+        "parentToken": null,
+        "agentSessionId": "9813717f-4f69-4a8d-8e2b-c7666d674082",
+        "sessionParent": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b",
+        "sessionOrigin": "subagent",
+        "ruleId": "g5-fork-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g5-fork-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent_fork",
+        "callId": "fixture-session-ecd8a034-a596-4f8f-8fd8-82145f5c041b-0-0"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-9813717f-4f69-4a8d-8e2b-c7666d674082-0-2"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent_fork",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "forkMarker": true
+    },
+    "markerContents": {
+      "forkMarker": "G5-FORK-ALLOW\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 fork child",
+        "provider": "fork"
+      },
+      {
+        "file": "9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-9813717f-4f69-4a8d-8e2b-c7666d674082-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "9813717f-4f69-4a8d-8e2b-c7666d674082__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-ecd8a034-a596-4f8f-8fd8-82145f5c041b-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent_fork",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g5 fork child",
+        "provider": null
+      },
+      {
+        "file": "session-ecd8a034-a596-4f8f-8fd8-82145f5c041b__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g6-a-workflow-tool-deny",
+    "group": "6",
+    "title": "workflow 工具入口 deny：脚本未启动，子任务未创建",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "workflow",
+        "callId": "fixture-session-5175e5ef-1b99-40e3-805b-a4173e45d62c-0-0",
+        "rootCallId": "fixture-session-5175e5ef-1b99-40e3-805b-a4173e45d62c-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-5175e5ef-1b99-40e3-805b-a4173e45d62c",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g6-workflow-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6-workflow-deny",
+        "name": "workflow",
+        "action": "deny"
+      }
+    ],
+    "executed": [],
+    "resultErrors": [
+      {
+        "name": "workflow",
+        "isError": true,
+        "errorMessage": "hostcov fixture: workflow tool denied"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inner": false
+    },
+    "markerContents": {
+      "inner": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-5175e5ef-1b99-40e3-805b-a4173e45d62c-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "workflow",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5175e5ef-1b99-40e3-805b-a4173e45d62c__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g6-b-workflow-tool-allow-inner-deny",
+    "group": "6",
+    "title": "workflow 工具 allow、子任务内 bash deny：编排本身无独立工具门禁",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "workflow",
+        "callId": "fixture-session-b7b0aafa-c758-4812-84d2-f61d0a7a2474-0-0",
+        "rootCallId": "fixture-session-b7b0aafa-c758-4812-84d2-f61d0a7a2474-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g6-workflow-allow",
+        "action": "allow"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-a73c7e8b-c222-4b0d-b43a-5e2e1b11de35-0-2",
+        "rootCallId": "fixture-a73c7e8b-c222-4b0d-b43a-5e2e1b11de35-0-2",
+        "parentToken": null,
+        "agentSessionId": "a73c7e8b-c222-4b0d-b43a-5e2e1b11de35",
+        "sessionParent": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474",
+        "sessionOrigin": "subagent",
+        "ruleId": "g6-workflow-inner-deny",
+        "action": "deny"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6-workflow-allow",
+        "name": "workflow",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6-workflow-inner-deny",
+        "name": "bash",
+        "action": "deny"
+      }
+    ],
+    "executed": [
+      {
+        "name": "workflow",
+        "callId": "fixture-session-b7b0aafa-c758-4812-84d2-f61d0a7a2474-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "hostcov fixture: workflow child bash denied"
+      },
+      {
+        "name": "workflow",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inner": false
+    },
+    "markerContents": {
+      "inner": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6-inner-deny child 1",
+        "provider": "spawn"
+      },
+      {
+        "file": "a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-a73c7e8b-c222-4b0d-b43a-5e2e1b11de35-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "a73c7e8b-c222-4b0d-b43a-5e2e1b11de35__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-b7b0aafa-c758-4812-84d2-f61d0a7a2474-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "workflow",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6-inner-deny child 1",
+        "provider": null
+      },
+      {
+        "file": "session-b7b0aafa-c758-4812-84d2-f61d0a7a2474__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g6-c-workflow-tool-allow-inner-allow",
+    "group": "6",
+    "title": "workflow 工具 allow、子任务内 bash allow 对照：效果实际发生",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "workflow",
+        "callId": "fixture-session-13c26f45-a4b0-4748-a8c4-ce659161d108-0-0",
+        "rootCallId": "fixture-session-13c26f45-a4b0-4748-a8c4-ce659161d108-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-13c26f45-a4b0-4748-a8c4-ce659161d108",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g6-workflow-allow2",
+        "action": "allow"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-21462862-8b7f-4c2e-8886-893bce0ef485-0-2",
+        "rootCallId": "fixture-21462862-8b7f-4c2e-8886-893bce0ef485-0-2",
+        "parentToken": null,
+        "agentSessionId": "21462862-8b7f-4c2e-8886-893bce0ef485",
+        "sessionParent": "session-13c26f45-a4b0-4748-a8c4-ce659161d108",
+        "sessionOrigin": "subagent",
+        "ruleId": "g6-workflow-inner-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6-workflow-allow2",
+        "name": "workflow",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6-workflow-inner-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "workflow",
+        "callId": "fixture-session-13c26f45-a4b0-4748-a8c4-ce659161d108-0-0"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-21462862-8b7f-4c2e-8886-893bce0ef485-0-2"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "workflow",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "inner": true
+    },
+    "markerContents": {
+      "inner": "G6-INNER-ALLOW\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6-inner-allow child 1",
+        "provider": "spawn"
+      },
+      {
+        "file": "21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-21462862-8b7f-4c2e-8886-893bce0ef485-0-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "21462862-8b7f-4c2e-8886-893bce0ef485__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-13c26f45-a4b0-4748-a8c4-ce659161d108-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "workflow",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6-inner-allow child 1",
+        "provider": null
+      },
+      {
+        "file": "session-13c26f45-a4b0-4748-a8c4-ce659161d108__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g6-d-workflow-vs-direct-delegation",
+    "group": "6",
+    "title": "同一会话先直调 subagent 再用 workflow：比较委派工具门禁记录",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": null,
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-0-0",
+        "rootCallId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-280f07e6-f6a7-44be-9712-0fa952edce4f",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g6d-subagent-allow",
+        "action": "allow"
+      },
+      {
+        "name": "workflow",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-1-2",
+        "rootCallId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-1-2",
+        "parentToken": null,
+        "agentSessionId": "session-280f07e6-f6a7-44be-9712-0fa952edce4f",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g6d-workflow-allow",
+        "action": "allow"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-a8aaf460-926a-4875-ae39-0fbac19f7ff8-0-3",
+        "rootCallId": "fixture-a8aaf460-926a-4875-ae39-0fbac19f7ff8-0-3",
+        "parentToken": null,
+        "agentSessionId": "a8aaf460-926a-4875-ae39-0fbac19f7ff8",
+        "sessionParent": "session-280f07e6-f6a7-44be-9712-0fa952edce4f",
+        "sessionOrigin": "subagent",
+        "ruleId": "g6d-inner-allow",
+        "action": "allow"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-2e46a12c-963b-4a13-8c60-6489effcdc16-0-4",
+        "rootCallId": "fixture-2e46a12c-963b-4a13-8c60-6489effcdc16-0-4",
+        "parentToken": null,
+        "agentSessionId": "2e46a12c-963b-4a13-8c60-6489effcdc16",
+        "sessionParent": "session-280f07e6-f6a7-44be-9712-0fa952edce4f",
+        "sessionOrigin": "subagent",
+        "ruleId": "g6d-inner-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6d-subagent-allow",
+        "name": "subagent",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6d-workflow-allow",
+        "name": "workflow",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6d-inner-allow",
+        "name": "bash",
+        "action": "allow"
+      },
+      {
+        "kind": "probe/decision",
+        "ruleId": "g6d-inner-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "subagent",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-0-0"
+      },
+      {
+        "name": "workflow",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-1-2"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-a8aaf460-926a-4875-ae39-0fbac19f7ff8-0-3"
+      },
+      {
+        "name": "bash",
+        "callId": "fixture-2e46a12c-963b-4a13-8c60-6489effcdc16-0-4"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "subagent",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      },
+      {
+        "name": "workflow",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "direct": true,
+      "workflow": true
+    },
+    "markerContents": {
+      "direct": "G6D-INNER direct\n",
+      "workflow": "G6D-INNER workflow\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6d-visibility child 1",
+        "provider": "spawn"
+      },
+      {
+        "file": "2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-2e46a12c-963b-4a13-8c60-6489effcdc16-0-4",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+        "type": "subagent/descriptor",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6d direct child",
+        "provider": "spawn"
+      },
+      {
+        "file": "a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "never",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-a8aaf460-926a-4875-ae39-0fbac19f7ff8-0-3",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "subagent",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6d direct child",
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-280f07e6-f6a7-44be-9712-0fa952edce4f-1-2",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "workflow",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "subagent/catalog",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": "continuable",
+        "label": "g6d-visibility child 1",
+        "provider": null
+      },
+      {
+        "file": "session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-a-bash-escalate-tool-allow",
+    "group": "7",
+    "title": "bash 工具 allow 但 body 内请求升权：never 下原生审批拒绝",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-d07f0f41-351e-4fc9-ba74-d3187d270a10-0-0",
+        "rootCallId": "fixture-session-d07f0f41-351e-4fc9-ba74-d3187d270a10-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-d07f0f41-351e-4fc9-ba74-d3187d270a10",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g7-bash-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g7-bash-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-d07f0f41-351e-4fc9-ba74-d3187d270a10-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "the user rejected escalating this command to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": false
+    },
+    "markerContents": {
+      "outside": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-d07f0f41-351e-4fc9-ba74-d3187d270a10__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-d07f0f41-351e-4fc9-ba74-d3187d270a10-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-d07f0f41-351e-4fc9-ba74-d3187d270a10__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-d07f0f41-351e-4fc9-ba74-d3187d270a10-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-d07f0f41-351e-4fc9-ba74-d3187d270a10__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "rejected",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-d07f0f41-351e-4fc9-ba74-d3187d270a10__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-b-run-code-escalate-tool-allow",
+    "group": "7",
+    "title": "run_code 工具 allow 但 body 内请求升权：never 下原生审批拒绝",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-b3986965-af96-47a6-9419-34f2000ae1c6-0-0",
+        "rootCallId": "fixture-session-b3986965-af96-47a6-9419-34f2000ae1c6-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-b3986965-af96-47a6-9419-34f2000ae1c6",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g7-run-code-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g7-run-code-allow",
+        "name": "run_code",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-b3986965-af96-47a6-9419-34f2000ae1c6-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "run_code",
+        "isError": true,
+        "errorMessage": "the user rejected escalating this program to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": false
+    },
+    "markerContents": {
+      "outside": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-b3986965-af96-47a6-9419-34f2000ae1c6-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-b3986965-af96-47a6-9419-34f2000ae1c6-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "rejected",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-b3986965-af96-47a6-9419-34f2000ae1c6__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-c-bash-escalate-no-tool-rule",
+    "group": "7",
+    "title": "bash 工具无探针规则（ask 模式）：原生审批记录与结果",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-5fb8e517-7849-4678-ac32-07675015a00a-0-0",
+        "rootCallId": "fixture-session-5fb8e517-7849-4678-ac32-07675015a00a-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-5fb8e517-7849-4678-ac32-07675015a00a",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": null,
+        "action": "pass"
+      }
+    ],
+    "decisions": [],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-5fb8e517-7849-4678-ac32-07675015a00a-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "sandbox escalation to \"danger-full-access\" requires approval, but no approval channel is available"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": false
+    },
+    "markerContents": {
+      "outside": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-5fb8e517-7849-4678-ac32-07675015a00a-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-5fb8e517-7849-4678-ac32-07675015a00a-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "unavailable",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-5fb8e517-7849-4678-ac32-07675015a00a__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-d-bash-escalate-sim-allowed",
+    "group": "7",
+    "title": "模拟应答：工具 allow 后 body 内升权被模拟批准（标注 simulated）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [
+      {
+        "event": "approval-sim/answer",
+        "simulated": true,
+        "outcome": "allowed-once",
+        "toolName": "bash",
+        "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+        "reason": "escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated approval",
+        "agentSessionId": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e",
+        "t": "2026-10-20T14:53:35.252Z"
+      }
+    ],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+        "rootCallId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g7d-bash-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g7d-bash-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": true
+    },
+    "markerContents": {
+      "outside": "G7D\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "allowed-once",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-dbaee3fd-c48a-48d0-b09a-66e09c47ec7e__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-e-run-code-escalate-sim-allowed",
+    "group": "7",
+    "title": "模拟应答：run_code 工具 allow 后 body 内升权被模拟批准（标注 simulated）",
+    "exitCode": 0,
+    "toolsMode": "ptc",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [
+      {
+        "event": "approval-sim/answer",
+        "simulated": true,
+        "outcome": "allowed-once",
+        "toolName": "run_code",
+        "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+        "reason": "escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated approval",
+        "agentSessionId": "session-09c061ce-de3a-4945-825a-9d60e59a460e",
+        "t": "2026-10-20T14:53:35.661Z"
+      }
+    ],
+    "preExecute": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+        "rootCallId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-09c061ce-de3a-4945-825a-9d60e59a460e",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g7e-run-code-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g7e-run-code-allow",
+        "name": "run_code",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "run_code",
+        "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "run_code",
+        "isError": false,
+        "errorMessage": null
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": true
+    },
+    "markerContents": {
+      "outside": "G7E-PROGRAM\n"
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-09c061ce-de3a-4945-825a-9d60e59a460e-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "run_code",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "allowed-once",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-09c061ce-de3a-4945-825a-9d60e59a460e__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  },
+  {
+    "caseId": "g7-f-bash-escalate-sim-rejected",
+    "group": "7",
+    "title": "模拟应答：工具 allow 后 body 内升权被模拟拒绝（标注 simulated）",
+    "exitCode": 0,
+    "toolsMode": null,
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "ask",
+    "probePrepend": false,
+    "approvalSim": [
+      {
+        "event": "approval-sim/answer",
+        "simulated": true,
+        "outcome": "rejected",
+        "toolName": "bash",
+        "callId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0",
+        "reason": "escalate sandbox to danger-full-access: host coverage fixture: controlled sibling write under simulated rejection",
+        "agentSessionId": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27",
+        "t": "2026-10-20T14:53:36.131Z"
+      }
+    ],
+    "preExecute": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0",
+        "rootCallId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0",
+        "parentToken": null,
+        "agentSessionId": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27",
+        "sessionParent": null,
+        "sessionOrigin": null,
+        "ruleId": "g7f-bash-allow",
+        "action": "allow"
+      }
+    ],
+    "decisions": [
+      {
+        "kind": "probe/decision",
+        "ruleId": "g7f-bash-allow",
+        "name": "bash",
+        "action": "allow"
+      }
+    ],
+    "executed": [
+      {
+        "name": "bash",
+        "callId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0"
+      }
+    ],
+    "resultErrors": [
+      {
+        "name": "bash",
+        "isError": true,
+        "errorMessage": "the user rejected escalating this command to \"danger-full-access\"; it stays denied, so stop and explain instead of working around it"
+      }
+    ],
+    "listeners": [
+      {
+        "index": 0,
+        "prepend": true,
+        "global": false,
+        "label": null
+      },
+      {
+        "index": 1,
+        "prepend": false,
+        "global": false,
+        "label": "decide"
+      },
+      {
+        "index": 2,
+        "prepend": false,
+        "global": false,
+        "label": "sentinel"
+      }
+    ],
+    "markers": {
+      "outside": false
+    },
+    "markerContents": {
+      "outside": null
+    },
+    "mcpInbound": [],
+    "mcpToolCalls": [],
+    "mcpResourceReads": [],
+    "network": 0,
+    "durable": [
+      {
+        "file": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27__session.v4.jsonl.zstd",
+        "type": "approval/policy",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": "ask",
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27__session.v4.jsonl.zstd",
+        "type": "tool/call",
+        "callId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27__session.v4.jsonl.zstd",
+        "type": "approval/asked",
+        "callId": "fixture-session-0177a54e-fb55-4d24-a625-a5e7ab512c27-0-0",
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": "bash",
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27__session.v4.jsonl.zstd",
+        "type": "approval/decided",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": "rejected",
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      },
+      {
+        "file": "session-0177a54e-fb55-4d24-a625-a5e7ab512c27__session.v4.jsonl.zstd",
+        "type": "tool/result",
+        "callId": null,
+        "parentCallId": null,
+        "rootCallId": null,
+        "name": null,
+        "outcome": null,
+        "policy": null,
+        "mode": null,
+        "label": null,
+        "provider": null
+      }
+    ]
+  }
+]

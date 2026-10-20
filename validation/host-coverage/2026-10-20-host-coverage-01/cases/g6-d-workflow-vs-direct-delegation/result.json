@@ -1,0 +1,141 @@
+{
+  "caseId": "g6-d-workflow-vs-direct-delegation",
+  "group": "6",
+  "title": "同一会话先直调 subagent 再用 workflow：比较委派工具门禁记录",
+  "task": "HOSTCOV G6-D visibility control",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 542,
+  "exitCode": 0,
+  "stdout": "G6D-DONE\n",
+  "stderrTail": "(node:75410) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `DeepSeek Harness --trace-warnings ...` to show where the warning was created)\n",
+  "probeEventCount": 24,
+  "markers": {
+    "direct": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws/direct-inner.txt",
+      "content": "G6D-INNER direct\n"
+    },
+    "workflow": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/ws/workflow-inner.txt",
+      "content": "G6D-INNER workflow\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g6-d-workflow-vs-direct-delegation/sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1836
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/2e46a12c-963b-4a13-8c60-6489effcdc16/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/2e46a12c-963b-4a13-8c60-6489effcdc16/session.v4.jsonl.zstd",
+      "bytes": 15055
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/a8aaf460-926a-4875-ae39-0fbac19f7ff8/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/a8aaf460-926a-4875-ae39-0fbac19f7ff8/session.v4.jsonl.zstd",
+      "bytes": 15512
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/session-280f07e6-f6a7-44be-9712-0fa952edce4f/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g6-d-workflow-vs-direct-delegation-ws--/session-280f07e6-f6a7-44be-9712-0fa952edce4f/session.v4.jsonl.zstd",
+      "bytes": 16843
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/2e46a12c-963b-4a13-8c60-6489effcdc16.json",
+      "bytes": 4322
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8.json",
+      "bytes": 4798
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f.json",
+      "bytes": 4729
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 8735
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 7866
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 1808
+    },
+    {
+      "path": "sessions/2e46a12c-963b-4a13-8c60-6489effcdc16__session.v4.jsonl.zstd",
+      "bytes": 15055
+    },
+    {
+      "path": "sessions/a8aaf460-926a-4875-ae39-0fbac19f7ff8__session.v4.jsonl.zstd",
+      "bytes": 15512
+    },
+    {
+      "path": "sessions/session-280f07e6-f6a7-44be-9712-0fa952edce4f__session.v4.jsonl.zstd",
+      "bytes": 16843
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 195
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/direct-inner.txt",
+      "bytes": 17
+    },
+    {
+      "path": "ws/workflow-inner.txt",
+      "bytes": 19
+    }
+  ],
+  "notes": ""
+}

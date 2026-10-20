@@ -1,0 +1,98 @@
+{
+  "caseId": "g1-c-bash-pass",
+  "group": "1",
+  "title": "探针不处理时交还原链路：hook 记录 next 结果，body 正常执行",
+  "task": "HOSTCOV G1-C pass-through",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 386,
+  "exitCode": 0,
+  "stdout": "G1C-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 13,
+  "markers": {
+    "marker": {
+      "exists": true,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/ws/marker.txt",
+      "content": "G1C-PASS\n"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-c-bash-pass/sessions/session-99431e2d-3e41-4170-b679-dec894e683e0__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1237
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-c-bash-pass-ws--/session-99431e2d-3e41-4170-b679-dec894e683e0/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-c-bash-pass-ws--/session-99431e2d-3e41-4170-b679-dec894e683e0/session.v4.jsonl.zstd",
+      "bytes": 15087
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-99431e2d-3e41-4170-b679-dec894e683e0.json",
+      "bytes": 4077
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3456
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2217
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 345
+    },
+    {
+      "path": "sessions/session-99431e2d-3e41-4170-b679-dec894e683e0__session.v4.jsonl.zstd",
+      "bytes": 15087
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

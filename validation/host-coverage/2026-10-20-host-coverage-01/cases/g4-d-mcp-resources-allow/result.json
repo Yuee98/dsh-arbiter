@@ -1,0 +1,308 @@
+{
+  "caseId": "g4-d-mcp-resources-allow",
+  "group": "4",
+  "title": "MCP 资源工具 allow：list/read 到达 server",
+  "task": "HOSTCOV G4-D mcp resources allow",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-d-mcp-resources-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-d-mcp-resources-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-d-mcp-resources-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-d-mcp-resources-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 457,
+  "exitCode": 0,
+  "stdout": "G4D-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 16,
+  "markers": {},
+  "approvalSimLog": [],
+  "mcpReceipt": [
+    {
+      "t": "2026-10-20T14:53:29.015Z",
+      "pid": 75308,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "method": "server/discover",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "dsh-mcp-client",
+              "version": "0.0.1"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.016Z",
+      "pid": 75308,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "server-discover-probe-1",
+        "error": {
+          "code": -32601,
+          "message": "server/discover not implemented by hostcov fixture"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.042Z",
+      "pid": 75309,
+      "direction": "in",
+      "payload": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "dsh-mcp-client",
+            "version": "0.0.1"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.043Z",
+      "pid": 75309,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {
+              "listChanged": false
+            },
+            "resources": {
+              "listChanged": false,
+              "subscribe": false
+            }
+          },
+          "serverInfo": {
+            "name": "hostcov-mcp",
+            "version": "1.0.0"
+          },
+          "instructions": "hostcov fixture server"
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.045Z",
+      "pid": 75309,
+      "direction": "in",
+      "payload": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.045Z",
+      "pid": 75309,
+      "direction": "in",
+      "payload": {
+        "method": "tools/list",
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.045Z",
+      "pid": 75309,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "echo_marker",
+              "description": "Echo a fixed marker string. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "write_receipt",
+              "description": "Record a marker on the server side and return it. Test tool.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.083Z",
+      "pid": 75309,
+      "direction": "in",
+      "payload": {
+        "method": "resources/list",
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.083Z",
+      "pid": 75309,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "resources": [
+            {
+              "uri": "hostcov://fixture/alpha",
+              "name": "alpha",
+              "mimeType": "text/plain",
+              "description": "Fixture resource alpha"
+            },
+            {
+              "uri": "hostcov://fixture/beta",
+              "name": "beta",
+              "mimeType": "text/plain",
+              "description": "Fixture resource beta"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.086Z",
+      "pid": 75309,
+      "direction": "in",
+      "payload": {
+        "method": "resources/read",
+        "params": {
+          "uri": "hostcov://fixture/alpha"
+        },
+        "jsonrpc": "2.0",
+        "id": 3
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.086Z",
+      "pid": 75309,
+      "direction": "resource-read",
+      "payload": {
+        "uri": "hostcov://fixture/alpha"
+      }
+    },
+    {
+      "t": "2026-10-20T14:53:29.086Z",
+      "pid": 75309,
+      "direction": "out",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "contents": [
+            {
+              "uri": "hostcov://fixture/alpha",
+              "mimeType": "text/plain",
+              "text": "body:alpha"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g4-d-mcp-resources-allow/sessions/session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 2421
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-d-mcp-resources-allow-ws--/session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g4-d-mcp-resources-allow-ws--/session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce/session.v4.jsonl.zstd",
+      "bytes": 15688
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce.json",
+      "bytes": 4111
+    },
+    {
+      "path": "mcp-receipt.jsonl",
+      "bytes": 2876
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 5651
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2536
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 446
+    },
+    {
+      "path": "sessions/session-cbbd5dac-3b2a-44a1-b02c-0e01943266ce__session.v4.jsonl.zstd",
+      "bytes": 15688
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

@@ -1,0 +1,93 @@
+{
+  "caseId": "g1-e-guard-vs-probe-allow",
+  "group": "1",
+  "title": "原生 guard 与探针 allow 分离：插件 allow 不能绕过 guard",
+  "task": "HOSTCOV G1-E guard vs allow",
+  "cliArgs": [],
+  "toolsMode": null,
+  "sandboxMode": null,
+  "approvalPolicy": "ask",
+  "approvalSim": null,
+  "probePrepend": false,
+  "env": {
+    "dshHome": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/home",
+    "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/ws",
+    "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/outside",
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/ws",
+    "platform": "darwin",
+    "node": "v24.21.0"
+  },
+  "elapsedMs": 413,
+  "exitCode": 0,
+  "stdout": "G1E-DONE\n",
+  "stderrTail": "",
+  "probeEventCount": 12,
+  "markers": {
+    "marker": {
+      "exists": false,
+      "path": "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/ws/marker.txt"
+    }
+  },
+  "approvalSimLog": [],
+  "mcpReceipt": [],
+  "networkReceipt": [],
+  "receiverPort": "",
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/host-coverage/2026-10-20-host-coverage-01/cases/g1-e-guard-vs-probe-allow/sessions/session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88__session.v4.jsonl.zstd"
+  ],
+  "files": [
+    {
+      "path": "home/profiles/hostcov/cordis.patch.yml",
+      "bytes": 1672
+    },
+    {
+      "path": "home/profiles/hostcov/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/hostcov/package.json",
+      "bytes": 212
+    },
+    {
+      "path": "home/profiles/hostcov/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-e-guard-vs-probe-allow-ws--/session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-host-coverage-2026-10-20-host-coverage-01-cases-g1-e-guard-vs-probe-allow-ws--/session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88/session.v4.jsonl.zstd",
+      "bytes": 14699
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88.json",
+      "bytes": 4103
+    },
+    {
+      "path": "probe.jsonl",
+      "bytes": 3453
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 2268
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 344
+    },
+    {
+      "path": "sessions/session-939cbf1d-04a2-4dfa-bc5b-4f7ac5bcce88__session.v4.jsonl.zstd",
+      "bytes": 14699
+    },
+    {
+      "path": "stderr.txt",
+      "bytes": 0
+    },
+    {
+      "path": "stdout.txt",
+      "bytes": 9
+    }
+  ],
+  "notes": ""
+}

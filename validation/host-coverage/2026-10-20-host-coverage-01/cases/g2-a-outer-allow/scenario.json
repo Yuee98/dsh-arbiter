@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "run_code",
+          "arguments": {
+            "description": "g2 outer allow",
+            "code": "\nconst fs = await import(\"node:fs\");\nfs.writeFileSync(\"program-started.txt\", \"program body started\\n\");\nconst r = await tools.bash({ command: \"printf 'OUTER-ALLOW-MARK\\\\n' > inner.txt; echo ok\", description: \"inner ok\" });\nreturn { ok: true, bash: r };\n"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "G2A-DONE"
+    }
+  ]
+}
