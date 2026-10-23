@@ -2,7 +2,7 @@
 
 描述单插件的执行链、命名与包结构、子 agent、审批模式、预设接入和上游扩展边界。
 
-状态：需求与设计讨论中，尚未实现。已确认结论同步到正文，其余冲突与建议见[决策与待讨论问题](decisions-and-questions.md)。
+状态（2026-10-21）：首轮完整功能版本已实现并可在隔离 DSH 0.2.1-rc.2 profile 中试用；产品语义未定项仍按本文与[决策记录](decisions-and-questions.md)保留讨论状态。实现证据、初版选择与剩余缺口见[首轮实施报告](implementation-report.md)。
 
 入口：[README](../README.md) · [设计导航](../design.md) · [证据](../evidence.md) · [决策与待讨论问题](decisions-and-questions.md)
 
@@ -14,6 +14,9 @@
 - [子 agent（智能体团队）场景](#design-5-6-1)
 - [审批模式](#design-6)
 - [预设与 UI 接入](#design-7)
+- [权限选择器与启用状态（已确认）](#permission-selector-contract)
+- [切换、停用与卸载](#permission-lifecycle)
+- [审批拒绝的展示与会话继续](#approval-rejection-feedback)
 - [未来：upstream 多根工作区](#design-13)
 - [术语](#glossary)
 
@@ -48,7 +51,7 @@
 
 1. **消除监听器顺序依赖**：两个插件各自 `prepend` 抢 waterfall 队首时，先后取决于加载顺序，而"规则短路先于审查"是省 token 的前提，不能建立在加载顺序上；实测还表明 `prepend` 不能让插件排在宿主内置监听之前（[覆盖范围](#execution-coverage)），该风险不只存在于插件之间；
 2. **状态共享**：规则判定结果、会话模式、审查上下文需要共享，跨插件传递没有干净的官方通道；
-3. **预设槽位互斥**：`registerAuto()` 是单槽，两个包都注册会抛错，物理上不可能共存。
+3. **预设槽位互斥**：`registerAuto()` 是单槽，两个提供者不能同时成功拥有该槽；这不保证另一插件不会留下独立监听器。本轮用户已确认 arbiter 替代官方 Auto Review，两者互斥，其他宿主 guard 照常生效。
 
 ```
 工具调用
@@ -108,8 +111,8 @@ dsh-arbiter/
 | locale 命名空间 | `arbiter` |
 | 设置与会话事件 | 审批模式读取插件设置；配置生效记录与 `arbiter/mode` 等事件字段待统一 |
 | plugin record 前缀 | `plugin:arbiter/*` |
-| 插件自有数据目录 | `$DSH_HOME/arbiter/` |
-| 斜杠命令 | `/arbiter`（执行模式子命令 `mode` 与只读 `status`；审批模式在设置页选择） |
+| 插件自有数据目录 | `$DSH_HOME/arbiter/`，按持久化 DSH 数据实例归属；同实例审计共享库，保留 profile／项目／会话标识，见[数据归属](configuration-and-audit.md#audit-retention) |
+| 斜杠命令 | `/arbiter status` 等只读入口；trusted / guarded 与审批模式均在设置页选择。初版 `/arbiter mode` 不是当前产品切换入口 |
 | 错误前缀 | `arbiter: ...` |
 
 模块划分（同一包内）：
@@ -151,7 +154,7 @@ dsh-arbiter/
 
 ## 工具与执行路径覆盖范围
 
-核对对象为本机安装的 **DSH 0.2.1-rc.2（macOS 27.0.1 / arm64）**。2026-10-20 重新读取安装包源码，同日完成第一轮宿主机实测。下表的“能力”列区分两类依据：**源码**表示调用链已确认；**实测**表示在隔离 profile 中用探针真实跑过，逐项见[覆盖范围证据](../evidence.md#evidence-22)与[本轮报告](../validation/host-coverage/2026-10-20-host-coverage-01/REPORT.md)。两类都**不表示 dsh-arbiter 已实现**，也不外推到未测的 profile、preset 与 surface。
+核对对象为本机安装的 **DSH 0.2.1-rc.2（macOS 27.0.1 / arm64）**。2026-10-20 重新读取安装包源码，同日完成第一轮宿主机实测。下表的“能力”列区分两类依据：**源码**表示调用链已确认；**实测**表示在隔离 profile 中用探针真实跑过，逐项见[覆盖范围证据](../evidence.md#evidence-22)与[本轮报告](../validation/host-coverage/2026-10-20-host-coverage-01/REPORT.md)。两类都**不表示 dsh-arbiter 已实现**，也不外推到未测的 profile、preset 与 surface。2026-10-21 的首轮插件实现已复用这些入口并补充了插件级集成验证；插件自身已接入的路径与仍未验证的组合见[首轮实施报告](implementation-report.md#3-检查命令与结果)。
 
 统一接入点是 `tools/pre-execute`：调用进入 DSH 工具流水线时，可以在工具主体执行前作出权限判定。能拦截入口，不等于能观察该工具实现内部的每一个效果；程序直接调用宿主服务，也不一定经过工具流水线。
 
@@ -161,22 +164,47 @@ dsh-arbiter/
 |---|---|---|---|
 | 直接调用注册工具，如 bash、文件编辑、web、终端工具 | 可在工具主体开始前取得工具名、参数和调用身份，允许或拒绝整个调用 | 源码 + 实测 | 探针 allow／deny 在 bash 与 `write` 上均生效；web／终端等工具未逐一实测（同属 registry 派发）。shell AST 仅适用于相应命令参数 |
 | bash／终端启动的脚本、程序及其子进程 | 能审查启动它们的工具调用 | 源码 + 实测 | `g3-c`／`g3-i` 显示子进程不产生独立门禁，探针只看到 `bash` 本身；脚本内部文件操作、网络请求不能逐项过同一门禁。审查输入是否含脚本正文仍是另一项能力 |
-| **外层 `run_code`** | 可接入；外层也走 pre-execute，参数包含程序文本 | 源码 + 实测 | `g2-b` 实测外层 deny 时程序未启动（标记文件不存在、无内层派发）。官方 Auto Review 主动跳过外层，本插件是否跳过仍是产品待决项；需要单独的程序审查输入，不能送入 bash AST |
+| **外层 `run_code`** | 可接入；外层也走 pre-execute，参数包含程序文本 | 源码 + 实测 | `g2-b` 实测外层 deny 时程序未启动（标记文件不存在、无内层派发）。本轮已确认先规则后程序文本审查，不能送入 bash AST；长程序允许带明确标记截断，详见[PTC 契约](rules.md#design-4-7) |
 | **`run_code → tools.bash` / `tools.<其他工具>`** | 每个实际发出的内层调用分别进入工具流水线，带真实参数、`parent` token 和 `rootCallId` | 源码 + 实测 | `g2-c`／`g2-d` 实测内层 deny 可被程序 catch、外层继续；两个并发内层各自进入 pre-execute，一放一拒互不取消。`callId` 形如 `<outer>:ptc:<n>`，`parent` 是 execution token 而非 agent。已发生效果不回滚 |
 | **`run_code → tools.mcp__…`** | MCP 工具已注册到同一 registry，使用同样的内层派发路径，可在 MCP 请求发出前拦截 | 源码 + 实测 | `g4-c` 实测内层 MCP 调用逐次进入 pre-execute，被拒的那次未到达服务器。动态工具列表、schema 更新、命名规范化与服务断连未测 |
 | **`run_code` 直接调用 Node API**：`fs`、`fetch`、`child_process` 等 | **没有逐效果的工具门禁**；只能控制外层程序准入。Node 运行时在非 full-access 下调用沙箱 | 源码 + 实测 | `g3-a`／`g3-b` 实测三类效果都实际发生而探针只看到外层 `run_code`；文件沙箱只改写入边界，不限制读取、网络或子进程。宏观准入不等于逐项审查 |
 | **直接调用 MCP 工具**：`mcp__<server>__<tool>` | MCP bridge 将工具注册到 DSH，body 内才发送 `client.callTool`，因此入口可拦截 | 源码 + 实测 | `g4-b` 实测 deny 时服务端已完成握手但**没有收到 `tools/call`**，即拒绝发生在 RPC 之前。服务器内部的数据库、文件、二次网络请求不能逐项拦截；DSH 会话文件沙箱也不等于远端服务的执行沙箱 |
 | MCP 资源工具：`list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource` | 都注册为普通 DSH 工具，可审查 server、URI 等参数 | 源码 + 实测 | `g4-d` 实测 list／read 到达服务端；`g4-e` 实测 deny 时服务端没有 `resources/read`。资源访问授权仍由服务端负责；模板工具未单独实测 |
 | MCP server 启动、连接、工具发现／重连及服务内部操作 | **不由上述逐工具门禁覆盖**；MCP client 直接创建 transport、发现工具 | 源码 | 本轮未测重连与动态列表；不承诺整个 MCP 协议／服务生命周期受控 |
-| **通过委派工具创建 subagent** | 委派本身是工具调用，能审查任务、目标后端及参数 | 源码 + 实测 | `g5-a`／`g6-d` 实测 `subagent`／`subagent_fork` 入口可审查。批准委派不替代子任务的逐调用判定 |
+| **通过委派工具创建 subagent** | 委派本身是工具调用，能审查任务、目标后端及参数 | 源码 + 实测 | `g5-a`／`g6-d` 实测 `subagent`／`subagent_fork` 入口可审查。本轮确认将委派入口纳入规则与审查；批准委派不替代子任务的逐调用判定 |
 | **进程内 subagent：spawn／fork** | 子任务为本地 Agent，工具调用走同一宿主流水线；全局／所属上层作用域监听器可接收其事件 | 源码 + 实测 | `g5-a…g5-e` 实测两种子任务的工具调用都进入 pre-execute（allow 执行、deny 阻止）；子会话 header 含 `parentSession`／`origin:"subagent"`／`delegationDepth`。创建时 `approval/policy: never` 不阻止插件先行 allow。不同 preset、冷恢复、后代与并发会话未测；`exec.parent` 不能用于识别 subagent |
 | **进程外／外部后端 subagent** | 可审查经工具发起的委派；通用外部后端路径只管理 run/result，没有本地子 Session | 源码 | **未运行**：本轮无可用外部后端。不能承诺共享本插件策略，需单独集成 |
 | workflow 工具及其编排路径 | workflow 工具入口可拦截；其实现直接调用 PTC runtime 与 subagent 服务，内部步骤不会自动产生对应的 `run_code`／委派工具门禁 | 源码 + 实测 | `g6-a` 实测入口 deny 后没有创建子任务；`g6-d` 实测 workflow 内部创建子任务**不产生** `subagent` 入口，而直调委派会；`g6-b`／`g6-c` 实测子任务自己的工具调用仍受各自门禁。后台、取消与生命周期组合未测 |
 | 沙箱升权：bash／`run_code` 的 `sandbox_permissions` | 工具入口可见参数；工具主体内部另调用原生审批服务 | 源码 + 实测 | `g7-a`／`g7-b` 实测工具 allow 后仍进入 `approval/asked`，`never` 下被拒且无效果；`g7-c` 实测无应答者时为 `unavailable`。**真实人工审批未运行**；allowed-once 只由模拟应答器产生（日志标 `simulated: true`）。插件 allow 不等于已批准升权 |
 
-**运行环境也影响覆盖**：表中结论只适用于插件实际安装并生效的 Host／profile。Web、headless、独立 DSH 进程和外部 agent 不因一个实例启用插件而自动覆盖。官方 Auto Review 自身会跳过没有 `exec.agent` 的调用；本产品是否接管这类程序化调用、缺少会话时如何取策略与授权，仍待定义。
+**运行环境也影响覆盖**：表中结论只适用于插件实际安装并生效的 Host／profile。Web、headless、独立 DSH 进程和外部 agent 不因一个实例启用插件而自动覆盖。**用户已确认：首版不接管没有 `exec.agent` 的程序化工具调用，明确列为覆盖边界。** 这类调用交回宿主原流程，其他工具校验与 guard 仍按各自契约处理；跳过 arbiter 不记作 review-allow、deny 或人工结果。
+
+这里的“无 agent 调用”具体指工具执行 API 的调用方省略 `ToolExecutionInput.agent`，如自行调用 `ctx.tools.execute(...)`。源码与官方提醒插件文档支持这项能力，但本轮尚未找到随附业务插件实际采用此方式的确定调用点，也未运行该场景；不得描述为已验证的常见后台路径。正常模型工具调用携带 agent，PTC 内层继承外层身份；自动化、headless 或后台运行本身不意味着没有 agent。插件直接使用 Node／宿主服务而不进入工具 registry，则是另一个既有的逐工具门禁覆盖边界，不能与省略 agent 的工具执行混为一谈。详见[源码澄清](../evidence.md#agentless-tool-api)。
+
+**子任务归属契约（本轮确认）**：委派和向现有子任务发送消息，是发起 agent 自己的工具调用，按其规则与审查模式处理；子任务内部的调用由子任务所在执行环境审查，父端不重复接管其内部每次调用，也不把委派批准记作后续执行授权。`send_message` 的工具包装源码支持接入，独立运行验证尚待补充；外部后端内部的原生审查能力不因此成为本插件已覆盖。workflow 内部服务直调仍按上表的入口与内部边界表达。
 
 **产品表达建议，待确认**：把“本次调用是否经过插件判定”“可见内容到哪一层”“当前执行沙箱”分别展示。对外可承诺“审查已接入的 DSH 工具调用”，不能仅凭这些 hook 承诺“所有动作均已审查”。配置页展示静态支持范围，单次调用详情展示实际接入与判定情况。
+
+<a id="approval-provider-coexistence"></a>
+
+### 审批提供者共存与冲突（已确认）
+
+arbiter 替代官方 Auto Review，两者在重叠作用域内互斥；宿主沙箱和其他 guard 保持正常作用。**不维护第三方互斥插件名单**：仅官方做明确互斥识别，其他插件按可观测的 tools/pre-execute、审批相关接口等行为提示可能冲突，不据此自动停用 arbiter。正常宿主 guard 属于执行约束，不因参与权限限制就视为互斥审批插件。
+
+| 状态 | 已确认的行为 |
+|---|---|
+| arbiter 尚未接管，官方 Auto Review 已实际运行 | 阻止 arbiter 接管审批；保留设置、规则测试、历史与诊断入口，提示关闭官方并提供打开插件管理的入口 |
+| arbiter 运行后发现官方冲突 | 保留已有门禁及当前模式、规则、在途结果和审查流程；弹一次通知并持续显示冲突状态 |
+| 其他插件出现可能影响审批的接口行为 | 轻量告警，展示可取得的接口与来源信息，继续按原模式审查 |
+| 官方仅安装、已关闭且不再运行 | 不据此阻止 arbiter 接管；不能只依据磁盘开关判断已停止 |
+| Auto 槽实际注册失败 | 如实显示该入口未能接管及可取得的诊断；不能假装完整启用。这是注册能力约束，不是第三方名单策略 |
+| 冲突消除 | 重新核对 arbiter 是否实际生效及当前宿主预设，再清除冲突状态 |
+
+**告警与审批分开**：同一连续冲突期只提醒一次；关闭通知表示已读，不表示冲突解除。通知不等待用户回答后才放行工具，不把全部调用改成 force-ask，也不因检测到其他监听器而把正常调用记成 error-escalate。strict／progress 中 force-ask 会按既有契约 fallback-deny，因此统一强制人工会改变整档模式的行为，不采用该方案。不自动关闭其他插件。
+
+官方冲突使用一次弹窗，其他潜在冲突使用轻量通知；设置或状态界面持续显示尚未解决的问题。没有连接前端的 headless 场景保留状态与日志，可用界面重连后读取当前状态。前端覆盖层与 Modal／Toast 的源码能力已有依据，具体检测、通知及重连仍需运行验证，见[冲突检测证据](../evidence.md#conflict-detection-source)。
+
+Auto 槽只允许单一注册，所以在 arbiter 运行后启用官方可能只是配置已保存或官方加载失败；必须核对实际运行状态及清理结果，不能推断双重审查已发生。关闭冲突插件也可能改变宿主预设，恢复时需要核对 arbiter 的实际生效状态，不能仅凭官方开关变为关闭就显示问题已解决。
 
 ---
 
@@ -246,7 +274,7 @@ subagent 的简短说明草案：
 
 这里常驻的是稳定语义，当前模式、故障细节和具体缺失证据随当次结果提供。放置方案已确认，具体文字可在实现与评估中调整；注入能力、父子会话覆盖与压缩后的保留情况需要在目标宿主验证。注入执行指引有助于模型恢复，但权限判定仍由插件执行。
 
-**启用判断**：不能仅判断原生预设名称是否为 auto。初稿指出子 agent 的 approval 固定为 never，预设派生结果可能为 custom；插件需要自己的启用条件，见[双模式](rules.md#design-4-5)。
+**启用判断**：读取插件的实际会话启用状态及所属覆盖范围，不能只比较原生预设名称。子任务可能因宿主旋钮组合而显示不同预设；不能据此漏掉已接管范围内的调用。父子范围映射需在接入中验证，不改变子任务共用 strict / progress 的既定设置；见[权限选择器契约](#permission-selector-contract)。
 
 ---
 
@@ -312,29 +340,121 @@ subagent 的简短说明草案：
 
 ### registerAuto
 
-```js
-ctx.effect(() => {
-  const dispose = ctx.permissionPresets.registerAuto(() => {
-    // admit：选中或恢复前同步执行
-    if (!config.enabled) throw new Error("arbiter: plugin disabled in policy config");
-  });
-  return dispose;
-}, "arbiter preset");
-```
+宿主已有能力与限制（源码核对，不等于下述新接入已实测）：
 
-约束（已核实）：
-
-- 单槽，官方 auto review 必须从 profile bundles 移除；
-- 名字固定 `auto`，旋钮固定 `danger-full-access + ask`；
-- 客户端硬编码「自动审查 (EXP)」文案与风险确认对话框，插件侧改不了（用户接受）；
+- Auto 为单槽，官方 Auto Review 与 arbiter 不同时接管；安装与关闭提示按[共存契约](#approval-provider-coexistence)，不因开发自动移除日常 profile 的 bundle；
+- **宿主权限预设服务**固定 `auto = danger-full-access + ask`，不是官方 Auto Review 插件自行选择；`registerAuto(admit)` 只接收准入回调，不能配置沙箱。改成工作区沙箱后，派生预设不再是 auto；
+- 原生权限控件的 Auto 文案与确认逻辑由宿主前端提供；原生控件不能通过 `registerAuto` 改名，不代表插件不能在相同 slot 提供自己的控件；
 - `auto` 不能作为新会话默认值（设置页只列配置预设）；
-- 卸载时必须照抄官方迁移：把仍处于 auto 的会话切到 `danger-full-access`，否则会话卡在"无审查者的全权模式"。
+- 官方卸载会将仍为 auto 的会话切到 `danger-full-access` 并主动取消在途审查；arbiter 不照抄该回退与取消行为，目标见[生命周期契约](#permission-lifecycle)。
+
+用户已选择不依赖上游修改的**同位置权限选择器方案**。不改 DSH 核心包、不篡改 AUTO_PRESET_SPEC，也不把工作区沙箱伪报为原生 auto。源码依据与待验证边界见[权限 UI 补核](../evidence.md#permission-ui-source)。
+
+**实测补正（2026-10-21）**：`/permission auto` 在 `registerAuto` 存活时被宿主接受，并**立即**按固定 spec 展开为
+`danger-full-access` + ask。该实测只证明"准入已接受后 auto 只能展开成固定组合"，不证明没有公开的拒绝路径。
+2026-10-22 复核确认 `apply()` 在写预设／旋钮之前同步调用 `autoAdmit`。
+
+**拒绝已实现并运行确认（2026-10-22，运行 id `2026-10-22-permission-recovery-01`）**：arbiter 在
+`registerAuto(admit)` 的回调中抛出 `AutoEntryRejected`。因为该回调先于任何权限写入执行，guarded、trusted 以及
+未启用 arbiter 的会话在 `/permission auto` 上都会**在权限变化之前**失败，`permission/preset`、`sandbox/mode`、
+`approval/policy` 均不追加，错误反馈指向自有菜单。宿主**没有**先扩为 full-access 的窗口。见
+[本轮报告](../validation/permission-ui/2026-10-22-permission-recovery-01/REPORT.md#f2)。
+
+<a id="permission-selector-contract"></a>
+
+### 权限选择器与会话启用状态（已确认）
+
+插件在 `conversation.input.permission` 位置提供自己的权限选择器，保留宿主其他权限选项，并提供单一“自动审查（Arbiter）”入口；具体显示名称可调整。trusted / guarded 放在插件配置页，不在权限菜单中拆成两个独立入口。该方案的产品方向已确认；基础 slot 覆盖、命令同步、重连及探针卸载还原已于 2026-10-21 验证。正式拒绝入口、真实管理器及其他新增场景按[本轮交接](permission-recovery-followup.md)修复／补测，不能外推为全部生命周期已通过。
+
+#### 接入约束（本轮实测确立）
+
+| 约束 | 内容 | 权重 |
+|---|---|---|
+| slot 注册面 | 必须用 `ctx.slots.inject('conversation.input.permission', …)` 注册。该 slot 由 conversation 在插件之后声明，直接 `register` 会抛 `slot … is not declared` | 硬约束 |
+| 覆盖优先级 | `conversation.input.permission` 是 `kind: 'single'`。`SlotCore.entriesOfSlot` 按 **priority 升序**取第一个，**数值越低越优先**；native 在 0，自有控件必须用负值。同一 priority 重复注册直接抛错 | 硬约束，与常见直觉相反 |
+| 命令同步接入点 | 只观察 `session/event` 的 `type === 'command/run'`、`data.name === 'permission'`、`data.args`。该事件在 handler 之前 commit，因此同值切换也可见 | 硬约束 |
+| 观察者内写入 | `session/event` 观察者运行在宿主 commit 内部，此时 `session.append` 会被判为重入并抛错；状态写入必须 defer 到下一拍 | 硬约束 |
+| 启用记录 | 必须用 `dsh-session` 的 `appendPluginRecord(session, type, data)`（写 `ignorable: true`）。`session.append('plugin:…')` 不带该标记，冷读会拒绝整份日志 | 硬约束，影响恢复 |
+| 退出入口 | 审批挂起时 composer 被宿主禁用，斜杠命令不可用；自有菜单需要直接调用 `session.command()` 或依赖原生控件 | 接入注意 |
+| auto 语义 | 原生 `/permission auto` 拒绝；自有选择器通过后端独立状态启用 trusted／guarded，不借助原生 auto 承载启用状态 | 拒绝**已实现并运行确认**；自有选择器的会话启停仍未接入正式客户端 |
+| auto 恢复 | `admit` 无参数，无法直接区分"用户切换"与"恢复已存 auto 身份的旧会话"。实现用公开的 `command/run` / `command/done` 生命周期区分：有进行中的 `/permission` 命令即视为用户切换并拒绝，否则视为恢复并放行 | 推断而非接口保证，已登记缺口 |
+| 卸载顺序 | `accepting = false` → **立即回退**仍受管且权限确实更宽的会话 → 再等待在途（≤30s）→ 释放。回退必须先于等待：停接管后到达的调用已不受门禁保护，只能靠宿主权限约束 | 已运行确认；顺序由集成用例与回归测试双重固定 |
+| 卸载顺序的反例 | 先等待在途再回退时，drain 窗口内到达的调用会在旧 `danger-full-access` 下免审执行（2026-10-22 实测复现：写出 workspace 外文件，回退事件晚于该次执行） | 已修复，见[补测报告](../validation/permission-ui/2026-10-22-permission-lifecycle-02/REPORT.md) |
+| 记录写入 | 只能用 `appendPluginRecord`（`ignorable: true`）；该包在 profile 未声明时按"裸导入 → 运行中宿主安装根"解析 | 运行确认 |
+
+| 概念 | 用户入口与作用范围 | 含义 |
+|---|---|---|
+| 会话启用状态 | 当前会话权限选择器 | 选择自动审查后接管该会话的新调用；切到其他权限模式后停止接管新调用。安装插件或打开配置页不自动启用任何会话 |
+| 执行边界 | 插件配置页的 trusted / guarded | 在该插件配置作用域内，决定已启用会话放行后是否仍受工作区文件沙箱约束；改变它不等于停用 arbiter |
+| 审批模式 | 插件配置页的主会话三档／子任务两档 | 选择审查策略及插件是否新发起人工审批，与启用状态和执行边界分开 |
+
+**首次默认配置（2026-10-24 已确认）**：执行边界 guarded，主会话 normal、子任务 strict；安装不自动启用任何会话。Reviewer 与初始规则等完整默认值见[初始配置](configuration-and-audit.md#initial-defaults)。
+
+| 当前会话选择 | arbiter 状态 | 实际宿主执行边界 |
+|---|---|---|
+| 自动审查 + trusted | 启用 | `danger-full-access + ask`；由自有入口应用，不调用已拒绝的原生 auto |
+| 自动审查 + guarded | 启用 | `workspace-write + ask`；宿主派生预设可能显示 workspace-write，插件控件仍明确显示 arbiter 已启用及 guarded |
+| 宿主其他权限模式 | 停用 | 应用用户选择的宿主权限，不因该组合与 guarded 相同就继续接管 |
+
+启用状态由后端管理，并保留恢复所需的会话信息；前端只显示后端确认的状态。不能用 `current === auto` 或 `current ∈ {auto, workspace-write}` 代替启用状态，也不能从“没有审计记录”推断已停用。持久化依托宿主会话机制等独立运行状态，不依赖审计 SQLite；具体事件字段、写入与宿主权限切换的原子性待验证。新会话或缺少启用证据的会话不能仅因插件已安装、配置中选择 guarded 或宿主为 workspace-write 就被自动接管。
+
+权限菜单选择及受支持的原生命令切换必须同步到同一个后端状态。尤其是 guarded 下再次执行 `/permission workspace-write`：即使实际沙箱／审批值已经相同，也必须能够表达用户退出 arbiter 的意图；不能只监听值变化事件。原生 `/permission auto` 按下节拒绝；其他命令失败也不得提前停用 arbiter。观察命令意图、更新内存状态与延后持久化的时序必须保持一致；公开接口若有限制应回填缺口，不能把“没有事件”记作同步成功。
+
+<a id="native-auto-rejection"></a>
+
+#### 原生 auto 入口拒绝（2026-10-22 已确认）
+
+在 arbiter 作为审批提供者的配置作用域内，**原生 `/permission auto` 不作为支持入口，trusted／guarded 两档均拒绝**。自有菜单中的“自动审查（Arbiter）”正常启用两档，其他宿主权限命令仍正常切出。该约定不干预其他独立 profile 的官方 Auto Review。
+
+拒绝必须发生在权限变更之前，保持会话原有的启用状态、执行边界、宿主沙箱／审批策略及已有在途请求；不得先进入 full-access、先停用 arbiter，再提示错误或事后回退。`command/run` 只表示命令开始，不能据此提交一次成功的退出。通过 `session.command()` 或原生选择器到达同一原生命令时，也不能绕过该约定。
+
+反馈明确指向自有菜单，例如“此入口不受 Arbiter 支持。请在会话权限菜单中选择‘自动审查（Arbiter）’。”这是权限入口错误，不伪装为 review-deny、human-deny 或审批链的新阶段。若采用不注册入口的实现，需核对错误反馈、自有入口、既有 auto 会话迁移及共存检测；若保留注册，则补测准入回调拒绝及其副作用边界。字段与注册方案留给实现，结果要求不变。
+
+前端卸载、页面刷新、断连重连都不自行改变会话权限。重连后以当前后端状态恢复展示，不用旧页面的乐观状态重新启用／停用会话。原生权限控件保留为覆盖撤销后的回退；不能通过修改 DOM 或隐藏文字来伪造接管状态。
+
+**运行验证（2026-10-21）**：上述四条前端生命周期均已在真实 Web 客户端上确认——刷新保持后端状态；断连期间由第二连接改变状态后重连采用新值；迟到响应未复活旧值；移除客户端覆盖后原生控件回归且后端 `enabled`／`revision` 不变。冷恢复、新会话不误启用、审计库缺失下的恢复也均已确认；启用状态保存在会话日志的可忽略插件记录中，不依赖审计 SQLite。
 
 <a id="design-7-2"></a>
 
-### guarded 模式入口
+### trusted / guarded 设置入口
 
-通过 `/arbiter mode guarded` 切到内置预设 `workspace-write`，UI 会显示为「工作区内修改」。
+两档在插件配置页选择，使用既定的“保存并应用”流程。保存成功后对作用域内已启用会话的后续调用应用对应执行边界；未启用会话不因修改该设置而被启用或改写权限。审批模式仍独立选择。旧稿和首轮实现中的 `/arbiter mode trusted|guarded` 是早期入口，不再作为当前产品方案。
+
+guarded 下，规则 allow、review-allow 或 human-allow 只完成插件准入，不能豁免宿主文件沙箱；越界写入仍可能失败，agent 可按宿主机制显式申请单次提权，插件不自动批准该升权。trusted 下没有这层工作区写入限制，其他宿主 guard 仍生效。
+
+<a id="permission-lifecycle"></a>
+
+### 切换、停用与卸载
+
+| 动作或状态 | 目标契约 |
+|---|---|
+| 切入自动审查 | 校验插件可接管及共存条件后，启用当前会话并应用配置中的执行边界；失败不得显示已启用 |
+| 切到其他权限模式 | 停止接管新调用，按用户选择应用宿主权限；不把切换解释为对已有请求的批准或拒绝 |
+| 模型审查已经发出 | 不会仅因切出或插件卸载而主动取消；保留已有快照、协议与结果，允许推进收尾，遵守[配置生效边界](approval-modes.md#configuration-activation) |
+| 人工审批已经弹出 | 不会仅因切出或卸载而撤销、代批或记作 human-deny；保留宿主请求等待其实际结果 |
+| 停用／卸载整个插件 | 停止新接管，将仍由 arbiter 接管的会话回退到“工作区写入”（`workspace-write + ask`）；已切到其他权限模式的会话保持原样。收尾后释放资源、撤销 UI 覆盖，保留用户规则、配置与日志 |
+
+“不主动取消”不等于保证宿主取消后仍继续。DSH 会在沙箱模式变化时取消受影响的运行中 PTC／run_code；其内部模型或人工等待也可能随调用取消。应记录真实取消原因，不能伪装成人工拒绝或普通 review-deny。进程退出也不承诺后台审查继续运行。
+
+卸载可有等待在途请求收尾的阶段；需要验证模型返回后仍可完成后续处理、人工请求保留时是否阻塞卸载、资源释放是否过早，以及已关闭会话恢复时是否残留不可恢复的 auto 身份。以上是目标与工程验证项，不宣称已经实现完整热卸载或冷恢复。仅客户端断连／覆盖层卸载不等于停用整个插件。
+
+本轮只验证[权限菜单、命令、重连与卸载四组能力](permission-ui-validation.md)，不重新执行全部宿主覆盖清单或扩大到完整功能实现。
+
+**运行验证（2026-10-21）**：探针通过 `ctx.fiber.dispose()` 验证 `stop new work → drain → roll back managed sessions → release` 的最小实现；
+在途 8 s 审查未被插件取消（`outcome: done`、`signalAborted: false`），卸载等待 7.8 s 后才回退并释放；
+已切 `read-only` 的会话被跳过而非被改写；关闭会话在卸载后重新打开可正常加载且不被重新启用。
+**仍未验证**：真实人类审批答复、`run_code`／PTC 在沙箱切换下的宿主取消（本机 `sandbox-exec` 不可用）、
+DSH 原生 `plugin_manager` 热卸载与强制进程终止。
+
+还需验证真实管理器停用／卸载时的依赖拆除顺序，以及等待收尾期间新调用如何处理；单个在途调用完成不证明该等待窗口内的新调用已被妥善处理。
+
+本轮后续已授权修复正式会话记录写入与原生入口拒绝，并补测真实管理器、新调用、人工答复及 PTC 取消。收尾等待期间的新调用不得在旧 trusted 权限下绕过门禁执行；可等待迁移到宿主目标权限后处理，或明确结束当前调用，不冒充人工拒绝。已有审批链继续推进所需的资源应保留，不能因拆除过早而失败或死锁。具体任务、证据分级及未完成项见[修复与补测交接](permission-recovery-followup.md)。
+
+**正式补测后的复核（2026-10-22）**：管理器基本停用／卸载及真人答复已取得运行证据；原驱动等待的日志写在延迟结束之后，
+在途与收尾窗口一度不能结案。这两项均已由[时序补测](../validation/permission-ui/2026-10-22-permission-lifecycle-02/REPORT.md)结案：
+夹具改为等待前记录并以可控屏障释放，由此复现并修复了"先 drain 后回退"的真实缺陷；
+审批中切换也不是宿主封锁——换不同预设并经公开 `session.command` 调用成功，审批保持挂起。
+产品要求不变。
 
 <a id="design-7-3"></a>
 
@@ -348,7 +468,21 @@ ctx.effect(() => {
 规则命中数：allow 42 / deny 0 / force-ask 1
 ```
 
-如果保留运行时状态注入，配置变更后需反映实际生效值；当次调用的具体结果、原因和恢复提示由工具结果提供，历史上下文中的旧状态不覆盖新的有效状态。
+权限控件与状态页应显示后端确认的启用状态、实际执行边界和审批模式；不能只显示宿主派生的预设名称。如果保留运行时状态注入，配置变更后需反映实际生效值；当次调用的具体结果、原因和恢复提示由工具结果提供，历史上下文中的旧状态不覆盖新的有效状态。
+
+<a id="approval-rejection-feedback"></a>
+
+#### 审批拒绝的展示与会话继续（2026-10-22 已确认）
+
+Arbiter 只负责自己产生的审批拒绝提示，工具执行结果、执行失败及沙箱错误的展示由 DSH 宿主负责。审批已允许但执行失败时，保留原有允许裁决，不由插件重新标记为审批拒绝，也不另建一套工具结果界面。
+
+拒绝提示沿用宿主工具调用的布局与交互，在对应调用位置增加橙色图标和“Arbiter 已拒绝”标记，展示一行简短原因，并提供“查看详情”入口。会话入口按会话与调用标识直接打开日志中同一条记录的[调用详情](configuration-and-audit.md#call-detail)，共用同一个界面和三层信息结构，不另建审批详情页。橙色和图标用于醒目提示及区分来源，具体样式适配宿主主题；普通审批拒绝不额外弹窗或逐次弹 toast。真实阶段与终态仍须区分，不能把 `fallback-deny` 或 `human-abort` 写成“用户拒绝”。原生组件的复用程度与具体打开方式留待接入验证，不把本节需求记作已经实现。
+
+拒绝仅结束当前工具调用，不由 Arbiter 主动中断整段会话或决定任务结束。插件将可区分的结果、实际判定链、原因及适用的运行时提示返回给执行 agent；例如输入截断应作为事实说明，不能自动等同于拒绝原因。用户侧摘要可以简短，agent 收到的信息应足以支持后续判断，具体原因合成见[拒绝理由](reviewer.md#design-5-7)。
+
+agent 根据结果决定下一步：存在符合授权与策略的方案时继续；需要信息或授权时说明具体需求；判断任务无法推进时，结束当前轮并回复用户说明受阻与已完成部分。插件不要求每次拒绝后都向用户发消息，也不以恢复指引鼓励绕过仍生效的禁止条件。主／子 agent 的常驻说明与具体提示沿用[执行指引](#agent-instruction-placement)。
+
+实时审批仍只处理当前操作，不在拒绝提示中加入“以后免审”捷径；首版规则创建与修改使用独立规则管理流程，[离线建议审核](configuration-and-audit.md#offline-rule-review)移到后续版本。
 
 ---
 

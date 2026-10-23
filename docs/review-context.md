@@ -2,14 +2,17 @@
 
 描述审查前如何构造事实、授权证据、历史与先前裁决，以及变量处理和输入预算。
 
-状态：需求与设计讨论中，尚未实现。已确认结论同步到正文，其余冲突与建议见[决策与待讨论问题](decisions-and-questions.md)。
+状态（2026-10-21）：首轮完整功能版本已实现并可在隔离 DSH 0.2.1-rc.2 profile 中试用；产品语义未定项仍按本文与[决策记录](decisions-and-questions.md)保留讨论状态。实现证据、初版选择与剩余缺口见[首轮实施报告](implementation-report.md)。
 
 入口：[README](../README.md) · [设计导航](../design.md) · [证据](../evidence.md) · [决策与待讨论问题](decisions-and-questions.md)
+
+实现状态（2026-10-21）：ReviewSnapshot、EVIDENCE／CONTEXT／PRIOR_VERDICTS、项目规则读取、token 预算与截断已实现；快照随每次调用保存，供审计和详情复用。实现与剩余验证见[首轮实施报告](implementation-report.md)。
 
 ## 本文导航
 
 - [结构化事实的完整性闸门](#design-5-2-2)
 - [审查输入的三段上下文](#design-5-2-3)
+- [授权来源优先级与文本效力](#authorization-source-priority)
 - [先前裁决（prior verdicts）](#design-5-2-4)
 - [变量展开与 `cd` 追踪](#design-5-2-5)
 - [Token 预算与估算](#design-5-2-6)
@@ -20,17 +23,20 @@
 
 ## 结构化事实的完整性闸门
 
-AST 解析产物可以作为审查输入，**但只在能被判定为完备时**。核心约束：
+AST 解析产物可以作为审查输入，已可靠观察到的内容与分析缺口必须一起表达；不要求先证明整个调用效果完备才能提供观察。核心约束：
 
 > **能肯定地说"有"，不能肯定地说"没有"。**
 
 `bash deploy.sh` 的 AST 里没有任何 `file_redirect`，但脚本可能写任意文件。若输出 `writes_outside_workspace: []`，审查者会读成"确认不越界"——**这比不提供事实更危险**。
 
-因此事实段的结构与闸门是：
+2026-10-22 已确认：[结构解析、每个词的静态取值、效果事实提取](rules.md#matching-uncertainty)是三个独立维度，不是互斥档位。原稿的单个 `completeness` 不再控制所有规则及审查结论；若为兼容而保留，只能表示事实提取状态。下方是语义示意，不冻结最终字段名或要求既有实现已完成迁移：
 
 ```jsonc
 {
-  "parse": { "status": "ok" | "error", "statements": 3 },
+  "structure": { "status": "complete", "issues": [], "statements": 3 },
+  "word_values": [
+    { "source": "\"$BUILD_DIR\"", "status": "dynamic" } // 原文保留，不填猜测值
+  ],
   "observed": {                    // 只列解析器真正看到的东西，不含"未发现"断言
     "writes": ["/Users/yue/build"],
     "network_commands": ["curl"],
@@ -41,31 +47,31 @@ AST 解析产物可以作为审查输入，**但只在能被判定为完备时**
   },
   "opaque": false,                 // 命令调用了解释器/脚本/未知二进制
   "opaque_reason": null,
-  "unresolved_expansions": [],     // 无法静态求值的展开，如 ["$BUILD_DIR"]
+  "unresolved_expansions": ["$BUILD_DIR"], // 无法静态求值的展开
   "expansion_risk": null,          // "undefined-possible"：未解析变量出现在破坏性位置
-  "completeness": "complete",      // complete | partial | none
+  "completeness": "partial",       // 只描述事实提取 complete | partial | none
   "parent_authorization_present": null, // true/false；非子 agent 时为 null
   "overlaps_denied_effect": false,      // 与某条被拒调用的 effect 重叠（§5.2.4）
   "history_truncated": false            // 历史/裁决段被预算截断（§5.2.4）
 }
 ```
 
-**完整性判定**：
+**独立状态及影响**：
 
-| 情况 | `completeness` | 是否可作为 allow 依据 |
+| 情况 | 状态及缺口 | 对规则／审查的影响 |
 |---|---|---|
-| `parse.status = ok` ∧ `opaque = false` ∧ 无子 shell/替换/复合语句 | `complete` | 是 |
-| `parse.status = ok` 但含 `opaque`（调脚本/解释器/未知二进制） | `partial` | **否** |
-| 含 `subshells > 0` / `substitutions > 0` / heredoc | `partial` | **否** |
-| `unresolved_expansions` 非空 | `partial` | **否** |
-| `cd` 到不可解析路径 | `partial` | **否** |
-| `parse.status = error` | `none` | **否**（事实段整体缺失，不是空对象） |
+| 结构完整且词可静态取得 | 前两项完整，事实状态另行记录 | 文本规则正常判断，不由此承诺掌握所有副作用 |
+| 结构完整但含变量等动态词 | 词值未知，不等于结构解析失败 | 原文保留；可以匹配明确的文本规则，不自动取消 allow 资格 |
+| 调用脚本／解释器／未知二进制 | 可以结构完整且词值明确，但效果事实有缺口 | 不能从外层 AST 推断脚本没有其他行为；不否定用户明确配置的文本规则 |
+| 子 shell／命令替换／heredoc | 递归检查是否完整；不能只因存在这种语法就认定结构缺失 | 可靠解析时纳入覆盖；未支持、嵌套有错误或未遍历完成时，相关结构条件无法判断 |
+| `cd` 目标不可解析 | 工作目录与后续相对目标的事实不确定 | 不把后续路径分类当作已确认安全，不直接改变文本条件结果 |
+| 结构错误或未知节点 | 结构不完整；词值与事实分别保留可用部分 | 相关 AST 条件无法判断，不以恢复片段授予完整覆盖；提供原文、可靠观察及具体缺口 |
 
 **三条硬规则**：
 
 1. 不允许输出"未发现 X"的断言，只能输出 `observed` 里实际看到的东西；
-2. `completeness != "complete"` 时，事实段**不得用于任何 allow 判定**，只能用于提高严重度或增加不确定性；
-3. `parse.status = error` 时事实段整个不出现，审查者只看到原始命令。
+2. 事实不完整时，不得用“没有观察到危险”或未知内容证明安全；可靠的正向观察可以提供给 reviewer，明确文本规则仍按自身匹配与覆盖求值，reviewer 可根据原文和授权正常审查；
+3. 没有可靠观察时省略相应事实并标明缺失，不用空对象／空列表暗示已经确认没有效果。存在结构错误时，仅保留能可靠关联到原始输入的观察，不能把错误恢复产物当作完整结构；若全部不可信，就只提供原文及错误说明。
 
 **正向用途（即使 partial 也有价值）**：
 
@@ -74,7 +80,7 @@ AST 解析产物可以作为审查输入，**但只在能被判定为完备时**
 - `observed.credential_paths` 命中 → 可确定性置 `secrets = true`；
 - `pipeline_exec` 命中 `curl|sh` 之类 → 可确定性置 `destructive = true`。
 
-即：**事实只能往"更危险"的方向用，不能往"更安全"的方向用**。这条原则同时覆盖 `completeness` 判定与探针的 `override` 模式（[判定引擎](reviewer.md#design-5-6) ① 层）。
+可靠观察可用于提高严重度或说明不确定性；缺失观察不能当作减轻风险的依据。事实 partial 不构成 review-allow 或命令规则 allow 的全局否决开关。探针 override 是否及如何采用这些观察仍遵循[判定引擎](reviewer.md#design-5-6)及其评测约束，不由本节擅自改动阈值。
 
 **token 预算**：事实段约 100–250 tok/次。只输出与判定相关的类别，不 dump 完整 AST；条目超上限（如 30 条）截断并置 `truncated: true`，同时降级 `completeness`。各段总预算与相互约束见 [O10](decisions-and-questions.md#question-o10)。
 
@@ -94,9 +100,9 @@ AST 解析产物可以作为审查输入，**但只在能被判定为完备时**
 
 <a id="design-5-2-3-1"></a>
 
-### 用户规则的两个来源
+### 自然语言审查指引的两个来源
 
-本节的自然语言“用户规则”统一称为[审查指引](terminology.md#core-terms)，供模型理解风险与授权上下文；它们不直接修改判定引擎中的审查判定规则和阈值。`CUSTOM_RULES`、`PROJECT_RULES` 暂保留原稿字段名。
+本节的自然语言“用户规则”统一称为[审查指引](terminology.md#core-terms)。用户已确认：`CUSTOM_RULES` 与启用的 `PROJECT_RULES` 均为自由文本，可以表达项目事实、限制、风险偏好及持续授权。其语义由 reviewer 理解，通过风险／授权信号影响代码判定；不由 free text 直接修改命令规则优先级、代码判定规则或阈值。字段名沿用原稿。
 
 | 来源 | 位置 | 作用域 | 上限 |
 |---|---|---|---|
@@ -118,16 +124,31 @@ AST 解析产物可以作为审查输入，**但只在能被判定为完备时**
 2. **需要按目录细分时，在 DSH 里建多个工作区**——这是既有机制，不该用插件再造一层目录继承；
 3. 文件缺失即"无项目规则"，语义干净。
 
-**为什么用 `.md` 而不是 `.yaml`**：内容是自然语言规则（"特别关注 .env 泄露"、"这个项目的生产目录是 /srv/app"），不是结构化配置。
+**为什么用 `.md` 而不是 `.yaml`**：内容是自然语言指引（如“特别关注 .env 泄露”“这个项目的生产目录是 /srv/app”），也可包含用户希望持续适用的授权；不是可执行的匹配规则配置。
 
-**冲突处理**：两者同时注入，不做覆盖。prompt 里写明：
+**读取开关与内容责任（已确认）**：设置页提供 `projectRules.enabled`，默认开启，控制是否读取项目审查指引。开启后按约定位置读取，用户负责内容；不再区分用户手写、克隆／拉取或 agent 修改的文件版本，不增加文件逐次人工认可流程。每次构造新的审查快照时取得当前内容；关闭时不将项目指引送入后续新构造的审查请求，不因此屏蔽正常的人类消息。界面应说明项目文件可以包含指引和授权。已发出的审查请求保持原快照，不要求重启或逐次确认。
+
+<a id="authorization-source-priority"></a>
+
+#### 来源优先级与冲突解释（已确认）
+
+多个来源的适用内容发生冲突时，使用以下顺序：
 
 ```
-When CUSTOM_RULES and PROJECT_RULES disagree, PROJECT_RULES wins: it is scoped
-to this workspace and is the more specific instruction.
+本会话人类原话（含宿主确认的真实 ask 答复）
+> 直接父会话人类原话（含对应的真实 ask 答复）
+> PROJECT_RULES
+> CUSTOM_RULES
+> agent 转述
 ```
 
-**位置与缓存**：`CUSTOM_RULES` 是全局且很少变，放进 **system 段**（稳定前缀，利于 KV cache）；`PROJECT_RULES` 随工作区变，放进 **user 段**（[O9](decisions-and-questions.md#question-o9)）。
+优先级解决适用内容之间的冲突，不丢弃其他来源的上下文。同一来源层级内，较新的适用指令在相关冲突上优先；不冲突的旧限制继续有效。例如“继续修复”本身不撤销更早的“不要上传日志”。任务需要哪些步骤、授权是否覆盖本次操作／目标／范围，均由 reviewer 基于原始材料理解，不另建代码级任务语义推断器。
+
+**来源优先级与授权强度分开**：直接父会话人类原话仍与本会话人类原话采用相同授权标准，可支持 explicit，冲突优先级较低不意味着其授权上限降为 implied。CUSTOM_RULES／PROJECT_RULES 可以表达明确或持续授权，但必须保留其指引来源，不改写成聊天中的人类原话或 human-allow。纯 agent 转述不能单独制造明确人类授权；摘要和普通工具／文件材料不因引用“用户已批准”而升级为原始人类来源。
+
+**Prompt 整合职责**：固定来源优先级及处理契约写入 system；各来源文本按独立标签或结构化字段提供。CUSTOM_RULES／PROJECT_RULES 都作为待解释的指引材料，不把 CUSTOM_RULES 原文当成压过更高优先级来源的 system 命令，也不只靠拼接先后表示覆盖。来源与时间顺序应可追溯，不能将低优先级文本重新包装成高优先级消息。该契约用于解释授权与限制，不让 reviewer 越过已经生效的命令规则或改写代码策略。
+
+**位置与缓存**：固定策略及来源契约保留稳定 system 前缀；CUSTOM_RULES／PROJECT_RULES 以独立标注的材料块提供，可以在动态历史之前组织稳定前缀，但缓存安排不能改变上述权力顺序。旧“CUSTOM_RULES 原文直接放 system”的布局被本轮契约替代，见 [O9](decisions-and-questions.md#question-o9)。
 
 **读取实现**：
 
@@ -137,13 +158,13 @@ const candidates = [".dsh/arbiter.md", ".arbiter.md"].map(p => join(workspaceRoo
 const projectRules = firstExisting(candidates);   // 缺失 → null
 ```
 
-`firstExisting` 只读文件，不监视变更；工作区切换时重新读。
+该片段只说明路径选择，不锁定缓存与刷新实现。**用户已确认：每次构造新 ReviewSnapshot 时取得当前项目指引，文件更新不要求重启或逐次确认。** 缓存／变更检测可按实现选择，但不能让下一次新快照无故继续使用旧内容。构造后的 ReviewSnapshot 保持不可变，已发出的审查请求不原地替换输入。
 
 <a id="design-5-2-3-2"></a>
 
 ### `EVIDENCE` 的结构
 
-三类消息合并成一条按时间从新到旧的流。**role 表示消息角色，evidence 表示来源所能支持的授权上限**；来源标记还需保留消息来自本会话、父会话人类还是父 agent 转述。下面的 source 字段为表达这一要求的 Schema 建议：
+三类消息合并成一条按时间从新到旧的流。该排序用于选择与展示，不取代[来源优先级](#authorization-source-priority)。**role 表示消息角色，evidence 表示来源所能支持的授权上限**；来源标记还需保留消息来自本会话、父会话人类还是父 agent 转述。下面的 source 字段为表达这一要求的 Schema 建议：
 
 ```jsonc
 {
@@ -214,7 +235,7 @@ const parentHuman = parent?.deriveMessages()
 
 1. **父可能不在 live** → `parent` 为 `undefined`，不注入父证据，`parent_authorization_present` 置 `null`；
 2. **父历史可能被压缩**：`deriveMessages()` 是派生历史，父 compaction 后人类消息原文可能已变摘要。若实测损失严重，改为扫父会话的**事件日志**；
-3. **只采纳可识别的人类原始输入**——父会话的普通工具结果、文件内容不作为授权注入；ask 工具若通过专用事件保存真实人类答复，应在验证事件来源后按上述规则提取，不把整个工具结果视为用户授权。
+3. **人类消息来源只采纳可识别的原始输入**——父会话的普通工具结果、文件内容不改写成人类原话；ask 工具若通过专用事件保存真实人类答复，应在验证事件来源后按上述规则提取，不把整个工具结果视为用户授权。启用的项目审查指引按单独的指引来源提供，不受这条人类消息提取规则排除。
 
 <a id="design-5-2-3-3"></a>
 
@@ -245,7 +266,7 @@ const parentHuman = parent?.deriveMessages()
 
 理由：heredoc 和长脚本可能几百上千字符，而审查需要的通常是"命令是什么"，不是逐字细节。截断后的 200 字符足够表达命令形态（`bash -c "..."` 的开头部分）。
 
-**注意**：截断的是历史的 tool call，**当前待审动作的命令不截断**（它是判定对象本身）。
+**注意**：上面的 200 字符限制只适用于历史 tool call。当前待审动作优先保留完整内容，不套用历史条目限额；长程序仍可能受总输入预算限制而截断，按[下方已确认契约](#pending-action-truncation)标记与反馈。
 
 **checkpoint**：会话被 compaction 后的摘要。独立上限 **3 条**（最近 3 次压缩的摘要），不占 tool call 的额度。`role: "checkpoint"` 提示 reviewer 这是有损摘要。
 
@@ -259,7 +280,7 @@ const parentHuman = parent?.deriveMessages()
 
 审查者需要知道"这个动作之前被怎么判过"——这是识别**重试**与**换写法绕过**的唯一来源。
 
-**来源**：本插件自己写的会话记录 `plugin:arbiter/decision`（[两个写入点](configuration-and-audit.md#design-9-1)），用 `pluginRecordOf(event)` 扫当前会话读回。
+**来源**：正常运行由本会话内存状态提供，不等待持久化成功；冷恢复优先读取 `plugin:arbiter/decision` 会话裁决记录，目标窗口缺段、不可读或完整性不明时再由 SQLite 补充。按共同事件标识去重与阶段顺序补齐后，保留最近 N 条逻辑裁决，N 与 `history.maxItems` 一致。会话与 SQLite 分别接收同一次裁决的数据，不串行依赖写入。审计清理不清空内存或会话裁决记录；两个来源均不足时标明缺失或完整性未知，不能作为“从未有先前裁决”处理。宿主恢复保证待验证，具体见[分层恢复](configuration-and-audit.md#decision-history-recovery)。
 
 **结构**：保留完整判定链与各阶段原因，字段形态为建议稿，实际审计结构见[记录内容](configuration-and-audit.md#design-9-2)。例如：
 
@@ -295,6 +316,8 @@ const parentHuman = parent?.deriveMessages()
 
 **预算（与历史段共享一个总上限）**：不是"当前轮全取 + 更早取 N 条"两笔独立预算，而是**合并后统一截断**：
 
+内存候选和冷恢复上限可以共用这个 N，但两者均按逻辑裁决计数，每条保留完整已知阶段链，不按原始事件行或模型请求次数计数。最终送审仍与工具历史合并取 N 条并受 token 预算限制；持久化恢复缺失与正常预算裁剪分别标记。
+
 ```
 候选池（四类，合并后统一排序）：
   A. 当前轮次的 prior verdicts（受阻调用的阶段链）
@@ -321,6 +344,8 @@ const parentHuman = parent?.deriveMessages()
 
 **原则：不做开关，不做白名单/黑名单，只做"词法解析 + 符号分类"。**
 
+本节描述提供给 reviewer 的事实提取，不改写[命令规范文本](rules.md#command-matching)。规范化不读取环境值或展开动态词；事实提取记录观察、符号分类与缺口，不能把它们混成一个全局 partial 来取消文本规则资格。
+
 ### 可静态求值的部分（永远做）
 
 ```
@@ -337,7 +362,7 @@ const parentHuman = parent?.deriveMessages()
 
 ③ cd 追踪（必须做）
    · 同一 command list 内追踪 cd 的效果，影响后续相对路径
-   · cd 目标可词法解析 → 更新当前目录；不可解析 → partial
+   · cd 目标可词法解析 → 更新当前目录；不可解析 → 记录目录事实缺口
 ```
 
 **`cd` 追踪不是精度问题，是安全 bug**：`cd /tmp && rm -rf build` 若不追踪，会把目标误判成 `<workspace>/build`（在工作区内）→ 可能 allow，而实际目标是 `/tmp/build`。
@@ -372,16 +397,12 @@ rm -rf $BUILD_DIR/         # 若 BUILD_DIR 为空 → rm -rf /  ← 灾难
 
 未定义变量在非 `set -u` 下展开成空串。因此当 `unresolved_expansions` 出现在破坏性参数、重定向目标或命令词上时，置 `expansion_risk: "undefined-possible"`，并且：
 
-- 不进入 allow（已由 `completeness = partial` 覆盖）；
+- 不把目标推断为已经确认的安全路径；文本规则按自身条件及覆盖正常判断，不由该标记全局取消 allow；
 - 审查者看到该标记，知道"可能比字面更危险"。
 
 ### 代价
 
-`rm -rf $BUILD_DIR`（变量来自会话外部）会一直是 `partial` → 不自动 allow → 交给 reviewer 判 → 大概率 ask。这个代价可接受：
-
-1. 高频场景已进规则表短路，到不了这里；
-2. `partial` 只是取消"自动 allow 资格"，不是取消审查；
-3. "我不知道这个变量是什么"本身就是合理的询问理由。
+`rm -rf $BUILD_DIR`（变量来自会话外部）可以结构完整，但词值及目标效果未知。若明确文本规则已匹配、覆盖完整且不被相关更高优先级规则阻挡，可按规则裁定；否则带着原文和缺口进入正常审查。未知变量本身不预先决定 review-allow、review-deny 或 review-escalate，也不直接产生 error-escalate。
 
 
 <a id="design-5-2-6"></a>
@@ -459,25 +480,25 @@ for (const item of candidates) {          // 已按 ts 降序
 
 这与"从新到旧"的语义天然一致，实现也简单。
 
-**截断的优先级**（固定段超预算时，按此顺序牺牲）：
+**预算分配原则**：先裁剪历史及可选辅助上下文，优先保留当前动作、相关授权证据和判定所需说明；不机械地把所有授权证据都删除来腾出程序空间。具体分段上限与保留头尾或片段的算法留给实现和评测。固定策略说明不作为普通文本任意切断；可配置材料无法合法组装时，按实际配置或请求错误处理。
 
-```
-1. DERIVED_FACTS         （可降级为 completeness: partial）
-2. PROJECT_RULES         （项目规则，可缺）
-3. PENDING_ACTION        ← 永不截断（判定对象本身）
-4. system / CUSTOM_RULES ← 永不截断（模型的固定策略说明与用户审查指引）
-```
+<a id="pending-action-truncation"></a>
 
-**`PENDING_ACTION` 永不截断**：如果连命令本身都放不下（超长 heredoc 之类），应该**直接 ask** 而不是硬塞——审查者看不到完整命令就无法负责。
+**当前动作截断契约（本轮确认）**：替代旧稿“PENDING_ACTION 永不截断，超限直接 ask”的方案。完整原始请求先参与规则匹配；必须进入模型审查而输入超预算时，允许对长程序等当前动作材料截断。运行时记录并向 reviewer 说明截断事实、原始长度及已省略内容的范围；原始请求与实际送审快照分别保存。具体字段名未定。
+
+截断是输入完整性信息，不直接决定权限结论，也不单独算审查故障。模型基于已知输入提供正常信号，判定引擎应用审查策略；首版不增加 truncated／输入充分性 noul 或独立硬闸门。真正的请求失败或后端错误仍按 error-escalate 处理。此约定不取消 shell 规则对完整 AST 覆盖的要求，也不把未知程序行为标成已检查。
+
+最终返回给执行 agent 的反馈由插件组合实际裁决原因与补充提示。运行时知道送审有截断，可以附“本次送审程序因输入预算被截断”；不能仅据此断言“因截断而拒绝”。review chain 保持阶段序列，截断元数据不成为新阶段或阶段标签后缀。相关定义见[最终反馈](reviewer.md#final-feedback-composition)。
 
 ### 硬兜底
 
-组装完成后对最终文本再估算一次：
+组装完成后对最终文本再估算一次，按上述优先级调整可裁剪材料，并更新各段完整性标记：
 
 ```js
 if (estimateTokenCount(finalText) > maxInputTokens) {
-  // 从尾部（动态段）逐条丢弃直到 under budget
-  // 若只剩固定段仍超限 → 直接 ask（不审查）
+  // 裁剪可选上下文，必要时按预算截断当前动作材料
+  // 更新实际送审快照及截断标记，再检查预算
+  // 无法构造合法请求时按实际请求准备错误处理，不把单纯截断算作错误
 }
 ```
 

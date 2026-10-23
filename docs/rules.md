@@ -2,14 +2,20 @@
 
 描述 AST 解析、匹配、规则优先级、trusted/guarded 下的语义、PTC 边界，以及离线规则建议与人工审核。
 
-状态：需求与设计讨论中，尚未实现。已确认结论同步到正文，其余冲突与建议见[决策与待讨论问题](decisions-and-questions.md)。
+状态（2026-10-21）：首轮完整功能版本已实现并可在隔离 DSH 0.2.1-rc.2 profile 中试用；产品语义未定项仍按本文与[决策记录](decisions-and-questions.md)保留讨论状态。实现证据、初版选择与剩余缺口见[首轮实施报告](implementation-report.md)。
 
 入口：[README](../README.md) · [设计导航](../design.md) · [证据](../evidence.md) · [决策与待讨论问题](decisions-and-questions.md)
+
+实现状态（2026-10-21）：规则引擎、优先级、覆盖与规则测试已实现。首轮用保守 shell 读取器替代 tree-sitter-bash WASM，并把重定向／赋值作为独立匹配节点；理由与边界见[实现选择 I1／I2](decisions-and-questions.md#implementation-choices-2026-10-21)和[首轮实施报告](implementation-report.md#4-初版实现选择可调整)。
 
 ## 本文导航
 
 - [规则引擎](#design-4)
-- [离线规则建议与人工审核](#design-5-10)
+- [匹配对象与参数条件](#parameter-matching)
+- [命令匹配文本与规范化](#command-matching)
+- [匹配方式与大小写](#matcher-semantics)
+- [解析状态与无法判断](#matching-uncertainty)
+- [离线规则建议与人工审核（后续版本）](#design-5-10)
 
 ---
 
@@ -19,15 +25,15 @@
 
 本章“规则”均指**命令规则**；审查判定规则属于[审查策略](terminology.md#core-terms)，由判定引擎执行。
 
+**首版初始规则（2026-10-24 已确认）**：新配置采用空规则表，需 Arbiter 处理的调用从 `review(default)` 起步；首版不附带预设命令规则。先实际使用并积累日志，再评估是否需要预设；本章示例仅用于说明语义，不自动写入用户配置。完整默认值见[初始配置](configuration-and-audit.md#initial-defaults)。
+
 <a id="design-4-1"></a>
 
 ### 解析
 
-**解析器**：tree-sitter-bash（与 Codex 同款语法，Codex 二进制内嵌 `tree-sitter-bash` + `shell-command/src/bash.rs`）。
+**当前选型方向（2026-10-22 已确认）**：优先复用现成解析及静态词解码能力，`unbash` 记为优先候选，具体接入留给实现侧验证，尚未确定为正式依赖。产品要求是保留命令结构、参数边界与原文，不能因候选库已能返回字符串就视为完整静态求值；具体契约见[命令匹配文本与规范化](#command-matching)。
 
-- Node 侧用 `web-tree-sitter` + tree-sitter-bash WASM（纯 JS，无需构建脚本）；
-- 备选：`sh-syntax`（mvdan/sh 的 JS 移植）；
-- **待验证**：DSH 的 Node 运行时加载 WASM 的可行性与启动开销（见 [待验证项](implementation.md#design-14)）。
+原稿选型为 `web-tree-sitter` + tree-sitter-bash WASM，备选为 `sh-syntax`（mvdan/sh 的 WASM 封装）；这些记录保留作比较，不再表示已冻结 tree-sitter 选型。候选的语法覆盖、DSH Node 与浏览器接入、依赖版本、错误处理、性能及边界用例均随模块实现验证，见[待验证项](implementation.md#design-14)。
 
 **为什么必须做 AST 而非字符串匹配**：
 
@@ -39,13 +45,57 @@
 
 ### 匹配方言
 
-不同匹配目标用不同方言，不做全局统一：
+规则使用精确匹配、RE2 正则和 glob 等文本匹配方式。匹配对象与匹配方式分开，不再将“路径”作为独立的规则语义；下表说明主要对象及其来源：
 
-| 匹配目标 | 方言 | 理由 |
+| 匹配对象 | 取值来源 | 说明 |
 |---|---|---|
-| 命令词序列 | exact / **RE2 regex** | 需要交替集合与字符类；glob 在词序列上语义含糊 |
-| 路径目标（重定向、文件参数） | **glob** | 路径是 glob 的主场，无 ReDoS 风险 |
-| 命令名（`gpt-relay`） | exact | 零歧义，最快 |
+| 命令规范文本 | Shell 解析出的独立命令，按[规范化契约](#command-matching)生成 | 精确匹配、RE2 与 glob 使用同一份文本；AST 继续负责复合命令与重定向等语法结构 |
+| 工具名 | 宿主提供的实际工具名 | 可按名称或命名空间表达规则范围 |
+| 选定参数字段 | 本次 tool call 的结构化参数 | 按用户选择的精确匹配、RE2 或 glob 检查字段值；字段名为 `path` 也不附加文件语义 |
+
+<a id="parameter-matching"></a>
+
+#### 匹配对象与参数条件（2026-10-22 已确认）
+
+一条规则在满足工具、agent 等适用范围后，检查其匹配条件。多个条件使用“或”，界面入口为“添加条件（或）”；同一字段的备选模式直接由表达式表达，不另设模式分组或布尔嵌套编辑器。精确匹配需要多个备选值时，可以添加多个“或”条件。条件组合不改变规则优先级，也不取消复合调用完整 allow 的覆盖要求。
+
+“工具参数”条件使用 [JSONPath（RFC 9535）](https://www.rfc-editor.org/rfc/rfc9535.html)从本次工具调用的参数对象中选择待匹配值，`$` 就是该参数对象，不包含工具名等外层包装。例如参数为 `{"target":{"path":"/project/docs/a.md"},"content":"hello"}` 时，`$.target.path` 取得 `/project/docs/a.md`，然后可用 glob `/project/docs/**` 匹配。字段候选可以由工具参数定义辅助提供并生成 JSONPath；不能取得定义时仍允许手填，不以逐工具适配为前提。采用标准语法，不引入执行 JavaScript 的表达式扩展；具体实现库另行验证，不从初版实现推定。
+
+选择器可读取单个字段、数组元素或多个值，例如 `$.files[0].path`、`$.files[*].path`；字段名含点号时可写 `$['a.b']`。JSONPath 只负责选择，精确匹配、RE2 或 glob 负责检查选中的值。保留 JSON 类型：RE2／glob 作用于字符串，数字、布尔与 null 使用相应类型的精确匹配，不自动将它们转为字符串；对象与数组不自动序列化成文本，应继续选择其中的字段或元素。不支持的值类型在该值上视为未匹配。
+
+每个参数条件提供“任一／全部”多值匹配选项，默认“任一”，所有规则行为使用同样的含义。“任一”表示选中值中至少一个符合表达式；“全部”表示至少选中一个值，且每个选中值都符合表达式。未选中任何值时，两种方式都不匹配，不以空集合满足“全部”。字段缺失不会产生选中值；null 是实际值，与缺失不同。“全部”只约束实际选中的值，不保证每个数组成员都有该字段。未匹配时继续按其他规则或默认审查处理，不因此直接拒绝整个调用；非法 JSONPath 属于配置校验错误，不能混同字段不存在。
+
+例如参数为 `{"targets":[{"environment":"test"},{"environment":"production"}]}`，`$.targets[*].environment` 选出 `"test"` 和 `"production"`。精确匹配 `"test"` 时，“任一”为匹配、“全部”为不匹配。可以用“任一 production”表达命中生产环境即禁止，用“全部 test”表达选中环境均为测试环境才免审；后者仍受规则适用范围、优先级及整个调用的 allow 覆盖要求约束。条件内对多个值的“任一／全部”与条件之间的“或”是两个不同层次，不相互替代。
+
+路径是普通参数值：不自动发现命令参数中的所有路径、不区分读写或源／目标角色，不为 `cp`、`mv`、`rm` 等命令维护路径识别适配表，也不因参数看起来像路径而自动转换工作区相对形式或推断文件访问范围。glob 是用户选择的字符串匹配方式，不局限于路径字段。
+
+例如 tool call 参数只有 `command: "cp a b"` 时，可以匹配 `command` 字符串或解析出的命令，不能自动提供“cp 的目标路径”字段。AST 对重定向等结构的识别仍保留，但不把 Shell 语法识别扩展成通用文件访问分析。规则匹配的承诺是“选定值符合表达式”；已识别的保守事实仍可按审查上下文契约提供给 reviewer，不由此新增路径规则语义。
+
+<a id="command-matching"></a>
+
+#### 命令匹配文本与规范化（2026-10-22 已确认）
+
+“命令”条件使用 AST 拆分出的独立命令，生成供规则检查的规范文本。规范化只统一能够静态确定的书写差异：静态词使用现成库取得解码值，再以稳定的引用方式输出；命令词之间统一用单个空格连接，词内空格、空字符串及参数边界必须保留。该文本用于匹配，不替换宿主实际执行的原始请求，也不承诺判断任意两段 Shell 程序是否等价。
+
+| 原始命令 | 规范匹配文本 |
+|---|---|
+| `gh    pr view 42` | `gh pr view 42` |
+| `gh pr "view" 42` | `gh pr view 42` |
+| `gh pr v'ie'w 42` | `gh pr view 42` |
+| `echo "a b"` | `echo 'a b'` |
+| `echo a\ b` | `echo 'a b'` |
+| `echo a b` | `echo a b` |
+| `echo ""` | `echo ''` |
+
+动态词保留原始片段及引用关系，不读取环境值、不执行命令替换、不展开文件通配符，也不将它们通过字面量重新引用。`echo '$HOME'`、`echo "$HOME"` 与 `echo $HOME` 必须保持可区分；`'*.ts'` 与 `*.ts` 同样不能合并。现成库的解码值只是取值能力，不构成静态性证明；先依据结构判断是否为支持的静态词，再决定是否使用该值。前导 `~`、本地化引用等展开边界也须处理，不能只排除变量和命令替换。
+
+无法可靠解码的词，包括 NUL、无法准确表示的字节及其他不支持结构，保留原文并说明未规范化原因，不猜测一个固定值；解析失败时保留原始输入和错误，不能伪造完整 AST。能否由其他规则裁定、能否取得完整 allow 覆盖，按[解析状态与无法判断](#matching-uncertainty)处理；“未规范化”本身不产生 deny，不将动态操作视为已知静态效果。
+
+命令对象的精确匹配样例采用相同规范化；RE2／glob 表达式自身不按 Shell 解析或改写，直接匹配生成的规范文本。需要按原始书写匹配时，选择“工具参数”，通过如 `$.command` 取得完整原文；该参数条件不自动进行命令规范化，不另增一套“原始命令模式”。复合命令仍分别检查，重定向、赋值及嵌套执行结构不因生成命令文本而消失，完整 allow 覆盖要求不变。
+
+规则测试与调用详情应能同时展示原始命令、实际匹配文本，以及必要的未规范化原因。规范文本的表示由产品契约控制，候选库升级或格式化选项变化不能悄悄改变已有规则的含义；运行匹配与测试使用同一转换逻辑。
+
+**实现候选，非接入完成声明**：优先验证 [`unbash`](https://github.com/webpro-nl/unbash) 的 `Word.text`／`Word.value`／`Word.parts`，复用其引号、转义与字面量拼接解码，插件负责支持结构检查和稳定文本输出。参考[取值实现](https://github.com/webpro-nl/unbash/blob/main/src/word-value.ts)与[结构定义](https://github.com/webpro-nl/unbash/blob/main/src/types.ts)。先前的隔离研究不等于已经满足宿主、浏览器或完整 Shell 兼容性要求；正式版本及验证范围留给实现侧。mvdan/sh 的 `expand.Literal` 可作为其他复用方向，但它还包含展开语义，不能绕过静态性检查；不将任意同名 `Lit`／`wordToLit` API 视为已验证的安全静态取值接口。
 
 <a id="design-4-2-1"></a>
 
@@ -55,12 +105,12 @@
 
 早期设计考虑过"自建安全子集 + `ret` 解析审计"，否决理由：
 
-1. **自带语法限制**：RE2 引擎根本不接受回溯引用（`\1`）、嵌套量词（`(a+)+`）、前瞻（`(?=x)`）——这些正是审计要拦的东西，引擎级拒绝比审计更可靠；
+1. **自带语法限制**：RE2 不接受回溯引用（`\1`）及前瞻（`(?=x)`）等超出其支持范围的构造；嵌套量词可以接受，其性能由引擎保证，无需自建危险模式清单；
 2. **线性时间保证**：RE2 用 DFA/NFA 组合，匹配时间 O(n)，不存在灾难性回溯；
 3. **零依赖纯 JS**：不需要 WASM 加载，不引发 pnpm 构建脚本批准，Node 与浏览器行为一致；
 4. **无需维护语法清单**：审计方案要持续跟进"哪些模式危险"；引擎方案只需 catch 编译异常。
 
-**实测数据**（本机，re2js 2.8.8，用真实规则模式跑）：
+**原稿实测数据**（本机，re2js 2.8.8，用真实规则模式跑；以下前缀模式的结果保留为历史引擎实验，不代表当前完整匹配契约）：
 
 - `^gpt-relay(?:\s|$)` 匹配 `gpt-relay send hi` → `true`（正确）
 - `^gh pr (view|list|status|checks|diff)\b` 匹配 `gh pr view 42` → `true`（正确）
@@ -74,21 +124,35 @@
   - 回溯引用 `(a)\1` → `RE2JSSyntaxException`
   - 注意：`\p{Greek}` 等 Unicode 类**可以**编译（RE2 支持），不算问题
 
-**现有五条规则全部兼容 RE2**：用的是锚定、交替、字符类、`\s`、`\b`——RE2 原生支持。
+原稿五条规则使用的语法兼容 RE2；语法兼容不表示旧前缀表达式可原样用于当前完整匹配，下面的产品示例已按新契约调整。
 
 <a id="design-4-2-2"></a>
+<a id="matcher-semantics"></a>
 
-#### 唯一保留的语义检查：`^` 锚定
+#### 匹配方式与大小写（2026-10-22 已确认）
 
-RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整个命令词）匹配"。**这是语义约束，不是安全约束**——非锚定 regex 在命令匹配上几乎总是写错了（`gh pr` 会匹配到 `foo gh pr bar` 的任意位置）。
+精确匹配、RE2、glob 均检查整个选中值，不提供额外的前缀／包含位置开关。精确匹配使用相应类型的相等判断；RE2 使用引擎原生完整匹配接口，不自动拼接或改写用户表达式。取消旧稿“pattern 必须以 `^` 开头”的校验；需要前缀或包含关系时，由用户在表达式中明确描述。命令对象使用[命令规范文本](#command-matching)，参数对象保留实际取得的值。
 
-因此加载时仍做一条检查：pattern 必须以 `^` 开头。例外：允许 `(?:^|...)` 之类的显式构造（正则开头是 `^` 或 `(?:^`）。
+例如实际文本是 `gh pr view 42`：RE2 `gh pr view` 不匹配，`gh pr view(?: .*)?` 匹配，`.*view.*` 匹配。即使写了 `^`，也不会把完整匹配变成前缀匹配。RE2 保留原生的 `(?i)`、`(?s)` 等标记，不自动开启跨行或多行模式；接口语义参考 [RE2JS](https://github.com/le0pard/re2js#checking-for-matches)。
+
+三种方式默认大小写敏感，不按操作系统或文件系统隐式切换，不自动将输入转小写。每个条件可显式选择“忽略大小写”，不增加全局开关；RE2 也允许用原生标记显式表达大小写策略。界面应显示所选匹配方式、大小写选项及表达式，不隐瞒表达式内的原生标记。
+
+glob 复用现成库并固定选项，不自建方言，也不要求字段必须是路径。`/` 是所有字段统一采用的文本分段约定，不推断文件访问或业务含义：
+
+| 写法 | 含义 |
+|---|---|
+| `*` | 零个或多个非 `/` 字符 |
+| `?` | 一个非 `/` 字符 |
+| 独立分段的 `**` | 可以跨越 `/` |
+| `[abc]`、`{a,b}` | 字符选择、备选模式 |
+
+`docs/*` 匹配 `docs/a.md`，不匹配 `docs/sub/a.md`；`docs/**` 可以匹配后者。启用点号开头内容的匹配，因此也覆盖如 `docs/.private/a.md`。不启用前导 `!` 的忽略文件式取反；不自动补 `**/`、只取 basename、转换路径分隔符或读取文件系统。Picomatch 一类现成库可提供这些行为，参考[语义与选项](https://github.com/micromatch/picomatch#basic-globbing)；具体依赖和接入仍由实现侧验证，不因引用候选库而开放其所有扩展语法或选项。
 
 **否定需求的表达方式**：RE2 不支持 lookahead，所以"匹配 `gh pr` 但不匹配 `gh pr checkout`"要用**规则顺序 + deny 优先**表达：
 
 ```jsonc
-{ "id": "gh-pr-no-checkout", "match": { "pattern": "^gh pr checkout\b" }, "verdict": "deny" }
-{ "id": "gh-pr-readonly",    "match": { "pattern": "^gh pr (view|list|status)\b" }, "verdict": "allow" }
+{ "id": "gh-pr-no-checkout", "match": { "pattern": "gh pr checkout(?: .*)?" }, "verdict": "deny" }
+{ "id": "gh-pr-readonly",    "match": { "pattern": "gh pr (view|list|status)(?: .*)?" }, "verdict": "allow" }
 ```
 
 第一条更精确且排在前面，`deny` 优先生效。这与四值裁决天然契合，无需否定前瞻。
@@ -105,11 +169,13 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 | `re2-wasm` | 需要 WASM 加载，维护活跃度不如 re2js |
 | `regexp-tree` | 属于"审计派"，同 `redos-detector` |
 
-**glob**：`picomatch`/`minimatch`，纯 JS，天然无回溯风险；默认拒绝 `..` 上跳模式。
+**glob**：用于选定字符串的模式匹配。旧稿将其专门绑定路径目标及上跳检查的表述由上述通用参数契约替代；不因选择 glob 就附加路径归一化或文件访问约束。
 
 <a id="design-4-3"></a>
 
 ### 规则 Schema
+
+当前已确认稳定规则 ID、可选自定义名称、启用状态、适用范围、多个“或”匹配条件、行为及可选备注等语义，具体 JSON 字段组织留给后续实现设计。名称默认由条件摘要生成，允许自定义且不参与匹配；与稳定 ID 的区别见[命名契约](configuration-and-audit.md#rule-naming)，有效性和告警见[保存校验](configuration-and-audit.md#rule-validation)。下方及后续的 `match` 示例沿用原稿的单条件写法以说明匹配含义，不表示最终 Schema 只能包含一个条件，也不限制新界面必须暴露 AST 节点字段；参数条件以[当前契约](#parameter-matching)为准，初版实现不作为需求约束。
 
 ```jsonc
 {
@@ -118,14 +184,14 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
   "match": {
     "node": "command",            // command | file_redirect | variable_assignment
     "kind": "regex",              // exact | regex | glob
-    "pattern": "^gpt-relay(?:\\s|$)",
+    "pattern": "(?s)gpt-relay(?: .*)?",
     "agents": ["main"]            // 可选：main | subagent | preset:<name>，缺省不限
   },
   "verdict": "allow"              // allow | deny | force-ask | force-review
 }
 ```
 
-`force-review` 可附带 `hint` 文本；不填写 `hint` 也必须进入审查。`hint` 只提供审查关注点，不指定审查结论。`review(default)` 是规则未能直接裁定时的兜底入口，不是可配置的 `verdict`。
+`force-review` 可附带 `hint` 文本；不填写 `hint` 也必须进入审查。`hint` 只提供审查关注点，不指定审查结论，界面放在折叠的高级项中，不因选择“必须审查”而在常规表单自动新增输入框。备注用于给人解释规则，不自动作为 `hint` 发给 reviewer。`review(default)` 是规则未能直接裁定时的兜底入口，不是可配置的 `verdict`。
 
 **没有 `sandboxed` 字段**。早期设计里的 `sandboxed: true`（"放行但保留沙箱兜底"）已删除——它的语义完全由提交模式决定：trusted 模式本来就没有沙箱可保留，guarded 模式下 `allow` 本来就要过沙箱。字段要么无意义、要么与默认行为相同（[方案演变记录](decisions-and-questions.md#design-15) 决策记录）。
 
@@ -140,17 +206,41 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 
 ```jsonc
 { "id": "relay-full-trust", "match": { "node": "command", "kind": "regex",
-    "pattern": "^gpt-relay(?:\\s|$)" }, "verdict": "allow" }
+    "pattern": "(?s)gpt-relay(?: .*)?" }, "verdict": "allow" }
 
 { "id": "gh-pr-readonly", "match": { "node": "command", "kind": "regex",
-    "pattern": "^gh pr (view|list|status|checks|diff)\\b" }, "verdict": "allow" }
+    "pattern": "(?s)gh pr (view|list|status|checks|diff)(?: .*)?" }, "verdict": "allow" }
 
 { "id": "gh-issue-readonly", "match": { "node": "command", "kind": "regex",
-    "pattern": "^gh issue (view|list|status)\\b" }, "verdict": "allow" }
+    "pattern": "(?s)gh issue (view|list|status)(?: .*)?" }, "verdict": "allow" }
 // 同理 gh repo / gh run / gh search
 ```
 
 **匹配语义**：先检查更高优先级的 `deny`、`force-ask`、`force-review`；均未命中时，命令的每个待匹配 AST 节点都必须被 `allow` 覆盖，才能整体放行。任一节点未被覆盖 → 整条命令进入 `review(default)`。因此 `cmd1 && cmd2` 只有一半可信时不会整体放行；“默认审查”也不只指零条规则命中的情况。
+
+上述“未命中”须与“无法判断”区分；高优先级规则或调用覆盖因结构缺失而无法判断时，不能仅凭较低优先级 allow 整体放行，见[解析状态与无法判断](#matching-uncertainty)。
+
+<a id="matching-uncertainty"></a>
+
+#### 解析状态与无法判断（2026-10-22 已确认）
+
+分别记录结构解析、每个词的静态取值、效果事实提取三个独立维度，不将它们合成互斥的三档状态或一个全局 `partial` 开关；具体字段名留给实现设计。
+
+| 维度 | 判定依据 | 对规则的影响 |
+|---|---|---|
+| 结构解析是否完整 | 解析错误、未知节点、嵌套脚本及遍历是否完成；达到处理预算也算未完成 | 决定能否可靠提取命令及确认整个调用的 allow 覆盖 |
+| 每个词能否静态取值 | 根据词的组成结构判断是否在支持范围内 | 可取值则规范化，否则保留原文；不因此取消整条规则的 allow 资格 |
+| 效果事实有哪些缺口 | 提取器记录实际观察及无法分析之处 | 不用缺失事实证明安全；不直接否定已确定的文本规则，也不要求证明任意程序的全部行为 |
+
+例如 `gpt-relay send "$CONTENT"` 的结构可完整解析，变量词保留原文，明确匹配并覆盖整个调用的规则仍可免审；`node script.js` 的结构及参数可完整取得，即使脚本效果未知，也不因此禁止用户明确配置的文本规则。只解析出前半段、后半段结构未知时，不能用前半段 allow 代表整体已获覆盖。事实状态与 reviewer 用法见[事实完整性闸门](review-context.md#design-5-2-2)。
+
+条件求值区分“匹配／不匹配／无法判断”。字段不存在、不支持的参数值类型、表达式不符合已取得的值，属于不匹配；结构缺失导致无法可靠取得条件需要的命令，属于无法判断。已有完整原始参数的条件仍正常求值，不因无关的结构或事实缺口变成未知；保留动态词原文也不自动意味着条件无法判断。
+
+先排除适用范围不相关的规则。同一规则条件为“或”：任一条件确定匹配即为匹配；全部确定不匹配才为不匹配；没有匹配且仍有未知条件时，保留无法判断。第一版不必预测未知结构究竟会命中哪个表达式，也不必精准推导每个语法错误的影响范围；结构不完整时，可以将依赖该结构的相关条件统一标为无法判断。
+
+已可靠确定命中的 deny、force-ask、force-review 照常生效；无法判断不能假装成某条规则已命中。相关更高优先级规则仍无法判断时，较低优先级 allow 不能短路，进入审查；依赖 AST 的 allow 也不能覆盖未知结构。没有其他已确定的强制路径时，记录为 `review(default)` 并说明规则判断或覆盖不足，不增加一段名为“unknown”的判定链。仅事实不完整或词未静态取值，不构成这样的整体放行否决。
+
+进入审查时提供完整原始输入、可信的已观察内容及具体缺口，正常应用审查策略。结构或事实不完整本身不直接产生 deny、强制人工或 error-escalate。现成解析器返回恢复后的 AST 不表示已完整解析；需递归检查嵌套错误和未知节点，不能只检查最外层错误数组。规则测试、实际匹配和审计解释共用这些状态及传播语义。
 
 <a id="design-4-4"></a>
 
@@ -173,8 +263,8 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 **`force-review` 高于 `allow` 的意义**：可以在一个宽泛的信任范围内明确指定必须审查的操作——
 
 ```jsonc
-{ "id": "relay-trust", "pattern": "^gpt-relay",                    "verdict": "allow" }
-{ "id": "relay-prod",  "pattern": "^gpt-relay send.*--to-prod",    "verdict": "force-review",
+{ "id": "relay-trust", "pattern": "(?s)gpt-relay(?: .*)?",                    "verdict": "allow" }
+{ "id": "relay-prod",  "pattern": "(?s)gpt-relay send(?: .*)? --to-prod(?: .*)?", "verdict": "force-review",
   "hint": "目标是生产环境，重点看 authorized 与 scope" }
 ```
 
@@ -183,8 +273,8 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 **已知副作用（有意接受）**：宽泛的 `force-review` 会让更窄的 `allow` 失效。
 
 ```jsonc
-{ "id": "relay-review", "pattern": "^gpt-relay",      "verdict": "force-review" } // 宽
-{ "id": "relay-send",   "pattern": "^gpt-relay send", "verdict": "allow" }        // 窄
+{ "id": "relay-review", "pattern": "(?s)gpt-relay(?: .*)?",      "verdict": "force-review" } // 宽
+{ "id": "relay-send",   "pattern": "(?s)gpt-relay send(?: .*)?", "verdict": "allow" }        // 窄
 ```
 
 此时 `gpt-relay send` 进入强制审查。接受理由：
@@ -193,7 +283,7 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 2. 显式要求审查的规则必须得到执行；
 3. 要让窄范围免审，需要缩小或删除与之冲突的 `force-review` 匹配范围。
 
-配置页应在保存时检测这种情况（某条 `allow` 的 pattern 集合被某条 `force-review` 完全覆盖）并给出警告。
+配置页在能够确定此类遮蔽或提供具体依据时给出告警；不要求识别任意表达式的完整包含关系，未检测到也不宣称没有冲突。告警不阻止保存，见[保存校验与告警](configuration-and-audit.md#rule-validation)。
 
 **默认审查没有规则附带的 `hint`**。全局与项目审查策略仍正常生效；需要针对某类操作增加关注点时，使用带 `hint` 的 `force-review` 规则。
 
@@ -204,56 +294,34 @@ RE2 接受非锚定模式，但本设计的规则语义是"整条命令（或整
 | 模式 | 沙箱 | `allow` 的结果 |
 |---|---|---|
 | trusted | 无 | 直接放行，无沙箱约束 |
-| guarded | `workspace-write` | 放行，但仍受沙箱约束——越界写入会被原生拒绝并走升权询问 |
+| guarded | `workspace-write` | 放行，但仍受沙箱约束；越界写入可能失败，agent 须显式申请单次提权，插件不自动批准 |
 
 <a id="design-4-5"></a>
 
 ### 双模式
 
-两个模式由权限预设决定，`allow` 的语义随模式变化（见 [五层裁决与优先级](rules.md#design-4-4) 末尾的表）：
+trusted / guarded 是用户在插件配置页选择的**执行边界**，与会话是否启用 arbiter、normal / strict / progress 审批模式分开。规则 allow 的准入语义相同，放行后是否仍有文件沙箱约束随执行边界变化：
 
-| 模式 | 预设 | 沙箱 |
+| 执行边界 | arbiter 接管 | 宿主实际组合 |
 |---|---|---|
-| **trusted** | `auto`（`registerAuto` 注册） | `danger-full-access` |
-| **guarded** | `workspace-write`（内置预设） | `workspace-write` |
+| **trusted** | 启用 | `danger-full-access + ask` |
+| **guarded** | 启用 | `workspace-write + ask` |
 
-切换命令（走官方预设 API，统一挂在 `/arbiter` 下）：
+用户通过同位置的 arbiter 权限选择器启用／停用当前会话，通过插件配置页选择执行边界。宿主普通“工作区写入”与“arbiter 已启用 + guarded”可能有相同沙箱／审批值，但前者不由插件审查，后者仍受完整规则与审查流程控制。
 
-```js
-// /arbiter mode trusted|guarded
-ctx.commands.register({
-  name: "arbiter",
-  description: "arbiter: mode / status",
-  handler: ({ agent, rawInput }) => {
-    const [sub, arg] = rawInput.trim().split(/\s+/, 2);
-    if (sub === "mode") {
-      const target = arg === "guarded" ? "workspace-write" : "auto";
-      ctx.permissionPresets.set(agent.session, target);
-      return { kind: "success", text: `已切换到 ${arg ?? "trusted"} (${target})` };
-    }
-    return { kind: "success", text: currentStatusText(ctx, agent) };
-  },
-});
-```
-
-这里的 mode 只切换 trusted / guarded 执行边界。审批模式由用户在插件设置页选择主会话与全部子任务的设置，不再提供 `/arbiter dnd` 写入口。
-
-**门禁判断必须改造**：官方 auto review 用 `permissionPresets.current(session) === "auto"` 判断启用，双模式下不成立（`derive()` 在 sandbox 改为 workspace-write 后返回 `workspace-write`，不再是 `auto`）。插件需要自己的启用判断，例如"当前预设 ∈ {auto, workspace-write}"。
+**门禁判断使用后端会话启用状态，不从原生预设反推**。仅比较 `current === auto` 会漏掉 guarded，仅比较 `current ∈ {auto, workspace-write}` 又会接管普通工作区会话。旧 `/arbiter mode trusted|guarded` 示例退出当前产品方案；原生命令、重连和卸载如何保持状态一致，统一见[权限选择器契约](architecture.md#permission-selector-contract)与[本轮验证任务](permission-ui-validation.md)。
 
 <a id="design-4-6"></a>
 
-### fail-closed 清单
+### 不完整解析与故障的处理
 
-以下情况一律 `next()` 交给后续路径（审查或人工），**绝不放行**：
+旧稿用一张 fail-closed 清单混合结构、静态取值、事实和审查故障，现由上述独立维度与三态求值替代：
 
-1. AST 解析失败或返回 ERROR 节点；
-2. 遇到未识别的节点类型（子 shell、命令替换、heredoc、后台 `&` 等，除非显式支持）；
-3. 命令包含多个语句且有任一节点未命中 allow 规则；
-4. 规则配置校验失败（加载期直接拒绝启动）；
-5. reviewer 响应不合法或调用失败：不自动放行，转 error-escalate，再按审批模式转人工或 fallback-deny；
-6. 低置信度或授权冲突未解决；
-7. `unresolved_expansions` 非空（[变量展开与目录追踪](review-context.md#design-5-2-5)）；
-8. 命令词本身是变量展开（`$CMD ...`）→ 视为 `opaque`。
+1. AST 错误、未知结构或遍历未完成时，不从恢复片段推导整个调用已完整 allow；无法完成的相关条件标为无法判断，原始参数条件仍按实际输入求值。
+2. 复合调用的 allow 覆盖不足，或相关更高优先级规则无法判断时，没有其他已确定路径则进入 review(default)，不直接拒绝或强制人工。
+3. 动态变量、脚本效果未知、`opaque` 或事实 partial 本身不取消确定的文本规则；不能用未知内容或缺失观察证明安全。命令词 `$CMD` 不推测实际可执行程序，保留原文与不确定性。
+4. reviewer 响应不合法或调用失败才按既有故障契约转 error-escalate，再按审批模式处理；模型正常返回后的风险与授权判断由审查策略决定。
+5. 无效配置不替换当前有效配置；无可用配置时不能以校验失败为由免审执行，沿用[配置保存与生效](configuration-and-audit.md#config-history)约定。
 
 <a id="design-4-7"></a>
 
@@ -269,7 +337,7 @@ if (exec.parent === undefined && exec.name === RUN_CODE_NAME) return next();
 // 内层调用（exec.parent !== undefined）正常走规则匹配与审查
 ```
 
-**外层可以审查，但需要不同输入处理**：外层参数包含程序文本，不能直接使用 tree-sitter-bash；这不代表程序文本不能被 reviewer 审查，也不代表不能按工具名控制整个调用。初稿是否继续跳过外层、外层如何与命令规则协作，仍属 [C5](decisions-and-questions.md) 待决问题。
+**已确认的外层准入契约**：外层 `run_code` 进入规则与审查流程，先对完整原始请求匹配规则；没有明确规则结论时，按程序文本送审。不能直接将 JS／TS 送入 bash AST。外层审查重点包含程序自身行为和直接 Node 效果，内层工具调用仍独立判定；外层批准不替代内层批准，内层门禁也不覆盖直接 Node 效果。
 
 **内层调用正常处理**：内层 `tools.bash({ command })` 的 `arguments.command` 是真的 bash 命令，AST 能解析，规则能匹配，审查能进行。
 
@@ -277,19 +345,23 @@ if (exec.parent === undefined && exec.name === RUN_CODE_NAME) return next();
 
 Node 运行时的临时进程和持久进程均在非 `danger-full-access` 模式下调用 `sandbox.confine`。当前 macOS 文件策略允许一般读取与联网，限制允许根以外的文件写入；不是所有写入都会被拒绝。程序可见 `process.env` 初始为空，不能把环境变量访问表述为必然取得宿主凭据。以上是源码事实，实际 runner 与行为仍需运行验证。
 
-如果沿用“跳过外层”并使用 trusted 模式，则直接 Node 效果既不受本插件逐调用审查，也没有 DSH 文件沙箱约束。guarded 能增加文件写入边界，不能补足读取和联网审查。
+用户可以通过规则在模型审查前裁定外层程序。外层被明确 allow 后，直接 Node 效果不再经过本次外层模型审查；trusted 模式没有 DSH 文件沙箱约束，guarded 能增加文件写入边界，不能补足读取和联网审查。内部实际发出的工具调用仍正常走各自准入流程。
 
-**待决方案**：若要对 `run_code` 设置 deny／force-ask／force-review，必须先让外层进入相应判定，不能在规则匹配前无条件跳过。这是产品选择，尚未确认或实现。完整路径矩阵见[覆盖范围](architecture.md#execution-coverage)，源码出处见[证据 §22](../evidence.md#evidence-22)。
+**长程序输入**：规则匹配使用完整原始请求；送审材料可以按预算截断，并由运行时明确标记。截断不自动触发 error-escalate、强制人工或拒绝，不新增模型自报 truncated／输入充分性字段。reviewer 在获知截断的情况下提供正常审查信号，代码按审查策略判定；最终反馈附加客观截断提示，不能仅凭截断事实声称它是拒绝原因。完整输入、实际送审内容及缺失标记各自保留，见[输入预算](review-context.md#design-5-2-6)。
+
+本轮确认记录见[执行覆盖与准入契约](decisions-and-questions.md#execution-admission-contract)。完整路径矩阵见[覆盖范围](architecture.md#execution-coverage)，源码出处见[证据 §22](../evidence.md#evidence-22)。
 
 ---
 
 <a id="design-5-10"></a>
 
-## 离线规则建议与人工审核
+## 离线规则建议与人工审核（后续版本）
+
+**范围更新（2026-10-23）**：离线规则建议不纳入首版，先完成核心功能并积累真实日志，再设计生成、验证与审核机制。专用入口与 journey 同步延期；下文保留既有原则和早期方案供后续参考，见[首版范围](requirements.md#first-release-scope)。同轮次审批去重是独立能力，不因本节的离线建议延期而改变范围。
 
 **规则建议只通过离线流程产生：日志 → 离线分析 → 候选规则 → 独立界面人工审核 → 加入正式规则列表。** 分析器没有修改生效规则的权限；候选在人工确认前不参与运行时匹配。
 
-实时审批只处理当前操作，不提供“以后免审”按钮，也不在审批 reason 中附带规则提名。用户可在独立的规则管理界面直接创建规则，或审核离线建议。无论哪种方式，最终确认的都是具体匹配范围和具体行为。
+实时审批只处理当前操作，不提供“以后免审”按钮，也不在审批 reason 中附带规则提名。首版用户在独立的规则管理界面直接创建规则；后续版本再提供离线建议审核。无论哪种方式，最终确认的都是具体匹配范围和具体行为。
 
 **人工确认后的候选就是普通规则，与手工创建的规则语义完全相同。** 规则 Schema 不区分来源，运行时不按来源改变匹配、优先级或放行行为。
 
@@ -305,6 +377,8 @@ Node 运行时的临时进程和持久进程均在非 `danger-full-access` 模�
 4. **它省的是 token，但高频部分已被规则层吃掉**，剩下的漏网调用频率不高。
 
 ### 离线日志分析与候选
+
+以下分析方式、候选结构与类别限制保留为早期草案，待真实样本积累后重新设计，不作为首版实现要求或已经定稿的生成与验证算法。
 
 **不做在线学习**（竞品 `dsh-perm-gate` 的 `riskLearning` / `riskSediment`）。理由：
 
@@ -334,7 +408,7 @@ Node 运行时的临时进程和持久进程均在非 `danger-full-access` 模�
     match:
       node: command
       kind: regex
-      pattern: '^gh pr (view|list|status|checks|diff)\b'
+      pattern: '(?s)gh pr (view|list|status|checks|diff)(?: .*)?'
       agents: [main]
     verdict: allow
     comment: "允许主 agent 免审执行 gh PR 只读查询"
@@ -364,6 +438,6 @@ Node 运行时的临时进程和持久进程均在非 `danger-full-access` 模�
 
 候选生成仍只考虑 AST 可完整判定的命令族，避免仅凭脚本调用的历史结果推导脚本内部行为。这些约束适用于自动建议免审规则；可以生成要求审查或禁止操作的建议，也不限制用户通过普通规则编辑器自行配置规则。
 
-**统一运行时语义**：人工审核后的规则遵循本章同一套 AST 解析、匹配、优先级与模式约束；不保留“学习规则额外复检”开关。`allow` 与审查不变式的整体适用边界仍在 [C1、C3](decisions-and-questions.md#product-discussion) 中继续收敛，但不会按创建来源区分。
+**统一运行时语义**：人工审核后的规则遵循本章同一套 AST 解析、匹配、优先级与模式约束；不保留“学习规则额外复检”开关。解析与 allow 的关系已按[独立状态与三态求值](#matching-uncertainty)确认；审查不变式的其他适用边界仍在 [C1](decisions-and-questions.md#product-discussion) 中继续收敛，不会按创建来源区分。
 
 ---

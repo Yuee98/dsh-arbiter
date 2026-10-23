@@ -17,6 +17,8 @@
 | [审查后端与判定](docs/reviewer.md) | 后端协议、prompt、IR、判定、reason、运行时控制 |
 | [配置与审计](docs/configuration-and-audit.md) | 配置 UI、凭据、规则测试、日志、离线调优 |
 | [实施与验证](docs/implementation.md) | 原 P0–P11 路线与待验证项 |
+| [权限 UI 验证任务](docs/permission-ui-validation.md) | 同位置控件覆盖、原生命令同步、重连及停用／卸载恢复四组验证与结果回填 |
+| [冷恢复修复与生命周期补测](docs/permission-recovery-followup.md) | 已授权的正式写入修复、原生 auto 拒绝、真实管理器、新调用、人工答复与 PTC 取消补测 |
 | [决策与问题](docs/decisions-and-questions.md) | 历史取舍、O1–O10 状态、已确认结论与待讨论建议 |
 | [调研证据](evidence.md) | 来源清单、个人工作流灵感、生态对比和价格快照 |
 
@@ -43,7 +45,7 @@
 | §4.1 | 解析 | [规则引擎与规则沉淀](docs/rules.md#design-4-1) |
 | §4.2 | 匹配方言 | [规则引擎与规则沉淀](docs/rules.md#design-4-2) |
 | §4.2.1 | regex 用 `re2js`，不自建安全子集 | [规则引擎与规则沉淀](docs/rules.md#design-4-2-1) |
-| §4.2.2 | 唯一保留的语义检查：`^` 锚定 | [规则引擎与规则沉淀](docs/rules.md#design-4-2-2) |
+| §4.2.2 | 完整匹配、glob 与大小写 | [规则引擎与规则沉淀](docs/rules.md#design-4-2-2) |
 | §4.2.3 | 被否决的替代方案 | [规则引擎与规则沉淀](docs/rules.md#design-4-2-3) |
 | §4.3 | 规则 Schema | [规则引擎与规则沉淀](docs/rules.md#design-4-3) |
 | §4.4 | 五层裁决与优先级 | [规则引擎与规则沉淀](docs/rules.md#design-4-4) |
