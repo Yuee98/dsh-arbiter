@@ -1,0 +1,172 @@
+{
+  "caseId": "force-ask-human-deny",
+  "title": "force-ask in normal mode maps a simulated rejection to human-deny",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:18.512Z",
+  "elapsedMs": 380,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": false
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 110592,
+    "calls": [
+      {
+        "call_id": "fixture-session-18e4ede1-1fac-481a-ad78-52a90d5004c5-0-0",
+        "session_kind": "main",
+        "result": "human-deny",
+        "reason": "Not executed [human-deny]: the user rejected this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "force-ask",
+            "ruleId": "echo-ask",
+            "configRevision": "855d456c9095",
+            "at": 1792570518480
+          },
+          {
+            "stage": "human",
+            "result": "human-deny",
+            "reason": "human_rejected",
+            "at": 1792570518480
+          }
+        ],
+        "execution_status": "not-started",
+        "approval_mode": "normal",
+        "signals": null
+      }
+    ],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:18.477Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+    },
+    {
+      "at": "2026-10-21T08:15:18.478Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+    },
+    {
+      "at": "2026-10-21T08:15:18.490Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+    }
+  ],
+  "approvalSim": [
+    {
+      "event": "approval-sim/mounted",
+      "outcome": "rejected",
+      "simulated": true,
+      "at": "2026-10-21T08:15:18.381Z"
+    },
+    {
+      "event": "approval-sim/answer",
+      "outcome": "rejected",
+      "toolName": "bash",
+      "callId": "fixture-session-18e4ede1-1fac-481a-ad78-52a90d5004c5-0-0",
+      "reason": "force-ask requires a human decision for this call.",
+      "agentSessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5",
+      "simulated": true,
+      "at": "2026-10-21T08:15:18.480Z"
+    }
+  ],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-ask-human-deny/sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "echo-ask",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^echo"
+        },
+        "verdict": "force-ask"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "approval-sim.jsonl",
+      "bytes": 417
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 110592
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-d30205a1.json",
+      "bytes": 1915
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2625
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-deny-ws--/session-18e4ede1-1fac-481a-ad78-52a90d5004c5/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-deny-ws--/session-18e4ede1-1fac-481a-ad78-52a90d5004c5/session.v4.jsonl.zstd",
+      "bytes": 15220
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5.json",
+      "bytes": 4101
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 380
+    },
+    {
+      "path": "sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5__session.v4.jsonl.zstd",
+      "bytes": 15220
+    }
+  ]
+}

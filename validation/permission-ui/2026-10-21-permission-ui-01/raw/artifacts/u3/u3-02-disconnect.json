@@ -1,0 +1,54 @@
+{
+  "disabled": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "status": {
+        "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+        "enabled": false,
+        "boundary": "guarded",
+        "reason": "second-connection",
+        "origin": "client-selector",
+        "revision": 2
+      }
+    }
+  },
+  "remoteStatus": {
+    "ok": true,
+    "status": {
+      "known": true,
+      "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+      "enabled": false,
+      "boundary": "guarded",
+      "reason": "second-connection",
+      "origin": "client-selector",
+      "revision": 2
+    },
+    "live": [
+      "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5"
+    ]
+  },
+  "whileOffline": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "__arbiter__",
+    "enabled": true
+  },
+  "afterReconnect": {
+    "known": true,
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": false,
+    "boundary": "guarded",
+    "reason": "second-connection",
+    "origin": "client-selector",
+    "revision": 2
+  },
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "workspace-write",
+    "enabled": false
+  }
+}

@@ -1,0 +1,556 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 1755,
+    "value": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+  },
+  {
+    "name": "state-ready",
+    "ok": true,
+    "ms": 4,
+    "value": {
+      "autoEntry": {
+        "rejected": true,
+        "rejections": 0,
+        "legacyAutoRestores": 0,
+        "registrationError": null
+      },
+      "sessionRecords": {
+        "ready": true,
+        "error": null,
+        "failures": []
+      },
+      "enabled": true
+    }
+  },
+  {
+    "name": "auto-rejected-not-enabled",
+    "ok": true,
+    "ms": 3520,
+    "value": {
+      "label": "00-not-enabled",
+      "submission": {
+        "ok": true,
+        "attempts": 1,
+        "args": " auto",
+        "command": {
+          "seq": 21,
+          "args": " auto",
+          "done": {
+            "seq": 22,
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          },
+          "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+        }
+      },
+      "before": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "after": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "timelineTail": [
+        {
+          "seq": 0,
+          "type": "permission/preset",
+          "ignorable": false,
+          "data": {
+            "preset": "workspace-write"
+          }
+        },
+        {
+          "seq": 1,
+          "type": "sandbox/mode",
+          "ignorable": false,
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "seq": 2,
+          "type": "approval/policy",
+          "ignorable": false,
+          "data": {
+            "policy": "ask"
+          }
+        },
+        {
+          "seq": 21,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-1",
+            "name": "permission",
+            "args": " auto",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 22,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-1",
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          }
+        }
+      ],
+      "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF2 bootstrap\n13:09\n已完成\n已完成，用时 1秒\n\nIDLE\n\n用量 110 tok\n13:09\n\n/permission auto\n\n工作区内修改\nfixture-1\n1 轮 1 步\n110 tok·缓存命中 0%\n0%\ncommand.execute failed: gateway/internal: 此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+    }
+  },
+  {
+    "name": "auto-rejected-guarded",
+    "ok": true,
+    "ms": 5516,
+    "value": {
+      "label": "01-guarded",
+      "submission": {
+        "ok": true,
+        "attempts": 2,
+        "args": " auto",
+        "command": {
+          "seq": 25,
+          "args": " auto",
+          "done": {
+            "seq": 26,
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          },
+          "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+        }
+      },
+      "before": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "after": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "timelineTail": [
+        {
+          "seq": 1,
+          "type": "sandbox/mode",
+          "ignorable": false,
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "seq": 2,
+          "type": "approval/policy",
+          "ignorable": false,
+          "data": {
+            "policy": "ask"
+          }
+        },
+        {
+          "seq": 21,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-1",
+            "name": "permission",
+            "args": " auto",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 22,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-1",
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          }
+        },
+        {
+          "seq": 23,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-2",
+            "name": "permission",
+            "args": " auto/permission auto",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 24,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-2",
+            "kind": "error",
+            "text": "unknown preset \"auto/permission auto\" (available: read-only, workspace-write, danger-full-access, auto)"
+          }
+        },
+        {
+          "seq": 25,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-3",
+            "name": "permission",
+            "args": " auto",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 26,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-3",
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          }
+        }
+      ],
+      "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF2 bootstrap\n13:09\n已完成\n已完成，用时 1秒\n\nIDLE\n\n用量 110 tok\n13:09\n\n/permission auto\n\n工作区内修改\nfixture-1\n1 轮 1 步\n110 tok·缓存命中 0%\n0%\ncommand.execute failed: gateway/internal: 此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+    }
+  },
+  {
+    "name": "auto-rejected-guarded-settled",
+    "ok": true,
+    "ms": 5,
+    "value": {
+      "last": {
+        "seq": 25,
+        "args": " auto",
+        "done": {
+          "seq": 26,
+          "kind": "error",
+          "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+        }
+      },
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "autoEntry": {
+        "rejected": true,
+        "rejections": 2,
+        "legacyAutoRestores": 0,
+        "registrationError": null
+      }
+    }
+  },
+  {
+    "name": "same-value-exit-still-works",
+    "ok": true,
+    "ms": 5215,
+    "value": {
+      "submission": {
+        "ok": true,
+        "attempts": 2,
+        "args": " workspace-write",
+        "command": {
+          "seq": 29,
+          "args": " workspace-write",
+          "done": {
+            "seq": 30,
+            "kind": "success",
+            "text": "preset workspace-write"
+          },
+          "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+        }
+      },
+      "before": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "after": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "newEvents": [
+        {
+          "seq": 27,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-4",
+            "name": "permission",
+            "args": " auto/permission workspace-write",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 28,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-4",
+            "kind": "error",
+            "text": "unknown preset \"auto/permission workspace-write\" (available: read-only, workspace-write, danger-full-access, auto)"
+          }
+        },
+        {
+          "seq": 29,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-5",
+            "name": "permission",
+            "args": " workspace-write",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 30,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-5",
+            "kind": "success",
+            "text": "preset workspace-write"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "other-presets-still-work",
+    "ok": true,
+    "ms": 9628,
+    "value": [
+      {
+        "preset": "read-only",
+        "submission": " read-only",
+        "effective": {
+          "preset": "read-only",
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "last": {
+          "seq": 31,
+          "args": " read-only",
+          "done": {
+            "seq": 34,
+            "kind": "success",
+            "text": "preset read-only"
+          }
+        }
+      },
+      {
+        "preset": "danger-full-access",
+        "submission": " danger-full-access",
+        "effective": {
+          "preset": "danger-full-access",
+          "sandbox": "danger-full-access",
+          "approval": "never"
+        },
+        "last": {
+          "seq": 35,
+          "args": " danger-full-access",
+          "done": {
+            "seq": 40,
+            "kind": "success",
+            "text": "preset danger-full-access"
+          }
+        }
+      },
+      {
+        "preset": "workspace-write",
+        "submission": " workspace-write",
+        "effective": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        },
+        "last": {
+          "seq": 41,
+          "args": " workspace-write",
+          "done": {
+            "seq": 46,
+            "kind": "success",
+            "text": "preset workspace-write"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "auto-still-rejected-after-switches",
+    "ok": true,
+    "ms": 3538,
+    "value": {
+      "label": "05-after-switches",
+      "submission": {
+        "ok": true,
+        "attempts": 1,
+        "args": " auto",
+        "command": {
+          "seq": 47,
+          "args": " auto",
+          "done": {
+            "seq": 48,
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          },
+          "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+        }
+      },
+      "before": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "after": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "timelineTail": [
+        {
+          "seq": 40,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-7",
+            "kind": "success",
+            "text": "preset danger-full-access"
+          }
+        },
+        {
+          "seq": 41,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-8",
+            "name": "permission",
+            "args": " workspace-write",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 42,
+          "type": "permission/preset",
+          "ignorable": false,
+          "data": {
+            "preset": "workspace-write"
+          }
+        },
+        {
+          "seq": 43,
+          "type": "sandbox/mode",
+          "ignorable": false,
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "seq": 44,
+          "type": "approval/policy",
+          "ignorable": false,
+          "data": {
+            "policy": "ask"
+          }
+        },
+        {
+          "seq": 46,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-8",
+            "kind": "success",
+            "text": "preset workspace-write"
+          }
+        },
+        {
+          "seq": 47,
+          "type": "command/run",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-9",
+            "name": "permission",
+            "args": " auto",
+            "source": {
+              "kind": "user"
+            }
+          }
+        },
+        {
+          "seq": 48,
+          "type": "command/done",
+          "ignorable": false,
+          "data": {
+            "commandId": "cmd-958c34e4-9",
+            "kind": "error",
+            "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+          }
+        }
+      ],
+      "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF2 bootstrap\n13:09\n已完成\n已完成，用时 1秒\n\nIDLE\n\n用量 110 tok\n13:09\n\n/permission auto\n\n工作区内修改\nfixture-1\n1 轮 1 步\n110 tok·缓存命中 0%\n0%\ncommand.execute failed: gateway/internal: 此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+    }
+  },
+  {
+    "name": "failed-command-keeps-state",
+    "ok": true,
+    "ms": 5213,
+    "value": {
+      "submission": {
+        "ok": true,
+        "attempts": 2,
+        "args": " not-a-preset",
+        "command": {
+          "seq": 51,
+          "args": " not-a-preset",
+          "done": {
+            "seq": 52,
+            "kind": "error",
+            "text": "unknown preset \"not-a-preset\" (available: read-only, workspace-write, danger-full-access, auto)"
+          },
+          "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+        }
+      },
+      "before": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "after": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "last": {
+        "seq": 51,
+        "args": " not-a-preset",
+        "done": {
+          "seq": 52,
+          "kind": "error",
+          "text": "unknown preset \"not-a-preset\" (available: read-only, workspace-write, danger-full-access, auto)"
+        }
+      }
+    }
+  }
+]

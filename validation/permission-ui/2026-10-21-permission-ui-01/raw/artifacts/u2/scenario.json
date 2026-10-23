@@ -1,0 +1,21 @@
+{
+  "routes": [
+    { "match": "U2BASELINE", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-ALLOW baseline\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws/u2-baseline.txt'", "description": "baseline allow" } } ] },
+      { "type": "text", "text": "U2BASELINE-DONE" }
+    ]},
+    { "match": "U2DENY", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY after-exit\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws/u2-deny.txt'", "description": "deny after exit" } } ] },
+      { "type": "text", "text": "U2DENY-DONE" }
+    ]},
+    { "match": "U2AUTO", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-ALLOW auto\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws/u2-auto.txt'", "description": "after auto" } } ] },
+      { "type": "text", "text": "U2AUTO-DONE" }
+    ]},
+    { "match": "U2ALLOWZ", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-ALLOW z\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws/u2-allowz.txt'", "description": "control allow" } } ] },
+      { "type": "text", "text": "U2ALLOWZ-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ]
+}

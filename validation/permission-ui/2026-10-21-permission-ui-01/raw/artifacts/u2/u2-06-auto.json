@@ -1,0 +1,98 @@
+{
+  "before": {
+    "enabled": true,
+    "boundary": "guarded",
+    "hostCurrent": "workspace-write"
+  },
+  "after": {
+    "enabled": false,
+    "boundary": "guarded",
+    "hostCurrent": "auto",
+    "reason": "permission-command"
+  },
+  "run": {
+    "at": 1792595923674,
+    "event": "session/event",
+    "sessionId": "session-51147434-2384-4a1b-aefd-be5d93c35868",
+    "seq": 56,
+    "type": "command/run",
+    "data": {
+      "commandId": "cmd-6688d4c9-4",
+      "name": "permission",
+      "args": " auto",
+      "source": {
+        "kind": "user"
+      }
+    },
+    "enabled": true
+  },
+  "autoAdmitted": 1,
+  "tail": [
+    {
+      "seq": 53,
+      "type": "plugin:pui/enabled",
+      "data": {
+        "boundary": "guarded",
+        "origin": "client-selector",
+        "at": 1792595920220
+      }
+    },
+    {
+      "seq": 54,
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "seq": 55,
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "seq": 56,
+      "type": "command/run",
+      "data": {
+        "commandId": "cmd-6688d4c9-4",
+        "name": "permission",
+        "args": " auto",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 57,
+      "type": "permission/preset",
+      "data": {
+        "preset": "auto"
+      }
+    },
+    {
+      "seq": 58,
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "danger-full-access"
+      }
+    },
+    {
+      "seq": 59,
+      "type": "plugin:pui/disabled",
+      "data": {
+        "reason": "permission-command",
+        "at": 1792595923675
+      }
+    },
+    {
+      "seq": 60,
+      "type": "command/done",
+      "data": {
+        "commandId": "cmd-6688d4c9-4",
+        "kind": "success",
+        "text": "preset auto"
+      }
+    }
+  ]
+}

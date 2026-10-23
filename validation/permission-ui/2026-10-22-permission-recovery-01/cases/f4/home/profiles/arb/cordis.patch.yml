@@ -1,0 +1,76 @@
+- {
+    "id": "agent-default-model",
+    "name": "@deepseek-ai/dsh-agent-default-model",
+    "config": { "provider": "pui", "model": "fixture-1" }
+  }
+- {
+    "id": "sandbox-policy",
+    "name": "@deepseek-ai/dsh-sandbox-policy",
+    "config":
+      {
+        "mode": "danger-full-access",
+        "workspaceRoot": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/20\
+          26-10-22-permission-recovery-01/cases/f4/ws"
+      }
+  }
+- {
+    "id": "approval",
+    "name": "@deepseek-ai/dsh-user-approval",
+    "config": { "policy": "never" }
+  }
+- {
+    "id": "permission",
+    "name": "@deepseek-ai/dsh-permission-presets",
+    "config": { "defaultPreset": "danger-full-access" }
+  }
+- {
+    "id": "workspace-controller",
+    "name": "@deepseek-ai/dsh-api-workspace-controller",
+    "config":
+      {
+        "documentsDirectory": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-\
+          ui/2026-10-22-permission-recovery-01/cases/f4"
+      }
+  }
+- {
+    "insert":
+      [
+        {
+            "id": "pui-llm",
+            "name": "file:///Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026\
+              -10-22-permission-recovery-01/probes/arbiter-llm.mjs",
+            "config":
+              {
+                "provider": "pui",
+                "scenarioPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/202\
+                  6-10-22-permission-recovery-01/cases/f4/scenario.json"
+              }
+          }
+      ]
+  }
+- {
+    "id": "arbiter",
+    "name": "dsh-arbiter",
+    "config":
+      {
+        "enabled": true,
+        "rules": [],
+        "reviewer":
+          {
+            "type": "chat",
+            "chat":
+              {
+                "provider": "pui",
+                "model": "fixture-1",
+                "temperature": 0,
+                "maxTokens": 400,
+                "timeoutMs": 20000,
+                "maxRepairRetries": 1
+              }
+          }
+      }
+  }
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1

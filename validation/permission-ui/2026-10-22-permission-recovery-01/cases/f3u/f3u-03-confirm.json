@@ -1,0 +1,19 @@
+{
+  "clicked": {
+    "ok": false
+  },
+  "confirmed": {
+    "ok": false,
+    "inDialog": false,
+    "seen": [
+      "添加插件",
+      "子智能体",
+      "网页搜索",
+      "Agent 循环",
+      "终端",
+      "更多",
+      "智能体团队",
+      "语音输入"
+    ]
+  }
+}

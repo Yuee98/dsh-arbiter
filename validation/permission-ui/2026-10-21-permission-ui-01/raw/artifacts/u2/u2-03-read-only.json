@@ -1,0 +1,80 @@
+{
+  "run": {
+    "at": 1792595911380,
+    "event": "session/event",
+    "sessionId": "session-51147434-2384-4a1b-aefd-be5d93c35868",
+    "seq": 41,
+    "type": "command/run",
+    "data": {
+      "commandId": "cmd-6688d4c9-2",
+      "name": "permission",
+      "args": " read-only",
+      "source": {
+        "kind": "user"
+      }
+    },
+    "enabled": false
+  },
+  "before": {
+    "enabled": false,
+    "hostCurrent": "workspace-write"
+  },
+  "after": {
+    "enabled": false,
+    "hostCurrent": "read-only"
+  },
+  "tail": [
+    {
+      "seq": 41,
+      "type": "command/run",
+      "data": {
+        "commandId": "cmd-6688d4c9-2",
+        "name": "permission",
+        "args": " read-only",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 42,
+      "type": "permission/preset",
+      "data": {
+        "preset": "read-only"
+      }
+    },
+    {
+      "seq": 43,
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "read-only"
+      }
+    },
+    {
+      "seq": 44,
+      "type": "command/done",
+      "data": {
+        "commandId": "cmd-6688d4c9-2",
+        "kind": "success",
+        "text": "preset read-only"
+      }
+    },
+    {
+      "seq": 45,
+      "type": "workspace/changes",
+      "data": {
+        "turn": 2
+      }
+    },
+    {
+      "seq": 46,
+      "type": "turn/end",
+      "data": {
+        "turn": 2,
+        "reason": {
+          "kind": "completed"
+        }
+      }
+    }
+  ]
+}

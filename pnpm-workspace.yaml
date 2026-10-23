@@ -1,6 +1,8 @@
 # Tool settings for this single-package project.
 packages:
   - .
+allowBuilds:
+  esbuild: true
 engineStrict: true
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true

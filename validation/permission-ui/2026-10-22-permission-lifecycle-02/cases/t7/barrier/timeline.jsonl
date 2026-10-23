@@ -1,0 +1,8 @@
+{"event":"agent-step","route":"default","index":0,"sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665152706}
+{"event":"agent-step","route":"default","index":0,"sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665152707}
+{"event":"agent-step","route":"T7PAR","index":0,"sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665154420}
+{"event":"review-started","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665154426}
+{"event":"review-released","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","released":true,"waitedMs":0,"t":1792665154426}
+{"event":"review-started","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665154431}
+{"event":"review-released","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","released":true,"waitedMs":648,"t":1792665155079}
+{"event":"agent-step","route":"T7PAR","index":1,"sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","t":1792665155110}

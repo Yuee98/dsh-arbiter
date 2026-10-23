@@ -1,0 +1,13 @@
+{"at":1792661898920,"event":"gate/entered","callId":"fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0","tool":"bash","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf","active":1}
+{"at":1792661898922,"event":"review/start","callId":"fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf"}
+{"at":1792661898924,"event":"review/settled","callId":"fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf"}
+{"at":1792661903513,"event":"gate/entered","callId":"fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2","tool":"bash","sessionId":"session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9","active":1}
+{"at":1792661903514,"event":"review/start","callId":"fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2","sessionId":"session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9"}
+{"at":1792661903515,"event":"review/settled","callId":"fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2","sessionId":"session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9"}
+{"at":1792661916645,"event":"gate/entered","callId":"fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-4","tool":"bash","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf","active":1}
+{"at":1792661916647,"event":"review/start","callId":"fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-4","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf"}
+{"at":1792661916807,"event":"unload/stop-admission","active":1,"managed":2}
+{"at":1792661946844,"event":"unload/drained","active":1,"waitedMs":30037}
+{"at":1792661946846,"event":"unload/rollback","sessionId":"session-66824047-b777-4549-92c5-ca08c8f82dcf","changed":true}
+{"at":1792661946846,"event":"unload/rollback","sessionId":"session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9","changed":true}
+{"at":1792661946846,"event":"unload/release","managed":0}

@@ -1,0 +1,159 @@
+{
+  "caseId": "allow-rule",
+  "title": "A complete allow rule short-circuits review",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:15.076Z",
+  "elapsedMs": 393,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": true,
+    "content": "ARBITER_MARKER\n"
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 110592,
+    "calls": [
+      {
+        "call_id": "fixture-session-7c5293bc-a066-4ef9-829a-cb624dad33f5-0-0",
+        "session_kind": "main",
+        "result": "allow",
+        "reason": "Arbiter: a complete allow rule covered this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "allow",
+            "ruleId": "echo-allow",
+            "configRevision": "10cee9973db7",
+            "at": 1792570515037
+          }
+        ],
+        "execution_status": "success",
+        "approval_mode": "normal",
+        "signals": null
+      }
+    ],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:15.034Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+    },
+    {
+      "at": "2026-10-21T08:15:15.034Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+    },
+    {
+      "at": "2026-10-21T08:15:15.052Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/allow-rule/sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "echo-allow",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^echo"
+        },
+        "verdict": "allow"
+      },
+      {
+        "id": "workspace-writes",
+        "match": {
+          "node": "file_redirect",
+          "kind": "glob",
+          "pattern": "{{WORKSPACE}}/**"
+        },
+        "verdict": "allow"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 110592
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-73b9daab.json",
+      "bytes": 2197
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2546
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-allow-rule-ws--/session-7c5293bc-a066-4ef9-829a-cb624dad33f5/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-allow-rule-ws--/session-7c5293bc-a066-4ef9-829a-cb624dad33f5/session.v4.jsonl.zstd",
+      "bytes": 15504
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5.json",
+      "bytes": 4081
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 380
+    },
+    {
+      "path": "sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5__session.v4.jsonl.zstd",
+      "bytes": 15504
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 15
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "arbiterRoute": 404,
+  "bundles": [
+    "@deepseek-ai/dsh-base",
+    "@deepseek-ai/dsh-web-app"
+  ],
+  "sessionLoaded": true,
+  "sessionEvents": 21,
+  "decisions": [],
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "selectorText": "工作区内修改"
+}

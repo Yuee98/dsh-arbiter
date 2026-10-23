@@ -1,0 +1,165 @@
+{
+  "recordedAt": "2026-10-22T11:03:57.614Z",
+  "tests": 9,
+  "failures": 0,
+  "results": [
+    {
+      "id": "R1",
+      "description": "A redirect after cd must not match the original workspace",
+      "passes": true,
+      "actual": {
+        "path": {
+          "kind": "review-default",
+          "reason": "partial-allow"
+        },
+        "matches": [
+          {
+            "index": 0,
+            "id": "cd",
+            "verdict": "allow",
+            "effective": true,
+            "node": "command",
+            "nodeIndex": 0,
+            "matchedText": "cd /outside"
+          },
+          {
+            "index": 1,
+            "id": "echo",
+            "verdict": "allow",
+            "effective": false,
+            "node": "command",
+            "nodeIndex": 1,
+            "matchedText": "echo harmless"
+          }
+        ]
+      }
+    },
+    {
+      "id": "R2",
+      "description": "Bulk egress in progress requires explicit authorization",
+      "passes": true,
+      "actual": {
+        "verdict": "review-escalate",
+        "decisionRules": [
+          "R6"
+        ],
+        "reason": "bulk external sending requires explicit authorization (authPoint=0 (needs >=8))",
+        "strategy": "progress",
+        "details": {
+          "riskClass": "low",
+          "authClass": "none",
+          "thresholds": {
+            "tauAuth": 0.8,
+            "tauRisk": 0.75,
+            "tauCritical": 0.25,
+            "tauLow": 0.7,
+            "chatLowRiskMax": 3,
+            "chatMediumRiskMax": 8,
+            "mediumRiskCeiling": 8,
+            "explicitFromRisk": 4,
+            "allowBulkEgress": true
+          }
+        }
+      }
+    },
+    {
+      "id": "R3",
+      "description": "After applying strict, an unfinished review must not open a new approval",
+      "passes": true,
+      "actual": {
+        "prompts": [],
+        "pendingResult": {
+          "kind": "deny",
+          "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.",
+          "info": {
+            "name": "ArbiterDeniedError",
+            "code": "ARBITER_DENIED",
+            "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests."
+          }
+        },
+        "recordedEvents": 0
+      }
+    },
+    {
+      "id": "R4",
+      "description": "Invalid profile A must restore A rather than profile B",
+      "passes": true,
+      "actual": {
+        "restoredRule": {
+          "id": "profile-rule",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo(?:\\s|$)"
+          },
+          "verdict": "deny"
+        },
+        "error": "rules[0]: regex patterns must be anchored with \"^\" or \"(?:^\" (rule \"profile-rule\")"
+      }
+    },
+    {
+      "id": "R5",
+      "description": "Capacity cleanup should retain recent records instead of deleting all without reclaiming space",
+      "passes": true,
+      "actual": {
+        "before": 444776,
+        "target": 428392,
+        "deleted": 0,
+        "remaining": 10,
+        "after": 192512
+      }
+    },
+    {
+      "id": "R6",
+      "description": "Both reviewer backends must receive global custom rules",
+      "passes": true,
+      "actual": {
+        "chatContainsRule": true,
+        "decisionContainsRule": true
+      }
+    },
+    {
+      "id": "R7",
+      "description": "Truncated original human evidence must be marked incomplete",
+      "passes": true,
+      "actual": {
+        "originalLength": 4073,
+        "retainedLength": 4000,
+        "evidenceTruncated": true,
+        "missing": [
+          "one or more authorization evidence messages were truncated; their trailing content is not available"
+        ],
+        "retainedRestriction": false
+      }
+    },
+    {
+      "id": "R8",
+      "description": "Accepting a suggestion must survive Loader reconciliation and mark the candidate accepted",
+      "passes": true,
+      "actual": {
+        "acceptError": null,
+        "acceptResponse": {
+          "ok": true,
+          "status": "accepted",
+          "rule": {
+            "id": "candidate-rule",
+            "match": {
+              "node": "command",
+              "kind": "regex",
+              "pattern": "^printf(?:\\s|$)"
+            },
+            "verdict": "allow"
+          }
+        },
+        "candidateStatus": "accepted",
+        "ruleAdded": true
+      }
+    },
+    {
+      "id": "R9",
+      "description": "A command family with a denial must not be reported as always allowed",
+      "passes": true,
+      "actual": []
+    }
+  ]
+}

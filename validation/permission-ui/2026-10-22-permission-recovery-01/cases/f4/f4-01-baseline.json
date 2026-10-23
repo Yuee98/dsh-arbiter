@@ -1,0 +1,8 @@
+{
+  "effective": {
+    "preset": "danger-full-access",
+    "sandbox": "danger-full-access",
+    "approval": "never"
+  },
+  "state": true
+}

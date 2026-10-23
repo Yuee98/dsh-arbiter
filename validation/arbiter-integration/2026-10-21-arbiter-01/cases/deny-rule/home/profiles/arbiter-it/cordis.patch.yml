@@ -1,0 +1,90 @@
+[
+  {
+    "id": "permission",
+    "name": "@deepseek-ai/dsh-permission-presets",
+    "config": {
+      "presets": {
+        "arbiter-trusted": {
+          "sandbox": "danger-full-access",
+          "approval": "ask"
+        }
+      },
+      "defaultPreset": "arbiter-trusted"
+    }
+  },
+  {
+    "id": "agent-default-model",
+    "name": "@deepseek-ai/dsh-agent-default-model",
+    "config": {
+      "provider": "arbiterfs",
+      "model": "fixture-1"
+    }
+  },
+  {
+    "id": "tools",
+    "name": "@deepseek-ai/dsh-tools",
+    "config": {
+      "mode": "native"
+    }
+  },
+  {
+    "id": "sandbox-policy",
+    "name": "@deepseek-ai/dsh-sandbox-policy",
+    "config": {
+      "mode": "danger-full-access",
+      "workspaceRoot": "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/deny-rule/ws"
+    }
+  },
+  {
+    "id": "approval",
+    "name": "@deepseek-ai/dsh-user-approval",
+    "config": {
+      "policy": "ask"
+    }
+  },
+  {
+    "insert": [
+      {
+        "id": "arbiter-llm",
+        "name": "file:///Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/fixtures/arbiter-llm.mjs",
+        "config": {
+          "provider": "arbiterfs",
+          "scenarioPath": "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/deny-rule/scenario.json"
+        }
+      },
+      {
+        "id": "arbiter",
+        "name": "dsh-arbiter",
+        "config": {
+          "enabled": true,
+          "modes": {
+            "main": "normal",
+            "subagent": "strict"
+          },
+          "rules": [
+            {
+              "id": "echo-deny",
+              "match": {
+                "node": "command",
+                "kind": "regex",
+                "pattern": "^echo"
+              },
+              "verdict": "deny"
+            }
+          ],
+          "reviewer": {
+            "type": "chat",
+            "chat": {
+              "provider": "session",
+              "model": "",
+              "temperature": 0,
+              "maxTokens": 400,
+              "timeoutMs": 8000,
+              "maxRepairRetries": 1
+            }
+          }
+        }
+      }
+    ]
+  }
+]

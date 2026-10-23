@@ -1,0 +1,42 @@
+{
+  "resumed": {
+    "ok": false,
+    "code": "resume-failed",
+    "message": "session \"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5\" is already owned by an active write handle"
+  },
+  "before": {
+    "known": true,
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": "late-response-probe",
+    "origin": "client-selector",
+    "revision": 5
+  },
+  "after": {
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": "late-response-probe",
+    "origin": "client-selector",
+    "revision": 5
+  },
+  "auditBefore": false,
+  "auditPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/home/arbiter/arbiter.db",
+  "restoredEvents": [
+    {
+      "at": 1792598127841,
+      "event": "pui/restored",
+      "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+      "boundary": "guarded",
+      "seq": 51
+    }
+  ],
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "__arbiter__",
+    "enabled": true
+  }
+}

@@ -1,0 +1,14 @@
+{"event":"agent-step","route":"T2-WARM","index":0,"sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792661994610}
+{"event":"agent-step","route":"T2-WARM","index":0,"sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792661994610}
+{"event":"review-started","callId":"fx-session-b2c283bb-630d-4934-8852-107a70045cda-0-0","sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792661994615}
+{"event":"review-released","callId":"fx-session-b2c283bb-630d-4934-8852-107a70045cda-0-0","sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","released":true,"waitedMs":0,"t":1792661994615}
+{"event":"agent-step","route":"T2-WARM","index":1,"sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792661994636}
+{"event":"agent-step","route":"T2-WARM","index":0,"sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792661999213}
+{"event":"agent-step","route":"T2-WARM","index":0,"sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792661999213}
+{"event":"review-started","callId":"fx-session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1-0-2","sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792661999215}
+{"event":"review-released","callId":"fx-session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1-0-2","sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","released":true,"waitedMs":1,"t":1792661999216}
+{"event":"agent-step","route":"T2-WARM","index":1,"sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792661999231}
+{"event":"agent-step","route":"T2OLD","index":0,"sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792662012332}
+{"event":"review-started","callId":"fx-session-b2c283bb-630d-4934-8852-107a70045cda-0-4","sessionId":"session-b2c283bb-630d-4934-8852-107a70045cda","t":1792662012334}
+{"event":"agent-step","route":"T2NEW","index":0,"sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792662017071}
+{"event":"agent-step","route":"T2NEW","index":1,"sessionId":"session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1","t":1792662019219}

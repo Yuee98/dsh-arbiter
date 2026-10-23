@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],
@@ -22,10 +22,12 @@
     "skipLibCheck": false,
     "allowJs": true,
     "checkJs": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx"
   },
   "include": [
     "src/**/*.ts",
+    "src/**/*.tsx",
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "*.config.ts",

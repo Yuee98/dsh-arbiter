@@ -1,0 +1,243 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 261,
+    "value": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d"
+  },
+  {
+    "name": "slot-initial",
+    "ok": true,
+    "ms": 37,
+    "value": {
+      "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+      "nativeControl": false,
+      "puiPresent": true,
+      "puiDot": "",
+      "options": [
+        {
+          "value": "__arbiter__",
+          "label": "自动审查（Arbiter）"
+        },
+        {
+          "value": "read-only",
+          "label": "read-only"
+        },
+        {
+          "value": "workspace-write",
+          "label": "workspace-write"
+        },
+        {
+          "value": "danger-full-access",
+          "label": "danger-full-access"
+        }
+      ],
+      "selected": "workspace-write"
+    }
+  },
+  {
+    "name": "enable-guarded-via-selector",
+    "ok": true,
+    "ms": 280,
+    "value": {
+      "on": true,
+      "status": {
+        "ok": true,
+        "status": {
+          "known": true,
+          "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+          "enabled": true,
+          "boundary": "guarded",
+          "reason": null,
+          "origin": "client-selector",
+          "revision": 1
+        },
+        "live": [
+          "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d"
+        ]
+      }
+    }
+  },
+  {
+    "name": "guarded-allow",
+    "ok": true,
+    "ms": 833,
+    "value": {
+      "done": true,
+      "marker": {
+        "exists": true,
+        "content": "guarded allow\n"
+      },
+      "gates": [
+        "gate/call",
+        "gate/allow",
+        "gate/released"
+      ]
+    }
+  },
+  {
+    "name": "guarded-deny",
+    "ok": true,
+    "ms": 568,
+    "value": {
+      "done": true,
+      "marker": {
+        "exists": false
+      },
+      "gates": [
+        "gate/call",
+        "gate/allow",
+        "gate/released",
+        "gate/call",
+        "gate/deny",
+        "gate/released"
+      ]
+    }
+  },
+  {
+    "name": "guarded-outside-write",
+    "ok": true,
+    "ms": 565,
+    "value": {
+      "done": true,
+      "marker": {
+        "exists": false
+      },
+      "gates": [
+        "gate/call",
+        "gate/allow",
+        "gate/released",
+        "gate/call",
+        "gate/deny",
+        "gate/released",
+        "gate/call",
+        "gate/allow",
+        "gate/released"
+      ]
+    }
+  },
+  {
+    "name": "host-options-preserved",
+    "ok": true,
+    "ms": 1,
+    "value": {
+      "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+      "nativeControl": false,
+      "puiPresent": true,
+      "puiDot": "",
+      "options": [
+        {
+          "value": "__arbiter__",
+          "label": "自动审查（Arbiter · guarded）"
+        },
+        {
+          "value": "read-only",
+          "label": "read-only"
+        },
+        {
+          "value": "workspace-write",
+          "label": "workspace-write"
+        },
+        {
+          "value": "danger-full-access",
+          "label": "danger-full-access"
+        }
+      ],
+      "selected": "__arbiter__"
+    }
+  },
+  {
+    "name": "trusted-boundary",
+    "ok": true,
+    "ms": 587,
+    "value": {
+      "before": {
+        "known": true,
+        "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+        "enabled": true,
+        "boundary": "guarded",
+        "reason": null,
+        "origin": "client-selector",
+        "revision": 1
+      },
+      "after": {
+        "known": true,
+        "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+        "enabled": true,
+        "boundary": "trusted",
+        "reason": null,
+        "origin": "config-page",
+        "revision": 2
+      },
+      "done": true,
+      "marker": {
+        "exists": true,
+        "content": "outside trusted\n"
+      },
+      "gates": [
+        "gate/call",
+        "gate/allow",
+        "gate/released",
+        "gate/call",
+        "gate/deny",
+        "gate/released",
+        "gate/call",
+        "gate/allow",
+        "gate/released",
+        "gate/call",
+        "gate/allow",
+        "gate/released"
+      ]
+    }
+  },
+  {
+    "name": "second-session-not-taken-over",
+    "ok": true,
+    "ms": 3328,
+    "value": {
+      "clicked": true,
+      "second": "session-9c1f1baf-9531-4d95-a4df-282051f87cc3",
+      "secondStatus": {
+        "sessionId": "session-9c1f1baf-9531-4d95-a4df-282051f87cc3",
+        "enabled": false,
+        "boundary": null,
+        "reason": null,
+        "origin": null,
+        "revision": 0
+      },
+      "done": true
+    }
+  },
+  {
+    "name": "override-removed-restores-native",
+    "ok": true,
+    "ms": 2038,
+    "value": {
+      "removed": true,
+      "state": {
+        "cellText": "工作区内修改",
+        "nativeControl": true,
+        "puiPresent": false,
+        "puiDot": null,
+        "options": [],
+        "selected": null
+      },
+      "status": {
+        "ok": true,
+        "status": {
+          "known": true,
+          "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+          "enabled": true,
+          "boundary": "trusted",
+          "reason": null,
+          "origin": "config-page",
+          "revision": 2
+        },
+        "live": [
+          "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+          "session-9c1f1baf-9531-4d95-a4df-282051f87cc3"
+        ]
+      }
+    }
+  }
+]

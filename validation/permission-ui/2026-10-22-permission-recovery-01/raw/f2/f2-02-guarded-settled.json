@@ -1,0 +1,22 @@
+{
+  "last": {
+    "seq": 25,
+    "args": " auto",
+    "done": {
+      "seq": 26,
+      "kind": "error",
+      "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+    }
+  },
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "autoEntry": {
+    "rejected": true,
+    "rejections": 2,
+    "legacyAutoRestores": 0,
+    "registrationError": null
+  }
+}

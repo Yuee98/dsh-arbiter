@@ -1,0 +1,49 @@
+{
+  "entry": "sessions.binding(id).session.command(\"/permission read-only\")",
+  "before": {
+    "effective": {
+      "preset": "workspace-write",
+      "sandbox": "workspace-write",
+      "approval": "ask"
+    },
+    "pending": true
+  },
+  "result": {
+    "ok": true,
+    "value": {
+      "matched": true
+    }
+  },
+  "after": {
+    "effective": {
+      "preset": "read-only",
+      "sandbox": "read-only",
+      "approval": "ask"
+    },
+    "pending": true
+  },
+  "approvals": [
+    {
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "type": "approval/asked",
+      "outcome": null
+    }
+  ],
+  "commands": [
+    {
+      "seq": 29,
+      "type": "command/run",
+      "name": "permission",
+      "args": " read-only"
+    },
+    {
+      "seq": 32,
+      "type": "command/done",
+      "kind": "success",
+      "text": "preset read-only"
+    }
+  ]
+}

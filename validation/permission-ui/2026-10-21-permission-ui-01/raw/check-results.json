@@ -1,0 +1,330 @@
+{
+  "checks": [
+    {
+      "group": "U1",
+      "name": "my selector occupies the slot",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "host read-only option kept",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "host workspace-write option kept",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "host danger-full-access option kept",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "host auto option is not offered by my menu",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "enable via selector entered guarded",
+      "ok": true,
+      "detail": {
+        "known": true,
+        "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+        "enabled": true,
+        "boundary": "guarded",
+        "reason": null,
+        "origin": "client-selector",
+        "revision": 1
+      }
+    },
+    {
+      "group": "U1",
+      "name": "guarded allow wrote inside workspace",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "guarded allow tool result not an error",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "probe deny blocked the call",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "deny marker absent on disk",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "guarded outside write denied by host sandbox",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "plugin allow does not bypass the fs sandbox",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "trusted outside write succeeded",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "boundary change kept the session enabled",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "second session is not enabled",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "second session produced no gate events",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "override removal restores the native control",
+      "ok": true
+    },
+    {
+      "group": "U1",
+      "name": "override removal does not rewrite backend state",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "same-value workspace-write emits no knob events",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "host value genuinely unchanged",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "command/run is logged before the handler",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "same-value command still exits arbiter",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "post-exit calls are not taken over",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "post-exit call ran under the host value",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "read-only switch changes the host value",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "danger-full-access switch changes the host value",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "bare /permission lists the host presets",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "arbiter menu stays separate from host presets",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "/permission auto is accepted while the integration is live",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "auto switches the host bundle to full-access",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "auto exits arbiter (no silent guarded takeover)",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "post-auto call is not gate-decided by arbiter",
+      "ok": true
+    },
+    {
+      "group": "U2",
+      "name": "control run still gated after re-enable",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "page refresh keeps backend state",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "page refresh shows the backend state",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "a second connection can disable while the page is offline",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "reconnect adopts the newer backend state",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "late response does not resurrect the old state",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "cold restart restores enablement",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "restored boundary is re-applied",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "gate is active after restart",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "a new session is not enabled after restart",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "enabled session still enabled after restart",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "restore does not need the audit database",
+      "ok": true
+    },
+    {
+      "group": "U3",
+      "name": "restore re-ran after the audit directory was moved",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "client override removal keeps backend enablement",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "client override removal restores the native control",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "slow review was really in flight at unload",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "unload waited for the in-flight review",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "plugin did not cancel its own review",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "in-flight call completed with its effect",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "rollback happened only after the drain",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "unload rolled the managed session to workspace-write",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "unloaded plugin releases its routes",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "reopened session loads (ignorable records only)",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "rollback is durable after reopen",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "reopened session is not re-enabled",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "user-switched session is skipped on unload",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "user-chosen read-only is preserved",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "pending approval is not auto-approved or denied by the switch",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "switch during a pending approval succeeds",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "approval request stays recorded as asked",
+      "ok": true
+    },
+    {
+      "group": "U4",
+      "name": "arbiter exits when the user switches during an approval",
+      "ok": true
+    }
+  ],
+  "passed": 63,
+  "failed": 0
+}

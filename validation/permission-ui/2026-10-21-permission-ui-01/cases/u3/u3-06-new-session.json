@@ -1,0 +1,23 @@
+{
+  "ids": [
+    "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "session-85f11264-6ab9-477f-8527-21d5a619c78e"
+  ],
+  "fresh": "session-85f11264-6ab9-477f-8527-21d5a619c78e",
+  "freshStatus": {
+    "sessionId": "session-85f11264-6ab9-477f-8527-21d5a619c78e",
+    "enabled": false,
+    "boundary": null,
+    "reason": null,
+    "origin": null,
+    "revision": 0
+  },
+  "enabledStatus": {
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": "late-response-probe",
+    "origin": "client-selector",
+    "revision": 5
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "caseId": "force-ask-strict",
+  "title": "force-ask in strict mode ends as fallback-deny without a reviewer",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:16.992Z",
+  "elapsedMs": 365,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": false
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 110592,
+    "calls": [
+      {
+        "call_id": "fixture-session-3714e2c6-f8a0-439e-9357-010133d248db-0-0",
+        "session_kind": "main",
+        "result": "fallback-deny",
+        "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "force-ask",
+            "ruleId": "echo-ask",
+            "configRevision": "692299c76a2e",
+            "at": 1792570516962
+          },
+          {
+            "stage": "fallback",
+            "result": "fallback-deny",
+            "reason": "automatic_mode_no_human",
+            "at": 1792570516962
+          }
+        ],
+        "execution_status": "not-started",
+        "approval_mode": "strict",
+        "signals": null
+      }
+    ],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:16.959Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+    },
+    {
+      "at": "2026-10-21T08:15:16.959Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+    },
+    {
+      "at": "2026-10-21T08:15:16.971Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-ask-strict/sessions/session-3714e2c6-f8a0-439e-9357-010133d248db__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "strict",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "echo-ask",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^echo"
+        },
+        "verdict": "force-ask"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 110592
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-e0001c00.json",
+      "bytes": 1915
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2204
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-strict-ws--/session-3714e2c6-f8a0-439e-9357-010133d248db/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-strict-ws--/session-3714e2c6-f8a0-439e-9357-010133d248db/session.v4.jsonl.zstd",
+      "bytes": 15143
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-3714e2c6-f8a0-439e-9357-010133d248db.json",
+      "bytes": 4093
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 380
+    },
+    {
+      "path": "sessions/session-3714e2c6-f8a0-439e-9357-010133d248db__session.v4.jsonl.zstd",
+      "bytes": 15143
+    }
+  ]
+}

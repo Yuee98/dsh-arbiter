@@ -1,0 +1,14 @@
+{
+  "autoEntry": {
+    "rejected": true,
+    "rejections": 0,
+    "legacyAutoRestores": 0,
+    "registrationError": null
+  },
+  "sessionRecords": {
+    "ready": true,
+    "error": null,
+    "failures": []
+  },
+  "enabled": true
+}

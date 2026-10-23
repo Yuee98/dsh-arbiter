@@ -1,0 +1,17 @@
+{
+  "decisions": [
+    {
+      "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+      "seq": 19,
+      "ignorable": true,
+      "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+      "tool": "bash",
+      "result": "review-allow",
+      "trace": [
+        "review(default)",
+        "review-allow"
+      ]
+    }
+  ],
+  "nonIgnorablePluginEvents": []
+}

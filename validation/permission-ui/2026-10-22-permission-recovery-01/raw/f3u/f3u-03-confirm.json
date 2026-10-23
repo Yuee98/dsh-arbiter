@@ -1,0 +1,10 @@
+{
+  "clicked": {
+    "ok": true
+  },
+  "confirmed": {
+    "ok": true,
+    "inDialog": true,
+    "label": "卸载"
+  }
+}

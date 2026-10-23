@@ -1,0 +1,2573 @@
+[
+  {
+    "caseId": "allow-rule",
+    "title": "A complete allow rule short-circuits review",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:15.076Z",
+    "elapsedMs": 393,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-7c5293bc-a066-4ef9-829a-cb624dad33f5-0-0",
+          "session_kind": "main",
+          "result": "allow",
+          "reason": "Arbiter: a complete allow rule covered this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "allow",
+              "ruleId": "echo-allow",
+              "configRevision": "10cee9973db7",
+              "at": 1792570515037
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:15.034Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+      },
+      {
+        "at": "2026-10-21T08:15:15.034Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+      },
+      {
+        "at": "2026-10-21T08:15:15.052Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-7c5293bc-a066-4ef9-829a-cb624dad33f5"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/allow-rule/sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-allow",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "allow"
+        },
+        {
+          "id": "workspace-writes",
+          "match": {
+            "node": "file_redirect",
+            "kind": "glob",
+            "pattern": "{{WORKSPACE}}/**"
+          },
+          "verdict": "allow"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-73b9daab.json",
+        "bytes": 2197
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2546
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-allow-rule-ws--/session-7c5293bc-a066-4ef9-829a-cb624dad33f5/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-allow-rule-ws--/session-7c5293bc-a066-4ef9-829a-cb624dad33f5/session.v4.jsonl.zstd",
+        "bytes": 15504
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5.json",
+        "bytes": 4081
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-7c5293bc-a066-4ef9-829a-cb624dad33f5__session.v4.jsonl.zstd",
+        "bytes": 15504
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "deny-rule",
+    "title": "A deny rule blocks the call without a reviewer",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:15.450Z",
+    "elapsedMs": 371,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf-0-0",
+          "session_kind": "main",
+          "result": "deny",
+          "reason": "Not executed [deny-rule]: a deny command rule matched this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "deny",
+              "ruleId": "echo-deny",
+              "configRevision": "e333f70adedc",
+              "at": 1792570515418
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "normal",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:15.415Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+      },
+      {
+        "at": "2026-10-21T08:15:15.416Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+      },
+      {
+        "at": "2026-10-21T08:15:15.427Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/deny-rule/sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-deny",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "deny"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-f5af067c.json",
+        "bytes": 1911
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2186
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-deny-rule-ws--/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-deny-rule-ws--/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf/session.v4.jsonl.zstd",
+        "bytes": 15088
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf.json",
+        "bytes": 4079
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf__session.v4.jsonl.zstd",
+        "bytes": 15088
+      }
+    ]
+  },
+  {
+    "caseId": "review-allow",
+    "title": "Real reviewer signals produce review-allow",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:15.861Z",
+    "elapsedMs": 409,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-7eea8561-3a0e-4042-a362-9d250fe5af45-0-0",
+          "session_kind": "main",
+          "result": "review-allow",
+          "reason": "Arbiter: the review allowed this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570515819
+            },
+            {
+              "stage": "review",
+              "result": "review-allow",
+              "reason": "ordinary low-risk action",
+              "decisionRules": [
+                "R7"
+              ],
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570515821
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 1,
+            "riskScore": null,
+            "riskClass": "low",
+            "authDist": null,
+            "authPoint": 8,
+            "authClass": "explicit",
+            "secrets": false,
+            "destructive": false,
+            "egress": false,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-7eea8561-3a0e-4042-a362-9d250fe5af45-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:15.821Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-allow/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_truncated\": fal",
+        "reply": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:15.817Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+      },
+      {
+        "at": "2026-10-21T08:15:15.817Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+      },
+      {
+        "at": "2026-10-21T08:15:15.837Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-allow/sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        {
+          "risk": 1,
+          "authorized": 8,
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-a79389bd.json",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 1943
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-allow-ws--/session-7eea8561-3a0e-4042-a362-9d250fe5af45/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-allow-ws--/session-7eea8561-3a0e-4042-a362-9d250fe5af45/session.v4.jsonl.zstd",
+        "bytes": 15508
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45.json",
+        "bytes": 4085
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 825
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 530
+      },
+      {
+        "path": "sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45__session.v4.jsonl.zstd",
+        "bytes": 15508
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "review-deny",
+    "title": "Critical reviewer signals produce review-deny",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:16.246Z",
+    "elapsedMs": 383,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31-0-0",
+          "session_kind": "main",
+          "result": "review-deny",
+          "reason": "Not executed [review-deny]: critical risk of irreversible damage.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570516214
+            },
+            {
+              "stage": "review",
+              "result": "review-deny",
+              "reason": "critical risk of irreversible damage",
+              "decisionRules": [
+                "R2"
+              ],
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570516216
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 10,
+            "riskScore": null,
+            "riskClass": "high",
+            "authDist": null,
+            "authPoint": 9,
+            "authClass": "explicit",
+            "secrets": false,
+            "destructive": true,
+            "egress": false,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":10,\"authorized\":9,\"secrets\":false,\"destructive\":true,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":10,\"authorized\":9,\"secrets\":false,\"destructive\":true,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:16.215Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-deny/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_truncated\": fals",
+        "reply": "{\"risk\":10,\"authorized\":9,\"secrets\":false,\"destructive\":true,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:16.212Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31"
+      },
+      {
+        "at": "2026-10-21T08:15:16.212Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31"
+      },
+      {
+        "at": "2026-10-21T08:15:16.224Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-deny/sessions/session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        {
+          "risk": 10,
+          "authorized": 9,
+          "secrets": false,
+          "destructive": true,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-005dd082.json",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 1941
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-deny-ws--/session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-deny-ws--/session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31/session.v4.jsonl.zstd",
+        "bytes": 15112
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31.json",
+        "bytes": 4083
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 825
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 530
+      },
+      {
+        "path": "sessions/session-736d7522-d7e4-45cb-8beb-7ae9c5aebc31__session.v4.jsonl.zstd",
+        "bytes": 15112
+      }
+    ]
+  },
+  {
+    "caseId": "review-error-fallback",
+    "title": "Malformed reviewer output escalates and strict mode falls back to deny",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:16.625Z",
+    "elapsedMs": 377,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 126976,
+      "calls": [
+        {
+          "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+          "session_kind": "main",
+          "result": "fallback-deny",
+          "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "7a836ea448f8",
+              "at": 1792570516592
+            },
+            {
+              "stage": "review",
+              "result": "error-escalate",
+              "reason": "reviewer output remained invalid after 2 attempts: reviewer output is not valid JSON: Unexpected token 's', \"still not json\" is not valid JSON",
+              "configRevision": "7a836ea448f8",
+              "at": 1792570516594
+            },
+            {
+              "stage": "fallback",
+              "result": "fallback-deny",
+              "reason": "automatic_mode_no_human",
+              "at": 1792570516594
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "strict",
+          "signals": null
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": "reviewer output is not valid JSON: Unexpected token 'o', \"not json\" is not valid JSON",
+          "response_text": "not json",
+          "parsed": null
+        },
+        {
+          "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+          "attempt": 2,
+          "backend": "chat",
+          "error": "reviewer output is not valid JSON: Unexpected token 's', \"still not json\" is not valid JSON",
+          "response_text": "still not json",
+          "parsed": null
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:16.593Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_trunca",
+        "reply": "not json"
+      },
+      {
+        "at": "2026-10-21T08:15:16.594Z",
+        "index": 1,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_trunca",
+        "reply": "still not json"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:16.590Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+      },
+      {
+        "at": "2026-10-21T08:15:16.590Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+      },
+      {
+        "at": "2026-10-21T08:15:16.602Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/sessions/session-d01bd389-b989-4042-87ea-663233a57916__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "strict",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        "not json",
+        "still not json"
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 126976
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-70860d9d.json",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 1961
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-error-fallback-ws--/session-d01bd389-b989-4042-87ea-663233a57916/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-error-fallback-ws--/session-d01bd389-b989-4042-87ea-663233a57916/session.v4.jsonl.zstd",
+        "bytes": 15152
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-d01bd389-b989-4042-87ea-663233a57916.json",
+        "bytes": 4103
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 1468
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 420
+      },
+      {
+        "path": "sessions/session-d01bd389-b989-4042-87ea-663233a57916__session.v4.jsonl.zstd",
+        "bytes": 15152
+      }
+    ]
+  },
+  {
+    "caseId": "force-ask-strict",
+    "title": "force-ask in strict mode ends as fallback-deny without a reviewer",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:16.992Z",
+    "elapsedMs": 365,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-3714e2c6-f8a0-439e-9357-010133d248db-0-0",
+          "session_kind": "main",
+          "result": "fallback-deny",
+          "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "force-ask",
+              "ruleId": "echo-ask",
+              "configRevision": "692299c76a2e",
+              "at": 1792570516962
+            },
+            {
+              "stage": "fallback",
+              "result": "fallback-deny",
+              "reason": "automatic_mode_no_human",
+              "at": 1792570516962
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "strict",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:16.959Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+      },
+      {
+        "at": "2026-10-21T08:15:16.959Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+      },
+      {
+        "at": "2026-10-21T08:15:16.971Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-3714e2c6-f8a0-439e-9357-010133d248db"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-ask-strict/sessions/session-3714e2c6-f8a0-439e-9357-010133d248db__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "strict",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-ask",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "force-ask"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-e0001c00.json",
+        "bytes": 1915
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2204
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-strict-ws--/session-3714e2c6-f8a0-439e-9357-010133d248db/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-strict-ws--/session-3714e2c6-f8a0-439e-9357-010133d248db/session.v4.jsonl.zstd",
+        "bytes": 15143
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-3714e2c6-f8a0-439e-9357-010133d248db.json",
+        "bytes": 4093
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-3714e2c6-f8a0-439e-9357-010133d248db__session.v4.jsonl.zstd",
+        "bytes": 15143
+      }
+    ]
+  },
+  {
+    "caseId": "force-review-shadow",
+    "title": "force-review shadows an allow and still reaches the reviewer",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:17.377Z",
+    "elapsedMs": 383,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19-0-0",
+          "session_kind": "main",
+          "result": "review-allow",
+          "reason": "Arbiter: the review allowed this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "force-review",
+              "ruleId": "echo-review",
+              "configRevision": "bfa098f5b18b",
+              "at": 1792570517338
+            },
+            {
+              "stage": "review",
+              "result": "review-allow",
+              "reason": "ordinary low-risk action",
+              "decisionRules": [
+                "R7"
+              ],
+              "configRevision": "bfa098f5b18b",
+              "at": 1792570517340
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 2,
+            "riskScore": null,
+            "riskClass": "low",
+            "authDist": null,
+            "authPoint": 7,
+            "authClass": "implied",
+            "secrets": false,
+            "destructive": false,
+            "egress": false,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":2,\"authorized\":7,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":2,\"authorized\":7,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:17.339Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-review-shadow/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_truncate",
+        "reply": "{\"risk\":2,\"authorized\":7,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:17.335Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19"
+      },
+      {
+        "at": "2026-10-21T08:15:17.335Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19"
+      },
+      {
+        "at": "2026-10-21T08:15:17.356Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-review-shadow/sessions/session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-allow",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "allow"
+        },
+        {
+          "id": "echo-review",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "force-review"
+        },
+        {
+          "id": "workspace-writes",
+          "match": {
+            "node": "file_redirect",
+            "kind": "glob",
+            "pattern": "{{WORKSPACE}}/**"
+          },
+          "verdict": "allow"
+        }
+      ],
+      "reviewerScript": [
+        {
+          "risk": 2,
+          "authorized": 7,
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-36deefea.json",
+        "bytes": 2383
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2822
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-review-shadow-ws--/session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-review-shadow-ws--/session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19/session.v4.jsonl.zstd",
+        "bytes": 15519
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19.json",
+        "bytes": 4099
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 824
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 530
+      },
+      {
+        "path": "sessions/session-5a6ae2a4-01ff-462a-ac73-acbb7d048b19__session.v4.jsonl.zstd",
+        "bytes": 15519
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "audit-unavailable",
+    "title": "Audit storage failure does not change the permission result",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:17.751Z",
+    "elapsedMs": 372,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": false,
+      "calls": [],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:17.712Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+      },
+      {
+        "at": "2026-10-21T08:15:17.712Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+      },
+      {
+        "at": "2026-10-21T08:15:17.730Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/audit-unavailable/sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-allow",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "allow"
+        },
+        {
+          "id": "workspace-writes",
+          "match": {
+            "node": "file_redirect",
+            "kind": "glob",
+            "pattern": "{{WORKSPACE}}/**"
+          },
+          "verdict": "allow"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter",
+        "bytes": 15
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2567
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-audit-unavailable-ws--/session-e0f722d3-da82-42e5-afd3-01bce20b03ac/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-audit-unavailable-ws--/session-e0f722d3-da82-42e5-afd3-01bce20b03ac/session.v4.jsonl.zstd",
+        "bytes": 15504
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac.json",
+        "bytes": 4095
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac__session.v4.jsonl.zstd",
+        "bytes": 15504
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "force-ask-human-allow",
+    "title": "force-ask in normal mode maps a simulated allowed-once answer to human-allow",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:18.130Z",
+    "elapsedMs": 377,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-609c102a-0eb7-46d9-897a-8e4ab4027b63-0-0",
+          "session_kind": "main",
+          "result": "human-allow",
+          "reason": "Arbiter: the user approved this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "force-ask",
+              "ruleId": "echo-ask",
+              "configRevision": "855d456c9095",
+              "at": 1792570518094
+            },
+            {
+              "stage": "human",
+              "result": "human-allow",
+              "reason": "human_approved",
+              "at": 1792570518094
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:18.091Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-609c102a-0eb7-46d9-897a-8e4ab4027b63"
+      },
+      {
+        "at": "2026-10-21T08:15:18.091Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-609c102a-0eb7-46d9-897a-8e4ab4027b63"
+      },
+      {
+        "at": "2026-10-21T08:15:18.109Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-609c102a-0eb7-46d9-897a-8e4ab4027b63"
+      }
+    ],
+    "approvalSim": [
+      {
+        "event": "approval-sim/mounted",
+        "outcome": "allowed-once",
+        "simulated": true,
+        "at": "2026-10-21T08:15:17.993Z"
+      },
+      {
+        "event": "approval-sim/answer",
+        "outcome": "allowed-once",
+        "toolName": "bash",
+        "callId": "fixture-session-609c102a-0eb7-46d9-897a-8e4ab4027b63-0-0",
+        "reason": "force-ask requires a human decision for this call.",
+        "agentSessionId": "session-609c102a-0eb7-46d9-897a-8e4ab4027b63",
+        "simulated": true,
+        "at": "2026-10-21T08:15:18.094Z"
+      }
+    ],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-ask-human-allow/sessions/session-609c102a-0eb7-46d9-897a-8e4ab4027b63__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-ask",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "force-ask"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "approval-sim.jsonl",
+        "bytes": 425
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-39b97fd8.json",
+        "bytes": 1915
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2632
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-allow-ws--/session-609c102a-0eb7-46d9-897a-8e4ab4027b63/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-allow-ws--/session-609c102a-0eb7-46d9-897a-8e4ab4027b63/session.v4.jsonl.zstd",
+        "bytes": 15631
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-609c102a-0eb7-46d9-897a-8e4ab4027b63.json",
+        "bytes": 4103
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-609c102a-0eb7-46d9-897a-8e4ab4027b63__session.v4.jsonl.zstd",
+        "bytes": 15631
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "force-ask-human-deny",
+    "title": "force-ask in normal mode maps a simulated rejection to human-deny",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:18.512Z",
+    "elapsedMs": 380,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-18e4ede1-1fac-481a-ad78-52a90d5004c5-0-0",
+          "session_kind": "main",
+          "result": "human-deny",
+          "reason": "Not executed [human-deny]: the user rejected this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "force-ask",
+              "ruleId": "echo-ask",
+              "configRevision": "855d456c9095",
+              "at": 1792570518480
+            },
+            {
+              "stage": "human",
+              "result": "human-deny",
+              "reason": "human_rejected",
+              "at": 1792570518480
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "normal",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:18.477Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+      },
+      {
+        "at": "2026-10-21T08:15:18.478Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+      },
+      {
+        "at": "2026-10-21T08:15:18.490Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5"
+      }
+    ],
+    "approvalSim": [
+      {
+        "event": "approval-sim/mounted",
+        "outcome": "rejected",
+        "simulated": true,
+        "at": "2026-10-21T08:15:18.381Z"
+      },
+      {
+        "event": "approval-sim/answer",
+        "outcome": "rejected",
+        "toolName": "bash",
+        "callId": "fixture-session-18e4ede1-1fac-481a-ad78-52a90d5004c5-0-0",
+        "reason": "force-ask requires a human decision for this call.",
+        "agentSessionId": "session-18e4ede1-1fac-481a-ad78-52a90d5004c5",
+        "simulated": true,
+        "at": "2026-10-21T08:15:18.480Z"
+      }
+    ],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-ask-human-deny/sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "echo-ask",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^echo"
+          },
+          "verdict": "force-ask"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "approval-sim.jsonl",
+        "bytes": 417
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-d30205a1.json",
+        "bytes": 1915
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2625
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-deny-ws--/session-18e4ede1-1fac-481a-ad78-52a90d5004c5/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-force-ask-human-deny-ws--/session-18e4ede1-1fac-481a-ad78-52a90d5004c5/session.v4.jsonl.zstd",
+        "bytes": 15220
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5.json",
+        "bytes": 4101
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 380
+      },
+      {
+        "path": "sessions/session-18e4ede1-1fac-481a-ad78-52a90d5004c5__session.v4.jsonl.zstd",
+        "bytes": 15220
+      }
+    ]
+  },
+  {
+    "caseId": "review-escalate-human-allow",
+    "title": "A review escalation reaches the human seam and can be approved",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:18.889Z",
+    "elapsedMs": 376,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "ARBITER_MARKER\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-b615da14-6af0-436c-97b9-fadab9b1ae6c-0-0",
+          "session_kind": "main",
+          "result": "human-allow",
+          "reason": "Arbiter: the user approved this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570518848
+            },
+            {
+              "stage": "review",
+              "result": "review-escalate",
+              "reason": "authorization is insufficient (authPoint=2 (needs >=8))",
+              "decisionRules": [
+                "R3"
+              ],
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570518850
+            },
+            {
+              "stage": "human",
+              "result": "human-allow",
+              "reason": "human_approved",
+              "at": 1792570518850
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 6,
+            "riskScore": null,
+            "riskClass": "medium",
+            "authDist": null,
+            "authPoint": 2,
+            "authClass": "none",
+            "secrets": false,
+            "destructive": false,
+            "egress": false,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-b615da14-6af0-436c-97b9-fadab9b1ae6c-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:18.849Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-escalate-human-allow/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_",
+        "reply": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:18.846Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-b615da14-6af0-436c-97b9-fadab9b1ae6c"
+      },
+      {
+        "at": "2026-10-21T08:15:18.846Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-b615da14-6af0-436c-97b9-fadab9b1ae6c"
+      },
+      {
+        "at": "2026-10-21T08:15:18.865Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-b615da14-6af0-436c-97b9-fadab9b1ae6c"
+      }
+    ],
+    "approvalSim": [
+      {
+        "event": "approval-sim/mounted",
+        "outcome": "allowed-once",
+        "simulated": true,
+        "at": "2026-10-21T08:15:18.749Z"
+      },
+      {
+        "event": "approval-sim/answer",
+        "outcome": "allowed-once",
+        "toolName": "bash",
+        "callId": "fixture-session-b615da14-6af0-436c-97b9-fadab9b1ae6c-0-0",
+        "reason": "review requires a human decision: no sufficient authorization was found",
+        "agentSessionId": "session-b615da14-6af0-436c-97b9-fadab9b1ae6c",
+        "simulated": true,
+        "at": "2026-10-21T08:15:18.850Z"
+      }
+    ],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-escalate-human-allow/sessions/session-b615da14-6af0-436c-97b9-fadab9b1ae6c__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        {
+          "risk": 6,
+          "authorized": 2,
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "approval-sim.jsonl",
+        "bytes": 446
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-406c309c.json",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2397
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-escalate-human-allow-ws--/session-b615da14-6af0-436c-97b9-fadab9b1ae6c/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-escalate-human-allow-ws--/session-b615da14-6af0-436c-97b9-fadab9b1ae6c/session.v4.jsonl.zstd",
+        "bytes": 15675
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-b615da14-6af0-436c-97b9-fadab9b1ae6c.json",
+        "bytes": 4115
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 824
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 530
+      },
+      {
+        "path": "sessions/session-b615da14-6af0-436c-97b9-fadab9b1ae6c__session.v4.jsonl.zstd",
+        "bytes": 15675
+      },
+      {
+        "path": "ws/marker.txt",
+        "bytes": 15
+      }
+    ]
+  },
+  {
+    "caseId": "review-escalate-human-abort",
+    "title": "A cancelled approval becomes human-abort, not human-deny",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:19.263Z",
+    "elapsedMs": 372,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-71c6d17b-e1af-42fa-b18e-44572b02b866-0-0",
+          "session_kind": "main",
+          "result": "human-abort",
+          "reason": "Not executed [human-abort]: the approval ended without a grant or denial.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570519230
+            },
+            {
+              "stage": "review",
+              "result": "review-escalate",
+              "reason": "authorization is insufficient (authPoint=2 (needs >=8))",
+              "decisionRules": [
+                "R3"
+              ],
+              "configRevision": "78ca2a3f9522",
+              "at": 1792570519232
+            },
+            {
+              "stage": "human",
+              "result": "human-abort",
+              "reason": "approval_cancelled",
+              "at": 1792570519232
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 6,
+            "riskScore": null,
+            "riskClass": "medium",
+            "authDist": null,
+            "authPoint": 2,
+            "authClass": "none",
+            "secrets": false,
+            "destructive": false,
+            "egress": false,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-71c6d17b-e1af-42fa-b18e-44572b02b866-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:19.232Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-escalate-human-abort/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_",
+        "reply": "{\"risk\":6,\"authorized\":2,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:19.228Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-71c6d17b-e1af-42fa-b18e-44572b02b866"
+      },
+      {
+        "at": "2026-10-21T08:15:19.228Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-71c6d17b-e1af-42fa-b18e-44572b02b866"
+      },
+      {
+        "at": "2026-10-21T08:15:19.241Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-71c6d17b-e1af-42fa-b18e-44572b02b866"
+      }
+    ],
+    "approvalSim": [
+      {
+        "event": "approval-sim/mounted",
+        "outcome": "cancelled",
+        "simulated": true,
+        "at": "2026-10-21T08:15:19.130Z"
+      },
+      {
+        "event": "approval-sim/answer",
+        "outcome": "cancelled",
+        "toolName": "bash",
+        "callId": "fixture-session-71c6d17b-e1af-42fa-b18e-44572b02b866-0-0",
+        "reason": "review requires a human decision: no sufficient authorization was found",
+        "agentSessionId": "session-71c6d17b-e1af-42fa-b18e-44572b02b866",
+        "simulated": true,
+        "at": "2026-10-21T08:15:19.232Z"
+      }
+    ],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-escalate-human-abort/sessions/session-71c6d17b-e1af-42fa-b18e-44572b02b866__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        {
+          "risk": 6,
+          "authorized": 2,
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "approval-sim.jsonl",
+        "bytes": 440
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-d72e9cd5.json",
+        "bytes": 1742
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2394
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-escalate-human-abort-ws--/session-71c6d17b-e1af-42fa-b18e-44572b02b866/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-escalate-human-abort-ws--/session-71c6d17b-e1af-42fa-b18e-44572b02b866/session.v4.jsonl.zstd",
+        "bytes": 15261
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-71c6d17b-e1af-42fa-b18e-44572b02b866.json",
+        "bytes": 4115
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 824
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 530
+      },
+      {
+        "path": "sessions/session-71c6d17b-e1af-42fa-b18e-44572b02b866__session.v4.jsonl.zstd",
+        "bytes": 15261
+      }
+    ]
+  },
+  {
+    "caseId": "subagent-allow",
+    "title": "A parent subagent delegation and the child's own tool call are both gated",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:19.701Z",
+    "elapsedMs": 436,
+    "exitCode": 0,
+    "stdout": "[fixture] out of scripted steps\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": true,
+      "content": "CHILD-ALLOW\n"
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 110592,
+      "calls": [
+        {
+          "call_id": "fixture-session-5a80c1ce-30a7-4866-bdae-8a43e1896d15-0-0",
+          "session_kind": "main",
+          "result": "allow",
+          "reason": "Arbiter: a complete allow rule covered this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "allow",
+              "ruleId": "subagent-allow-tool",
+              "configRevision": "529dd53f7b5e",
+              "at": 1792570519611
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "normal",
+          "signals": null
+        },
+        {
+          "call_id": "fixture-cacb734e-41fc-4c50-b785-6ffcdf534c2f-0-2",
+          "session_kind": "subagent",
+          "result": "allow",
+          "reason": "Arbiter: a complete allow rule covered this call.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "allow",
+              "ruleId": "child-printf",
+              "configRevision": "529dd53f7b5e",
+              "at": 1792570519642
+            }
+          ],
+          "execution_status": "success",
+          "approval_mode": "strict",
+          "signals": null
+        }
+      ],
+      "modelCalls": [],
+      "candidates": []
+    },
+    "reviewerRequests": [],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:19.609Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+      },
+      {
+        "at": "2026-10-21T08:15:19.609Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+      },
+      {
+        "at": "2026-10-21T08:15:19.632Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+      },
+      {
+        "at": "2026-10-21T08:15:19.640Z",
+        "route": "ARBITER-CHILD",
+        "index": 0,
+        "sessionId": "cacb734e-41fc-4c50-b785-6ffcdf534c2f"
+      },
+      {
+        "at": "2026-10-21T08:15:19.655Z",
+        "route": "ARBITER-CHILD",
+        "index": 1,
+        "sessionId": "cacb734e-41fc-4c50-b785-6ffcdf534c2f"
+      },
+      {
+        "at": "2026-10-21T08:15:19.665Z",
+        "route": "default",
+        "index": 2,
+        "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/subagent-allow/sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f__session.v4.jsonl.zstd",
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/subagent-allow/sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [
+        {
+          "id": "subagent-allow-tool",
+          "match": {
+            "node": "tool",
+            "kind": "exact",
+            "pattern": "subagent",
+            "tool": "subagent"
+          },
+          "verdict": "allow"
+        },
+        {
+          "id": "child-printf",
+          "match": {
+            "node": "command",
+            "kind": "regex",
+            "pattern": "^printf"
+          },
+          "verdict": "allow"
+        },
+        {
+          "id": "workspace-writes",
+          "match": {
+            "node": "file_redirect",
+            "kind": "glob",
+            "pattern": "{{WORKSPACE}}/**"
+          },
+          "verdict": "allow"
+        }
+      ],
+      "reviewerScript": []
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 722
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 110592
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-05a1e6f8.json",
+        "bytes": 2411
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2848
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/cacb734e-41fc-4c50-b785-6ffcdf534c2f/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/cacb734e-41fc-4c50-b785-6ffcdf534c2f/session.v4.jsonl.zstd",
+        "bytes": 15812
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15/session.v4.jsonl.zstd",
+        "bytes": 16217
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f.json",
+        "bytes": 4755
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15.json",
+        "bytes": 4418
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 805
+      },
+      {
+        "path": "sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f__session.v4.jsonl.zstd",
+        "bytes": 15812
+      },
+      {
+        "path": "sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15__session.v4.jsonl.zstd",
+        "bytes": 16217
+      },
+      {
+        "path": "ws/child-marker.txt",
+        "bytes": 12
+      }
+    ]
+  },
+  {
+    "caseId": "probe-override",
+    "title": "probeMode override turns observed credential plus network facts into a fixed deny",
+    "task": "write the integration marker",
+    "startedAt": "2026-10-21T08:15:20.073Z",
+    "elapsedMs": 370,
+    "exitCode": 0,
+    "stdout": "done\n",
+    "stderrTail": "",
+    "marker": {
+      "exists": false
+    },
+    "audit": {
+      "exists": true,
+      "bytes": 114688,
+      "calls": [
+        {
+          "call_id": "fixture-session-d900699c-3841-4678-abc2-eba84f46d3e7-0-0",
+          "session_kind": "main",
+          "result": "review-deny",
+          "reason": "Not executed [review-deny]: sensitive material would leave the machine.",
+          "trace": [
+            {
+              "stage": "rule",
+              "result": "review(default)",
+              "reason": "no-match",
+              "configRevision": "28166f4579b8",
+              "at": 1792570520038
+            },
+            {
+              "stage": "review",
+              "result": "review-deny",
+              "reason": "sensitive material leaves the machine across a trust boundary",
+              "decisionRules": [
+                "R1"
+              ],
+              "configRevision": "28166f4579b8",
+              "at": 1792570520040
+            }
+          ],
+          "execution_status": "not-started",
+          "approval_mode": "normal",
+          "signals": {
+            "riskDist": null,
+            "riskPoint": 1,
+            "riskScore": null,
+            "riskClass": "low",
+            "authDist": null,
+            "authPoint": 8,
+            "authClass": "explicit",
+            "secrets": true,
+            "destructive": false,
+            "egress": true,
+            "bulk": false,
+            "source": "chat",
+            "repairs": 0
+          }
+        }
+      ],
+      "modelCalls": [
+        {
+          "call_id": "fixture-session-d900699c-3841-4678-abc2-eba84f46d3e7-0-0",
+          "attempt": 1,
+          "backend": "chat",
+          "error": null,
+          "response_text": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+          "parsed": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+        }
+      ],
+      "candidates": []
+    },
+    "reviewerRequests": [
+      {
+        "at": "2026-10-21T08:15:20.039Z",
+        "index": 0,
+        "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+        "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/probe-override/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_truncated\": f",
+        "reply": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "agentRequests": [
+      {
+        "at": "2026-10-21T08:15:20.035Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-d900699c-3841-4678-abc2-eba84f46d3e7"
+      },
+      {
+        "at": "2026-10-21T08:15:20.036Z",
+        "route": "default",
+        "index": 0,
+        "sessionId": "session-d900699c-3841-4678-abc2-eba84f46d3e7"
+      },
+      {
+        "at": "2026-10-21T08:15:20.049Z",
+        "route": "default",
+        "index": 1,
+        "sessionId": "session-d900699c-3841-4678-abc2-eba84f46d3e7"
+      }
+    ],
+    "approvalSim": [],
+    "sessionLogs": [
+      "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/probe-override/sessions/session-d900699c-3841-4678-abc2-eba84f46d3e7__session.v4.jsonl.zstd"
+    ],
+    "profile": {
+      "mode": "normal",
+      "subagentMode": "strict",
+      "approvalPolicy": "ask",
+      "sandbox": "danger-full-access",
+      "toolsMode": "native",
+      "rules": [],
+      "reviewerScript": [
+        {
+          "risk": 1,
+          "authorized": 8,
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "agent-requests.jsonl",
+        "bytes": 363
+      },
+      {
+        "path": "home/arbiter/arbiter.db",
+        "bytes": 114688
+      },
+      {
+        "path": "home/arbiter/arbiter.db-shm",
+        "bytes": 32768
+      },
+      {
+        "path": "home/arbiter/arbiter.db-wal",
+        "bytes": 0
+      },
+      {
+        "path": "home/arbiter/last-good/arbiter-it-d9462b0e.json",
+        "bytes": 1744
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.patch.yml",
+        "bytes": 2018
+      },
+      {
+        "path": "home/profiles/arbiter-it/cordis.yml",
+        "bytes": 223
+      },
+      {
+        "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+        "bytes": 960
+      },
+      {
+        "path": "home/profiles/arbiter-it/package.json",
+        "bytes": 278
+      },
+      {
+        "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+        "bytes": 13
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-probe-override-ws--/session-d900699c-3841-4678-abc2-eba84f46d3e7/session.lock",
+        "bytes": 0
+      },
+      {
+        "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-probe-override-ws--/session-d900699c-3841-4678-abc2-eba84f46d3e7/session.v4.jsonl.zstd",
+        "bytes": 15060
+      },
+      {
+        "path": "home/storages/session_projcache/sessions/session-d900699c-3841-4678-abc2-eba84f46d3e7.json",
+        "bytes": 4089
+      },
+      {
+        "path": "reviewer-requests.jsonl",
+        "bytes": 825
+      },
+      {
+        "path": "scenario.json",
+        "bytes": 532
+      },
+      {
+        "path": "sessions/session-d900699c-3841-4678-abc2-eba84f46d3e7__session.v4.jsonl.zstd",
+        "bytes": 15060
+      }
+    ]
+  }
+]

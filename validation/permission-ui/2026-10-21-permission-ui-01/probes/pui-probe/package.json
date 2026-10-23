@@ -1,0 +1,25 @@
+{
+  "name": "pui-probe",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": { "default": "./index.js" },
+    "./client": { "default": "./client.js" },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-gateway"
+      ]
+    }
+  }
+}

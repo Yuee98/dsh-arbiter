@@ -1,0 +1,17 @@
+{
+  "effective": {
+    "preset": "danger-full-access",
+    "sandbox": "danger-full-access",
+    "approval": "never"
+  },
+  "header": {
+    "type": "session",
+    "version": 4,
+    "id": "session-7279c3b6-c0ae-49f8-ab76-ca21d6ad9b9b",
+    "createdAt": 1792650635153,
+    "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f6/ws",
+    "isSeeded": false,
+    "delegationDepth": 0,
+    "agentPreset": "standard"
+  }
+}

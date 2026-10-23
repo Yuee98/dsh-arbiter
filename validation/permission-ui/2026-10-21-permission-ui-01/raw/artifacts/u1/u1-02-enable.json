@@ -1,0 +1,74 @@
+{
+  "on": true,
+  "status": {
+    "ok": true,
+    "status": {
+      "known": true,
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "enabled": true,
+      "boundary": "guarded",
+      "reason": null,
+      "origin": "client-selector",
+      "revision": 1
+    },
+    "live": [
+      "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d"
+    ]
+  },
+  "sessionEvents": {
+    "ok": true,
+    "seq": 6,
+    "events": [
+      {
+        "seq": 0,
+        "type": "permission/preset",
+        "data": {
+          "preset": "workspace-write"
+        },
+        "ignorable": false
+      },
+      {
+        "seq": 1,
+        "type": "sandbox/mode",
+        "data": {
+          "mode": "workspace-write"
+        },
+        "ignorable": false
+      },
+      {
+        "seq": 2,
+        "type": "approval/policy",
+        "data": {
+          "policy": "ask"
+        },
+        "ignorable": false
+      },
+      {
+        "seq": 3,
+        "type": "plugin:pui/enabled",
+        "data": {
+          "boundary": "guarded",
+          "origin": "client-selector",
+          "at": 1792600325964
+        },
+        "ignorable": true
+      },
+      {
+        "seq": 4,
+        "type": "sandbox/mode",
+        "data": {
+          "mode": "workspace-write"
+        },
+        "ignorable": false
+      },
+      {
+        "seq": 5,
+        "type": "approval/policy",
+        "data": {
+          "policy": "ask"
+        },
+        "ignorable": false
+      }
+    ]
+  }
+}

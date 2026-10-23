@@ -1,0 +1,303 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792595888063,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 83,
+        "val": "IDLE"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 83,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "U2 base"
+          },
+          "count": 3,
+          "lastSeq": 67
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 83,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 83,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 83,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 500,
+            "outputTokens": 50,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 3,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 83,
+        "val": {
+          "surfaceTokens": 3019,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 3008
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 83,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 3019,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1614
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 75,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 77
+          },
+          "lastTurn": 3
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 83,
+        "val": {
+          "next-turn": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "U2ALLOWZ"
+                }
+              ],
+              "source": {
+                "kind": "user",
+                "rpcId": "07836ea1-5475-4810-8dac-2d784d5b9527",
+                "clientTimeZone": "Asia/Shanghai"
+              },
+              "role": "user",
+              "id": "ff77126e-ef1e-4cf5-87f0-d9f9e8e7b7be"
+            }
+          ],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 83,
+        "val": {
+          "turns": 3,
+          "steps": 5,
+          "llmMs": 67,
+          "toolMs": 6425,
+          "ttftMs": 65,
+          "ttftSteps": 5,
+          "decodeMs": 2,
+          "decodeTokens": 50,
+          "lastTurn": 3,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 4,
+              "prompt": "U2 base",
+              "response": "IDLE"
+            },
+            {
+              "turn": 2,
+              "seq": 28,
+              "prompt": "U2DENY",
+              "response": "U2DENY-DONE"
+            },
+            {
+              "turn": 3,
+              "seq": 62,
+              "prompt": "U2AUTO",
+              "response": "U2AUTO-DONE"
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 83,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "preset": "auto",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 83,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 83,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 83,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 83,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "lastMessageTime": 1792595930715,
+          "lastInjectionTime": 1792595888544,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 83,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 83,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 83,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 83,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "puiPermission": {
+        "ver": 1,
+        "seq": 83,
+        "val": {
+          "enabled": true,
+          "boundary": "guarded",
+          "revision": 5
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 83,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 83,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792595927501
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 83,
+        "val": null
+      }
+    }
+  }
+}

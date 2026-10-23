@@ -1,0 +1,13 @@
+{
+  "done": true,
+  "enabled": true,
+  "gates": [
+    "gate/call",
+    "gate/allow",
+    "gate/released"
+  ],
+  "marker": {
+    "exists": true,
+    "content": "PUI-ALLOW z\n"
+  }
+}

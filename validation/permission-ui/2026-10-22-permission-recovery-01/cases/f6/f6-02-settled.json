@@ -1,0 +1,136 @@
+{
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "timeline": [
+    {
+      "seq": 0,
+      "type": "permission/preset",
+      "ignorable": false,
+      "data": {
+        "preset": "danger-full-access"
+      }
+    },
+    {
+      "seq": 1,
+      "type": "sandbox/mode",
+      "ignorable": false,
+      "data": {
+        "mode": "danger-full-access"
+      }
+    },
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "ignorable": false,
+      "data": {
+        "policy": "never"
+      }
+    },
+    {
+      "seq": 28,
+      "type": "plugin:arbiter/decision",
+      "ignorable": true,
+      "data": {
+        "version": 1,
+        "callId": "fx-session-7279c3b6-c0ae-49f8-ab76-ca21d6ad9b9b-0-0",
+        "tool": "run_code",
+        "fingerprint": "run_code:4cfa9430b884512fb1f1b968",
+        "trace": [
+          "review(default)",
+          "review-allow"
+        ],
+        "result": "review-allow",
+        "reason": "Arbiter: the review allowed this call.",
+        "ruleId": null,
+        "decisionRules": [
+          "R7"
+        ],
+        "configRevision": "56286690c5d2",
+        "effect": null,
+        "ts": 1792650656489
+      }
+    },
+    {
+      "seq": 30,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-7dab4a55-1",
+        "name": "permission",
+        "args": " workspace-write",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 31,
+      "type": "permission/preset",
+      "ignorable": false,
+      "data": {
+        "preset": "workspace-write"
+      }
+    },
+    {
+      "seq": 32,
+      "type": "sandbox/mode",
+      "ignorable": false,
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "seq": 33,
+      "type": "approval/policy",
+      "ignorable": false,
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "seq": 35,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-7dab4a55-1",
+        "kind": "success",
+        "text": "preset workspace-write"
+      }
+    }
+  ],
+  "calls": [
+    {
+      "seq": 27,
+      "name": "run_code",
+      "callId": "fx-session-7279c3b6-c0ae-49f8-ab76-ca21d6ad9b9b-0-0",
+      "at": 1792650646483
+    }
+  ],
+  "results": [
+    {
+      "seq": 37,
+      "at": 1792650666605,
+      "isError": true,
+      "text": "Error: code run failed (abort): sandbox mode changed\nFile sandbox: danger-full-access."
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 28,
+      "result": "review-allow",
+      "trace": [
+        "review(default)",
+        "review-allow"
+      ]
+    }
+  ],
+  "markers": {
+    "outerStarted": "outer started",
+    "inner": null,
+    "outerFinished": null
+  },
+  "bodyTail": "IDLE\n对话\n轨迹\nF6 bootstrap\n14:30\n已完成\n已完成，用时 8秒\n\nIDLE\n\n用量 110 tok\n14:30\nF6PTC\n14:30\n已完成\n已完成，用时 23秒\n\nF6PTC-DONE\n\n已编辑 443 个文件\n+4,106\n-61\n../../f5/edge-profile/Default/History\n二进制\n../../f5/edge-profile/Default/History-journal\n二进制\n../../f5/edge-profile/Default/Login Data\n二进制\n../../f5/edge-profile/Default/Sync Data/Nigori.bin\n二进制\n全部 443 个文件\n用量 220 tok\n14:31\n发消息或创建任务, / 调用指令, @ 文件或对话\nfixture-1\n2 轮 3 步·10000 tok/s\n330 tok·缓存命中 0%\n0%"
+}

@@ -1,0 +1,31 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "text": "run it",
+      "calls": [
+        {
+          "name": "bash",
+          "arguments": {
+            "command": "echo ARBITER_MARKER > marker.txt",
+            "description": "write the integration marker"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "done"
+    }
+  ],
+  "reviewer": [
+    {
+      "risk": 10,
+      "authorized": 9,
+      "secrets": false,
+      "destructive": true,
+      "egress": false,
+      "bulk": false
+    }
+  ]
+}

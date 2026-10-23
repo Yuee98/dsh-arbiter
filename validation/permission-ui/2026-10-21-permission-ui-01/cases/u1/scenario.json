@@ -1,0 +1,25 @@
+{
+  "routes": [
+    { "match": "U1ALLOWA", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws/guarded-allow.txt", "content": "guarded allow\n" } } ] },
+      { "type": "text", "text": "U1ALLOWA-DONE" }
+    ]},
+    { "match": "U1DENYB", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY in workspace\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws/guarded-deny.txt'", "description": "guarded deny" } } ] },
+      { "type": "text", "text": "U1DENYB-DONE" }
+    ]},
+    { "match": "U1OUTSIDEC", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/outside/guarded-outside.txt", "content": "outside guarded\n" } } ] },
+      { "type": "text", "text": "U1OUTSIDEC-DONE" }
+    ]},
+    { "match": "U1TRUSTEDD", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/outside/trusted-outside.txt", "content": "outside trusted\n" } } ] },
+      { "type": "text", "text": "U1TRUSTEDD-DONE" }
+    ]},
+    { "match": "U1NEWSESSIONE", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY second\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws/second-ws-deny.txt'", "description": "second session deny" } } ] },
+      { "type": "text", "text": "U1NEWSESSIONE-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ]
+}

@@ -1,0 +1,47 @@
+{
+  "resumed": {
+    "ok": true,
+    "seq": 68,
+    "status": {
+      "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+      "enabled": true,
+      "boundary": "guarded",
+      "reason": "late-response-probe",
+      "origin": "client-selector",
+      "revision": 5
+    }
+  },
+  "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+  "auditPresent": false,
+  "enabled": {
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": "late-response-probe",
+    "origin": "client-selector",
+    "revision": 5
+  },
+  "restored": [
+    {
+      "at": 1792598127841,
+      "event": "pui/restored",
+      "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+      "boundary": "guarded",
+      "seq": 51
+    },
+    {
+      "at": 1792598159318,
+      "event": "pui/restored",
+      "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+      "boundary": "guarded",
+      "seq": 68
+    }
+  ],
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "workspace-write",
+    "enabled": false
+  }
+}

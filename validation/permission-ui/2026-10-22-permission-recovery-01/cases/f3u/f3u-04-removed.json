@@ -1,0 +1,97 @@
+{
+  "gone": true,
+  "manifest": {
+    "name": "dsh-profile-arb",
+    "private": true,
+    "dsh": {
+      "profile": {
+        "bundles": [
+          "@deepseek-ai/dsh-base",
+          "@deepseek-ai/dsh-web-app"
+        ]
+      }
+    }
+  },
+  "stillSelected": false,
+  "stillDependency": false,
+  "state": 404,
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "timelineTail": [
+    {
+      "seq": 0,
+      "type": "permission/preset",
+      "ignorable": false,
+      "data": {
+        "preset": "workspace-write"
+      }
+    },
+    {
+      "seq": 1,
+      "type": "sandbox/mode",
+      "ignorable": false,
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "ignorable": false,
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "seq": 28,
+      "type": "plugin:arbiter/decision",
+      "ignorable": true,
+      "data": {
+        "version": 1,
+        "callId": "fx-session-c1eee021-6cdf-406a-83ab-256f74984e99-0-0",
+        "tool": "bash",
+        "fingerprint": "bash:3179c5af77dd70ea2670085c",
+        "trace": [
+          "review(default)",
+          "review-allow"
+        ],
+        "result": "review-allow",
+        "reason": "Arbiter: the review allowed this call.",
+        "ruleId": null,
+        "decisionRules": [
+          "R7"
+        ],
+        "configRevision": "75c93df5058b",
+        "effect": {
+          "version": 1,
+          "parse": {
+            "status": "ok",
+            "statements": 1
+          },
+          "observed": {
+            "writes": [
+              "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/ws/f3ui-slow.txt"
+            ],
+            "networkCommands": [],
+            "credentialPaths": [],
+            "pipelineExec": [],
+            "substitutions": 0,
+            "subshells": 0
+          },
+          "opaque": false,
+          "opaqueReason": null,
+          "unresolvedExpansions": [],
+          "expansionRisk": null,
+          "completeness": "complete",
+          "parentAuthorizationPresent": null,
+          "overlapsDeniedEffect": false,
+          "historyTruncated": false
+        },
+        "ts": 1792656287880
+      }
+    }
+  ]
+}

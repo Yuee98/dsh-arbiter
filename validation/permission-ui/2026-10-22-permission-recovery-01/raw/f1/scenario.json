@@ -1,0 +1,14 @@
+{
+  "routes": [
+    { "match": "F1RESEARCH", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F1 deny probe\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f1/ws/f1-deny.txt'", "description": "deny probe" } } ] },
+      { "type": "text", "text": "F1RESEARCH-DONE" }
+    ]},
+    { "match": "F1ALLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f1/ws/f1-allow.txt", "content": "allow\n" } } ] },
+      { "type": "text", "text": "F1ALLOW-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDefault": { "risk": 2, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

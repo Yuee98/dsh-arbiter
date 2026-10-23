@@ -1,0 +1,28 @@
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": {
+    "initialized": true,
+    "workspaceIds": [
+      "01920000-0000-4000-8000-000000000001"
+    ],
+    "archivedSessionIds": [],
+    "pinnedSessionIds": [],
+    "defaultWorkspaceId": "01920000-0000-4000-8000-000000000001"
+  },
+  "tables": {
+    "workspaces": {
+      "01920000-0000-4000-8000-000000000001": {
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u4/ws",
+        "title": "pui-validation-workspace",
+        "sessionIds": [
+          "session-25306a93-6092-4aaf-8027-ec9fa65d155f"
+        ],
+        "createdAt": "2026-10-21T16:17:57.041Z",
+        "updatedAt": "2026-10-21T16:18:00.253Z"
+      }
+    }
+  }
+}

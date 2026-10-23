@@ -1,0 +1,136 @@
+[
+  {
+    "name": "produce-decision",
+    "ok": true,
+    "ms": 2170,
+    "value": "session-67f1adc9-e13c-411a-be77-9ebaf3443185"
+  },
+  {
+    "name": "record-written-ignorable",
+    "ok": true,
+    "ms": 3,
+    "value": {
+      "decisions": [
+        {
+          "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+          "seq": 19,
+          "ignorable": true,
+          "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+          "tool": "bash",
+          "result": "review-allow",
+          "trace": [
+            "review(default)",
+            "review-allow"
+          ]
+        }
+      ],
+      "nonIgnorablePluginEvents": []
+    }
+  },
+  {
+    "name": "close-session-and-exit-host",
+    "ok": true,
+    "ms": 2128,
+    "value": {
+      "pid": 3230,
+      "stopped": true
+    }
+  },
+  {
+    "name": "cold-restart-and-reopen",
+    "ok": true,
+    "ms": 2805,
+    "value": {
+      "resumed": {
+        "status": 200
+      },
+      "state": {
+        "ok": true,
+        "sessionRecords": {
+          "ready": true,
+          "error": null,
+          "failures": []
+        }
+      },
+      "decisionsAfterRestart": [
+        {
+          "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+          "seq": 19,
+          "ignorable": true,
+          "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+          "tool": "bash",
+          "result": "review-allow"
+        }
+      ],
+      "loadedSessions": [
+        {
+          "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+          "events": 29
+        },
+        {
+          "sessionId": "session-f2710943-3679-4777-90c5-072e8139905e",
+          "events": 3
+        }
+      ],
+      "nonIgnorablePluginEvents": []
+    }
+  },
+  {
+    "name": "read-back-summary",
+    "ok": true,
+    "ms": 1736,
+    "value": {
+      "before": 1,
+      "after": 2,
+      "records": [
+        {
+          "seq": 19,
+          "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+          "tool": "bash",
+          "result": "review-allow",
+          "ignorable": true
+        },
+        {
+          "seq": 19,
+          "callId": "fx-session-f2710943-3679-4777-90c5-072e8139905e-0-0",
+          "tool": "write",
+          "result": "review-allow",
+          "ignorable": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "audit-removed-cold-restart",
+    "ok": true,
+    "ms": 4117,
+    "value": {
+      "auditDirExisted": true,
+      "auditPresentNow": true,
+      "decisions": [
+        {
+          "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+          "seq": 19,
+          "ignorable": true,
+          "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0"
+        },
+        {
+          "sessionId": "session-f2710943-3679-4777-90c5-072e8139905e",
+          "seq": 19,
+          "ignorable": true,
+          "callId": "fx-session-f2710943-3679-4777-90c5-072e8139905e-0-0"
+        }
+      ],
+      "nonIgnorablePluginEvents": [],
+      "state": {
+        "enabled": true,
+        "audit": "ok",
+        "sessionRecords": {
+          "ready": true,
+          "error": null,
+          "failures": []
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,105 @@
+{
+  "routes": [
+    {
+      "match": "T2-WARM",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'T2-WARM\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t2/ws/t2-warm.txt'",
+                "description": "warmup"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "WARM-DONE"
+        }
+      ]
+    },
+    {
+      "match": "T2OLD",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'T2-OLD\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t2/ws/t2-old.txt'",
+                "description": "held review (old)"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "T2OLD-DONE"
+        }
+      ]
+    },
+    {
+      "match": "T2NEW",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'T2-NEW\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t2/outside/t2-new.txt'",
+                "description": "new call during drain"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "T2NEW-DONE"
+        }
+      ]
+    },
+    {
+      "match": "T2B warmup",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'T2-B\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t2/ws/t2-b.txt'",
+                "description": "session B warmup"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "T2B-DONE"
+        }
+      ]
+    }
+  ],
+  "default": [
+    {
+      "type": "text",
+      "text": "IDLE"
+    }
+  ],
+  "reviewerDefault": {
+    "risk": 2,
+    "authorized": 6,
+    "secrets": false,
+    "destructive": false,
+    "egress": false,
+    "bulk": false
+  },
+  "holdMatch": [
+    "T2-OLD"
+  ]
+}

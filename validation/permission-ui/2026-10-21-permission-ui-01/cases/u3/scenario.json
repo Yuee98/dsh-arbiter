@@ -1,0 +1,13 @@
+{
+  "routes": [
+    { "match": "U3ENABLE", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-ALLOW u3\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/ws/u3-allow.txt'", "description": "u3 allow" } } ] },
+      { "type": "text", "text": "U3ENABLE-DONE" }
+    ]},
+    { "match": "U3AFTER", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY u3\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/ws/u3-deny.txt'", "description": "u3 deny" } } ] },
+      { "type": "text", "text": "U3AFTER-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ]
+}

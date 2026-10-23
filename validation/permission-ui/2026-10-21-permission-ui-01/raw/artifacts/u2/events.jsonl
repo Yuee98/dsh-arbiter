@@ -1,0 +1,46 @@
+{"at":1792595883126,"event":"probe/start","logPath":"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/home/pui/events.jsonl","pid":83678}
+{"at":1792595883126,"event":"auto/registered"}
+{"at":1792595883126,"event":"probe/ready"}
+{"at":1792595888069,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":0,"type":"permission/preset","data":{"preset":"workspace-write"},"enabled":false}
+{"at":1792595888069,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":1,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":false}
+{"at":1792595888069,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":2,"type":"approval/policy","data":{"policy":"ask"},"enabled":false}
+{"at":1792595888070,"event":"session/created","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":3,"record":{"sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","enabled":false,"boundary":null,"reason":null,"origin":null,"revision":0}}
+{"at":1792595888550,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":17,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792595888550},"enabled":true}
+{"at":1792595888550,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":18,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792595888550,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":19,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792595888550,"event":"pui/enabled","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","boundary":"guarded","origin":"client-selector","seq":20}
+{"at":1792595904064,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":23,"type":"command/run","data":{"commandId":"cmd-6688d4c9-1","name":"permission","args":" workspace-write","source":{"kind":"user"}},"enabled":true}
+{"at":1792595904064,"event":"pui/command-exit","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","target":"workspace-write","nativeValueMayBeUnchanged":true,"deferred":true}
+{"at":1792595904065,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":24,"type":"plugin:pui/disabled","data":{"reason":"permission-command","at":1792595904065},"enabled":false}
+{"at":1792595904065,"event":"pui/disabled","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","reason":"permission-command","mode":null}
+{"at":1792595904065,"event":"pui/command-exit-applied","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","target":"workspace-write","changed":true}
+{"at":1792595904065,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":25,"type":"command/done","data":{"commandId":"cmd-6688d4c9-1","kind":"success","text":"preset workspace-write"},"enabled":false}
+{"at":1792595911380,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":41,"type":"command/run","data":{"commandId":"cmd-6688d4c9-2","name":"permission","args":" read-only","source":{"kind":"user"}},"enabled":false}
+{"at":1792595911381,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":42,"type":"permission/preset","data":{"preset":"read-only"},"enabled":false}
+{"at":1792595911381,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":43,"type":"sandbox/mode","data":{"mode":"read-only"},"enabled":false}
+{"at":1792595911394,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":44,"type":"command/done","data":{"commandId":"cmd-6688d4c9-2","kind":"success","text":"preset read-only"},"enabled":false}
+{"at":1792595914855,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":47,"type":"command/run","data":{"commandId":"cmd-6688d4c9-3","name":"permission","args":" danger-full-access","source":{"kind":"user"}},"enabled":false}
+{"at":1792595914856,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":48,"type":"permission/preset","data":{"preset":"danger-full-access"},"enabled":false}
+{"at":1792595914856,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":49,"type":"sandbox/mode","data":{"mode":"danger-full-access"},"enabled":false}
+{"at":1792595914856,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":50,"type":"approval/policy","data":{"policy":"never"},"enabled":false}
+{"at":1792595914863,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":52,"type":"command/done","data":{"commandId":"cmd-6688d4c9-3","kind":"success","text":"preset danger-full-access"},"enabled":false}
+{"at":1792595920220,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":53,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792595920220},"enabled":true}
+{"at":1792595920221,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":54,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792595920221,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":55,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792595920221,"event":"pui/enabled","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","boundary":"guarded","origin":"client-selector","seq":56}
+{"at":1792595923674,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":56,"type":"command/run","data":{"commandId":"cmd-6688d4c9-4","name":"permission","args":" auto","source":{"kind":"user"}},"enabled":true}
+{"at":1792595923675,"event":"pui/command-exit","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","target":"auto","nativeValueMayBeUnchanged":true,"deferred":true}
+{"at":1792595923675,"event":"auto/admitted"}
+{"at":1792595923675,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":57,"type":"permission/preset","data":{"preset":"auto"},"enabled":true}
+{"at":1792595923675,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":58,"type":"sandbox/mode","data":{"mode":"danger-full-access"},"enabled":true}
+{"at":1792595923675,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":59,"type":"plugin:pui/disabled","data":{"reason":"permission-command","at":1792595923675},"enabled":false}
+{"at":1792595923675,"event":"pui/disabled","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","reason":"permission-command","mode":null}
+{"at":1792595923675,"event":"pui/command-exit-applied","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","target":"auto","changed":true}
+{"at":1792595923675,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":60,"type":"command/done","data":{"commandId":"cmd-6688d4c9-4","kind":"success","text":"preset auto"},"enabled":false}
+{"at":1792595930828,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":78,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792595930828},"enabled":true}
+{"at":1792595930828,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":79,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792595930828,"event":"session/event","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","seq":80,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792595930828,"event":"pui/enabled","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","boundary":"guarded","origin":"client-selector","seq":81}
+{"at":1792595937142,"event":"gate/call","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","tool":"bash","callId":"fixture-session-51147434-2384-4a1b-aefd-be5d93c35868-0-2","boundary":"guarded","text":"{\"command\":\"printf 'PUI-ALLOW z\\\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u2/ws/u2-allowz.txt'\",\"description\":\"control allow\"}"}
+{"at":1792595937143,"event":"gate/allow","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","tool":"bash","callId":"fixture-session-51147434-2384-4a1b-aefd-be5d93c35868-0-2"}
+{"at":1792595937143,"event":"gate/released","sessionId":"session-51147434-2384-4a1b-aefd-be5d93c35868","callId":"fixture-session-51147434-2384-4a1b-aefd-be5d93c35868-0-2","active":0}

@@ -1,6 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  "entry": ["src/index.ts"],
+  "entry": [
+    "src/index.ts",
+    "src/client/index.tsx",
+    "scripts/repair-session.ts",
+  ],
+  "ignoreExportsUsedInFile": true,
   "project": [
     "src/**/*.ts",
     "tests/**/*.ts",
@@ -9,5 +14,8 @@
   ],
   // This executable is installed through mise.toml, not npm.
   "ignoreBinaries": ["actionlint"],
+  // The session package ships with DSH and is resolved from the running
+  // installation at runtime; it is intentionally not a declared dependency.
+  "ignoreDependencies": ["@deepseek-ai/dsh-session"],
   "treatConfigHintsAsErrors": true,
 }

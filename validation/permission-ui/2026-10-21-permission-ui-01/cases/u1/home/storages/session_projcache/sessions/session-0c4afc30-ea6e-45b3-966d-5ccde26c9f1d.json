@@ -1,0 +1,293 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792600325387,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 74,
+        "val": "U1ALLOWA"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 74,
+        "val": {
+          "first": {
+            "seq": 11,
+            "text": "U1ALLOWA"
+          },
+          "count": 4,
+          "lastSeq": 64
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 74,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 74,
+        "val": "danger-full-access"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 74,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 800,
+            "outputTokens": 80,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 4,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 74,
+        "val": {
+          "surfaceTokens": 3299,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 3287
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 74,
+        "val": {
+          "systems": [
+            {
+              "seq": 10,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 3299,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1894
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 70,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 72
+          },
+          "lastTurn": 4
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 74,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 74,
+        "val": {
+          "turns": 4,
+          "steps": 8,
+          "llmMs": 40,
+          "toolMs": 649,
+          "ttftMs": 40,
+          "ttftSteps": 8,
+          "decodeMs": 0,
+          "decodeTokens": 80,
+          "lastTurn": 4,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 7,
+              "prompt": "U1ALLOWA",
+              "response": "U1ALLOWA-DONE"
+            },
+            {
+              "turn": 2,
+              "seq": 30,
+              "prompt": "U1DENYB",
+              "response": "U1DENYB-DONE"
+            },
+            {
+              "turn": 3,
+              "seq": 44,
+              "prompt": "U1OUTSIDEC",
+              "response": "U1OUTSIDEC-DONE"
+            },
+            {
+              "turn": 4,
+              "seq": 61,
+              "prompt": "U1TRUSTEDD",
+              "response": "U1TRUSTEDD-DONE"
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 74,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "danger-full-access",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 74,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 74,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 74,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 74,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "lastMessageTime": 1792600328637,
+          "lastInjectionTime": 1792600326550,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 74,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 74,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 74,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 74,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "puiPermission": {
+        "ver": 1,
+        "seq": 74,
+        "val": {
+          "enabled": true,
+          "boundary": "trusted",
+          "revision": 2
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 74,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 74,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792600328500
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 74,
+        "val": null
+      }
+    }
+  }
+}

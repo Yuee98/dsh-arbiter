@@ -1,0 +1,47 @@
+{
+  "routes": [
+    {
+      "match": "T7PAR",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "read",
+              "arguments": {
+                "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t7/ws/t7-a.txt"
+              }
+            },
+            {
+              "name": "read",
+              "arguments": {
+                "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t7/ws/t7-b.txt"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "T7PAR-DONE"
+        }
+      ]
+    }
+  ],
+  "default": [
+    {
+      "type": "text",
+      "text": "IDLE"
+    }
+  ],
+  "holdMatch": [
+    "t7-b.txt"
+  ],
+  "reviewerDefault": {
+    "risk": 2,
+    "authorized": 6,
+    "secrets": false,
+    "destructive": false,
+    "egress": false,
+    "bulk": false
+  }
+}

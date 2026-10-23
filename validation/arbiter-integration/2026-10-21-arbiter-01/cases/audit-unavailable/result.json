@@ -1,0 +1,127 @@
+{
+  "caseId": "audit-unavailable",
+  "title": "Audit storage failure does not change the permission result",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:17.751Z",
+  "elapsedMs": 372,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": true,
+    "content": "ARBITER_MARKER\n"
+  },
+  "audit": {
+    "exists": false,
+    "calls": [],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:17.712Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+    },
+    {
+      "at": "2026-10-21T08:15:17.712Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+    },
+    {
+      "at": "2026-10-21T08:15:17.730Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-e0f722d3-da82-42e5-afd3-01bce20b03ac"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/audit-unavailable/sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "echo-allow",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^echo"
+        },
+        "verdict": "allow"
+      },
+      {
+        "id": "workspace-writes",
+        "match": {
+          "node": "file_redirect",
+          "kind": "glob",
+          "pattern": "{{WORKSPACE}}/**"
+        },
+        "verdict": "allow"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter",
+      "bytes": 15
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2567
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-audit-unavailable-ws--/session-e0f722d3-da82-42e5-afd3-01bce20b03ac/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-audit-unavailable-ws--/session-e0f722d3-da82-42e5-afd3-01bce20b03ac/session.v4.jsonl.zstd",
+      "bytes": 15504
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac.json",
+      "bytes": 4095
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 380
+    },
+    {
+      "path": "sessions/session-e0f722d3-da82-42e5-afd3-01bce20b03ac__session.v4.jsonl.zstd",
+      "bytes": 15504
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 15
+    }
+  ]
+}

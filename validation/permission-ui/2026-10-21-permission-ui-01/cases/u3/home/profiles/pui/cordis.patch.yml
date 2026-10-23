@@ -1,0 +1,46 @@
+- {
+    "id": "agent-default-model",
+    "name": "@deepseek-ai/dsh-agent-default-model",
+    "config": { "provider": "pui", "model": "fixture-1" }
+  }
+- {
+    "insert":
+      [
+        {
+            "id": "pui-llm",
+            "name": "file:///Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026\
+              -10-21-permission-ui-01/probes/llm-fixture.mjs",
+            "config":
+              {
+                "provider": "pui",
+                "scenarioPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/202\
+                  6-10-21-permission-ui-01/cases/u3/scenario.json"
+              }
+          },
+        {
+            "id": "pui-probe",
+            "name": "file:///Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026\
+              -10-21-permission-ui-01/probes/pui-probe/index.js",
+            "config":
+              {
+                "logPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-\
+                  21-permission-ui-01/cases/u3/home/pui/events.jsonl",
+                "registerAuto": false
+              }
+          }
+      ]
+  }
+- {
+    "id": "sandbox-policy",
+    "name": "@deepseek-ai/dsh-sandbox-policy",
+    "config":
+      {
+        "mode": "workspace-write",
+        "workspaceRoot": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/20\
+          26-10-21-permission-ui-01/cases/u3/ws"
+      }
+  }
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1

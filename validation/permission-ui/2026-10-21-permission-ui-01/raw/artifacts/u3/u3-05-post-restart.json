@@ -1,0 +1,13 @@
+{
+  "gates": [
+    "gate/call",
+    "gate/allow",
+    "gate/released",
+    "gate/call",
+    "gate/deny",
+    "gate/released"
+  ],
+  "marker": {
+    "exists": false
+  }
+}

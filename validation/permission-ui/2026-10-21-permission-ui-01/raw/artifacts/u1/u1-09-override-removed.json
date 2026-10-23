@@ -1,0 +1,27 @@
+{
+  "removed": true,
+  "state": {
+    "cellText": "工作区内修改",
+    "nativeControl": true,
+    "puiPresent": false,
+    "puiDot": null,
+    "options": [],
+    "selected": null
+  },
+  "status": {
+    "ok": true,
+    "status": {
+      "known": true,
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "enabled": true,
+      "boundary": "trusted",
+      "reason": null,
+      "origin": "config-page",
+      "revision": 2
+    },
+    "live": [
+      "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "session-9c1f1baf-9531-4d95-a4df-282051f87cc3"
+    ]
+  }
+}

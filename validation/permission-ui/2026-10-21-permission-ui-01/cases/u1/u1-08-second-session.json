@@ -1,0 +1,133 @@
+{
+  "clicked": true,
+  "ids": [
+    "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+    "session-9c1f1baf-9531-4d95-a4df-282051f87cc3"
+  ],
+  "sessions": {
+    "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d": {
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "enabled": true,
+      "boundary": "trusted",
+      "reason": null,
+      "origin": "config-page",
+      "revision": 2
+    },
+    "session-9c1f1baf-9531-4d95-a4df-282051f87cc3": {
+      "sessionId": "session-9c1f1baf-9531-4d95-a4df-282051f87cc3",
+      "enabled": false,
+      "boundary": null,
+      "reason": null,
+      "origin": null,
+      "revision": 0
+    }
+  },
+  "done": true,
+  "gates": [
+    {
+      "at": 1792600326861,
+      "t": 5120,
+      "event": "gate/call",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-0",
+      "boundary": "guarded",
+      "text": "{\"file_path\":\"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws/guarded-allow.txt\",\"content\":\"guarded allow\\n\"}"
+    },
+    {
+      "at": 1792600326861,
+      "t": 5120,
+      "event": "gate/allow",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-0"
+    },
+    {
+      "at": 1792600326861,
+      "t": 5120,
+      "event": "gate/released",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-0",
+      "active": 0
+    },
+    {
+      "at": 1792600327461,
+      "t": 5720,
+      "event": "gate/call",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "bash",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-2",
+      "boundary": "guarded",
+      "text": "{\"command\":\"printf 'PUI-DENY in workspace\\\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/ws/guarded-deny.txt'\",\"description\":\"guarded deny\"}"
+    },
+    {
+      "at": 1792600327461,
+      "t": 5720,
+      "event": "gate/deny",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "bash",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-2"
+    },
+    {
+      "at": 1792600327461,
+      "t": 5720,
+      "event": "gate/released",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-2",
+      "active": 0
+    },
+    {
+      "at": 1792600328039,
+      "t": 6298,
+      "event": "gate/call",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-3",
+      "boundary": "guarded",
+      "text": "{\"file_path\":\"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/outside/guarded-outside.txt\",\"content\":\"outside guarded\\n\"}"
+    },
+    {
+      "at": 1792600328039,
+      "t": 6298,
+      "event": "gate/allow",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-3"
+    },
+    {
+      "at": 1792600328039,
+      "t": 6298,
+      "event": "gate/released",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-3",
+      "active": 0
+    },
+    {
+      "at": 1792600328622,
+      "t": 6881,
+      "event": "gate/call",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-4",
+      "boundary": "trusted",
+      "text": "{\"file_path\":\"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u1/outside/trusted-outside.txt\",\"content\":\"outside trusted\\n\"}"
+    },
+    {
+      "at": 1792600328622,
+      "t": 6881,
+      "event": "gate/allow",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "tool": "write",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-4"
+    },
+    {
+      "at": 1792600328622,
+      "t": 6881,
+      "event": "gate/released",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "callId": "fixture-session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d-0-4",
+      "active": 0
+    }
+  ],
+  "second": "session-9c1f1baf-9531-4d95-a4df-282051f87cc3"
+}

@@ -1,0 +1,60 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 10204,
+    "value": "session-9868c2e2-fd6c-4a6e-add1-823f4ed2514f"
+  },
+  {
+    "name": "open-approval",
+    "ok": true,
+    "ms": 1802,
+    "value": {
+      "pending": true,
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      }
+    }
+  },
+  {
+    "name": "manager-action",
+    "ok": true,
+    "ms": 9477,
+    "value": {
+      "action": "uninstall",
+      "clicked": true,
+      "confirmed": true
+    }
+  },
+  {
+    "name": "approval-after-action",
+    "ok": true,
+    "ms": 33,
+    "value": {
+      "action": "uninstall",
+      "pending": true,
+      "approvals": [
+        {
+          "seq": 2,
+          "type": "approval/policy",
+          "outcome": null
+        },
+        {
+          "seq": 28,
+          "type": "approval/asked",
+          "outcome": null
+        }
+      ],
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "results": [],
+      "marker": null,
+      "bodyTail": "-process subagent tool calls\n不逐项覆盖\ndirect Node fs/fetch/child_process effects inside run_code\nworkflow internal orchestration steps\nMCP server internals after the RPC\nprocesses started by bash after the bash call was allowed\n包含的组件\n共 1 个 · 1 运行中\ndsh-arbiter\nDeterministic command rules plus real auto review for DeepSeek Harness.\narbiter\n运行中\n来源信息\n代码来源\nlink:/Volumes/sandisk/code/dsh-arbiter\n当前版本\n0.1.0"
+    }
+  }
+]

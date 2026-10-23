@@ -1,0 +1,441 @@
+/**
+ * The review decision engine.
+ *
+ * Models produce signals; this module produces the decision. The regular
+ * strategy is shared by `normal` and `strict` (the only difference between
+ * those modes is whether the plugin opens a human approval). `progress` uses
+ * the same rule order with a wider set of conditions. Every branch names the
+ * R-rule it applied so the audit can be replayed.
+ */
+
+import type {
+  DerivedFacts,
+  PolicyDecision,
+  PolicyThresholds,
+  ReviewSignals,
+  ReviewVerdict,
+  ProbeMode,
+} from './types.js';
+
+export type StrategyName = 'normal' | 'progress';
+
+function probabilityAtLeast(
+  distribution: Readonly<Record<string, number>> | null,
+  minimum: number,
+): number | null {
+  if (distribution === null) return null;
+  let total = 0;
+  let sum = 0;
+  for (const [key, value] of Object.entries(distribution)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    total += value;
+    const level = Number(key);
+    if (Number.isFinite(level) && level >= minimum) sum += value;
+  }
+  return total > 0 ? sum / total : null;
+}
+
+function probabilityAtMost(
+  distribution: Readonly<Record<string, number>> | null,
+  maximum: number,
+): number | null {
+  if (distribution === null) return null;
+  let total = 0;
+  let sum = 0;
+  for (const [key, value] of Object.entries(distribution)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    total += value;
+    const level = Number(key);
+    if (Number.isFinite(level) && level <= maximum) sum += value;
+  }
+  return total > 0 ? sum / total : null;
+}
+
+function certainty(value: number | null): boolean {
+  return value !== null;
+}
+
+function riskGate(
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): {
+  readonly passed: boolean;
+  readonly rule: string;
+  readonly observed: string;
+} {
+  if (signals.riskPoint !== null) {
+    const point = signals.riskPoint;
+    if (point <= thresholds.chatMediumRiskMax) {
+      return {
+        passed: true,
+        rule: 'R7',
+        observed: `riskPoint=${String(point)}`,
+      };
+    }
+    return {
+      passed: false,
+      rule: 'R5',
+      observed: `riskPoint=${String(point)} > ${String(thresholds.chatMediumRiskMax)}`,
+    };
+  }
+  const low = probabilityAtMost(signals.riskDist, thresholds.chatLowRiskMax);
+  const medium = probabilityAtMost(
+    signals.riskDist,
+    thresholds.mediumRiskCeiling,
+  );
+  if (signals.riskClass === 'low' && low !== null && low >= thresholds.tauLow) {
+    return {
+      passed: true,
+      rule: 'R7',
+      observed: `P(risk<=3)=${low.toFixed(2)}`,
+    };
+  }
+  if (medium !== null && medium >= thresholds.tauRisk) {
+    return {
+      passed: true,
+      rule: 'R7',
+      observed: `P(risk<=${String(thresholds.mediumRiskCeiling)})=${medium.toFixed(2)}`,
+    };
+  }
+  return {
+    passed: false,
+    rule: 'R8',
+    observed: `P(risk<=${String(thresholds.mediumRiskCeiling)})=${(medium ?? 0).toFixed(2)}`,
+  };
+}
+
+function authGate(
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+  required: 'none' | 'implied' | 'explicit',
+): { readonly passed: boolean; readonly observed: string } {
+  if (required === 'none')
+    return { passed: true, observed: 'authorization not required' };
+  if (signals.authPoint !== null) {
+    const minimum = required === 'explicit' ? 8 : 5;
+    return {
+      passed: signals.authPoint >= minimum,
+      observed: `authPoint=${String(signals.authPoint)} (needs >=${String(minimum)})`,
+    };
+  }
+  const threshold = required === 'explicit' ? 8 : 5;
+  const probability = probabilityAtLeast(signals.authDist, threshold);
+  return {
+    passed: probability !== null && probability >= thresholds.tauAuth,
+    observed: `P(auth>=${String(threshold)})=${(probability ?? 0).toFixed(2)}`,
+  };
+}
+
+function allow(
+  rule: string,
+  reason: string,
+  strategy: StrategyName,
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): PolicyDecision {
+  return {
+    verdict: 'review-allow',
+    decisionRules: [rule],
+    reason,
+    strategy,
+    details: {
+      riskClass: signals.riskClass,
+      authClass: signals.authClass,
+      thresholds,
+    },
+  };
+}
+
+function escalate(
+  rule: string,
+  reason: string,
+  strategy: StrategyName,
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): PolicyDecision {
+  return {
+    verdict: 'review-escalate',
+    decisionRules: [rule],
+    reason,
+    strategy,
+    details: {
+      riskClass: signals.riskClass,
+      authClass: signals.authClass,
+      thresholds,
+    },
+  };
+}
+
+function deny(
+  rule: string,
+  reason: string,
+  strategy: StrategyName,
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): PolicyDecision {
+  return {
+    verdict: 'review-deny',
+    decisionRules: [rule],
+    reason,
+    strategy,
+    details: {
+      riskClass: signals.riskClass,
+      authClass: signals.authClass,
+      thresholds,
+    },
+  };
+}
+
+/**
+ * Apply one strategy to one set of signals.
+ *
+ * Order: fixed deny (R1, R2), conditions that require a human in every mode
+ * (R3, R4, R5), then the mode-dependent rows (R6, R7), finally R8.
+ */
+export function decideReview(
+  signals: ReviewSignals,
+  strategy: StrategyName,
+  thresholds: PolicyThresholds,
+): PolicyDecision {
+  if (signals.secrets && signals.egress) {
+    return deny(
+      'R1',
+      'sensitive material leaves the machine across a trust boundary',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  const critical =
+    signals.riskClass === 'high' ||
+    (signals.riskPoint !== null && signals.riskPoint >= 9) ||
+    (signals.riskDist !== null &&
+      certainty(probabilityAtLeast(signals.riskDist, 9)) &&
+      (probabilityAtLeast(signals.riskDist, 9) ?? 0) >= thresholds.tauCritical);
+  if (critical) {
+    return deny(
+      'R2',
+      'critical risk of irreversible damage',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  if (signals.destructive && signals.bulk) {
+    return escalate(
+      'R4',
+      'bulk irreversible destruction requires a human decision',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  const required: 'none' | 'implied' | 'explicit' =
+    signals.riskPoint !== null
+      ? signals.riskPoint >= thresholds.explicitFromRisk
+        ? 'explicit'
+        : 'none'
+      : signals.riskClass === 'low'
+        ? 'none'
+        : 'explicit';
+  const auth = authGate(signals, thresholds, required);
+  if (!auth.passed) {
+    return escalate(
+      'R3',
+      `authorization is insufficient (${auth.observed})`,
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  if (
+    signals.bulk &&
+    signals.egress &&
+    !signals.secrets &&
+    !signals.destructive
+  ) {
+    if (!thresholds.allowBulkEgress) {
+      return escalate(
+        'R6',
+        'bulk external sending requires a human decision in this mode',
+        strategy,
+        signals,
+        thresholds,
+      );
+    }
+    const explicit = authGate(signals, thresholds, 'explicit');
+    if (!explicit.passed) {
+      return escalate(
+        'R6',
+        `bulk external sending requires explicit authorization (${explicit.observed})`,
+        strategy,
+        signals,
+        thresholds,
+      );
+    }
+    const gate = riskGate(signals, thresholds);
+    if (!gate.passed) {
+      return escalate(
+        'R6',
+        `bulk external sending exceeds the risk ceiling (${gate.observed})`,
+        strategy,
+        signals,
+        thresholds,
+      );
+    }
+    return allow(
+      'R6',
+      'bulk external sending with explicit authorization',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  if (signals.riskClass === 'low' && !signals.destructive && !signals.secrets) {
+    return allow(
+      'R7',
+      'ordinary low-risk action',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  const gate = riskGate(signals, thresholds);
+  if (!gate.passed) {
+    return escalate(
+      'R5',
+      `risk exceeds the selected ceiling (${gate.observed})`,
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  // A destructive action that is not bulk may still be allowed with explicit
+  // authorization, but only inside the regular risk ceiling. This keeps R4
+  // meaningful without turning every deletion into a human-only action.
+  if (
+    signals.destructive &&
+    signals.riskPoint !== null &&
+    signals.riskPoint > thresholds.chatMediumRiskMax
+  ) {
+    return escalate(
+      'R5',
+      'destructive action exceeds the selected risk ceiling',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+
+  return allow(
+    'R7',
+    'explicitly authorized action within the selected risk ceiling',
+    strategy,
+    signals,
+    thresholds,
+  );
+}
+
+/**
+ * Apply `probeMode: override`: a complete fact may make a probe more dangerous,
+ * never safer. Facts never turn an observed risk off.
+ */
+export function applyProbeOverrides(
+  signals: ReviewSignals,
+  facts: DerivedFacts | null,
+  mode: ProbeMode,
+): ReviewSignals {
+  if (mode !== 'override' || facts === null) return signals;
+  return {
+    ...signals,
+    secrets: signals.secrets || facts.observed.credentialPaths.length > 0,
+    destructive:
+      signals.destructive ||
+      facts.observed.pipelineExec.length > 0 ||
+      facts.expansionRisk !== null,
+    egress: signals.egress || facts.observed.networkCommands.length > 0,
+    bulk:
+      signals.bulk ||
+      facts.observed.writes.length >= 10 ||
+      (signals.destructive && facts.observed.writes.length > 1),
+  };
+}
+
+/** Re-derive decision-backend classes under the currently effective thresholds. */
+export function reclassifySignals(
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): ReviewSignals {
+  if (signals.source !== 'decision') return signals;
+  const atLeast = (
+    distribution: Readonly<Record<string, number>> | null,
+    minimum: number,
+  ): number | null => {
+    if (distribution === null) return null;
+    let total = 0;
+    let sum = 0;
+    for (const [key, value] of Object.entries(distribution)) {
+      total += value;
+      if (Number(key) >= minimum) sum += value;
+    }
+    return total > 0 ? sum / total : null;
+  };
+  const atMost = (
+    distribution: Readonly<Record<string, number>> | null,
+    maximum: number,
+  ): number | null => {
+    if (distribution === null) return null;
+    let total = 0;
+    let sum = 0;
+    for (const [key, value] of Object.entries(distribution)) {
+      total += value;
+      if (Number(key) <= maximum) sum += value;
+    }
+    return total > 0 ? sum / total : null;
+  };
+  const critical = atLeast(signals.riskDist, 9);
+  const low = atMost(signals.riskDist, 3);
+  const riskClass =
+    critical !== null && critical >= thresholds.tauCritical
+      ? 'high'
+      : low !== null && low >= thresholds.tauLow
+        ? 'low'
+        : 'medium';
+  const explicit = atLeast(signals.authDist, 8);
+  const implied = atLeast(signals.authDist, 5);
+  const authClass =
+    explicit !== null && explicit >= thresholds.tauAuth
+      ? 'explicit'
+      : implied !== null && implied >= thresholds.tauAuth
+        ? 'implied'
+        : 'none';
+  return { ...signals, riskClass, authClass };
+}
+
+/** Re-evaluate a stored signal set under a comparison strategy without a model call. */
+export function compareStrategies(
+  signals: ReviewSignals,
+  normal: PolicyThresholds,
+  progress: PolicyThresholds,
+): {
+  readonly normal: ReviewVerdict;
+  readonly progress: ReviewVerdict;
+  readonly promoted: boolean;
+} {
+  const normalDecision = decideReview(signals, 'normal', normal);
+  const progressDecision = decideReview(signals, 'progress', progress);
+  return {
+    normal: normalDecision.verdict,
+    progress: progressDecision.verdict,
+    promoted:
+      normalDecision.verdict === 'review-escalate' &&
+      progressDecision.verdict === 'review-allow',
+  };
+}

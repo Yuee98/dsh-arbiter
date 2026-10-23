@@ -1,0 +1,36 @@
+{
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "timelineTail": [
+    {
+      "seq": 0,
+      "type": "permission/preset",
+      "ignorable": false,
+      "data": {
+        "preset": "workspace-write"
+      }
+    },
+    {
+      "seq": 1,
+      "type": "sandbox/mode",
+      "ignorable": false,
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "ignorable": false,
+      "data": {
+        "policy": "ask"
+      }
+    }
+  ],
+  "state": 404,
+  "switch": "false",
+  "nativeControl": null
+}

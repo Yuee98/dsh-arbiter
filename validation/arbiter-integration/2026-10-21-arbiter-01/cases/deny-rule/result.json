@@ -1,0 +1,145 @@
+{
+  "caseId": "deny-rule",
+  "title": "A deny rule blocks the call without a reviewer",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:15.450Z",
+  "elapsedMs": 371,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": false
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 110592,
+    "calls": [
+      {
+        "call_id": "fixture-session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf-0-0",
+        "session_kind": "main",
+        "result": "deny",
+        "reason": "Not executed [deny-rule]: a deny command rule matched this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "deny",
+            "ruleId": "echo-deny",
+            "configRevision": "e333f70adedc",
+            "at": 1792570515418
+          }
+        ],
+        "execution_status": "not-started",
+        "approval_mode": "normal",
+        "signals": null
+      }
+    ],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:15.415Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+    },
+    {
+      "at": "2026-10-21T08:15:15.416Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+    },
+    {
+      "at": "2026-10-21T08:15:15.427Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/deny-rule/sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "echo-deny",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^echo"
+        },
+        "verdict": "deny"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 110592
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-f5af067c.json",
+      "bytes": 1911
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2186
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-deny-rule-ws--/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-deny-rule-ws--/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf/session.v4.jsonl.zstd",
+      "bytes": 15088
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf.json",
+      "bytes": 4079
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 380
+    },
+    {
+      "path": "sessions/session-2d651fc7-7715-4494-82a0-02bb3c2f9bbf__session.v4.jsonl.zstd",
+      "bytes": 15088
+    }
+  ]
+}

@@ -1,0 +1,275 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792664053880,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 28,
+        "val": "IDLE"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "T5L bootstrap"
+          },
+          "count": 2,
+          "lastSeq": 25
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 28,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 28,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 2,
+            "step": 1,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 28,
+        "val": {
+          "surfaceTokens": 2712,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 2658
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 2712,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1307
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "openTurnStartSeq": 22,
+          "lastStepStartSeq": 24,
+          "lastStepBoundary": {
+            "kind": "start",
+            "seq": 24
+          },
+          "lastTurn": 2
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 28,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 28,
+        "val": {
+          "turns": 1,
+          "steps": 1,
+          "llmMs": 17,
+          "toolMs": 0,
+          "ttftMs": 16,
+          "ttftSteps": 2,
+          "decodeMs": 1,
+          "decodeTokens": 20,
+          "lastTurn": 1,
+          "openStep": null,
+          "pendingCalls": {
+            "fx-session-9868c2e2-fd6c-4a6e-add1-823f4ed2514f-0-0": 1792664065632
+          }
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 4,
+              "prompt": "T5L bootstrap",
+              "response": "IDLE"
+            },
+            {
+              "turn": 2,
+              "seq": 22,
+              "prompt": "T5ASK",
+              "response": ""
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 28,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 28,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 28,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0,
+          "pendingTurnStart": 1792664065613
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 28,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "lastMessageTime": 1792664065631,
+          "lastInjectionTime": 1792664055480,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 28,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 28,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 28,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 28,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 28,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 28,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792664065628
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 28,
+        "val": null
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "pending": true,
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "approvals": [
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "type": "approval/asked",
+      "data": {
+        "id": "46cf8673-6862-4b47-90da-aefdca73fcf3",
+        "toolName": "bash",
+        "callId": "fx-session-ae0f310d-b4f1-4b3f-8654-b9c1511c793b-0-0",
+        "reason": "review requires a human decision: no sufficient authorization was found"
+      }
+    }
+  ]
+}

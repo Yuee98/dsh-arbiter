@@ -1,0 +1,47 @@
+{"at":1792598089716,"event":"probe/start","logPath":"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/home/pui/events.jsonl","pid":95965}
+{"at":1792598089716,"event":"probe/ready"}
+{"at":1792598090084,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":0,"type":"permission/preset","data":{"preset":"workspace-write"},"enabled":false}
+{"at":1792598090084,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":1,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":false}
+{"at":1792598090085,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":2,"type":"approval/policy","data":{"policy":"ask"},"enabled":false}
+{"at":1792598090085,"event":"session/created","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":3,"record":{"sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","enabled":false,"boundary":null,"reason":null,"origin":null,"revision":0}}
+{"at":1792598090672,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":17,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792598090672},"enabled":true}
+{"at":1792598090672,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":18,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792598090673,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":19,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792598090673,"event":"pui/enabled","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","boundary":"guarded","origin":"client-selector","seq":20,"via":"appendPluginRecord"}
+{"at":1792598111813,"event":"gate/call","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","tool":"bash","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0","boundary":"guarded","text":"{\"command\":\"printf 'PUI-ALLOW u3\\\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/ws/u3-allow.txt'\",\"description\":\"u3 allow\"}"}
+{"at":1792598111813,"event":"gate/allow","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","tool":"bash","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0"}
+{"at":1792598111813,"event":"gate/released","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0","active":0}
+{"at":1792598116171,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":40,"type":"plugin:pui/disabled","data":{"reason":"second-connection","at":1792598116171},"enabled":false}
+{"at":1792598116171,"event":"pui/disabled","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","reason":"second-connection","mode":null}
+{"at":1792598120211,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":41,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792598120211},"enabled":true}
+{"at":1792598120211,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":42,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792598120211,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":43,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792598120212,"event":"pui/enabled","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","boundary":"guarded","origin":"client-selector","seq":44,"via":"appendPluginRecord"}
+{"at":1792598120516,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":44,"type":"plugin:pui/disabled","data":{"reason":"late-response-probe","at":1792598120515},"enabled":false}
+{"at":1792598120516,"event":"pui/disabled","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","reason":"late-response-probe","mode":null}
+{"at":1792598124564,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":45,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792598124564},"enabled":true}
+{"at":1792598124564,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":46,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792598124564,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":47,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792598124564,"event":"pui/enabled","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","boundary":"guarded","origin":"client-selector","seq":48,"via":"appendPluginRecord"}
+{"at":1792598127336,"event":"probe/start","logPath":"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/home/pui/events.jsonl","pid":96244}
+{"at":1792598127337,"event":"probe/ready"}
+{"at":1792598127840,"event":"session/created","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":49,"record":{"sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","enabled":true,"boundary":"guarded","reason":"late-response-probe","origin":"client-selector","revision":5}}
+{"at":1792598127841,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":49,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792598127841,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":50,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792598127841,"event":"pui/restored","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","boundary":"guarded","seq":51}
+{"at":1792598130536,"event":"pui/resume-failed","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","message":"session \"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5\" is already owned by an active write handle"}
+{"at":1792598152189,"event":"gate/call","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","tool":"bash","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0","boundary":"guarded","text":"{\"command\":\"printf 'PUI-DENY u3\\\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/ws/u3-deny.txt'\",\"description\":\"u3 deny\"}"}
+{"at":1792598152189,"event":"gate/deny","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","tool":"bash","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0"}
+{"at":1792598152189,"event":"gate/released","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","callId":"fixture-session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5-0-0","active":0}
+{"at":1792598152302,"event":"session/event","sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","seq":0,"type":"permission/preset","data":{"preset":"workspace-write"},"enabled":false}
+{"at":1792598152303,"event":"session/event","sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","seq":1,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":false}
+{"at":1792598152303,"event":"session/event","sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","seq":2,"type":"approval/policy","data":{"policy":"ask"},"enabled":false}
+{"at":1792598152303,"event":"session/created","sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","seq":3,"record":{"sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","enabled":false,"boundary":null,"reason":null,"origin":null,"revision":0}}
+{"at":1792598156111,"event":"probe/start","logPath":"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/home/pui/events.jsonl","pid":96424}
+{"at":1792598156111,"event":"probe/ready"}
+{"at":1792598156191,"event":"session/created","sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","seq":4,"record":{"sessionId":"session-85f11264-6ab9-477f-8527-21d5a619c78e","enabled":false,"boundary":null,"reason":null,"origin":null,"revision":0}}
+{"at":1792598159316,"event":"session/created","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":66,"record":{"sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","enabled":true,"boundary":"guarded","reason":"late-response-probe","origin":"client-selector","revision":5}}
+{"at":1792598159317,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":66,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792598159317,"event":"session/event","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":67,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792598159318,"event":"pui/restored","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","boundary":"guarded","seq":68}
+{"at":1792598159319,"event":"pui/resumed","sessionId":"session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5","seq":68,"enabled":true}

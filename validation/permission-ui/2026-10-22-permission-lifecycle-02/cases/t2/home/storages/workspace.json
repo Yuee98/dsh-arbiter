@@ -1,0 +1,29 @@
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": {
+    "initialized": true,
+    "workspaceIds": [
+      "01920000-0000-4000-8000-000000000001"
+    ],
+    "archivedSessionIds": [],
+    "pinnedSessionIds": [],
+    "defaultWorkspaceId": "01920000-0000-4000-8000-000000000001"
+  },
+  "tables": {
+    "workspaces": {
+      "01920000-0000-4000-8000-000000000001": {
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t2/ws",
+        "title": "recovery-workspace",
+        "sessionIds": [
+          "session-9bc11bd9-e449-474c-87d4-61ca35c6d0a1",
+          "session-b2c283bb-630d-4934-8852-107a70045cda"
+        ],
+        "createdAt": "2026-10-22T09:39:51.626Z",
+        "updatedAt": "2026-10-22T09:39:55.393Z"
+      }
+    }
+  }
+}

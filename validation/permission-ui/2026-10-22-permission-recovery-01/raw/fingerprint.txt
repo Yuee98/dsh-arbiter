@@ -1,0 +1,21 @@
+date=2026-10-22T14:52:06+08:00
+os=27.0.1 arm64
+node=v24.21.0
+dsh_runtime=0.2.1-rc.2
+arbiter_build=0.1.0
+b67a65b9719272b2eb54093b63c121d05907da062a1393e8c9f871e1cd18f94e  dsh/package.json
+4f23c620145098d611d04d8363bc6716f49b26930c9141a21dc9a8df2b72ba63  dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js
+2f5dd07cb5c744a29abbb8003a8a4cefd9e582c6e2538074ca299a0ddd02a3bf  dsh/node_modules/@deepseek-ai/dsh-session/lib/index.js
+1e53932e7c4213ea24a7d87f06960b7a7702cb21f8a5741c97242b4a470a442a  dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js
+6a5ad1ba3c3dc3abbbae52e6c8c4463970ee0c1c8988cebb0d5cf2acd17ee90b  dsh/node_modules/@deepseek-ai/dsh-user-approval/lib/index.js
+1b8bf9eb266d7b3b7f899175e3f435c89ed8baa8aabc677212759f8c6cd23132  dsh/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
+772ca58f0f786d6cb4d839deb621634c31097c13228d81b14e3f3153d0524924  dsh/node_modules/@deepseek-ai/dsh-sandbox-policy/lib/index.js
+143b445f1b303be83d56f9e7d3992e1a4885850c08f1082065d332ba7a70ae0a  dsh/node_modules/@deepseek-ai/dsh-hmr/lib/index.js
+--- arbiter source/blob hashes ---
+59f90b26ba9fd632108674d5062e9e07994de60de7bfb22d26c22b94ed6f9928  /Volumes/sandisk/code/dsh-arbiter/src/index.ts
+a8fc41783863c78fbad505cda631f95c32e80e16a2f1b5ce3ea2c078f9c77d8e  /Volumes/sandisk/code/dsh-arbiter/src/records.ts
+8d142c343cf3a3388201e611cb52df5f241da47c1493b6f5e97da0663e09c397  /Volumes/sandisk/code/dsh-arbiter/src/repair.ts
+0c02aeecf18f037b2365f52f9d6837358e0bfb42b3e7bbb4f70c29f53e852b87  /Volumes/sandisk/code/dsh-arbiter/lib/index.js
+10a96862b1f5a41437632e4fd0dedf14735fb78af69ed47d0126b3e7678e1599  /Volumes/sandisk/code/dsh-arbiter/lib/records.js
+04bda0863d335483a6c111722ec320a61f3e5d7263e18f6fce19e677b3434ac2  /Volumes/sandisk/code/dsh-arbiter/lib/repair.js
+e25716f0c4cdcdfe41b726fdd058f0082a5bc0bcffb14e636d5784b6c567e236  /Volumes/sandisk/code/dsh-arbiter/lib/client.js

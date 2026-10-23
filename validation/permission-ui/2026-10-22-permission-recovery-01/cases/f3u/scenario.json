@@ -1,0 +1,11 @@
+{
+  "routes": [
+    { "match": "F3SLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F3UI-SLOW\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/ws/f3ui-slow.txt'", "description": "in-flight during uninstall" } } ] },
+      { "type": "text", "text": "F3SLOW-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDelayMs": 12000,
+  "reviewerDefault": { "risk": 2, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

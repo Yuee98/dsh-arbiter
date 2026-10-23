@@ -1,0 +1,262 @@
+{
+  "heldCall": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+  "heldBefore": false,
+  "toggled": {
+    "ok": true,
+    "before": "true"
+  },
+  "overlap": {
+    "tClick": 1792661916790,
+    "tStop": 1792661916807,
+    "tNew": 1792661920059,
+    "tNewGate": null,
+    "tRelease": 1792661941370,
+    "stopAfterClickMs": 17,
+    "newAfterStopMs": 3252,
+    "newGateAfterStopMs": null,
+    "releaseAfterNewGateMs": null,
+    "drainedAt": 1792661946844,
+    "releaseAt": 1792661946846
+  },
+  "stopActive": 1,
+  "finished": true,
+  "barrier": [
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 0,
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661898918
+    },
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 0,
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661898918
+    },
+    {
+      "event": "review-started",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661898923
+    },
+    {
+      "event": "review-released",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "released": true,
+      "waitedMs": 0,
+      "t": 1792661898923
+    },
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 1,
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661898944
+    },
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 0,
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661903512
+    },
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 0,
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661903512
+    },
+    {
+      "event": "review-started",
+      "callId": "fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661903514
+    },
+    {
+      "event": "review-released",
+      "callId": "fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "released": true,
+      "waitedMs": 1,
+      "t": 1792661903515
+    },
+    {
+      "event": "agent-step",
+      "route": "T2-WARM",
+      "index": 1,
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661903533
+    },
+    {
+      "event": "agent-step",
+      "route": "T2OLD",
+      "index": 0,
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661916644
+    },
+    {
+      "event": "review-started",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-4",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "t": 1792661916647
+    },
+    {
+      "event": "agent-step",
+      "route": "T2NEW",
+      "index": 0,
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661921374
+    },
+    {
+      "event": "agent-step",
+      "route": "T2NEW",
+      "index": 1,
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "t": 1792661923521
+    }
+  ],
+  "trace": [
+    {
+      "at": 1792661898920,
+      "event": "gate/entered",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+      "tool": "bash",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "active": 1
+    },
+    {
+      "at": 1792661898922,
+      "event": "review/start",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf"
+    },
+    {
+      "at": 1792661898924,
+      "event": "review/settled",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-0",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf"
+    },
+    {
+      "at": 1792661903513,
+      "event": "gate/entered",
+      "callId": "fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2",
+      "tool": "bash",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "active": 1
+    },
+    {
+      "at": 1792661903514,
+      "event": "review/start",
+      "callId": "fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9"
+    },
+    {
+      "at": 1792661903515,
+      "event": "review/settled",
+      "callId": "fx-session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9-0-2",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9"
+    },
+    {
+      "at": 1792661916645,
+      "event": "gate/entered",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-4",
+      "tool": "bash",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "active": 1
+    },
+    {
+      "at": 1792661916647,
+      "event": "review/start",
+      "callId": "fx-session-66824047-b777-4549-92c5-ca08c8f82dcf-0-4",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf"
+    },
+    {
+      "at": 1792661916807,
+      "event": "unload/stop-admission",
+      "active": 1,
+      "managed": 2
+    },
+    {
+      "at": 1792661946844,
+      "event": "unload/drained",
+      "active": 1,
+      "waitedMs": 30037
+    },
+    {
+      "at": 1792661946846,
+      "event": "unload/rollback",
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "changed": true
+    },
+    {
+      "at": 1792661946846,
+      "event": "unload/rollback",
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "changed": true
+    },
+    {
+      "at": 1792661946846,
+      "event": "unload/release",
+      "managed": 0
+    }
+  ],
+  "markers": {
+    "oldInside": null,
+    "newOutside": "T2-NEW"
+  },
+  "manager": {
+    "status": 404
+  },
+  "sessions": [
+    {
+      "sessionId": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+      "effective": {
+        "preset": "danger-full-access",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "results": [
+        {
+          "isError": false,
+          "text": "(no output)"
+        }
+      ],
+      "decisions": [
+        {
+          "seq": 19,
+          "result": "review-allow"
+        }
+      ]
+    },
+    {
+      "sessionId": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9",
+      "effective": {
+        "preset": "danger-full-access",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "results": [
+        {
+          "isError": false,
+          "text": "(no output)"
+        },
+        {
+          "isError": false,
+          "text": "(no output)"
+        }
+      ],
+      "decisions": [
+        {
+          "seq": 19,
+          "result": "review-allow"
+        }
+      ]
+    }
+  ],
+  "sessionA": "session-66824047-b777-4549-92c5-ca08c8f82dcf",
+  "sessionB": "session-bfbfa2ff-fff4-42ca-8ca8-8ed2fe11d0b9"
+}

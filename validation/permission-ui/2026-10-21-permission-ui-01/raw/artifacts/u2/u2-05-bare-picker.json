@@ -1,0 +1,9 @@
+{
+  "picker": [
+    "../home/pui/events.jsonl\n+4\n-0",
+    "仅可查看",
+    "工作区内修改",
+    "完全权限"
+  ],
+  "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nU2 base\n23:18\n已完成\n已完成，用时 18秒\n\nIDLE\n\n用量 110 tok\n23:18\nU2DENY\n23:18\n已完成\n已完成，用时 6秒\n\nU2DENY-DONE\n\n已编辑 7 个文件\n+70\n-57\n../../scratch/edge-profile/Default/WebStorage/QuotaManager\n二进制\n../../scratch/edge-profile/Default/WebStorage/QuotaManager-journal\n二进制\n../home/pui/events.jsonl\n+4\n-0\n../home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-permission-ui-2026-10-21-permission-ui-01-cases-u2-ws--/session-51147434-2384-4a1b-aefd-be5d93c35868/session.v4.jsonl.zstd\n二进制\n全部 7 个文件\n用量 220 tok\n23:18\n仅可查看\n工作区内修改\n完全权限\n自动审查\nEXP\n无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。\n\n/permission\n\n自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access\nfixture-1\n2 轮 3 步\n330 tok·缓存命中 0%\n0%"
+}

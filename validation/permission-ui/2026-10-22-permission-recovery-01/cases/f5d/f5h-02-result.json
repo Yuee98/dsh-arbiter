@@ -1,0 +1,59 @@
+{
+  "decided": {
+    "seq": 29,
+    "outcome": "rejected"
+  },
+  "waitedSeconds": 2400,
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "data": {
+        "id": "0fd511f0-17b4-4051-a868-6437f01b5ead",
+        "toolName": "bash",
+        "callId": "fx-session-cdb5c23e-54ed-4e64-afde-a7f50a317ffd-0-0",
+        "reason": "review requires a human decision: no sufficient authorization was found"
+      }
+    },
+    {
+      "seq": 29,
+      "type": "approval/decided",
+      "data": {
+        "id": "0fd511f0-17b4-4051-a868-6437f01b5ead",
+        "outcome": "rejected"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 30,
+      "result": "human-deny",
+      "trace": [
+        "review(default)",
+        "review-escalate",
+        "human-deny"
+      ],
+      "ignorable": true
+    }
+  ],
+  "results": [
+    {
+      "isError": true,
+      "text": "Error: Not executed [human-deny]: the user rejected this call."
+    }
+  ],
+  "marker": null,
+  "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF5HUMAN approval probe\n15:26\n已完成\n已完成，用时 9秒\n\nIDLE\n\n用量 110 tok\n15:26\nF5ASK\n15:26\n已完成\n已完成，用时 5分53秒\n\nF5ASK-DONE\n\n已编辑 404 个文件\n+239,371\n-56\n../agent-requests.jsonl\n+1\n-0\n../edge-profile/AutoLaunchProtocolsComponent/1.0.0.12/manifest.json\n+5\n-0\n../edge-profile/AutoLaunchProtocolsComponent/1.0.0.12/protocols.json\n+125\n-0\n../edge-profile/Autofill/4.0.1.32/autofill_bypass_cache_forms.json\n+11\n-0\n全部 404 个文件\n用量 220 tok\n15:32\n发消息或创建任务, / 调用指令, @ 文件或对话\n工作区内修改\nfixture-1\n2 轮 3 步·15000 tok/s\n330 tok·缓存命中 0%\n0%"
+}

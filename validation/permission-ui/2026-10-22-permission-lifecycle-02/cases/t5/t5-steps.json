@@ -1,0 +1,182 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 2165,
+    "value": "session-ae0f310d-b4f1-4b3f-8654-b9c1511c793b"
+  },
+  {
+    "name": "open-approval",
+    "ok": true,
+    "ms": 1860,
+    "value": {
+      "pending": true,
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "approvals": [
+        {
+          "type": "approval/policy",
+          "data": {
+            "policy": "ask"
+          }
+        },
+        {
+          "type": "approval/asked",
+          "data": {
+            "id": "46cf8673-6862-4b47-90da-aefdca73fcf3",
+            "toolName": "bash",
+            "callId": "fx-session-ae0f310d-b4f1-4b3f-8654-b9c1511c793b-0-0",
+            "reason": "review requires a human decision: no sufficient authorization was found"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "A-native-different-preset",
+    "ok": true,
+    "ms": 2558,
+    "value": {
+      "entry": "sessions.binding(id).session.command(\"/permission read-only\")",
+      "before": {
+        "effective": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        },
+        "pending": true
+      },
+      "result": {
+        "ok": true,
+        "value": {
+          "matched": true
+        }
+      },
+      "after": {
+        "effective": {
+          "preset": "read-only",
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "pending": true
+      },
+      "approvals": [
+        {
+          "type": "approval/policy",
+          "outcome": null
+        },
+        {
+          "type": "approval/asked",
+          "outcome": null
+        }
+      ],
+      "commands": [
+        {
+          "seq": 29,
+          "type": "command/run",
+          "name": "permission",
+          "args": " read-only"
+        },
+        {
+          "seq": 32,
+          "type": "command/done",
+          "kind": "success",
+          "text": "preset read-only"
+        }
+      ]
+    }
+  },
+  {
+    "name": "B-same-value-explicit",
+    "ok": true,
+    "ms": 2518,
+    "value": {
+      "entry": "sessions.binding(id).session.command(\"/permission workspace-write\")",
+      "before": {
+        "effective": {
+          "preset": "read-only",
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "pending": true
+      },
+      "result": {
+        "ok": true,
+        "value": {
+          "matched": true
+        }
+      },
+      "after": {
+        "effective": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        },
+        "pending": true
+      },
+      "approvals": [
+        {
+          "type": "approval/policy",
+          "outcome": null
+        },
+        {
+          "type": "approval/asked",
+          "outcome": null
+        }
+      ],
+      "commands": [
+        {
+          "seq": 29,
+          "type": "command/run",
+          "name": "permission",
+          "args": " read-only"
+        },
+        {
+          "seq": 32,
+          "type": "command/done",
+          "kind": "success",
+          "text": "preset read-only"
+        },
+        {
+          "seq": 33,
+          "type": "command/run",
+          "name": "permission",
+          "args": " workspace-write"
+        },
+        {
+          "seq": 36,
+          "type": "command/done",
+          "kind": "success",
+          "text": "preset workspace-write"
+        }
+      ]
+    }
+  },
+  {
+    "name": "C-answer-after-attempts",
+    "ok": true,
+    "ms": 69,
+    "value": {
+      "stillPending": true,
+      "approvals": [
+        {
+          "type": "approval/policy",
+          "outcome": null
+        },
+        {
+          "type": "approval/asked",
+          "outcome": null
+        }
+      ],
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "note": "left pending for a human answer; see t5h for the answered variant"
+    }
+  }
+]

@@ -1,0 +1,4 @@
+# Installed by `dsh plugin add`; the bundle patch inserts the arbiter row.
+- insert:
+    - id: arbiter
+      name: dsh-arbiter

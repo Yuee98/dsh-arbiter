@@ -1,0 +1,13 @@
+{
+  "pid": 67018,
+  "port": 57981,
+  "origin": "http://127.0.0.1:57981",
+  "cookie": "<redacted>",
+  "tokenUrl": "http://127.0.0.1:57981/?token=MBw4g1yrRmOTBBOWuK2QCNVAGQvhQk2LdTMN4yEbDts",
+  "home": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/home",
+  "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/ws",
+  "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/outside",
+  "dir": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2",
+  "scenarioPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/scenario.json",
+  "eventsPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3ui2/home/arbiter/events.jsonl"
+}

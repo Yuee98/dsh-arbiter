@@ -1,0 +1,698 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 260,
+    "value": "session-eec873bd-88ea-4366-a54d-a0c3126d8266"
+  },
+  {
+    "name": "enable-guarded",
+    "ok": true,
+    "ms": 260,
+    "value": {
+      "status": {
+        "known": true,
+        "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+        "enabled": true,
+        "boundary": "guarded",
+        "reason": null,
+        "origin": "client-selector",
+        "revision": 1
+      },
+      "selector": {
+        "cells": 1,
+        "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+        "nativeControl": false,
+        "puiPresent": true,
+        "selected": "__arbiter__"
+      }
+    }
+  },
+  {
+    "name": "client-override-removal-only",
+    "ok": true,
+    "ms": 2052,
+    "value": {
+      "before": {
+        "known": true,
+        "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+        "enabled": true,
+        "boundary": "guarded",
+        "reason": null,
+        "origin": "client-selector",
+        "revision": 1
+      },
+      "after": {
+        "known": true,
+        "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+        "enabled": true,
+        "boundary": "guarded",
+        "reason": null,
+        "origin": "client-selector",
+        "revision": 1
+      },
+      "selector": {
+        "cells": 1,
+        "cellText": "工作区内修改",
+        "nativeControl": true,
+        "puiPresent": false,
+        "selected": null
+      }
+    }
+  },
+  {
+    "name": "inflight-review-during-unload",
+    "ok": true,
+    "ms": 31900,
+    "value": {
+      "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+      "inflight": true,
+      "during": {
+        "ok": true,
+        "active": [
+          "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+        ]
+      },
+      "unload": {
+        "ok": true,
+        "drainMs": 12000,
+        "active": 1
+      },
+      "midEvents": [
+        {
+          "at": 1792599463349,
+          "t": 22299,
+          "event": "review/inflight",
+          "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+          "callId": "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0",
+          "delayMs": 8000
+        },
+        {
+          "at": 1792599463765,
+          "t": 22715,
+          "event": "pui/dispose-begin",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "drainMs": 12000
+        },
+        {
+          "at": 1792599463766,
+          "t": 22716,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1
+        },
+        {
+          "at": 1792599464018,
+          "t": 22968,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 253
+        },
+        {
+          "at": 1792599464270,
+          "t": 23220,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 505
+        },
+        {
+          "at": 1792599464523,
+          "t": 23473,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 758
+        },
+        {
+          "at": 1792599464774,
+          "t": 23724,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1009
+        },
+        {
+          "at": 1792599465027,
+          "t": 23977,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1262
+        },
+        {
+          "at": 1792599465281,
+          "t": 24231,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1516
+        },
+        {
+          "at": 1792599465533,
+          "t": 24483,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1768
+        },
+        {
+          "at": 1792599465786,
+          "t": 24736,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2021
+        },
+        {
+          "at": 1792599466038,
+          "t": 24988,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2273
+        },
+        {
+          "at": 1792599466289,
+          "t": 25239,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2524
+        },
+        {
+          "at": 1792599466541,
+          "t": 25491,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2776
+        },
+        {
+          "at": 1792599466792,
+          "t": 25742,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3027
+        },
+        {
+          "at": 1792599467045,
+          "t": 25995,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3280
+        }
+      ],
+      "afterEvents": [
+        {
+          "at": 1792599463349,
+          "t": 22299,
+          "event": "review/inflight",
+          "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+          "callId": "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0",
+          "delayMs": 8000
+        },
+        {
+          "at": 1792599463765,
+          "t": 22715,
+          "event": "pui/dispose-begin",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "drainMs": 12000
+        },
+        {
+          "at": 1792599463766,
+          "t": 22716,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1
+        },
+        {
+          "at": 1792599464018,
+          "t": 22968,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 253
+        },
+        {
+          "at": 1792599464270,
+          "t": 23220,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 505
+        },
+        {
+          "at": 1792599464523,
+          "t": 23473,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 758
+        },
+        {
+          "at": 1792599464774,
+          "t": 23724,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1009
+        },
+        {
+          "at": 1792599465027,
+          "t": 23977,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1262
+        },
+        {
+          "at": 1792599465281,
+          "t": 24231,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1516
+        },
+        {
+          "at": 1792599465533,
+          "t": 24483,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 1768
+        },
+        {
+          "at": 1792599465786,
+          "t": 24736,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2021
+        },
+        {
+          "at": 1792599466038,
+          "t": 24988,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2273
+        },
+        {
+          "at": 1792599466289,
+          "t": 25239,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2524
+        },
+        {
+          "at": 1792599466541,
+          "t": 25491,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 2776
+        },
+        {
+          "at": 1792599466792,
+          "t": 25742,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3027
+        },
+        {
+          "at": 1792599467045,
+          "t": 25995,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3280
+        },
+        {
+          "at": 1792599467297,
+          "t": 26247,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3532
+        },
+        {
+          "at": 1792599467549,
+          "t": 26499,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 3784
+        },
+        {
+          "at": 1792599467803,
+          "t": 26753,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 4038
+        },
+        {
+          "at": 1792599468056,
+          "t": 27006,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 4291
+        },
+        {
+          "at": 1792599468308,
+          "t": 27258,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 4543
+        },
+        {
+          "at": 1792599468561,
+          "t": 27511,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 4796
+        },
+        {
+          "at": 1792599468813,
+          "t": 27763,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 5048
+        },
+        {
+          "at": 1792599469064,
+          "t": 28014,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 5299
+        },
+        {
+          "at": 1792599469317,
+          "t": 28267,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 5552
+        },
+        {
+          "at": 1792599469570,
+          "t": 28520,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 5805
+        },
+        {
+          "at": 1792599469822,
+          "t": 28772,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 6057
+        },
+        {
+          "at": 1792599470074,
+          "t": 29024,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 6309
+        },
+        {
+          "at": 1792599470327,
+          "t": 29277,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 6562
+        },
+        {
+          "at": 1792599470579,
+          "t": 29529,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 6814
+        },
+        {
+          "at": 1792599470832,
+          "t": 29782,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 7067
+        },
+        {
+          "at": 1792599471082,
+          "t": 30032,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 7317
+        },
+        {
+          "at": 1792599471334,
+          "t": 30284,
+          "event": "pui/dispose-wait",
+          "active": [
+            "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0"
+          ],
+          "waitedMs": 7569
+        },
+        {
+          "at": 1792599471350,
+          "t": 30300,
+          "event": "review/settled",
+          "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+          "callId": "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0",
+          "outcome": "done",
+          "signalAborted": false
+        },
+        {
+          "at": 1792599471351,
+          "t": 30301,
+          "event": "gate/released",
+          "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+          "callId": "fixture-session-eec873bd-88ea-4366-a54d-a0c3126d8266-0-0",
+          "active": 0
+        },
+        {
+          "at": 1792599471587,
+          "t": 30537,
+          "event": "pui/dispose-drained",
+          "active": [],
+          "waitedMs": 7822
+        },
+        {
+          "at": 1792599471587,
+          "t": 30537,
+          "event": "pui/dispose-rollback",
+          "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+          "to": "workspace-write+ask",
+          "boundaryWas": "guarded"
+        },
+        {
+          "at": 1792599471587,
+          "t": 30537,
+          "event": "pui/dispose-end",
+          "waitedMs": 7822
+        },
+        {
+          "at": 1792599471587,
+          "t": 30537,
+          "event": "pui/unload-disposed"
+        }
+      ],
+      "marker": {
+        "exists": true,
+        "content": "PUI-SLOW-8000 allow\n"
+      }
+    }
+  },
+  {
+    "name": "post-unload-routes-gone",
+    "ok": true,
+    "ms": 6,
+    "value": {
+      "routes": {
+        "ok": false,
+        "error": "SyntaxError: Unexpected token 'o', \"not found\" is not valid JSON"
+      },
+      "selector": {
+        "cells": 1,
+        "cellText": "工作区内修改",
+        "nativeControl": true,
+        "puiPresent": false,
+        "selected": null
+      }
+    }
+  },
+  {
+    "name": "reopen-after-unload",
+    "ok": true,
+    "ms": 4010,
+    "value": {
+      "resumed": {
+        "ok": false,
+        "code": "resume-failed",
+        "message": "session \"session-eec873bd-88ea-4366-a54d-a0c3126d8266\" is already owned by an active write handle"
+      },
+      "status": {
+        "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+        "enabled": false,
+        "boundary": "guarded",
+        "reason": "plugin-unload",
+        "origin": "client-selector",
+        "revision": 2
+      },
+      "rollbackEvents": [
+        {
+          "type": "sandbox/mode",
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "type": "approval/policy",
+          "data": {
+            "policy": "ask"
+          }
+        },
+        {
+          "type": "sandbox/mode",
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "type": "approval/policy",
+          "data": {
+            "policy": "ask"
+          }
+        }
+      ],
+      "restored": [],
+      "ignorableRecords": [
+        {
+          "type": "plugin:pui/enabled",
+          "ignorable": true
+        },
+        {
+          "type": "plugin:pui/disabled",
+          "ignorable": true
+        }
+      ],
+      "selector": {
+        "cells": 1,
+        "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+        "nativeControl": false,
+        "puiPresent": true,
+        "selected": "workspace-write"
+      }
+    }
+  },
+  {
+    "name": "user-switched-not-overwritten",
+    "ok": true,
+    "ms": 10880,
+    "value": {
+      "fresh": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+      "before": {
+        "known": true,
+        "sessionId": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+        "enabled": false,
+        "boundary": "guarded",
+        "reason": "permission-command",
+        "origin": "client-selector",
+        "revision": 2
+      },
+      "sandboxBefore": {
+        "ok": true,
+        "effectiveMode": "workspace-write",
+        "approval": "ask"
+      },
+      "skipped": [
+        {
+          "at": 1792599488674,
+          "t": 11174,
+          "event": "pui/dispose-skip",
+          "sessionId": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+          "reason": "not-managed"
+        }
+      ],
+      "rolledBack": [],
+      "modeEvents": [
+        {
+          "mode": "workspace-write"
+        },
+        {
+          "mode": "workspace-write"
+        },
+        {
+          "mode": "read-only"
+        }
+      ]
+    }
+  }
+]
