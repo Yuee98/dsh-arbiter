@@ -2115,3 +2115,87 @@ describe('capacity pressure from auxiliary files', () => {
     db.close();
   });
 });
+
+describe('retention does not mistake free pages for auxiliary files', () => {
+  test('freelist space from age deletion does not evict the remaining calls', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const expiredTs = Date.now() - 5 * 24 * 60 * 60 * 1_000;
+    // Large expired calls create substantial free pages once deleted.
+    for (let index = 0; index < 8; index += 1) {
+      store.enqueue(
+        record({
+          callId: `free-page-${String(index)}`,
+          result: 'allow',
+          ts: expiredTs,
+          arguments: { command: 'echo hi', padding: 'f'.repeat(60_000) },
+        }),
+      );
+    }
+    for (let index = 0; index < 4; index += 1) {
+      store.enqueue(
+        record({ callId: `survivor-${String(index)}`, result: 'allow' }),
+      );
+    }
+    await store.flush();
+    const occupiedBefore = store.databaseBytes;
+    expect(occupiedBefore).toBeGreaterThan(0);
+    // A target that compaction can meet on its own. If free pages were treated as
+    // auxiliary, the derived budget would look tiny and the survivors would be
+    // deleted for nothing.
+    const target = Math.floor(occupiedBefore * 0.75);
+    const outcome = store.runRetention(Date.now(), 1, target);
+    const remaining = store.listCalls({}).rows.map((row) => row.callId);
+    expect(remaining.filter((id) => id.startsWith('survivor-'))).toHaveLength(
+      4,
+    );
+    expect(outcome.deleted).toBeGreaterThan(0);
+    store.close();
+  });
+
+  test('templates orphaned by age deletion are reclaimed before capacity eviction', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const expiredTs = Date.now() - 5 * 24 * 60 * 60 * 1_000;
+    for (let index = 0; index < 3; index += 1) {
+      const system = `REVIEW_POLICY\nAGE ORPHAN ${String(index)} ${'o'.repeat(30_000)}`;
+      store.enqueue(
+        record({
+          callId: `age-orphan-${String(index)}`,
+          result: 'allow',
+          ts: expiredTs,
+          modelAttempts: [
+            {
+              requestId: `age-orphan-${String(index)}:model:1`,
+              callId: `age-orphan-${String(index)}`,
+              attempt: 1,
+              backend: 'chat',
+              protocol: 'arbiter-chat-json-v1',
+              request: { provider: 'p', model: 'm', system, messages: [] },
+              templateId: templateIdOf(system),
+              responseText: '{}',
+              parsed: null,
+              error: null,
+              startedAt: 1,
+              durationMs: 2,
+              estimatedInputTokens: 3,
+              usage: null,
+            },
+          ],
+        }),
+      );
+    }
+    for (let index = 0; index < 3; index += 1) {
+      store.enqueue(
+        record({ callId: `keep-${String(index)}`, result: 'allow' }),
+      );
+    }
+    await store.flush();
+    const before = store.databaseBytes;
+    // A tight target: the orphaned template content alone would breach it, so
+    // reclaiming it before the capacity comparison is what keeps the recent
+    // calls alive.
+    store.runRetention(Date.now(), 1, Math.floor(before * 0.9));
+    const remaining = store.listCalls({}).rows.map((row) => row.callId);
+    expect(remaining.filter((id) => id.startsWith('keep-'))).toHaveLength(3);
+    store.close();
+  });
+});

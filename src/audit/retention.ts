@@ -100,7 +100,14 @@ export function runRetention(
   now: number,
   retentionDays: number,
   retentionBytes: number,
-  databaseBytes: () => number,
+  /**
+   * Total bytes of auxiliary audit files (migration backups and sidecars).
+   *
+   * These are reported separately from the database because deleting rows can
+   * never reclaim them, and they must not be confused with SQLite's free pages:
+   * a freelist page is reclaimable database space, not an auxiliary file.
+   */
+  auxiliaryBytes: () => number,
 ): RetentionOutcome {
   try {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -108,19 +115,20 @@ export function runRetention(
     // Continue with the current page counts.
   }
   const cutoff = now - retentionDays * 24 * 60 * 60 * 1_000;
-  // Reclaim unreferenced shared content first: it may already be enough to meet
-  // the target without deleting a retainable call.
-  reclaimShared(db, cutoff);
   let deleted = rowChanges(
     db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
   );
+  // Reclaim after the age-based deletion, not before it: expired calls are what
+  // make their templates orphaned, and reclaiming them now keeps that content
+  // out of the capacity decision below.
+  reclaimShared(db, cutoff);
   let guard = 0;
-  // Auxiliary files (backups, sidecars) cannot be reclaimed by deleting rows, so
-  // the database budget is what remains of the target after them. That lets a
-  // large backup still trigger eviction of reclaimable rows, while the loop
-  // only measures pages a delete can actually free.
-  const auxiliary = Math.max(0, databaseBytes() - occupiedBytes(db));
-  const databaseBudget = Math.max(0, retentionBytes - auxiliary);
+  // Auxiliary files cannot be reclaimed by deleting rows, so the database budget
+  // is what remains of the target after them. The budget is derived from the
+  // real auxiliary size, never from `total - occupied`: that difference includes
+  // SQLite's free pages, which compaction can reclaim and which must therefore
+  // stay inside the database's own budget.
+  const databaseBudget = Math.max(0, retentionBytes - auxiliaryBytes());
   while (occupiedBytes(db) > databaseBudget && guard < 40) {
     guard += 1;
     const remaining = rowNumber(
@@ -161,10 +169,11 @@ export function runRetention(
   }
   // Final pass: the loop may have removed the last reference to shared rows.
   reclaimShared(db, cutoff);
-  if (deleted > 0 || databaseBytes() > retentionBytes) compact(db);
+  if (deleted > 0 || occupiedBytes(db) + auxiliaryBytes() > retentionBytes)
+    compact(db);
   // After compaction the physical footprint may still exceed the target because
   // the single newest call (or a sidecar/backup) is larger than it. Say so
   // rather than deleting the last record to satisfy a number.
   const irreducible = occupiedBytes(db) > databaseBudget;
-  return { deleted, irreducible, bytes: databaseBytes() };
+  return { deleted, irreducible, bytes: occupiedBytes(db) + auxiliaryBytes() };
 }

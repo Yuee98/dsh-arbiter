@@ -197,6 +197,30 @@ export class AuditStore {
   }
 
   /**
+   * Bytes of auxiliary audit files that deleting rows cannot reclaim.
+   *
+   * Migration backups and the WAL/SHM sidecars are separate files; the database
+   * itself is deliberately excluded, because its free pages are reclaimable by
+   * compaction and therefore belong to the database's own budget.
+   */
+  private get auxiliaryBytes(): number {
+    let total = 0;
+    for (const candidate of [
+      `${this.path}-wal`,
+      `${this.path}-shm`,
+      `${this.path}.backup-v1`,
+      `${this.path}.backup-v2`,
+    ]) {
+      try {
+        total += statSync(candidate).size;
+      } catch {
+        // A missing sidecar or backup is normal.
+      }
+    }
+    return total;
+  }
+
+  /**
    * Bytes the retention target governs.
    *
    * The database, its WAL/SHM sidecars and its own migration backups all live
@@ -736,7 +760,7 @@ export class AuditStore {
     // Scheduled from an interval, so a throw here would escape into the host.
     return (
       this.guard(() =>
-        runRetention(this.db, now, days, bytes, () => this.databaseBytes),
+        runRetention(this.db, now, days, bytes, () => this.auxiliaryBytes),
       ) ?? { deleted: 0, irreducible: false, bytes: this.databaseBytes }
     );
   }
