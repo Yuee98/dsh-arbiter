@@ -1,13 +1,17 @@
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 
+/**
+ * First-release navigation. Offline rule suggestions, analysis and policy
+ * replay are deferred beyond this release, so they have no tab here; the
+ * prototype panel under `panels/suggestions.tsx` is not wired into the page.
+ */
 const TABS = [
   ['status', 'page.status'],
   ['rules', 'page.rules'],
   ['reviewer', 'page.reviewer'],
   ['advanced', 'page.advanced'],
   ['logs', 'page.logs'],
-  ['suggestions', 'page.suggestions'],
   ['about', 'page.about'],
 ] as const;
 

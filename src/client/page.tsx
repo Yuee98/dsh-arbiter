@@ -15,7 +15,6 @@ import { RulesPanel } from './panels/rules.js';
 import { ReviewerPanel } from './panels/reviewer.js';
 import { AdvancedPanel } from './panels/advanced.js';
 import { LogsPanel } from './panels/logs.js';
-import { SuggestionsPanel } from './panels/suggestions.js';
 import { AboutPanel } from './panels/about.js';
 
 export function ArbiterPage(_props: SlotProps): ReactNode {
@@ -187,13 +186,6 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         <AdvancedPanel draft={draft} onDraft={onDraft} />
       ) : null}
       {tab === 'logs' ? <LogsPanel /> : null}
-      {tab === 'suggestions' ? (
-        <SuggestionsPanel
-          onApplied={() => {
-            load().catch(onFailure);
-          }}
-        />
-      ) : null}
       {tab === 'about' ? <AboutPanel state={state} /> : null}
     </div>
   );

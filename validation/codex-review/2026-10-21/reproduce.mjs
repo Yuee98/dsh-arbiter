@@ -181,19 +181,28 @@ try {
     },
   } } });
   apply(accepting.ctx, {});
+  // Revised by the first-release scope decision (issue #20): offline rule
+  // suggestions are deferred, so the accept endpoint must not exist at all and
+  // cannot reach the configuration editor. The original R8 behavior is kept in
+  // results.json and the remediation report as historical evidence.
   let acceptError = null, acceptResponse = null;
-  try {
-    acceptResponse = await (await accepting.routes.get('/api/arbiter/suggestions/act').fetch(new Request('http://fixture/accept', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ candidateId: 'candidate-one', action: 'accept' }),
-    }))).json();
-  } catch (error) { acceptError = String(error); }
+  const acceptRoute = accepting.routes.get('/api/arbiter/suggestions/act');
+  if (acceptRoute !== undefined) {
+    try {
+      acceptResponse = await (await acceptRoute.fetch(new Request('http://fixture/accept', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ candidateId: 'candidate-one', action: 'accept' }),
+      }))).json();
+    } catch (error) { acceptError = String(error); }
+  }
   const inspection = new AuditStore(join(home, 'arbiter', 'arbiter.db'), DEFAULT_CONFIG.audit);
   const candidateStatus = inspection.listCandidates().find(c => c.candidateId === 'candidate-one')?.status;
   inspection.close();
-  check('R8', 'Accepting a suggestion must survive Loader reconciliation and mark the candidate accepted',
-    acceptError === null && candidateStatus === 'accepted', {
-      acceptError, acceptResponse, candidateStatus, ruleAdded: configured.rules?.some(r => r.id === candidateRule.id),
+  check('R8', 'A deferred suggestion accept endpoint must be absent and leave candidates and rules unchanged',
+    acceptRoute === undefined && candidateStatus === 'pending'
+      && !configured.rules?.some(r => r.id === candidateRule.id), {
+      routeRegistered: acceptRoute !== undefined, acceptError, acceptResponse, candidateStatus,
+      ruleAdded: configured.rules?.some(r => r.id === candidateRule.id),
     });
   afterAccept?.close();
 

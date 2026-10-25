@@ -1,15 +1,8 @@
-import {
-  clearRoute,
-  logRoute,
-  logsRoute,
-  replayRoute,
-  suggestionsRoute,
-} from './audit-routes.js';
+import { clearRoute, logRoute, logsRoute } from './audit-routes.js';
 import { credentialsRoute, testRoute, validateRoute } from './config-routes.js';
 import { ConfigurationAccess } from './configuration.js';
 import { jsonResponse } from './http.js';
 import { statePayload } from './state.js';
-import { analyzeRoute, SuggestionActions } from './suggestion-routes.js';
 import type { FetchRouteLike, HostEnvironment } from './types.js';
 
 /** Routes share one configuration accessor and retain optional-service injection. */
@@ -37,10 +30,6 @@ export function registerRoutes(host: HostEnvironment): void {
       testRoute(host),
       logsRoute(host),
       logRoute(host),
-      suggestionsRoute(host),
-      analyzeRoute(host),
-      new SuggestionActions(host, configuration).route(),
-      replayRoute(host),
       clearRoute(host),
     ];
     host.ctx.effect(() => {

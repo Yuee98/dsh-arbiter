@@ -137,35 +137,6 @@ export interface LogDetail {
   readonly config: unknown;
 }
 
-export interface CandidateView {
-  readonly candidateId: string;
-  readonly createdAt: number;
-  readonly status: 'pending' | 'accepted' | 'rejected';
-  readonly rule: unknown;
-  readonly stats: unknown;
-  readonly evidence: unknown;
-  readonly windowStart: number;
-  readonly windowEnd: number;
-  readonly note: string | null;
-}
-
-export interface ReplayView {
-  readonly considered: number;
-  readonly comparable: number;
-  readonly promoted: number;
-  readonly normalAllow: number;
-  readonly progressAllow: number;
-  readonly changed: number;
-  readonly skipped: number;
-  readonly items: readonly {
-    readonly callId: string;
-    readonly tool: string;
-    readonly normal: string;
-    readonly progress: string;
-    readonly promoted: boolean;
-  }[];
-}
-
 export interface SlotProps {
   readonly view?: string;
 }

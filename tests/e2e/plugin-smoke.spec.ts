@@ -108,37 +108,44 @@ test(
     await expect(plugin.getByText('没有记录。', { exact: true })).toBeVisible();
     await expect(plugin.getByRole('status')).toHaveCount(0);
 
-    const [suggestions] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === '/api/arbiter/suggestions',
-      ),
-      plugin.getByRole('button', { name: '离线建议', exact: true }).click(),
-    ]);
-    expect(suggestions.status()).toBe(200);
+    // First release: offline rule suggestions are deferred. Their tab and the
+    // analysis / accept actions must not be reachable from the real UI either.
     await expect(
-      plugin.getByRole('heading', { name: '离线规则建议', exact: true }),
-    ).toBeVisible();
-    await expect(
-      plugin.getByText('暂无候选。', { exact: false }),
-    ).toBeVisible();
-    const [replay] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === '/api/arbiter/replay',
-      ),
-      plugin
-        .getByRole('button', {
-          name: '策略回放（normal vs progress）',
-          exact: true,
-        })
-        .click(),
-    ]);
-    expect(replay.status()).toBe(200);
-    await expect(
-      plugin.getByText('可比记录：', { exact: false }),
-    ).toBeVisible();
-    await expect(plugin.getByRole('status')).toHaveCount(0);
+      plugin.getByRole('button', { name: '离线建议', exact: true }),
+    ).toHaveCount(0);
+
+    const rulesBeforeBody: unknown = await (
+      await page.request.get(`${dsh.origin}/api/arbiter/state`)
+    ).json();
+    if (
+      rulesBeforeBody === null ||
+      typeof rulesBeforeBody !== 'object' ||
+      !('config' in rulesBeforeBody)
+    ) {
+      throw new Error('DSH state did not supply an effective configuration.');
+    }
+    const rulesBefore = rulesBeforeBody.config;
+    for (const [path, method] of [
+      ['/api/arbiter/analyze', 'POST'],
+      ['/api/arbiter/suggestions', 'GET'],
+      ['/api/arbiter/replay', 'GET'],
+      ['/api/arbiter/suggestions/act', 'POST'],
+    ] as const) {
+      // A GET must not carry a body: the host rejects that before routing, so
+      // the request would no longer prove the route itself is absent.
+      const response = await page.request.fetch(
+        `${dsh.origin}${path}`,
+        method === 'POST'
+          ? { method, data: { candidateId: 'none', action: 'accept' } }
+          : { method },
+      );
+      expect(response.status(), path).toBe(404);
+    }
+    // The attempted acceptance changed nothing in the effective configuration.
+    const rulesAfter: unknown = await (
+      await page.request.get(`${dsh.origin}/api/arbiter/state`)
+    ).json();
+    expect(rulesAfter).toMatchObject({ config: rulesBefore });
 
     await plugin
       .getByRole('button', { name: '覆盖与试用', exact: true })
