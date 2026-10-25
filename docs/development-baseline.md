@@ -74,9 +74,17 @@ fast-check 已接入现有规则优先级测试，每项 100 轮，失败输出 
 
 ## i18n 的开发与发布检查
 
-客户端通过真实 DSH `locale.register/bind/getSnapshot/subscribe` 接入宿主偏好，插件卸载时释放资源。中文 key 集中在 `locale/zh.json`；缺失英文在运行时明确回退中文。开发检查 `pnpm check:i18n` 验证 key、已有英文与插值一致性，允许尚未翻译的英文项。
+客户端通过真实 DSH `locale.register/bind/getSnapshot/subscribe` 接入宿主偏好，插件卸载时释放资源。资源按 `locale/<语言>/<模块>.json` 维护，例如 `locale/zh/config.json`、`locale/zh/rules.json` 和 `locale/en/common.json`。按稳定功能模块拆文件，文件内部用嵌套对象表达分组，属性名不再包含点号；组件仍用 `t('config.actions.label')` 这样的完整点号 key。文件名提供模块命名空间，文件内容不重复套模块名。`common.json` 保留既有根级 `title`／`summary` 等公共 key，不增加 common 前缀；命名空间碰撞和字符串／对象冲突会报错。
 
-`pnpm check:i18n:release` 要求英文完整，`pnpm check:release` 先执行这一门禁，再执行完整检查和真实 DSH smoke。目前英文尚未补齐是已确认的开发阶段状态，发布门禁应当失败，不能用中文回退冒充英文完成。现有原型的自有文案已接入中文 locale，新版 UI 继续沿用该边界。设计稿和 issues 继续中文。
+`src/client/i18n/resources.ts` 显式导入各语言与模块，供 TypeScript 从中文叶子节点推导合法 key，并把资源编入浏览器包；新增文件或语言时同步登记。运行时先展平成点号 key，再逐条合并中文回退，因此部分译文不会覆盖整个中文分组。缺文件、缺分组或缺叶子都能按条回退，用户内容和插值参数不被重复解释。
+
+`locale/schema.json` 是所有语言共用的 JSON Schema，只规定嵌套对象、合法属性名和非空白字符串，禁止数组、数字、布尔与 null；不手工枚举全部文案 key。`.vscode/settings.json` 为资源文件关联该 schema，字典自身不混入 `$schema`。校验使用仅开发环境依赖的 Ajv，浏览器不加载 schema 校验器。
+
+`pnpm check:i18n` 扫描所有语言目录及其每个 JSON 文件，先应用共享 schema，再以中文为基准检查未知模块／key、对象与字符串冲突及插值一致性；检查对象不限英文。磁盘资源还必须与客户端登记完全一致，防止新增资源未实际打包或注册。开发阶段允许译文缺文件／key，不能容忍已有译文格式错误。模块文件使用小写开头的字母数字名称；语言目录使用如 zh、en、fr、pt-BR 的语言标签。
+
+`pnpm check:i18n:release` 对所有已声明语言要求完整覆盖中文叶子，`pnpm check:release` 先执行这一门禁，再执行完整检查和真实 DSH smoke。目前英文尚未补齐是已确认的开发阶段状态，发布门禁应当失败，不能用中文回退冒充英文完成。新增／修改 UI 继续复用此入口，设计稿和 issues 继续中文。打包消费者递归核对全部语言资源及 schema；真实 DSH 的构建指纹也包含整个 locale 目录。
+
+2026-10-25 资源重组验证：214 个中文 key 与文案、2 个已有英文 key 与文案均与拆分前一致。`pnpm verify` 通过 139 项 unit、39 项 integration、18 项 UI 和 R1–R9；包含第三语言的共享 schema、结构／插值、发布完整性、资源登记及逐条回退验证。macOS arm64、DSH 0.2.1-rc.3 下三个真实 smoke 均通过，覆盖语言切换和刷新。发布检查按预期拒绝仍缺失的 212 个英文 key，不表示英文已完成。
 
 ## 真实 DSH E2E
 

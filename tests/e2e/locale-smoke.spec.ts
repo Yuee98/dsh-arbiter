@@ -1,9 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { dismissGettingStarted, openArbiterConfiguration } from './dsh/ui.js';
-import chinese from '../../locale/zh.json' with { type: 'json' };
-import english from '../../locale/en.json' with { type: 'json' };
-
-const englishCatalog: Readonly<Record<string, string | undefined>> = english;
+import config from '../../locale/zh/config.json' with { type: 'json' };
 
 test('switches the real host language and restores localized configuration after refresh', async ({
   dshPage: page,
@@ -17,12 +14,10 @@ test('switches the real host language and restores localized configuration after
   await expect(page.locator('html')).toHaveAttribute('lang', /^en/);
   await openArbiterConfiguration(page);
 
-  const actionsLabel =
-    englishCatalog['config.actions.label'] ?? chinese['config.actions.label'];
-  const validateLabel =
-    englishCatalog['config.validate'] ?? chinese['config.validate'];
-  const revisionTemplate =
-    englishCatalog['config.revision'] ?? chinese['config.revision'];
+  // English has only common messages: the whole missing config module falls back.
+  const actionsLabel = config.actions.label;
+  const validateLabel = config.validate;
+  const revisionTemplate = config.revision;
   const state = await page.request.get(`${dsh.origin}/api/arbiter/state`);
   const body: unknown = await state.json();
   if (

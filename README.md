@@ -127,6 +127,8 @@ mise exec -- pnpm verify
 | `pnpm check:unused`         | Knip 检查未使用文件、导出与依赖                                   |
 | `pnpm check:workflows`      | actionlint 与 zizmor 离线检查 GitHub Actions／Dependabot          |
 | `pnpm check:dependencies`   | 检查源码运行时循环依赖，类型引用不计入                            |
+| `pnpm check:i18n`           | 遍历全部语言，检查共享 schema、key／结构／插值与资源登记一致性    |
+| `pnpm check:i18n:release`   | 在上述检查外要求所有已声明语言完整覆盖中文                        |
 | `pnpm test`                 | 运行 unit、integration 与 UI 三个 Vitest 项目                     |
 | `pnpm test:coverage`        | 全量源码覆盖率报告，无百分比门槛和过渡名单                        |
 | `pnpm build`                | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
@@ -144,4 +146,6 @@ node scripts/check.mjs
 
 现有设计专题、归档与 `validation/` 资料不纳入工程的格式、Lint、类型与 Knip 检查。构建只包含 `src/`；`lib/`、依赖目录与测试产物不提交。
 
-CI 在所有 PR、main 推送和手动触发时运行单个 `Verify` job。Dependabot 每周检查 npm 开发依赖和 Actions 更新，通过 PR 验证，不自动合并。
+文案按 `locale/<语言>/<功能模块>.json` 分文件，内部使用嵌套对象，所有语言共用 `locale/schema.json`。组件保留点号 key；新增资源同步登记到 `src/client/i18n/resources.ts`。开发允许缺少译文并逐条回退中文，发布前补齐英文及其他已声明语言，详见[资源组织与校验](docs/development-baseline.md#i18n-的开发与发布检查)。
+
+CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周检查 npm 开发依赖和 Actions 更新，通过 PR 验证，不自动合并。

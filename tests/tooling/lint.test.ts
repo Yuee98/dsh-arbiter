@@ -245,6 +245,8 @@ describe('module import boundaries', () => {
     ['src/client/components/card.tsx', 'node:fs'],
     ['src/client/components/card.tsx', 'fs/promises'],
     ['src/client/components/card.tsx', '../../audit.js'],
+    ['src/client/i18n/resources.ts', '../../../locale/schema.json'],
+    ['src/client/i18n/resources.ts', '../../../locale/zh/config.ts'],
     ['src/client/components/card.tsx', 'better-sqlite3'],
     ['src/rules/match.ts', 'react'],
     ['src/domain/value.ts', '@deepseek-ai/dsh-session'],
@@ -255,7 +257,8 @@ describe('module import boundaries', () => {
 
   it.each([
     ['src/client/components/card.tsx', '../../types.js'],
-    ['src/client/i18n.ts', '../../locale/zh.json'],
+    ['src/client/i18n/resources.ts', '../../../locale/zh/config.json'],
+    ['src/client/i18n/resources.ts', '../../../locale/fr-CA/config.json'],
     ['src/rules/match.ts', '../shell/parse.js'],
     ['src/rules/match.ts', 'picomatch'],
     ['src/policy.ts', './types.js'],

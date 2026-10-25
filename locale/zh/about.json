@@ -1,0 +1,18 @@
+{
+  "trialTitle": "试用步骤",
+  "trialDescription": "使用隔离 profile；不要先改日常 profile。",
+  "trialCommands": "# 1. 安装到隔离 profile\ndsh plugin --profile arbiter add /Volumes/sandisk/code/dsh-arbiter\n\n# 2. 启动该 profile\ndsh --profile arbiter web\n\n# 3. 打开侧栏 Plugins → dsh-arbiter → 配置页\n# 4. 选择 reviewer，创建 allow / force-review 规则，运行 /arbiter status 或规则测试\n# 5. 在日志页查看每次调用为什么被放行或拒绝",
+  "executionPrefix": "当前执行模式：",
+  "executionExplanation": "。插件不修改宿主核心，不自动切换日常 profile，也不自动应答沙箱升权。",
+  "boundaries": "已验证边界",
+  "connected": "已接入",
+  "notIndividual": "不逐项覆盖",
+  "lifecycle": "停用与卸载",
+  "lifecycleDescription": "插件停用后不再新增判定；已写入的规则、候选与审计保留。卸载不会自动清理 SQLite，也不会把原有会话切回其他 preset；托管 auto 预设的迁移与官方 auto review 相同，应先在隔离 profile 确认。",
+  "limits": "已知限制",
+  "calibrationLimit": "阈值、progress 额外代批范围未经校准；日志只给出失败率下界，误放率需要人工复核。",
+  "surfaceLimit": "真实人工审批、Web 之外的 surface、外部后端子任务、MCP 动态列表与 workflow 后台组合未在本轮验证。",
+  "subagentLimit": "子任务无人工通道；需要人工的调用进入 fallback-deny，只结束当前调用。",
+  "projectRulesLimit": "项目规则文件默认只作为审查指引，不被当作人类授权，也不覆盖插件策略。",
+  "orderLimit": "`prepend` 不能保证本插件排在其他审查者之前；插件内部保证规则先于自身 reviewer。"
+}

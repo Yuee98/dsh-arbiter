@@ -38,7 +38,12 @@ export function forbiddenImport(file, source) {
     const resolved = path.posix.normalize(
       path.posix.join(path.posix.dirname(file), source),
     );
-    if (layer === 'browser' && /^locale\/[^/]+\.json$/u.test(resolved))
+    if (
+      layer === 'browser' &&
+      /^locale\/[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*\/[a-z][A-Za-z0-9]*\.json$/u.test(
+        resolved,
+      )
+    )
       return null;
     const dependency = moduleLayer(resolved.replace(/\.(?:m?js|jsx)$/u, '.ts'));
     if (layer === 'pure' && dependency !== 'pure')

@@ -1,0 +1,14 @@
+{
+  "actions": {
+    "label": "配置操作"
+  },
+  "revision": "配置修订 {revision}",
+  "unsavedDraft": " · 有未保存草稿",
+  "validate": "校验草稿",
+  "reload": "重新读取",
+  "save": "保存并应用",
+  "busy": "处理中…",
+  "loading": "正在读取 Arbiter 配置…",
+  "loadFailed": "无法读取 Arbiter 配置：{error}",
+  "saved": "配置已保存并应用。"
+}
