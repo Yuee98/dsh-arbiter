@@ -1163,6 +1163,26 @@ describe('API disable must not leave an ungated wide session', () => {
         managed: false,
         reason: 'session-disabled',
       });
+      // The parent is untouched and still admitted.
+      const parentView = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-i09-root',
+      );
+      expect(viewOf(parentView.body)).toMatchObject({
+        enabled: true,
+        managed: true,
+      });
+      // The parent keeps its own widened permission: only the disabled child
+      // narrows. Disabling a child must not silently exit the parent.
+      expect(modeEvents(main).at(-1)).toEqual({ mode: 'danger-full-access' });
+      // The child's next call is ungated by design, but its captured sandbox is
+      // gone, so it cannot execute outside the workspace.
+      expect((await harness.gate(call(child, 'child-after'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(
+        decisions(child).filter((entry) => entry['callId'] === 'child-after'),
+      ).toHaveLength(0);
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
     } finally {
       harness.dispose();
     }
