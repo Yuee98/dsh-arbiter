@@ -186,6 +186,78 @@ describe('rule list header and inline editing', () => {
     ).toBeNull();
   });
 
+  test('a multi-word custom name keeps the space that was just typed', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const name = within(row(id)).getByRole('textbox', { name: '显示名称' });
+    // Inner spaces belong to the name; no keystroke may collapse them.
+    await user.type(name, '只读 查询');
+    expect(name).toHaveValue('只读 查询');
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: { rules: [{ id, name: '只读 查询' }] },
+    });
+  });
+
+  test('a regular-expression pattern is never rewritten while typing', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const pattern = within(row(id)).getByRole('textbox', { name: '表达式' });
+    // Anchors, escapes and quantifiers are ordinary text to this field.
+    await user.type(pattern, '^gh pr (view|list)\\s+\\d+$');
+    expect(pattern).toHaveValue('^gh pr (view|list)\\s+\\d+$');
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [
+              {
+                target: 'command',
+                kind: 'regex',
+                pattern: '^gh pr (view|list)\\s+\\d+$',
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test('a JSONPath stays exactly as typed, brackets and quotes included', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    const path = within(row(id)).getByRole('textbox', { name: 'JSONPath' });
+    // Braces and quotes are user-event syntax, so the value is pasted.
+    await user.click(path);
+    await user.paste("$['a.b'][*].path");
+    expect(path).toHaveValue("$['a.b'][*].path");
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [{ id, conditions: [{ path: "$['a.b'][*].path" }] }],
+      },
+    });
+  });
+
   test('adding and removing an alternative keeps conditions as OR', async () => {
     baseHandlers();
     const user = await openRules();
@@ -323,11 +395,45 @@ describe('rule list header and inline editing', () => {
     const pattern = within(row(id)).getByRole('textbox', {
       name: '表达式',
     });
-    await user.type(pattern, '-3');
+    pattern.focus();
+    // Type key by key so the intermediate `-` is really rendered.
+    await user.keyboard('-');
+    expect(pattern).toHaveValue('-');
+    await user.keyboard('3');
     expect(pattern).toHaveValue('-3');
     // Blur shows what the draft holds; it is the same negative number.
     await user.tab();
     expect(pattern).toHaveValue('-3');
+
+    // Clearing is an edit while focused; leaving the field shows the number the
+    // draft actually holds, rather than a half-typed value.
+    await user.clear(pattern);
+    expect(pattern).toHaveValue('');
+    await user.tab();
+    expect(pattern).toHaveValue('-3');
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    // The typed number is a JSON number, not the string "-3".
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [
+              {
+                target: 'argument',
+                path: '$.offset',
+                kind: 'exact',
+                pattern: -3,
+              },
+            ],
+          },
+        ],
+      },
+    });
   });
 
   test('collapsing a row keeps every edit in the draft', async () => {
