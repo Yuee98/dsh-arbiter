@@ -76,26 +76,38 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     setError(errorText(failure));
   }, []);
 
-  const load = useCallback(async (): Promise<void> => {
-    const ticket = generation.current + 1;
-    generation.current = ticket;
-    setBusy(true);
-    setError(null);
-    try {
-      const value = await getJson('/state', stateResponse);
-      if (generation.current !== ticket) return;
-      setState(value);
-      setDraft(cloneDraft(value.config));
-      setDirty(false);
-      setSaveStatus('idle');
-      setAuditNotice(null);
-      setValidation({ errors: value.loadErrors, warnings: value.warnings });
-    } catch (errorValue) {
-      if (generation.current === ticket) setError(errorText(errorValue));
-    } finally {
-      if (generation.current === ticket) setBusy(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (options: { readonly keepDraft?: boolean } = {}): Promise<void> => {
+      const ticket = generation.current + 1;
+      generation.current = ticket;
+      setBusy(true);
+      setError(null);
+      try {
+        const value = await getJson('/state', stateResponse);
+        if (generation.current !== ticket) return;
+        // A reload or a completed save replaces the draft, so any answer for
+        // the previous draft is stale from here on.
+        validationRevision.current += 1;
+        setState(value);
+        if (options.keepDraft === true) {
+          // The user edited while the request was in flight. Those edits were
+          // not part of what was applied, so they stay as unsaved work.
+          setValidation({ errors: [], warnings: [] });
+          return;
+        }
+        setDraft(cloneDraft(value.config));
+        setDirty(false);
+        setSaveStatus('idle');
+        setAuditNotice(null);
+        setValidation({ errors: value.loadErrors, warnings: value.warnings });
+      } catch (errorValue) {
+        if (generation.current === ticket) setError(errorText(errorValue));
+      } finally {
+        if (generation.current === ticket) setBusy(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     load().catch(onFailure);
@@ -132,6 +144,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
   const save = useCallback(async (): Promise<void> => {
     if (state === null || draft === null) return;
+    // Findings from this save belong to the draft submitted here.
+    const revision = validationRevision.current;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -144,8 +158,9 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         saveResponse,
       );
       // Reload first: the reload clears transient state, so the saved-and-
-      // effective feedback is published after the fresh identities arrive.
-      await load();
+      // effective feedback is published after the fresh identities arrive. A
+      // draft edited during the request is preserved instead of discarded.
+      await load({ keepDraft: validationRevision.current !== revision });
       // Saved and effective are reported separately: the API only returns this
       // payload after the candidate was written and applied.
       setSaveStatus(response.changed ? 'saved' : 'unchanged');
@@ -166,8 +181,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         const errors = draftErrors(
           errorValue instanceof ApiError ? errorValue.payload : null,
         );
-        // A rejected save reports errors for exactly this draft revision.
-        setValidation((current) => ({ ...current, errors }));
+        // The errors describe the draft that was submitted. If the editor has
+        // moved on, they must not be attached to whatever rule now sits at that
+        // index; the failure is still reported, without per-rule findings.
+        if (validationRevision.current === revision)
+          setValidation((current) => ({ ...current, errors }));
         setError(t('config.invalid', { errors: issuesText(errors, t) }));
         return;
       }

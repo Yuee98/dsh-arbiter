@@ -1,9 +1,0 @@
-{
-  "issue": 9,
-  "projectId": "g-p-6adda594fbc4819187525d7423793021",
-  "workflow": "agent-ready-issue-to-pr",
-  "mode": "auto",
-  "sessionRef": "sr_2f4b6a5c-9d61-4a3e-8c57-1e0a7b93d245",
-  "effort": "max",
-  "effortFallback": "error"
-}

@@ -9,6 +9,15 @@ import { renderClient } from '../helpers/render-client.js';
 
 const server = setupApiMock();
 
+/** A gate whose release this test controls, for in-flight responses. */
+function deferred() {
+  let release: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
 /** Every save body this file observes, reset before each case. */
 const saved: unknown[] = [];
 
@@ -637,13 +646,15 @@ describe('rule validation feedback', () => {
 
   test('a validation answer that arrives after an edit is discarded', async () => {
     baseHandlers();
-    let release: (() => void) | undefined;
+    const gate = deferred();
+    let handled: (() => void) | undefined;
+    const answered = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
     server.use(
       http.post('*/api/arbiter/validate', async () => {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        return HttpResponse.json({
+        await gate.promise;
+        const body = HttpResponse.json({
           ok: true,
           errors: [
             {
@@ -654,24 +665,150 @@ describe('rule validation feedback', () => {
           ],
           warnings: [],
         });
+        handled?.();
+        return body;
       }),
     );
     const user = await openRules();
     const id = await addRule(user);
     await user.click(screen.getByRole('button', { name: '校验草稿' }));
-    await waitFor(() => {
-      expect(release).toBeDefined();
-    });
     // The draft changes while the request is in flight.
     await user.type(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
       'gh pr view',
     );
-    release?.();
+    gate.release();
+    // Synchronize on the response actually being handled before asserting.
+    await answered;
     await waitFor(() => {
       expect(screen.queryByText(/配置校验失败/)).toBeNull();
     });
     expect(within(row(id)).queryByText(/匹配表达式不能为空/)).toBeNull();
+  });
+
+  test('reloading a draft discards an answer for the previous draft', async () => {
+    baseHandlers();
+    const gate = deferred();
+    let handled: (() => void) | undefined;
+    const answered = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
+    server.use(
+      http.post('*/api/arbiter/validate', async () => {
+        await gate.promise;
+        const body = HttpResponse.json({
+          ok: true,
+          errors: [
+            {
+              path: 'rules[0].conditions[0].pattern',
+              message: 'a match expression is required',
+              code: 'rule.pattern-empty',
+            },
+          ],
+          warnings: [],
+        });
+        handled?.();
+        return body;
+      }),
+    );
+    const user = await openRules();
+    await addRule(user);
+    await user.click(screen.getByRole('button', { name: '校验草稿' }));
+    // Reload replaces the draft, so the old validation is about nothing.
+    await user.click(screen.getByRole('button', { name: '重新读取' }));
+    gate.release();
+    await answered;
+    await waitFor(() => {
+      expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
+        '当前草稿与生效配置一致。',
+      );
+    });
+    expect(screen.queryByText(/配置校验失败/)).toBeNull();
+    expect(screen.queryByText(/匹配表达式不能为空/)).toBeNull();
+  });
+
+  test('a save rejection does not attach its findings to a newer draft', async () => {
+    baseHandlers();
+    const gate = deferred();
+    let handled: (() => void) | undefined;
+    const answered = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
+    server.use(
+      http.post('*/api/arbiter/config/save', async ({ request }) => {
+        saved.push(await request.json());
+        await gate.promise;
+        const body = HttpResponse.json(
+          {
+            ok: false,
+            code: 'config-invalid',
+            errors: [
+              {
+                path: 'rules[0].conditions',
+                message: 'a rule requires at least one condition',
+                code: 'rule.conditions-empty',
+              },
+            ],
+            warnings: [],
+          },
+          { status: 422 },
+        );
+        handled?.();
+        return body;
+      }),
+    );
+    const user = await openRules();
+    const doomed = await addRule(user);
+    const kept = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    // The user deletes the offending rule before the rejection arrives.
+    await user.click(within(row(doomed)).getByText('更多'));
+    await user.click(within(row(doomed)).getByRole('button', { name: '删除' }));
+    gate.release();
+    await answered;
+
+    // The failure is still reported, but the surviving rule carries no finding
+    // that was produced for the deleted one.
+    expect(await screen.findByText(/配置校验失败，未保存/)).toBeInTheDocument();
+    expect(
+      within(row(kept)).queryByText(/每条规则至少需要一个匹配条件/),
+    ).toBeNull();
+  });
+
+  test('a successful save keeps edits typed while it was in flight', async () => {
+    baseHandlers();
+    const gate = deferred();
+    let handled: (() => void) | undefined;
+    const answered = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
+    server.use(
+      http.post('*/api/arbiter/config/save', async ({ request }) => {
+        saved.push(await request.json());
+        await gate.promise;
+        const response = HttpResponse.json(savedBody());
+        handled?.();
+        return response;
+      }),
+    );
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    const pattern = within(row(id)).getByRole('textbox', { name: '表达式' });
+    await user.type(pattern, 'gh pr view');
+    gate.release();
+    await answered;
+
+    // The newer edit is not part of what was applied, so it stays unsaved.
+    await waitFor(() => {
+      expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
+        '草稿未保存',
+      );
+    });
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('gh pr view');
+    expect(saved).toHaveLength(1);
   });
 
   test('a failed save keeps the expanded edits and the draft', async () => {
