@@ -31,6 +31,57 @@ export interface AuditStats {
   }[];
 }
 
+/** One detected conflict with another approval provider. */
+export interface CoexistenceConflictView {
+  readonly id: string;
+  /** `blocking` stops a new takeover; `warning` only informs. */
+  readonly severity: 'blocking' | 'warning';
+  readonly kind: 'official-auto-review' | 'auto-slot' | 'approval-hook';
+  /** The module, entry or synthetic slot the conflict came from. */
+  readonly source: string;
+  readonly entryId: string | null;
+  /** The observable capability, e.g. `tools/pre-execute`. */
+  readonly capability: string;
+  readonly detail: string | null;
+}
+
+/** One reminder for a continuous conflict period. */
+export interface CoexistenceNoticeView {
+  readonly id: string;
+  readonly conflictId: string;
+  readonly severity: 'blocking' | 'warning';
+  readonly kind: CoexistenceConflictView['kind'];
+  readonly source: string;
+  readonly capability: string;
+  readonly at: number;
+  /** True once the user closed it; the conflict itself still stands. */
+  readonly acknowledged: boolean;
+}
+
+/**
+ * What the host could establish about other approval providers.
+ *
+ * `detection: 'partial'` means a public surface was missing, so "no conflict"
+ * is explicit about its limits instead of claiming a clean state.
+ */
+export interface CoexistenceView {
+  readonly detection: 'complete' | 'partial';
+  readonly missing: readonly string[];
+  readonly blocked: boolean;
+  readonly reason: 'official-running' | null;
+  readonly official: {
+    readonly present: boolean;
+    readonly module: string;
+    readonly enabled: boolean;
+    readonly running: boolean;
+    readonly phase: string | null;
+  };
+  readonly autoSlot: 'arbiter' | 'other' | 'unknown';
+  readonly conflicts: readonly CoexistenceConflictView[];
+  readonly notices: readonly CoexistenceNoticeView[];
+  readonly updatedAt: number;
+}
+
 export interface StateResponse {
   readonly name: string;
   readonly enabled: boolean;
@@ -70,6 +121,8 @@ export interface StateResponse {
   readonly executionMode: string;
   readonly reviewerType: string;
   readonly sessionRecordErrors: readonly (readonly [string, string])[];
+  /** Absent when the payload predates coexistence detection. */
+  readonly coexistence: CoexistenceView | null;
 }
 
 /** The API result of one save; `saved` and effective identity are separate. */

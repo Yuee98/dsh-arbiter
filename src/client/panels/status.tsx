@@ -2,6 +2,7 @@ import type { Translate } from '../i18n.js';
 
 import type { ReactNode } from 'react';
 
+import { CoexistenceSection } from '../components/coexistence.js';
 import { Field, Notice, Section, Select } from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { formatTime } from '../view-helpers.js';
@@ -116,6 +117,7 @@ export function StatusPanel(props: {
           />
         )}
       </Section>
+      <CoexistenceSection coexistence={state.coexistence} />
       <ConfigurationHistory state={state} />
       <CoverageSummary state={state} />
     </>

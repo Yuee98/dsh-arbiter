@@ -31,5 +31,8 @@ export function effectiveState(): StateResponse {
     executionMode: 'guarded',
     reviewerType: 'chat',
     sessionRecordErrors: [['session-1', 'disk unavailable']],
+    // The default fixture is a host that reports no conflict; a case that needs
+    // one spread its own value over this state.
+    coexistence: null,
   };
 }

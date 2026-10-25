@@ -5,6 +5,7 @@ import type {
   SaveResponse,
   StateResponse,
 } from '../view-types.js';
+import { coexistenceView } from './coexistence.js';
 import { configuration } from './config.js';
 import {
   array,
@@ -171,5 +172,7 @@ export function stateResponse(value: unknown): StateResponse {
       'sessionRecordErrors',
       array(recordError),
     ),
+    coexistence:
+      field(source, 'coexistence', optional(coexistenceView)) ?? null,
   };
 }

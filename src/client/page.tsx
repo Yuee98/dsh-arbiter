@@ -8,6 +8,8 @@ import type { TabId } from './components/page-tabs.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, getJson, postJson } from './api.js';
+import { CoexistenceAlert } from './components/coexistence.js';
+import { useCoexistenceFeed } from './coexistence-feed.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
@@ -16,6 +18,7 @@ import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
 import type { ConfigIssueView } from './view-issues.js';
 import type {
+  CoexistenceView,
   Draft,
   SaveResponse,
   StateResponse,
@@ -48,6 +51,13 @@ function failureOf(error: unknown): SaveFailure {
   };
 }
 
+/** The payload's own coexistence section, the feed's starting value. */
+function initialCoexistence(
+  state: StateResponse | null,
+): CoexistenceView | null {
+  return state === null ? null : state.coexistence;
+}
+
 export function ArbiterPage(_props: SlotProps): ReactNode {
   const t = useArbiterTranslation();
   const [state, setState] = useState<StateResponse | null>(null);
@@ -67,6 +77,12 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   const onFailure = useCallback((failure: unknown): void => {
     setError(errorText(failure));
   }, []);
+  // The feed owns the live coexistence view; the payload's own value is only
+  // the initial one, so a conflict found while the page is open still shows.
+  const coexistenceFeed = useCoexistenceFeed(
+    initialCoexistence(state),
+    onFailure,
+  );
 
   const load = useCallback(async (): Promise<void> => {
     const ticket = generation.current + 1;
@@ -207,6 +223,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         }}
       />
 
+      <CoexistenceAlert
+        coexistence={coexistenceFeed.view}
+        onAcknowledge={coexistenceFeed.acknowledge}
+      />
+
       <PageTabs tab={tab} onTab={setTab} />
 
       {error === null ? null : <Notice kind="error" text={error} />}
@@ -219,7 +240,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       )}
 
       {tab === 'status' ? (
-        <StatusPanel state={state} draft={draft} onDraft={onDraft} />
+        <StatusPanel
+          state={{ ...state, coexistence: coexistenceFeed.view }}
+          draft={draft}
+          onDraft={onDraft}
+        />
       ) : null}
       {tab === 'rules' ? <RulesPanel draft={draft} onDraft={onDraft} /> : null}
       {tab === 'reviewer' ? (

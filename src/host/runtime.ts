@@ -409,6 +409,7 @@ function acquireRuntime(
     audit: null,
     auditError: null,
     autoPresetError: null,
+    autoSlot: 'unknown',
     priorVerdicts: new Map(),
     historyStatus: new Map(),
     historyReset: new Map(),

@@ -18,6 +18,13 @@ export interface StubServices extends Partial<Omit<HostServices, 'presets'>> {
   readonly sandboxPolicy?: { readonly defaultMode?: string };
   readonly connection?: ConnectionLike;
   readonly permissionPresets?: HostServices['presets'];
+  /**
+   * The Cordis Loader, read structurally by coexistence detection.
+   *
+   * It is not part of `HostServices` because this plugin never consumes it as a
+   * typed dependency; a stub still needs to serve it through `get('loader')`.
+   */
+  readonly loader?: unknown;
 }
 
 type StubMembers = Pick<ContextLike, 'on' | 'effect' | 'inject' | 'logger'>;
@@ -44,6 +51,7 @@ export function createStubContext(
   function get(key: 'configEditor'): StubServices['configEditor'];
   function get(key: 'commands'): StubServices['commands'];
   function get(key: 'connection'): StubServices['connection'];
+  function get(key: 'loader'): unknown;
   function get(key: string): unknown;
   function get(key: string): unknown {
     return registry[key];

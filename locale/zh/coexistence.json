@@ -1,0 +1,44 @@
+{
+  "title": "审批提供者共存",
+  "description": "Arbiter 替代官方 Auto Review；其他插件按可观察的能力提示，不自动停用任何插件。",
+  "officialState": "官方 Auto Review：{state}（运行状态 {phase}）",
+  "autoSlotState": "Auto 槽：{slot}",
+  "detection": {
+    "complete": "可读取的公开接口完整，结论基于本次运行状态。",
+    "partial": "部分公开接口不可用（{surfaces}），只报告已观察到的冲突。"
+  },
+  "official": {
+    "running": "正在运行",
+    "stopped": "已安装但未运行",
+    "absent": "未安装",
+    "noPhase": "未知"
+  },
+  "slot": {
+    "arbiter": "由 Arbiter 持有",
+    "other": "由其他提供者持有",
+    "unknown": "无法确认"
+  },
+  "severity": {
+    "blocking": "阻止",
+    "warning": "告警"
+  },
+  "reason": {
+    "officialRunning": "官方 Auto Review（{source}）正在实际运行，Arbiter 不会新接管任何会话。",
+    "autoSlotTaken": "Auto 槽已被其他提供者占用（{source}）：{error}",
+    "approvalHook": "{source} 注册了 {capability}，可能影响审批结果。"
+  },
+  "entry": "（插件条目 {entry}）",
+  "none": "未检测到可能冲突的审批提供者。",
+  "blockedGuidance": "请在插件管理中关闭官方 Auto Review（{source}）并确认其已停止运行，然后重新加载本页并启用会话。",
+  "warningGuidance": "以下项目仅作提示：Arbiter 继续按当前模式审查，现有门禁与其他宿主 guard 保持不变。",
+  "notice": {
+    "blockingTitle": "存在冲突的审批提供者",
+    "blockingBody": "检测到官方 Auto Review（{source}）正在运行，因此不会新接管会话，也没有产生权限扩张。",
+    "blockingGuidance": "关闭方式：打开插件管理，停用官方 Auto Review 插件并确认其运行状态变为未运行；随后重新加载本页，再启用会话。设置、规则测试、历史与诊断入口仍可使用。",
+    "warningTitle": "其他插件可能影响审批",
+    "warningBody": "{source} 注册了 {capability}；Arbiter 继续按当前模式审查。",
+    "dismiss": "知道了",
+    "acknowledge": "知道了",
+    "detectionOnly": "本次只显示已观察到的冲突；部分接口不可用时无法确认完整状态。"
+  }
+}

@@ -1,5 +1,6 @@
 /** dsh-arbiter host entry. Decision, lifecycle and route adapters live in host/. */
 import { registerCommands } from './host/commands.js';
+import { CoexistenceMonitor } from './host/coexistence.js';
 import { CallGate } from './host/gate.js';
 import { DecisionHistory } from './host/history.js';
 import { PermissionLifecycle } from './host/permissions.js';
@@ -43,6 +44,21 @@ export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
   host.history = history;
   const admissions = new SessionAdmissions(host);
   const permissions = new PermissionLifecycle(host, history, admissions);
+  // Coexistence owns "is another approval provider active"; admission still owns
+  // "may this session be taken over" and every write that follows. The monitor
+  // reads the Auto slot the permission lifecycle proves, so a saved-but-failed
+  // configuration never reads as a live conflict.
+  const coexistence = new CoexistenceMonitor(host, {
+    autoSlot: () =>
+      host.runtime.autoSlot === 'registered'
+        ? 'arbiter'
+        : host.runtime.autoSlot === 'other'
+          ? 'other'
+          : 'unknown',
+    autoError: () => host.runtime.autoPresetError,
+    selfFiber: ctx.fiber,
+  });
+  admissions.setEnableGuard(() => coexistence.enableBlock());
   const settlement = new CallSettlement(host, history);
   // The boundary is applied to an enabled session; a configuration change must
   // reach the sessions the user already enabled, and nothing else.
@@ -63,7 +79,7 @@ export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
   permissions.register();
   new CallGate(host, permissions, history, settlement).register();
   registerCommands(host);
-  registerRoutes(host, admissions);
+  registerRoutes(host, admissions, coexistence);
   const { runtime, audit } = host;
   ctx.logger.info(
     'arbiter: enabled=%s revision=%s rules=%s reviewer=%s audit=%s',

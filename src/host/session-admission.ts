@@ -18,9 +18,14 @@ import type {
   SessionAdmissionView,
 } from '../types.js';
 import {
+  atSafeSandbox,
+  boundaryIsSafe,
+  boundaryWrites,
+  narrowWrites,
+} from './boundary-writes.js';
+import {
   ADMISSION_RECORD_TYPE,
   ADMISSION_VERSION,
-  boundaryKnobs,
   configuredBoundary,
   foldAdmission,
   parentChain,
@@ -28,23 +33,13 @@ import {
   toAdmission,
 } from './admission.js';
 import type { FoldedAdmission } from './admission.js';
-import type { HostEnvironment } from './types.js';
+import { refuseEnable } from './admission-veto.js';
+import type { AdmissionFailure, EnableGuard } from './admission-veto.js';
+import type { HostEnvironment, KnobWrite } from './types.js';
 
 export type AdmissionTrigger = 'api' | 'permission-command' | 'boundary-sync';
 
-export interface AdmissionFailure {
-  readonly ok: false;
-  readonly code:
-    | 'session-unknown'
-    | 'record-unavailable'
-    | 'record-failed'
-    | 'plugin-disabled'
-    | 'stopping'
-    | 'boundary-not-applied'
-    | 'boundary-unconfirmed'
-    | 'invalid-action';
-  readonly message: string;
-}
+export type { AdmissionFailure, EnableGuard } from './admission-veto.js';
 
 export type AdmissionResult =
   { readonly ok: true; readonly view: SessionAdmissionView } | AdmissionFailure;
@@ -52,16 +47,6 @@ export type AdmissionResult =
 interface CacheEntry {
   readonly lastSeq: number;
   readonly folded: FoldedAdmission | null;
-}
-
-interface Knobs {
-  readonly sandbox: string | null;
-  readonly approval: string | null;
-}
-
-interface KnobWrite {
-  readonly type: 'sandbox/mode' | 'approval/policy';
-  readonly value: string;
 }
 
 export class SessionAdmissions {
@@ -78,9 +63,22 @@ export class SessionAdmissions {
    * ungated calls.
    */
   private readonly failingClosed = new Set<string>();
+  /** A coexistence veto consulted before a takeover writes anything. */
+  private enableGuard: EnableGuard | null = null;
 
   constructor(host: HostEnvironment) {
     this.host = host;
+  }
+
+  /**
+   * Install the pre-admission veto.
+   *
+   * Called once by the composition root with the coexistence monitor, so this
+   * service still owns "may this session be taken over" and the monitor owns
+   * "is another approval provider active". Nothing else is written here.
+   */
+  setEnableGuard(guard: EnableGuard | null): void {
+    this.enableGuard = guard;
   }
 
   /** Remember one session object so parent links and folds stay readable. */
@@ -212,7 +210,7 @@ export class SessionAdmissions {
     const folded = this.admissionOf(id);
     if (folded === null) {
       if (boundary !== 'trusted') {
-        this.writeKnobs(session, this.narrowWrites(session));
+        this.writeKnobs(session, narrowWrites(session));
       }
       // A delegated child that cannot be narrowed must not run as an enabled
       // scope under a guarded configuration.
@@ -224,7 +222,7 @@ export class SessionAdmissions {
     // the live host value proves the boundary is in force.
     const narrow = boundary === 'guarded' && !this.confined(session);
     if (folded.boundary === boundary && !narrow) return true;
-    this.writeKnobs(session, this.boundaryWrites(session, boundary));
+    this.writeKnobs(session, boundaryWrites(session, boundary));
     if (this.writeRecord(session, true, boundary) !== 'written') {
       this.host.ctx.logger.warn(
         'arbiter: boundary sync for session %s could not be recorded',
@@ -251,8 +249,8 @@ export class SessionAdmissions {
       this.writeKnobs(
         session,
         session.header?.parentSession === undefined
-          ? this.boundaryWrites(session, 'guarded')
-          : this.narrowWrites(session),
+          ? boundaryWrites(session, 'guarded')
+          : narrowWrites(session),
       );
       if (!this.atSafeBoundary(session)) {
         this.markFailingClosed(id);
@@ -282,77 +280,6 @@ export class SessionAdmissions {
       reason: scope.reason,
       managed: scope.managed,
     };
-  }
-
-  private knobsOf(session: SessionLike): Knobs {
-    let sandbox: string | null = null;
-    let approval: string | null = null;
-    if (typeof session.snapshotEvents !== 'function') {
-      return { sandbox, approval };
-    }
-    for (const event of session.snapshotEvents()) {
-      const data: unknown = event.data;
-      if (data === null || typeof data !== 'object') continue;
-      const record: Readonly<Record<string, unknown>> = { ...data };
-      if (event.type === 'sandbox/mode' && typeof record['mode'] === 'string')
-        sandbox = record['mode'];
-      if (
-        event.type === 'approval/policy' &&
-        typeof record['policy'] === 'string'
-      )
-        approval = record['policy'];
-    }
-    return { sandbox, approval };
-  }
-
-  /**
-   * The knob changes one boundary needs on this session.
-   *
-   * A subagent is never rewritten: the host pins delegated approval and
-   * captures the parent's sandbox, and widening that from inside would grant a
-   * child more than its delegation carried. An absent knob means the
-   * deployment default applies, which is the host's choice, not this plugin's.
-   */
-  private boundaryWrites(
-    session: SessionLike,
-    boundary: ExecutionBoundary,
-  ): readonly KnobWrite[] {
-    if (session.header?.parentSession !== undefined) return [];
-    const target = boundaryKnobs(boundary);
-    const current = this.knobsOf(session);
-    const writes: KnobWrite[] = [];
-    // An absent event is not evidence that the deployment default matches the
-    // target: the default can be full access. A managed session states its
-    // boundary explicitly so the log, not an assumption, carries it.
-    if (current.sandbox !== target.sandbox) {
-      writes.push({ type: 'sandbox/mode', value: target.sandbox });
-    }
-    if (current.approval !== target.approval) {
-      writes.push({ type: 'approval/policy', value: target.approval });
-    }
-    return writes;
-  }
-
-  /**
-   * The narrowing a still-covered session needs to stop running wide.
-   *
-   * A subagent never gets its knobs widened by this plugin, but the host
-   * captures the parent's sandbox at delegation, so a child of a trusted root
-   * can be running `danger-full-access` without any record of its own. When the
-   * plugin stops taking over (explicit disable, unload, a boundary change) that
-   * captured sandbox must be narrowed too, or the child would execute new
-   * unreviewed calls with the parent's old privilege.
-   *
-   * Only the sandbox is touched: the host pins a delegated child's approval to
-   * `never`, and replacing that would open prompts the delegation never had.
-   */
-  private narrowWrites(session: SessionLike): readonly KnobWrite[] {
-    // Only a value that is actually wider is rewritten. Absent is not rewritten
-    // here because this narrowing must never widen a session the host confined
-    // more strictly (a child captured read-only or an explicit read-only
-    // choice); `atSafeBoundary` still refuses to call absent "safe".
-    if (this.knobsOf(session).sandbox !== 'danger-full-access') return [];
-    return [{ type: 'sandbox/mode', value: 'workspace-write' }];
   }
 
   /**
@@ -429,21 +356,31 @@ export class SessionAdmissions {
   }
 
   /**
-   * Enable one session under the configured boundary.
+   * Everything `enable` must know before its first write, or the refusal.
    *
-   * Order matters: the admission record lands first so the gate already covers
-   * the session, then the boundary widens it. If the record cannot be written
-   * nothing is widened; if a knob write then fails the session stays admitted
-   * and narrower, which is the safe direction. The host has no cross-event
-   * transaction, so this ordering — not a rollback — is what prevents an
-   * ungated wide session.
-   *
-   * Activation is refused while the plugin master switch is off or teardown
-   * has begun: the gate would not protect the session it just widened.
+   * Kept apart from the write sequence so the checks read as one decision: an
+   * unknown session, a disabled plugin, a stopping runtime, and a *new*
+   * takeover under a running conflict are all refusals, and none of them may
+   * leave a record or a widened knob behind.
    */
-  enable(id: string): AdmissionResult {
+  private prepareEnable(id: string):
+    | AdmissionFailure
+    | {
+        readonly session: SessionLike;
+        readonly boundary: ExecutionBoundary;
+        readonly wasManaged: boolean;
+      } {
     const failure = this.unavailable(id);
     if (failure !== null) return failure;
+    // Re-confirming a session this plugin already gates is not a new takeover —
+    // the selector may call enable idempotently — so a running conflict only
+    // warns there. A session that is not yet managed is what the guard blocks.
+    const admitted = this.admissionOf(id);
+    const wasManaged = admitted !== null && admitted.enabled;
+    if (!wasManaged) {
+      const veto = this.enableGuard?.() ?? null;
+      if (veto !== null) return refuseEnable(this.host, id, veto);
+    }
     if (!this.host.runtime.config.enabled)
       return {
         ok: false,
@@ -460,18 +397,35 @@ export class SessionAdmissions {
     if (session === undefined)
       return { ok: false, code: 'session-unknown', message: `unknown ${id}` };
     this.observe(session);
-    const boundary = configuredBoundary(this.host.runtime.config);
-    // Whether this session was already managed before this request. It decides
-    // what a failed guarded activation may undo: a fresh enable can be
-    // withdrawn, but a session that was already admitted must not lose gate
-    // protection while it still holds a permission this plugin widened.
-    const previously = this.admissionOf(id);
-    const wasManaged = previously !== null && previously.enabled;
+    return {
+      session,
+      boundary: configuredBoundary(this.host.runtime.config),
+      wasManaged,
+    };
+  }
+
+  /**
+   * Enable one session under the configured boundary.
+   *
+   * Order matters: the admission record lands first so the gate already covers
+   * the session, then the boundary widens it. If the record cannot be written
+   * nothing is widened; if a knob write then fails the session stays admitted
+   * and narrower, which is the safe direction. The host has no cross-event
+   * transaction, so this ordering — not a rollback — is what prevents an
+   * ungated wide session.
+   *
+   * Activation is refused while the plugin master switch is off or teardown
+   * has begun: the gate would not protect the session it just widened.
+   */
+  enable(id: string): AdmissionResult {
+    const prepared = this.prepareEnable(id);
+    if ('ok' in prepared) return prepared;
+    const { session, boundary, wasManaged } = prepared;
     const state = this.writeRecord(session, true, boundary);
     if (state !== 'written')
       return { ok: false, code: 'record-failed', message: state };
     this.covered.set(id, session);
-    const writes = this.boundaryWrites(session, boundary);
+    const writes = boundaryWrites(session, boundary);
     this.writeKnobs(session, writes);
     if (writes.length > 0) {
       const applied = this.writeRecord(session, true, boundary);
@@ -579,7 +533,7 @@ export class SessionAdmissions {
     const session = this.sessionFor(id);
     if (session === undefined) return false;
     if (session.header?.parentSession === undefined) return false;
-    return this.covered.has(id) || this.narrowWrites(session).length > 0;
+    return this.covered.has(id) || narrowWrites(session).length > 0;
   }
 
   /**
@@ -671,45 +625,23 @@ export class SessionAdmissions {
   }
 
   /**
-   * Whether the host currently confines this session to the workspace.
+   * Whether the host currently confines this session.
    *
-   * An absent sandbox event is not proof of confinement: the deployment
-   * default can be full access, so only an observed workspace-write counts.
+   * An absent sandbox event is not proof of confinement: the deployment default
+   * can be full access, so only an observed workspace-write (or read-only) counts.
    */
-  /** Whether the observed sandbox is a value this plugin can call safe. */
-  private atSafeSandbox(session: SessionLike): boolean {
-    const sandbox = this.knobsOf(session).sandbox;
-    return sandbox === 'workspace-write' || sandbox === 'read-only';
-  }
-
   private confined(session: SessionLike): boolean {
-    const sandbox = this.knobsOf(session).sandbox;
-    return sandbox === 'workspace-write' || sandbox === 'read-only';
+    return atSafeSandbox(session);
   }
 
   /**
    * Whether this session already satisfies everything teardown must restore.
    *
-   * A main session must end at `workspace-write + ask`; a delegated child only
-   * needs its captured sandbox narrowed, because the host pinned its approval
-   * policy at delegation and this plugin must not rewrite it.
+   * Delegated to the pure helper so the obligation is stated once, next to the
+   * writes it checks.
    */
   atSafeBoundary(session: SessionLike): boolean {
-    const current = this.knobsOf(session);
-    // A delegated child is never widened by this plugin, so its obligations are
-    // narrower: it must not sit at full access, and an absent value is left to
-    // the host's own delegation defaults.
-    if (session.header?.parentSession !== undefined) {
-      return current.sandbox !== 'danger-full-access';
-    }
-    // A main session is the one this plugin widened, so both halves of the
-    // bundle must be observed: an absent sandbox event can mean a full-access
-    // deployment default, and `ask` is what the widening replaced.
-    return (
-      current.sandbox !== null &&
-      current.sandbox !== 'danger-full-access' &&
-      current.approval === 'ask'
-    );
+    return boundaryIsSafe(session);
   }
 
   /**
@@ -726,12 +658,12 @@ export class SessionAdmissions {
         // Write the explicit safe sandbox whenever the observed value is not
         // already safe, including when it is absent: an absent override can
         // fall back to a full-access deployment default.
-        if (!this.atSafeSandbox(session)) {
+        if (!atSafeSandbox(session)) {
           this.writeKnobs(session, [
             { type: 'sandbox/mode', value: 'workspace-write' },
           ]);
         }
-        if (this.atSafeSandbox(session)) return true;
+        if (atSafeSandbox(session)) return true;
       } catch {
         // Retry: the host may still be publishing another append.
       }
@@ -757,13 +689,13 @@ export class SessionAdmissions {
     this.writeKnobs(
       root,
       root.header?.parentSession === undefined
-        ? this.boundaryWrites(root, 'guarded')
-        : this.narrowWrites(root),
+        ? boundaryWrites(root, 'guarded')
+        : narrowWrites(root),
     );
     for (const [id, session] of this.covered) {
       if (id === rootId) continue;
       if (!this.isDescendantOf(id, rootId)) continue;
-      this.writeKnobs(session, this.narrowWrites(session));
+      this.writeKnobs(session, narrowWrites(session));
     }
   }
 
@@ -788,7 +720,7 @@ export class SessionAdmissions {
         // An inherited scope has no record of its own: when its root narrows,
         // the sandbox the host captured at delegation must narrow with it.
         if (boundary !== 'trusted') {
-          this.writeKnobs(session, this.narrowWrites(session));
+          this.writeKnobs(session, narrowWrites(session));
         }
         continue;
       }
@@ -797,7 +729,7 @@ export class SessionAdmissions {
         continue;
       }
       if (folded.boundary === boundary) continue;
-      const writes = this.boundaryWrites(session, boundary);
+      const writes = boundaryWrites(session, boundary);
       if (writes.length === 0) continue;
       this.writeKnobs(session, writes);
       const state = this.writeRecord(session, true, boundary);

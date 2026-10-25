@@ -275,37 +275,52 @@ export class PermissionLifecycle {
     });
   }
 
+  /**
+   * Publish the native Auto entry with a synchronous rejection gate.
+   *
+   * The same call is what proves who holds the host's single Auto slot: a
+   * second registration throws, and the message is retained for coexistence.
+   * Only a disposer that actually ran says `registered`; a throw says `other`.
+   */
   private registerAuto(): void {
-    if (this.host.services.presets?.registerAuto !== undefined) {
-      try {
-        this.host.ctx.effect(
-          () =>
-            this.host.services.presets?.registerAuto?.(() => {
-              // Outside the plugin's approval scope, leave the host's own auto
-              // entry alone.
-              if (!this.host.runtime.config.enabled) return;
-              // A `/permission` command is being handled right now: this is a
-              // user switch, so reject it before any preset or knob is written.
-              if (this.permissionCommands.size > 0) {
-                throw new AutoEntryRejected();
-              }
-              // No command is open: the host is publishing a stored `auto`
-              // identity. Refusing here would roll the session load back.
-              this.host.runtime.legacyAutoRestores.push({ at: Date.now() });
-              this.host.ctx.logger.warn(
-                'arbiter: session restored with a stored "auto" identity; the native auto entry stays rejected for new switches',
-              );
-            }),
-          'arbiter preset',
-        );
-      } catch (error) {
-        this.host.runtime.autoPresetError =
-          error instanceof Error ? error.message : String(error);
-        this.host.ctx.logger.warn(
-          'arbiter: auto preset registration failed: %s',
-          this.host.runtime.autoPresetError,
-        );
-      }
+    const presets = this.host.services.presets;
+    if (presets?.registerAuto === undefined) {
+      this.host.runtime.autoSlot = 'unavailable';
+      return;
+    }
+    try {
+      this.host.ctx.effect(
+        () =>
+          presets.registerAuto?.(() => {
+            // Outside the plugin's approval scope, leave the host's own auto
+            // entry alone.
+            if (!this.host.runtime.config.enabled) return;
+            // A `/permission` command is being handled right now: this is a
+            // user switch, so reject it before any preset or knob is written.
+            if (this.permissionCommands.size > 0) {
+              throw new AutoEntryRejected();
+            }
+            // No command is open: the host is publishing a stored `auto`
+            // identity. Refusing here would roll the session load back.
+            this.host.runtime.legacyAutoRestores.push({ at: Date.now() });
+            this.host.ctx.logger.warn(
+              'arbiter: session restored with a stored "auto" identity; the native auto entry stays rejected for new switches',
+            );
+          }),
+        'arbiter preset',
+      );
+      // The effect ran its setup, so this plugin holds the slot now.
+      this.host.runtime.autoSlot = 'registered';
+    } catch (error) {
+      // A second registration is a throw from the host, which is the only
+      // public proof that someone else already owns the slot.
+      this.host.runtime.autoSlot = 'other';
+      this.host.runtime.autoPresetError =
+        error instanceof Error ? error.message : String(error);
+      this.host.ctx.logger.warn(
+        'arbiter: auto preset registration failed: %s',
+        this.host.runtime.autoPresetError,
+      );
     }
   }
 

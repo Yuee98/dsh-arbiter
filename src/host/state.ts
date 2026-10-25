@@ -1,4 +1,5 @@
 import { sessionRecordError, sessionRecordReady } from '../records.js';
+import type { CoexistenceMonitor } from './coexistence.js';
 import { executionModeName } from './common.js';
 import type { HostEnvironment } from './types.js';
 import type { ConfigurationAccess } from './configuration.js';
@@ -70,6 +71,7 @@ export function statePayload(
   host: HostEnvironment,
   configuration: ConfigurationAccess,
   admissions?: SessionAdmissions,
+  coexistence?: CoexistenceMonitor,
 ): unknown {
   const { ctx, runtime } = host;
   const name = 'arbiter';
@@ -84,6 +86,9 @@ export function statePayload(
       rejections: runtime.autoRejections.length,
       legacyAutoRestores: runtime.legacyAutoRestores.length,
       registrationError: runtime.autoPresetError,
+      // Who holds the host's single Auto slot, as this runtime proved it: a
+      // registration that threw is a different answer from one that never ran.
+      slot: runtime.autoSlot,
     },
     sessionRecords: {
       ready: sessionRecordReady(),
@@ -95,6 +100,10 @@ export function statePayload(
     // summary only reports what this runtime currently covers so a client can
     // read the confirmed state without inferring it from a preset name.
     admission: admissions?.summary() ?? null,
+    // Conflicts are read from the host on this call, so a page reload reports
+    // what runs now instead of what was true at startup. The payload carries no
+    // notice state of its own: acknowledgements belong to the coexistence route.
+    coexistence: coexistence?.summary() ?? null,
     sourceConfig: entry?.options.config ?? null,
     effectiveRevision: runtime.effectiveRevision,
     configSnapshotId: runtime.configSnapshotId,

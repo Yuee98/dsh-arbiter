@@ -62,6 +62,13 @@ export interface CaseOptions {
   readonly barrierDir?: string;
   /** Pending-action text that must hold its review open. */
   readonly holdMatch?: string;
+  /**
+   * Additional profile rows, appended after the fixture rows.
+   *
+   * A coexistence case uses it to compose a real second approval provider (the
+   * official bundle or a local plugin file) into the same isolated profile.
+   */
+  readonly extraRows?: readonly Record<string, unknown>[];
 }
 
 export async function createCaseHost(
@@ -69,7 +76,7 @@ export async function createCaseHost(
   caseOptions: CaseOptions = {},
 ): Promise<CaseHost> {
   const options = {
-    extraRows: [fixtureRow(caseOptions)],
+    extraRows: [fixtureRow(caseOptions), ...(caseOptions.extraRows ?? [])],
     ...(caseOptions.arbiterRowConfig === undefined
       ? {}
       : { arbiterRowConfig: caseOptions.arbiterRowConfig }),
