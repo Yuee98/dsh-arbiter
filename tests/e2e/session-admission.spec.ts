@@ -347,18 +347,23 @@ test.describe('session admission', () => {
           'echo arbiter-deny-managed',
         );
         const secondSessionId = second.sessionId;
+        // The log is flushed in frames, so wait for the decision *and* its
+        // refused result before asserting; a settled turn can arrive first.
         const gated = await waitForSession(
           host.home,
           (candidate) =>
             candidate.sessionId === secondSessionId &&
             candidate.events.some(
-              (event) => event.type === 'plugin:arbiter/decision',
+              (event) =>
+                event.type === 'plugin:arbiter/decision' &&
+                JSON.stringify(event.data).includes('deny-rule'),
             ),
         );
         expect(gated).not.toBeNull();
-        expect(decisionRecords(second)[0]).toContain('deny-rule');
+        const managed = gated ?? second;
+        expect(decisionRecords(managed)[0]).toContain('deny-rule');
         expect(
-          second.events.some(
+          managed.events.some(
             (event) =>
               event.type === 'tool/result' &&
               JSON.stringify(event.data).includes('Not executed'),
