@@ -10,7 +10,7 @@
  * permission selector (#5) will: this issue delivers the backend and proves it
  * through the public session surface.
  */
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -233,6 +233,23 @@ async function openExistingSession(
   // The client resolves the session through its own stream before the session
   // is live on the host, so give it the same settle a human sees.
   await page.waitForTimeout(1500);
+}
+
+/** Poll the backend view until the admission satisfies `matches`. */
+async function waitForAdmissionState(
+  host: DshHost,
+  sessionId: string,
+  matches: (admission: Record<string, unknown>) => boolean,
+  timeoutMs = 30_000,
+): Promise<Record<string, unknown> | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const view = await liveAdmission(host, sessionId);
+    const admission = admissionOf(view.body);
+    if (view.status === 200 && matches(admission)) return admission;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
 }
 
 /** Poll the admission API until the session is live in this host. */
@@ -794,24 +811,290 @@ test.describe('session admission', () => {
         60_000,
       );
       if (switched === null) throw new Error('the switch never settled');
+      // The disable record is written after the command settles. The backend
+      // view is the authoritative read (the log frame may still be buffered),
+      // so wait for it before stopping the process.
+      const exited = await waitForAdmissionState(
+        host,
+        session.sessionId,
+        (admission) => admission['enabled'] === false,
+      );
+      expect(exited).not.toBeNull();
       const beforeRestart = effectivePermission(switched.events);
       expect(beforeRestart.sandbox).toBe('read-only');
 
       // A restart is an unload followed by a fresh plugin: the read-only
       // session must keep its own permission rather than being rewritten.
       const restarted = await caseHost.restart();
+      // The session is only live again once a client opens it, which is also
+      // the moment the restored admission becomes observable.
+      await openHost(page, restarted);
+      await openExistingSession(page, 'ADM-READONLY');
       const after = await waitForSession(
         restarted.home,
         (candidate) => candidate.sessionId === session.sessionId,
       );
       expect(after).not.toBeNull();
       expect(effectivePermission(after?.events ?? [])).toEqual(beforeRestart);
-      // Leaving through the native command also stopped admission.
-      expect(lastAdmission(after?.events ?? [])).toMatchObject({
+      // The exit is durable too: the same-value-capable command pair in the
+      // log is what restored the disabled state, with no audit database read.
+      const restoredView = await waitForAdmissionState(
+        restarted,
+        session.sessionId,
+        (admission) => admission['enabled'] === false,
+      );
+      expect(restoredView).toMatchObject({
         enabled: false,
+        managed: false,
+        boundary: 'guarded',
       });
     } finally {
       await caseHost.dispose();
     }
   });
 });
+
+/**
+ * The real plugin-manager lifecycle, driven through its own switch.
+ *
+ * Issue #4 requires the drain window itself: a call that arrives after
+ * admission stops but before teardown finishes must see the narrowed host
+ * boundary. The barrier makes the window real instead of timing-based — the
+ * in-flight review is held open by the model fixture, and the driver acts only
+ * after the plugin recorded `review/start` for that exact call.
+ */
+test.describe('plugin-manager disable with a call in flight', () => {
+  test('a call that arrives in the drain window is confined by the rolled-back sandbox', async ({
+    page,
+  }, testInfo) => {
+    const artifacts = testInfo.outputPath('dsh-drain');
+    const tracePath = join(artifacts, 'trace.jsonl');
+    const barrierDir = join(artifacts, 'barrier');
+    await mkdir(artifacts, { recursive: true });
+    const outside = join(artifacts, 'late-outside.txt');
+    const caseHost = await createCaseHost(artifacts, {
+      arbiterRowConfig: { boundary: 'trusted' },
+      tracePath,
+      barrierDir,
+      // The barrier keys off the pending action text, not the user message.
+      holdMatch: 'drain-hold.txt',
+    });
+    try {
+      const host = caseHost.current();
+      // Two trusted sessions: one holds a review open for the whole drain
+      // window, the other sends the call that arrives inside it.
+      const held = await runOneCall(page, host, 'DRAIN-HELD-WARM', 'echo held');
+      await openHost(page, host);
+      await newSession(page);
+      await sendPrompt(page, 'DRAIN-LATE-WARM RUN echo late');
+      const lateSession = await sessionWithText(host, 'DRAIN-LATE-WARM');
+      const lateSessionId = lateSession.sessionId;
+      for (const sessionId of [held.sessionId, lateSessionId]) {
+        const enabled = await admissionRequest(host, {
+          sessionId,
+          action: 'enable',
+        });
+        expect(enabled.status).toBe(200);
+        expect(admissionOf(enabled.body)['boundary']).toBe('trusted');
+      }
+
+      // A second page stays on the late session, ready to send during teardown.
+      const latePage = await page.context().newPage();
+      await openHost(latePage, host);
+      await openExistingSession(latePage, 'DRAIN-LATE-WARM');
+
+      // Start the call the fixture holds in review: the gate call stays in
+      // flight, which is exactly what the drain window waits for.
+      await openHost(page, host);
+      await openExistingSession(page, 'DRAIN-HELD-WARM');
+      await sendPrompt(
+        page,
+        `DRAIN-HOLD RUN printf 'held' > ${join(artifacts, 'drain-hold.txt')}`,
+      );
+      const started = await waitForBarrier(barrierDir, 90_000);
+      expect(started).not.toBeNull();
+      if (started === null) throw new Error('the review never started');
+
+      // Disable through the real manager switch. Its switch turns disabled as
+      // soon as teardown starts, which is this test's window marker.
+      await openPluginManager(page);
+      expect(await startManagerDisable(page)).toBe(true);
+
+      // Send from the prepared page while the first review still holds the
+      // drain: the plugin has stopped accepting, but teardown has not finished.
+      await sendPrompt(
+        latePage,
+        `DRAIN-LATECALL RUN printf 'late' > ${outside}`,
+      );
+      const late = await waitForSession(
+        host.home,
+        (candidate) =>
+          candidate.sessionId === lateSessionId &&
+          candidate.events.some(
+            (event) =>
+              event.type === 'user/message' &&
+              JSON.stringify(event.data).includes('DRAIN-LATECALL'),
+          ) &&
+          candidate.events.some((event) => event.type === 'tool/result'),
+        60_000,
+      );
+      expect(late).not.toBeNull();
+      if (late === null) throw new Error('the late call never settled');
+
+      // Admission had stopped, so no decision was taken; the host sandbox that
+      // teardown narrowed before draining is what confined the call.
+      const lateCalls = callsAfter(late, 'DRAIN-LATECALL');
+      expect(lateCalls.length).toBeGreaterThan(0);
+      expect(decisionsFor(late, lateCalls)).toHaveLength(0);
+      // The host sandbox is the evidence that matters, and it is the outcome
+      // that cannot be stale: the write outside the workspace did not happen.
+      await expect(readFile(outside, 'utf8')).rejects.toThrow();
+      // The rollback the trace recorded landed in this session's own log too.
+      const narrowed = await waitForSession(
+        host.home,
+        (candidate) =>
+          candidate.sessionId === lateSessionId &&
+          effectivePermission(candidate.events).sandbox === 'workspace-write',
+        30_000,
+      );
+      expect(narrowed).not.toBeNull();
+
+      // The late call arrived between stop-admission and the drain completing.
+      const events = await waitForTrace(tracePath, 'unload/release');
+      const stopped = events.find(
+        (entry) => entry.event === 'unload/stop-admission',
+      );
+      const drained = events.find((entry) => entry.event === 'unload/drained');
+      expect(stopped?.event).toBe('unload/stop-admission');
+      expect(drained?.event).toBe('unload/drained');
+      expect(stopped?.at ?? 0).toBeLessThan(drained?.at ?? 0);
+      const arrivedAt = late.events.find(
+        (event) =>
+          event.type === 'user/message' &&
+          JSON.stringify(event.data).includes('DRAIN-LATECALL'),
+      )?.time;
+      expect(typeof arrivedAt).toBe('number');
+      expect(arrivedAt ?? 0).toBeGreaterThan(stopped?.at ?? 0);
+      expect(arrivedAt ?? 0).toBeLessThan(drained?.at ?? 0);
+
+      // Rollback preceded the drain wait, as the required order demands.
+      const rollbacks = events.filter(
+        (entry) => entry.event === 'unload/rollback',
+      );
+      // `rolled` when the boundary was lowered, `unchanged` when the host
+      // already reported the safe value; a failure is what must not appear.
+      // The required order is rollback *before the drain wait ends*, which is
+      // what "no ungated call runs under the old boundary" depends on.
+      expect(rollbacks).toHaveLength(2);
+      for (const rollback of rollbacks) {
+        expect(['rolled', 'unchanged']).toContain(rollback.outcome);
+        expect(rollback.at).toBeGreaterThanOrEqual(stopped?.at ?? 0);
+        expect(rollback.at).toBeLessThanOrEqual(drained?.at ?? 0);
+      }
+      await latePage.close();
+    } finally {
+      // Release the held review so the process can exit cleanly.
+      await releaseBarrier(barrierDir);
+      await caseHost.dispose();
+    }
+  });
+});
+
+/** Wait for the fixture to report that a held review started. */
+async function waitForBarrier(
+  directory: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const files = await readdir(directory).catch(() => [] as string[]);
+    const started = files.find((file) => file.endsWith('-started.json'));
+    if (started !== undefined) return join(directory, started);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return null;
+}
+
+/** Release every held review so teardown is not blocked by the fixture. */
+async function releaseBarrier(directory: string): Promise<void> {
+  const files = await readdir(directory).catch(() => [] as string[]);
+  for (const file of files) {
+    if (!file.endsWith('-started.json')) continue;
+    await writeFile(
+      join(directory, file.replace('-started.json', '-release')),
+      '',
+    );
+  }
+}
+
+interface TraceEntry {
+  readonly at: number;
+  readonly event: string;
+  readonly outcome?: string;
+}
+
+/** Read the plugin's read-only lifecycle trace. */
+async function readTrace(path: string): Promise<readonly TraceEntry[]> {
+  const text = await readFile(path, 'utf8').catch(() => '');
+  const entries: TraceEntry[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim().length === 0) continue;
+    const record = asRecord(JSON.parse(line));
+    if (record === null) continue;
+    const at: unknown = record['at'];
+    const event: unknown = record['event'];
+    if (typeof at !== 'number' || typeof event !== 'string') continue;
+    const outcome: unknown = record['outcome'];
+    entries.push({
+      at,
+      event,
+      ...(typeof outcome === 'string' ? { outcome } : {}),
+    });
+  }
+  return entries;
+}
+
+/** Wait until the trace contains `event`, then return everything traced. */
+async function waitForTrace(
+  path: string,
+  event: string,
+  timeoutMs = 60_000,
+): Promise<readonly TraceEntry[]> {
+  const deadline = Date.now() + timeoutMs;
+  let entries: readonly TraceEntry[] = [];
+  while (Date.now() < deadline) {
+    entries = await readTrace(path);
+    if (entries.some((entry) => entry.event === event)) return entries;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return entries;
+}
+
+/** Open the real plugin manager page. */
+async function openPluginManager(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^(插件|Plugins)$/ }).click();
+  await expect(
+    page.getByRole('button', { name: /^(查看|View) dsh-arbiter$/ }),
+  ).toBeVisible();
+}
+
+/**
+ * Flip the plugin's own switch off and wait until teardown has started.
+ *
+ * "Started" is the manager's own signal: the row's switch becomes disabled
+ * while the instance is unloading. Waiting for `aria-checked=false` instead
+ * would wait for the whole teardown, which is the end of the window under
+ * test, not its beginning.
+ */
+async function startManagerDisable(page: Page): Promise<boolean> {
+  await expect(
+    page.getByRole('button', { name: /^查看 dsh-arbiter$/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /^查看 dsh-arbiter$/ }).click();
+  const toggle = page.getByRole('switch', { name: /dsh-arbiter/ }).first();
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-checked')) === 'false') return true;
+  await toggle.click();
+  await expect(toggle).toBeDisabled({ timeout: 30_000 });
+  return true;
+}

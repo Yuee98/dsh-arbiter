@@ -23,6 +23,7 @@ import {
   boundaryKnobs,
   configuredBoundary,
   foldAdmission,
+  parentChain,
   resolveScope,
   toAdmission,
 } from './admission.js';
@@ -39,6 +40,7 @@ export interface AdmissionFailure {
     | 'record-failed'
     | 'plugin-disabled'
     | 'stopping'
+    | 'boundary-not-applied'
     | 'invalid-action';
   readonly message: string;
 }
@@ -131,10 +133,20 @@ export class SessionAdmissions {
     return toAdmission(id, this.rootOf(id), folded);
   }
 
-  /** The main session this one descends from: itself when it has no parent. */
+  /**
+   * The main session this one descends from: itself when it has no parent.
+   *
+   * A subagent can delegate again, so the answer is the top of the bounded
+   * parent chain — never just the immediate parent. An unresolvable or cyclic
+   * chain falls back to the first unresolved id, which no admission can match.
+   */
   rootOf(id: string): string {
-    const parent = this.sessionFor(id)?.header?.parentSession;
-    return parent === undefined || parent.length === 0 ? id : parent;
+    const chain = parentChain(
+      id,
+      (sessionId) => this.sessionFor(sessionId)?.header?.parentSession,
+    );
+    if (chain.unresolved !== null) return chain.unresolved;
+    return chain.ids[chain.ids.length - 1] ?? id;
   }
 
   /**
@@ -169,14 +181,28 @@ export class SessionAdmissions {
     return scope;
   }
 
-  /** Align one enabled session's knobs with its recorded boundary, once. */
+  /**
+   * Align one covered session with the effective boundary.
+   *
+   * Runs on the first covered call after a reload, which is the point where a
+   * configuration edit and a still-running session meet:
+   *   - a session with its own enabled record follows the configured boundary
+   *     and records the change;
+   *   - an inherited scope has no record and is only ever narrowed, because the
+   *     host captured its sandbox at delegation and this plugin never widened
+   *     a child on purpose.
+   */
   private syncOne(id: string, session: SessionLike): void {
-    const folded = this.admissionOf(id);
-    if (folded === null || !folded.enabled) return;
     const boundary = configuredBoundary(this.host.runtime.config);
-    if (folded.boundary === boundary) return;
-    const writes = this.boundaryWrites(session, boundary);
-    this.writeKnobs(session, writes);
+    const folded = this.admissionOf(id);
+    if (folded === null) {
+      if (boundary !== 'trusted') {
+        this.writeKnobs(session, this.narrowWrites(session));
+      }
+      return;
+    }
+    if (!folded.enabled || folded.boundary === boundary) return;
+    this.writeKnobs(session, this.boundaryWrites(session, boundary));
     if (this.writeRecord(session, true, boundary) === 'written') return;
     this.host.ctx.logger.warn(
       'arbiter: boundary sync for session %s could not be recorded',
@@ -248,6 +274,26 @@ export class SessionAdmissions {
       writes.push({ type: 'approval/policy', value: target.approval });
     }
     return writes;
+  }
+
+  /**
+   * The narrowing a still-covered session needs to stop running wide.
+   *
+   * A subagent never gets its knobs widened by this plugin, but the host
+   * captures the parent's sandbox at delegation, so a child of a trusted root
+   * can be running `danger-full-access` without any record of its own. When the
+   * plugin stops taking over (explicit disable, unload, a boundary change) that
+   * captured sandbox must be narrowed too, or the child would execute new
+   * unreviewed calls with the parent's old privilege.
+   *
+   * Only the sandbox is touched: the host pins a delegated child's approval to
+   * `never`, and replacing that would open prompts the delegation never had.
+   */
+  private narrowWrites(session: SessionLike): readonly KnobWrite[] {
+    const current = this.knobsOf(session);
+    if (current.sandbox === null || current.sandbox === 'workspace-write')
+      return [];
+    return [{ type: 'sandbox/mode', value: 'workspace-write' }];
   }
 
   private writeKnobs(session: SessionLike, writes: readonly KnobWrite[]): void {
@@ -356,6 +402,19 @@ export class SessionAdmissions {
         );
       }
     }
+    // A guarded admission is only honest when the host really is confined.
+    // Enabling a session that already sits at danger-full-access cannot claim
+    // guarded: the record must describe the sandbox in force, or a cold reader
+    // would believe the workspace fence exists when it does not.
+    const effective = this.knobsOf(session).sandbox;
+    if (boundary === 'guarded' && effective === 'danger-full-access') {
+      return {
+        ok: false,
+        code: 'boundary-not-applied',
+        message:
+          'the host still reports danger-full-access; guarded was not applied',
+      };
+    }
     return this.result(id);
   }
 
@@ -381,14 +440,53 @@ export class SessionAdmissions {
     const boundary =
       current?.boundary ?? configuredBoundary(this.host.runtime.config);
     if (trigger === 'api' && current !== null && current.enabled) {
-      const narrowed = this.boundaryWrites(session, 'guarded');
-      this.writeKnobs(session, narrowed);
+      this.narrowCovered(session);
     }
     const state = this.writeRecord(session, false, boundary);
     if (state !== 'written')
       return { ok: false, code: 'record-failed', message: state };
     this.covered.delete(id);
     return this.result(id);
+  }
+
+  /**
+   * Narrow one session, retrying a bounded number of times.
+   *
+   * The write is the last protection before gate protection ends, so a single
+   * transient append failure must not leave the session wide. A failure that
+   * persists is reported to the caller, which keeps the session refused.
+   */
+  narrowSession(session: SessionLike, attempts = 3): boolean {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (typeof session.append !== 'function') return false;
+      try {
+        const writes = this.narrowWrites(session);
+        if (writes.length === 0) return true;
+        this.writeKnobs(session, writes);
+        const current = this.knobsOf(session);
+        if (current.sandbox === null || current.sandbox === 'workspace-write')
+          return true;
+      } catch {
+        // Retry: the host may still be publishing another append.
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Narrow the sandbox of one covered session and of every covered session
+   * that inherits its admission.
+   *
+   * The root's own narrowing is the configured guarded bundle; a descendant
+   * only ever needs its captured sandbox narrowed, never its pinned approval.
+   */
+  private narrowCovered(root: SessionLike): void {
+    this.writeKnobs(root, this.boundaryWrites(root, 'guarded'));
+    for (const [id, session] of this.covered) {
+      if (id === root.id) continue;
+      if (this.rootOf(id) !== root.id) continue;
+      this.writeKnobs(session, this.narrowWrites(session));
+    }
   }
 
   /**
@@ -401,7 +499,15 @@ export class SessionAdmissions {
     const boundary = configuredBoundary(config);
     for (const [id, session] of this.covered) {
       const folded = this.admissionOf(id);
-      if (folded === null || !folded.enabled) {
+      if (folded === null) {
+        // An inherited scope has no record of its own: when its root narrows,
+        // the sandbox the host captured at delegation must narrow with it.
+        if (boundary !== 'trusted') {
+          this.writeKnobs(session, this.narrowWrites(session));
+        }
+        continue;
+      }
+      if (!folded.enabled) {
         this.covered.delete(id);
         continue;
       }
@@ -459,6 +565,24 @@ export class SessionAdmissions {
     return [...this.covered];
   }
 
+  /**
+   * Everything teardown must bring back to a safe host boundary.
+   *
+   * A session is included when it is covered (its own or an inherited
+   * admission) and its own record does not already say "disabled": a session
+   * that left keeps its own permission, while every still-managed session —
+   * main or descendant — is narrowed before admission stops.
+   */
+  teardownTargets(): readonly (readonly [string, SessionLike])[] {
+    const targets: (readonly [string, SessionLike])[] = [];
+    for (const [id, session] of this.covered) {
+      const folded = this.admissionOf(id);
+      if (folded !== null && !folded.enabled) continue;
+      targets.push([id, session]);
+    }
+    return targets;
+  }
+
   /** Remember that this session could not be brought back to a safe boundary. */
   markFailingClosed(sessionId: string): void {
     this.failingClosed.add(sessionId);
@@ -474,11 +598,19 @@ export class SessionAdmissions {
     return [...this.failingClosed];
   }
 
+  /** The session reached a safe boundary on a later attempt. */
+  clearFailingClosed(sessionId: string): void {
+    this.failingClosed.delete(sessionId);
+  }
+
   /** One bounded summary for the state payload. */
   summary(): unknown {
     return {
       boundary: configuredBoundary(this.host.runtime.config),
       covered: this.covered.size,
+      // A session the plugin widened and could not narrow again: a human must
+      // reselect its permission, because the plugin no longer gates it.
+      failingClosed: [...this.failingClosed],
       sessions: [...this.covered.keys()].slice(-20).map((id) => {
         const admission = this.admission(id);
         return admission === null

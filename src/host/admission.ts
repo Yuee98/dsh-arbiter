@@ -288,6 +288,11 @@ function unmanaged(
  *   3. otherwise a subagent follows its parent chain, and is admitted only by
  *      the nearest ancestor carrying a record — which must be enabled;
  *   4. an unresolvable or cyclic chain is never admitted.
+ *
+ * Every admitted scope reports the main session at the top of the chain as
+ * `rootSessionId`, whether the record belongs to that main or to a subagent
+ * that was enabled on its own: the root is what a client displays and what
+ * covers the rest of the branch.
  */
 export function resolveScope(
   sessionId: string,
@@ -295,19 +300,23 @@ export function resolveScope(
 ): AdmissionScope {
   if (!lookup.known(sessionId))
     return unmanaged('parent-unresolved', sessionId);
+  const chain = parentChain(sessionId, lookup.parentOf);
+  if (chain.cycle) return unmanaged('parent-cycle', chain.unresolved);
+  // The top of the resolvable chain is the main session. An unknown ancestor
+  // still blocks inheritance: someone else's switch must not cover this call.
+  const root = chain.ids[chain.ids.length - 1] ?? sessionId;
+  if (!lookup.known(root)) return unmanaged('parent-unresolved', root);
   const direct = lookup.admissionOf(sessionId);
   if (direct !== null) {
     return direct.enabled
       ? {
           managed: true,
           reason: 'session-enabled',
-          admission: toAdmission(sessionId, sessionId, direct),
+          admission: toAdmission(sessionId, root, direct),
           unresolvedParent: null,
         }
       : unmanaged('session-disabled');
   }
-  const chain = parentChain(sessionId, lookup.parentOf);
-  if (chain.cycle) return unmanaged('parent-cycle', chain.unresolved);
   for (const id of chain.ids.slice(1)) {
     if (!lookup.known(id)) return unmanaged('parent-unresolved', id);
     const folded = lookup.admissionOf(id);
@@ -316,7 +325,7 @@ export function resolveScope(
     return {
       managed: true,
       reason: 'parent-session-enabled',
-      admission: toAdmission(id, id, folded),
+      admission: toAdmission(id, root, folded),
       unresolvedParent: null,
     };
   }

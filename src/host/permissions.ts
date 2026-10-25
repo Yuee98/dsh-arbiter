@@ -98,10 +98,13 @@ export class PermissionLifecycle {
     try {
       if (typeof session.append !== 'function') return 'failed';
       const current = this.sessionPermission(session);
+      // A delegated child keeps the approval policy the host pinned at
+      // delegation; only its captured sandbox is this plugin's to narrow.
+      const delegated = session.header?.parentSession !== undefined;
       const needsSandbox =
         current.sandbox !== null && current.sandbox !== 'workspace-write';
       const needsApproval =
-        current.approval !== null && current.approval !== 'ask';
+        !delegated && current.approval !== null && current.approval !== 'ask';
       // Nothing this plugin widened: leave the log alone rather than writing a
       // no-op permission event into it.
       if (!needsSandbox && !needsApproval) return 'unchanged';
@@ -145,9 +148,12 @@ export class PermissionLifecycle {
       return;
     }
     if (event.type === 'permission/preset' && typeof session.id === 'string') {
-      // A preset written without a `/permission` command means another surface
-      // (a picker calling `presets.set()`) chose a host permission for this
-      // session; that is the user leaving arbiter.
+      // The host writes this inside a `/permission` handler, before the
+      // command settles. An in-flight command owns the decision then, so only
+      // a preset written with no command open is an independent switch (a
+      // picker calling `presets.set()`); otherwise a failing command would
+      // exit admission through this observer despite its own error.
+      if (this.hasCommandInFlight(session.id)) return;
       this.scheduleExit(session.id, 'permission/preset');
     }
   }
@@ -190,6 +196,14 @@ export class PermissionLifecycle {
     if (owner.args.trim().length === 0) return;
     if (data['kind'] !== 'success') return;
     this.scheduleExit(owner.sessionId, 'permission-command');
+  }
+
+  /** Whether a `/permission` command for this session has not settled yet. */
+  private hasCommandInFlight(sessionId: string): boolean {
+    for (const command of this.permissionCommands.values()) {
+      if (command.sessionId === sessionId) return true;
+    }
+    return false;
   }
 
   /**
@@ -268,7 +282,10 @@ export class PermissionLifecycle {
     // A restored session can be live and admitted without this process having
     // gated a single call from it; teardown must still find it.
     const discovered = this.admissions.discover();
-    const covered = this.admissions.coveredSessions();
+    // Covered includes sessions whose admission is inherited from an enabled
+    // parent; those never gate their own record but still run under the
+    // sandbox the host captured at delegation.
+    const covered = this.admissions.teardownTargets();
     this.host.lifecycle('unload/stop-admission', {
       active: this.host.runtime.active,
       managed: covered.length,
@@ -279,8 +296,12 @@ export class PermissionLifecycle {
       // that covered this session, and a session that already left keeps its
       // own permission.
       const admission = this.admissions.admission(sessionId);
-      if (admission === null || !admission.enabled) continue;
-      const rolled = this.rollbackSession(session, 'plugin-unload');
+      if (admission !== null && !admission.enabled) continue;
+      // Retry a transient failure before giving up: a session left wide with
+      // no gate is the one state teardown must not hand over.
+      const rolled = this.admissions.narrowSession(session)
+        ? this.rollbackSession(session, 'plugin-unload')
+        : 'failed';
       if (rolled === 'failed') this.admissions.markFailingClosed(sessionId);
       this.host.lifecycle('unload/rollback', {
         sessionId,
@@ -306,6 +327,24 @@ export class PermissionLifecycle {
         'arbiter: unload drain window elapsed with %s call(s) still active',
         String(this.host.runtime.active),
       );
+    }
+    // One last attempt after the drain: the in-flight publish that caused the
+    // failure may be finished now. This is the final moment at which this
+    // plugin can still narrow the session.
+    for (const sessionId of this.admissions.failingClosedSessions()) {
+      const session = this.admissions
+        .coveredSessions()
+        .find(([id]) => id === sessionId)?.[1];
+      if (session === undefined) continue;
+      if (!this.admissions.narrowSession(session)) {
+        this.host.ctx.logger.error(
+          'arbiter: session %s is still %s after unload: every narrowing write was refused by the host, so calls from it will not be gated and carry its previous permission. Select a permission again for that session.',
+          sessionId,
+          'wide',
+        );
+        continue;
+      }
+      this.admissions.clearFailingClosed(sessionId);
     }
     this.host.lifecycle('unload/release', {
       managed: this.admissions.coveredSessions().length,

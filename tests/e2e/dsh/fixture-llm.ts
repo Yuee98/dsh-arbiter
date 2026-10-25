@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 /**
  * Deterministic model adapter for the isolated lifecycle suite.
  *
@@ -38,6 +41,15 @@ interface ChatMessage {
 
 export interface FixtureConfig {
   readonly provider?: string;
+  /**
+   * Directory for the review barrier. A reviewer request whose pending action
+   * text contains `holdMatch` is reported as `<dir>/<callId>-started.json` and
+   * held until `<dir>/<callId>-release` exists, so a driver can act while the
+   * review really is in flight instead of guessing from timing.
+   */
+  readonly barrierDir?: string;
+  readonly holdMatch?: string;
+  readonly barrierTimeoutMs?: number;
 }
 
 function textOfBlocks(content: unknown): string {
@@ -108,6 +120,43 @@ interface StreamChunk {
 }
 
 class FixtureAdapter {
+  private readonly config: FixtureConfig;
+  private reviewIndex = 0;
+
+  constructor(config: FixtureConfig) {
+    this.config = config;
+  }
+
+  /**
+   * Hold one review open so a driver can act while it is genuinely in flight.
+   *
+   * The `callId` comes from the plugin's own `ARBITER_TRACE_PATH` trace, which
+   * records `review/start` with the real call id just before asking the model.
+   * The fixture never decides anything: it reports that a review started and
+   * waits for the driver's release file.
+   */
+  private async barrier(messages: readonly ChatMessage[]): Promise<void> {
+    const directory = this.config.barrierDir;
+    if (directory === undefined) return;
+    const hold = this.config.holdMatch;
+    const text = pendingActionText(messages);
+    if (hold === undefined || !text.includes(hold)) return;
+    const tracePath = process.env['ARBITER_TRACE_PATH'] ?? '';
+    const callId =
+      lastReviewCallId(tracePath) ?? `review-${String(Date.now())}`;
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, `${callId}-started.json`),
+      JSON.stringify({ callId, at: Date.now(), pending: text.slice(0, 200) }),
+    );
+    const release = join(directory, `${callId}-release`);
+    const deadline = Date.now() + (this.config.barrierTimeoutMs ?? 120_000);
+    while (!existsSync(release) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    this.reviewIndex += 1;
+  }
+
   providerInfo(provider: string): Record<string, unknown> {
     return { id: provider, name: 'Arbiter E2E Fixture' };
   }
@@ -149,6 +198,7 @@ class FixtureAdapter {
     await Promise.resolve();
     const system = options.system ?? '';
     if (system.startsWith('REVIEW_POLICY')) {
+      await this.barrier(options.messages ?? []);
       yield { type: 'block-start', index: 0, blockType: 'text' };
       yield { type: 'text-delta', index: 0, text: REVIEW_ANSWER };
       yield {
@@ -242,12 +292,46 @@ interface LlmService {
   registerAdapter(providers: readonly string[], adapter: unknown): unknown;
 }
 
+/** The newest `review/start` call id the plugin recorded, if any. */
+function lastReviewCallId(tracePath: string): string | null {
+  if (tracePath.length === 0) return null;
+  try {
+    const lines = readFileSync(tracePath, 'utf8').split('\n').filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (line === undefined) continue;
+      const entry: unknown = JSON.parse(line);
+      if (entry === null || typeof entry !== 'object') continue;
+      if (Reflect.get(entry, 'event') !== 'review/start') continue;
+      const callId: unknown = Reflect.get(entry, 'callId');
+      if (typeof callId === 'string') return callId;
+    }
+  } catch {
+    // An unreadable trace only means no barrier key; the review proceeds.
+  }
+  return null;
+}
+
+/** The pending action's own JSON block from the review request text. */
+function pendingActionText(messages: readonly ChatMessage[]): string {
+  const text = messages
+    .map((message) => textOfBlocks(message.content))
+    .join('\n');
+  const at = text.lastIndexOf('PENDING_ACTION');
+  if (at === -1) return '';
+  const rest = text.slice(at + 'PENDING_ACTION'.length);
+  const end = rest.search(
+    /\n(?:REVIEW_HINT|DERIVED_FACTS|MISSING_INPUT|PRIOR_VERDICTS)\b/u,
+  );
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
 export function apply(
   ctx: { readonly llm: LlmService },
   config: FixtureConfig,
 ): void {
   ctx.llm.registerAdapter(
     [config.provider ?? 'arbiter-fixture'],
-    new FixtureAdapter(),
+    new FixtureAdapter(config),
   );
 }

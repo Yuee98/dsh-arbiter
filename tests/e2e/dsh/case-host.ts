@@ -26,26 +26,42 @@ export interface CaseHost {
   readonly logs: () => Promise<readonly LoggedSession[]>;
 }
 
-const FIXTURE_ROW = {
-  insert: [
-    {
-      id: 'arbiter-e2e-llm',
-      name: 'file://' + join(repoRoot, 'tests/e2e/dsh/fixture-llm.ts'),
-      config: { provider: 'arbiter-fixture' },
-    },
-    // The fixture owns the default model selection, so the host never asks for
-    // a credential or reaches a real provider.
-    {
-      id: 'agent-default-model',
-      name: '@deepseek-ai/dsh-agent-default-model',
-      config: { provider: 'arbiter-fixture', model: 'arbiter-fixture' },
-    },
-  ],
-};
+function fixtureRow(options: CaseOptions): Record<string, unknown> {
+  return {
+    insert: [
+      {
+        id: 'arbiter-e2e-llm',
+        name: 'file://' + join(repoRoot, 'tests/e2e/dsh/fixture-llm.ts'),
+        config: {
+          provider: 'arbiter-fixture',
+          ...(options.barrierDir === undefined
+            ? {}
+            : { barrierDir: options.barrierDir }),
+          ...(options.holdMatch === undefined
+            ? {}
+            : { holdMatch: options.holdMatch }),
+        },
+      },
+      // The fixture owns the default model selection, so the host never asks
+      // for a credential or reaches a real provider.
+      {
+        id: 'agent-default-model',
+        name: '@deepseek-ai/dsh-agent-default-model',
+        config: { provider: 'arbiter-fixture', model: 'arbiter-fixture' },
+      },
+    ],
+  };
+}
 
 export interface CaseOptions {
   /** The arbiter row's own configuration (rules, boundary, modes). */
   readonly arbiterRowConfig?: Record<string, unknown>;
+  /** The plugin's read-only lifecycle trace, for barrier-driven cases. */
+  readonly tracePath?: string;
+  /** Review-barrier directory for the model fixture. */
+  readonly barrierDir?: string;
+  /** Pending-action text that must hold its review open. */
+  readonly holdMatch?: string;
 }
 
 export async function createCaseHost(
@@ -53,10 +69,13 @@ export async function createCaseHost(
   caseOptions: CaseOptions = {},
 ): Promise<CaseHost> {
   const options = {
-    extraRows: [FIXTURE_ROW],
+    extraRows: [fixtureRow(caseOptions)],
     ...(caseOptions.arbiterRowConfig === undefined
       ? {}
       : { arbiterRowConfig: caseOptions.arbiterRowConfig }),
+    ...(caseOptions.tracePath === undefined
+      ? {}
+      : { env: { ARBITER_TRACE_PATH: caseOptions.tracePath } }),
   };
   let host = await startDshHost(repoRoot, artifacts, options);
   let home = host.home;

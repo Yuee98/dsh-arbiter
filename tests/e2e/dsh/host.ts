@@ -50,6 +50,11 @@ export interface HostOptions {
   /** The arbiter row's own configuration document. */
   readonly arbiterRowConfig?: Record<string, unknown>;
   /**
+   * Extra environment for the host process. The lifecycle suite uses it for
+   * the plugin's read-only trace (`ARBITER_TRACE_PATH`), never for behaviour.
+   */
+  readonly env?: Readonly<Record<string, string>>;
+  /**
    * Keep the isolated home after `stop()`. A restart case needs the same home,
    * profile and session log; the last start of the case owns the cleanup.
    */
@@ -138,6 +143,7 @@ export async function startDshHost(
     ...(options.restart === undefined ? {} : { reuse: options.restart }),
   });
   const env = isolatedEnv(profile.home);
+  Object.assign(env, options.env ?? {});
   let host: ReturnType<typeof launchHost> | undefined;
   const stop = async (
     stopOptions: { readonly keepHome?: boolean } = {},

@@ -686,6 +686,67 @@ describe('native permission commands', () => {
     }
   });
 
+  test('a failing command does not exit through its own preset write', async () => {
+    const session = makeSession('s-partial');
+    session.append('sandbox/mode', { mode: 'workspace-write' });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-partial', action: 'enable' },
+      });
+      // The host writes command/run, then the preset inside the handler, then
+      // settles the command as an error. The in-flight command owns the
+      // decision, so the preset must not exit admission on its own.
+      harness.emit(session, {
+        type: 'command/run',
+        data: {
+          commandId: 'cmd-partial',
+          name: 'permission',
+          args: ' read-only',
+        },
+      });
+      harness.emit(session, {
+        type: 'permission/preset',
+        data: { preset: 'read-only' },
+      });
+      await settle();
+      harness.emit(session, {
+        type: 'command/done',
+        data: {
+          commandId: 'cmd-partial',
+          kind: 'error',
+          text: 'switch failed',
+        },
+      });
+      await settle();
+      expect(admissions(session).at(-1)?.['enabled']).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a preset written with no command open still exits admission', async () => {
+    const session = makeSession('s-picker');
+    session.append('sandbox/mode', { mode: 'workspace-write' });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-picker', action: 'enable' },
+      });
+      // Another surface selecting a preset directly, with no command pair.
+      harness.emit(session, {
+        type: 'permission/preset',
+        data: { preset: 'read-only' },
+      });
+      await settle();
+      expect(admissions(session).at(-1)?.['enabled']).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   test('a rejected native auto entry preserves admission and records itself', async () => {
     const session = makeSession('s-auto');
     session.append('sandbox/mode', { mode: 'workspace-write' });
@@ -820,6 +881,79 @@ describe('restore and scope', () => {
         managed: false,
         reason: 'parent-not-admitted',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a trusted-to-guarded change narrows a running subagent', async () => {
+    const main = makeSession('s-b-root');
+    main.append('sandbox/mode', { mode: 'workspace-write' });
+    const child = makeSession('s-b-child', { parentSession: 's-b-root' });
+    // The host captured the parent's trusted sandbox at delegation.
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([main, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-b-root', action: 'enable' },
+      });
+      // The child is covered through the parent and its call is gated.
+      await harness.gate(call(child, 'child-first'), allow);
+      const restricted = harness.reread({ ...ALLOW_ECHO, boundary: 'guarded' });
+      try {
+        // The first covered call after the change reconciles the child's
+        // captured sandbox; it has no admission record of its own.
+        await restricted.gate(call(child, 'child-after-change'), allow);
+        expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+        // Its host-pinned approval stays exactly as the delegation set it.
+        expect(approvalEvents(child).at(-1)).toEqual({
+          policy: 'never',
+          source: 'delegation',
+        });
+      } finally {
+        restricted.dispose();
+      }
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a deep subagent reports the main session as its root', async () => {
+    const main = makeSession('s-root');
+    main.append('sandbox/mode', { mode: 'workspace-write' });
+    const child = makeSession('s-mid', { parentSession: 's-root' });
+    const grandchild = makeSession('s-leaf', { parentSession: 's-mid' });
+    const harness = createHarness([main, child, grandchild], ALLOW_ECHO);
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-root', action: 'enable' },
+      });
+      const view = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-leaf',
+      );
+      // The public root is the main session, not the intermediate parent, and
+      // the call is still covered through the whole chain.
+      expect(viewOf(view.body)).toMatchObject({
+        sessionId: 's-leaf',
+        rootSessionId: 's-root',
+        managed: true,
+        reason: 'parent-session-enabled',
+      });
+      expect(
+        (await harness.gate(call(grandchild, 'leaf-call'), allow)).kind,
+      ).toBe('allow');
+      expect(
+        decisions(grandchild).some((entry) => entry['callId'] === 'leaf-call'),
+      ).toBe(true);
     } finally {
       harness.dispose();
     }

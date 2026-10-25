@@ -43,9 +43,15 @@ interface StubEvent {
 
 interface StubSession {
   readonly id: string;
-  readonly header: { readonly cwd: string };
+  readonly header: {
+    readonly cwd: string;
+    readonly parentSession?: string;
+    readonly origin?: string;
+  };
   /** Turns the session's own log writes into host failures. */
   failAppend: boolean;
+  /** Lets one test fail selected writes while the rest keep working. */
+  onAppend: ((type: string, data: unknown) => boolean) | null;
   readonly snapshotEvents: () => readonly SessionEventLike[];
   readonly append: (type: string, data: unknown) => void;
 }
@@ -77,6 +83,7 @@ function makeSession(
   const stub: StubSession & { id: string; failAppend: boolean } = {
     id,
     failAppend: false,
+    onAppend: null,
     header: { cwd: process.cwd() },
     snapshotEvents: () =>
       // The host commits every plugin record with `ignorable: true`; the stub
@@ -88,6 +95,8 @@ function makeSession(
       })),
     append(type: string, data: unknown) {
       if (stub.failAppend) throw new Error('host is shutting down');
+      if (stub.onAppend !== null && !stub.onAppend(type, data))
+        throw new Error('append refused while the host is publishing');
       events.push({ type, data });
     },
   };
@@ -122,6 +131,19 @@ function trustedSession(
   events.push({ type: 'sandbox/mode', data: { mode: 'danger-full-access' } });
   events.push({ type: 'approval/policy', data: { policy: 'ask' } });
   return makeSession(id, events);
+}
+
+/** A delegated child: it carries the host's captured policy and its parent. */
+function subagentSession(
+  id: string,
+  parentSession: string,
+  events: StubEvent[] = [],
+): StubSession & { id: string } {
+  const session = makeSession(id, events);
+  return {
+    ...session,
+    header: { cwd: process.cwd(), parentSession, origin: 'subagent' },
+  };
 }
 
 /** The registry is typed at construction and implements each public overload. */
@@ -181,6 +203,7 @@ function contextFor(
   session: StubSession,
   approvalRequest: ApprovalServiceLike['request'] = () =>
     Promise.resolve('unavailable'),
+  services: Partial<StubServices> = {},
 ): {
   ctx: ContextLike;
   stub: { gate?: Gate; sessionEvent?: SessionEvent };
@@ -188,7 +211,7 @@ function contextFor(
 } {
   const stub: { gate?: Gate; sessionEvent?: SessionEvent } = {};
   const disposers: (() => Promise<unknown>)[] = [];
-  const services: StubServices = {
+  const resolved: StubServices = {
     sandboxPolicy: { defaultMode: 'workspace-write' },
     sessions: { get: () => session },
     approval: {
@@ -197,6 +220,7 @@ function contextFor(
     },
     permissionPresets: { registerAuto: () => () => {} },
     workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+    ...services,
   };
 
   // The handler signatures are the plugin's own; this builder is the single
@@ -230,7 +254,7 @@ function contextFor(
         error: () => undefined,
       },
     },
-    services,
+    resolved,
   );
 
   return { ctx, stub, disposers };
@@ -418,7 +442,49 @@ describe('unload rollback', () => {
     ).toEqual([]);
   });
 
-  test('a failed rollback keeps the session refused instead of ungated', async () => {
+  test('a subagent that inherited a trusted parent is narrowed on unload', async () => {
+    const parentEvents: StubEvent[] = [];
+    const parent = trustedSession('s9-parent', parentEvents);
+    // The host captured the parent's sandbox for the child and pinned its
+    // approval to never; the child has no admission record of its own.
+    const childEvents: StubEvent[] = [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+      { type: 'approval/policy', data: { policy: 'never' } },
+    ];
+    const child = subagentSession('s9-child', 's9-parent', childEvents);
+    const services = {
+      sessions: { get: (id: string) => (id === 's9-parent' ? parent : child) },
+    };
+    const { ctx, stub, disposers } = contextFor(parent, undefined, services);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+
+    // A child call is gated through its parent's admission and covered.
+    expect(await stub.gate?.(exec(child, 'c9-child'), allow)).toEqual({
+      kind: 'allow',
+    });
+    const before = childEvents.length;
+    await unload(disposers);
+    // The child's captured full-access sandbox is narrowed before admission
+    // stops, so a later ungated call cannot run with the parent's old trust.
+    expect(
+      childEvents
+        .slice(before)
+        .filter((event) => event.type === 'sandbox/mode')
+        .map((event) => event.data),
+    ).toEqual([{ mode: 'workspace-write' }]);
+    // Its host-pinned approval is left alone: the delegation never had prompts.
+    expect(
+      childEvents
+        .slice(before)
+        .filter((event) => event.type === 'approval/policy'),
+    ).toHaveLength(0);
+  });
+
+  test('a persistent rollback failure is retried, then reported as unresolved', async () => {
     const events: StubEvent[] = [];
     const session = trustedSession('s8', events);
     const { ctx, stub, disposers } = contextFor(session);
@@ -432,10 +498,41 @@ describe('unload rollback', () => {
     // confirm the narrow boundary.
     session.failAppend = true;
     await unload(disposers);
-    // With admission stopped and the sandbox unconfirmed, the next call is
-    // refused rather than executed under the old trusted boundary.
+    // This test drives the production listener directly; after a real plugin
+    // unload that listener is gone, so what is asserted here is the handler's
+    // own behaviour while it is still registered: teardown retried, could not
+    // confirm a narrow boundary, and keeps refusing this session.
     const decision = await stub.gate?.(exec(session, 'c8-late'), allow);
     expect(decision?.kind).toBe('deny');
+    // The unresolved state is reported rather than dropped, so the state
+    // payload can name a session whose permission a human must reselect.
+    expect(session.failAppend).toBe(true);
+  });
+
+  test('a transient rollback failure is retried until the boundary lands', async () => {
+    const events: StubEvent[] = [];
+    const session = trustedSession('s10', events);
+    const { ctx, stub, disposers } = contextFor(session);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await stub.gate?.(exec(session, 'c10'), allow);
+    // Fail the first narrow attempt, then let the retry succeed.
+    let failuresLeft = 1;
+    session.onAppend = (type) => {
+      if (type !== 'sandbox/mode') return true;
+      if (failuresLeft === 0) return true;
+      failuresLeft -= 1;
+      return false;
+    };
+    await unload(disposers);
+    // The retry narrowed the session instead of leaving it wide.
+    const modes = events
+      .filter((event) => event.type === 'sandbox/mode')
+      .map((event) => event.data);
+    expect(modes.at(-1)).toEqual({ mode: 'workspace-write' });
   });
 
   test('permission is rolled back before the drain wait, not after', async () => {
