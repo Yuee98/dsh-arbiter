@@ -50,6 +50,16 @@ export interface FixtureConfig {
   readonly barrierDir?: string;
   readonly holdMatch?: string;
   readonly barrierTimeoutMs?: number;
+  /**
+   * Directory receiving one JSON file per conversation model request.
+   *
+   * The file records the exact system prompt and user-role context the host
+   * actually sent, which is the only honest evidence of what the model saw on
+   * one step. A session log keeps historical messages even after a compaction
+   * replaced them, so reading the log alone cannot distinguish the effective
+   * prompt from an older one.
+   */
+  readonly requestDir?: string;
 }
 
 function textOfBlocks(content: unknown): string {
@@ -125,6 +135,8 @@ interface StreamChunk {
 class FixtureAdapter {
   private readonly config: FixtureConfig;
   private reviewIndex = 0;
+  /** Monotone index of recorded conversation requests. */
+  private requestIndex = 0;
 
   constructor(config: FixtureConfig) {
     this.config = config;
@@ -201,6 +213,43 @@ class FixtureAdapter {
     });
   }
 
+  /**
+   * Write the exact request the host sent for one conversation step.
+   *
+   * Only conversation requests are recorded: a reviewer or compaction call is
+   * a different purpose and must not be mistaken for the agent's own view.
+   */
+  private recordRequest(options: {
+    readonly system?: string;
+    readonly messages?: readonly ChatMessage[];
+  }): void {
+    const directory = this.config.requestDir;
+    if (directory === undefined) return;
+    mkdirSync(directory, { recursive: true });
+    const messages = options.messages ?? [];
+    const text = messages.map((message) => textOfBlocks(message.content));
+    // A loop-built request carries the system prompt as the leading system-role
+    // message in `messages`; `options.system` is only set by a one-shot caller.
+    // Record whichever form this request actually used, so a driver reads the
+    // prompt the model really received.
+    const fromMessages = messages
+      .filter((message) => message.role === 'system')
+      .map((message) => textOfBlocks(message.content))
+      .join('\n\n');
+    // One file per request, ordered by name so a driver reads them in order.
+    const index = this.requestIndex;
+    this.requestIndex += 1;
+    writeFileSync(
+      join(directory, `${String(index).padStart(4, '0')}.json`),
+      JSON.stringify({
+        at: Date.now(),
+        system:
+          options.system ?? (fromMessages.length > 0 ? fromMessages : null),
+        userTexts: text,
+      }),
+    );
+  }
+
   /** One deterministic answer, yielded through a real async generator. */
   async *stream(options: {
     readonly system?: string;
@@ -226,6 +275,7 @@ class FixtureAdapter {
       yield { type: 'finish', reason: { kind: 'stop' } };
       return;
     }
+    this.recordRequest(options);
     const messages = options.messages ?? [];
     const { text, command, delegate, ask } = requestedTurn(messages);
     if (ask !== null && !alreadyCalled(messages, text)) {

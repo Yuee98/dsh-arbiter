@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  COMMON_GUIDANCE,
   GUIDANCE_SECTION,
   PARENT_GUIDANCE,
   SUBAGENT_GUIDANCE,
@@ -44,31 +45,68 @@ const STATE_SPECIFIC = [
 ];
 
 describe('standing guidance text', () => {
-  test('a rejected call is stated as not executed', () => {
-    expect(SUBAGENT_GUIDANCE).toMatch(/not executed/iu);
+  test('every managed agent is told a rejected call was not executed', () => {
+    for (const text of BOTH) {
+      expect(text).toMatch(/rejected tool call was not executed/iu);
+    }
   });
 
-  test('a permitted alternative comes before reporting to the parent', () => {
-    const alternative = SUBAGENT_GUIDANCE.search(/alternative/iu);
-    const report = SUBAGENT_GUIDANCE.search(/report/iu);
-    expect(alternative).toBeGreaterThanOrEqual(0);
-    expect(report).toBeGreaterThan(alternative);
+  test('every managed agent is told to try a permitted alternative first', () => {
+    for (const text of BOTH) {
+      expect(text).toMatch(/allowed alternative/iu);
+    }
   });
 
-  test('the parent relays the answer without widening its scope', () => {
-    expect(PARENT_GUIDANCE).toMatch(/relay/iu);
-    expect(PARENT_GUIDANCE).toMatch(/scope/iu);
-    expect(PARENT_GUIDANCE).toMatch(/ask/iu);
+  test('every managed agent is told not to repeat an unchanged blocked effect', () => {
+    for (const text of BOTH) {
+      expect(text).toMatch(/do not repeat the same blocked effect/iu);
+    }
   });
 
-  test('asking is never restricted by the approval mode', () => {
+  test.each(BOTH)(
+    'a permitted alternative is stated before any escalation: %s',
+    (text) => {
+      const alternative = text.search(/allowed alternative/iu);
+      const escalate = Math.min(
+        ...[/report/iu, /ask surface/iu]
+          .map((pattern) => text.search(pattern))
+          .filter((index) => index >= 0),
+      );
+      expect(alternative).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(escalate)).toBe(true);
+      expect(alternative).toBeLessThan(escalate);
+    },
+  );
+
+  test('a subagent reports the pending operation, reason and needed help', () => {
+    expect(SUBAGENT_GUIDANCE).toMatch(/report the pending operation/iu);
+    expect(SUBAGENT_GUIDANCE).toMatch(/blocking reason/iu);
+    expect(SUBAGENT_GUIDANCE).toMatch(/help you need/iu);
+    // The reporting duty belongs to the subagent, not to the parent text.
+    expect(PARENT_GUIDANCE).not.toMatch(/report the pending operation/iu);
+  });
+
+  test('a parent relays with the original words and scope unchanged', () => {
+    expect(PARENT_GUIDANCE).toMatch(/relay the answer to the subtask/iu);
+    expect(PARENT_GUIDANCE).toMatch(
+      /original words and authorization scope unchanged/iu,
+    );
+  });
+
+  test('a parent never asks on the subagent behalf and states the exact scope', () => {
+    expect(PARENT_GUIDANCE).toMatch(/state the exact operation and scope/iu);
     expect(PARENT_GUIDANCE).toMatch(
       /approval modes do not restrict these questions/iu,
     );
   });
 
+  test('the common paragraph is shared verbatim by both roles', () => {
+    expect(COMMON_GUIDANCE.length).toBeGreaterThan(0);
+    for (const text of BOTH) expect(text).toContain(COMMON_GUIDANCE);
+  });
+
   test.each(BOTH)('the text is short and single-paragraph: %s', (text) => {
-    expect(text.length).toBeLessThan(600);
+    expect(text.length).toBeLessThan(1_000);
     expect(text).not.toContain('\n');
   });
 
@@ -90,7 +128,7 @@ describe('standing guidance text', () => {
     'recovery stays advice, not a mandatory script: %s',
     (text) => {
       // Steps and ordering words are what turn guidance into a script; the text
-      // may name the order alternative-then-report but no numbered procedure.
+      // may name the order alternative-then-help but no numbered procedure.
       expect(text).not.toMatch(
         /(?:^|\s)(?:1\.|2\.|step\s*\d|first,|second,)/iu,
       );
@@ -103,10 +141,15 @@ describe('standing guidance text', () => {
 describe('role selection', () => {
   test('a subagent gets the reporting guidance', () => {
     expect(guidanceText('subagent')).toBe(SUBAGENT_GUIDANCE);
+    expect(guidanceText('subagent')).toContain(COMMON_GUIDANCE);
   });
 
   test('a main session gets the parent guidance', () => {
     expect(guidanceText('main')).toBe(PARENT_GUIDANCE);
+    // A main session also runs its own tool calls, so it keeps the common
+    // non-execution and alternative-first semantics rather than only the
+    // subtask-handling paragraph.
+    expect(guidanceText('main')).toContain(COMMON_GUIDANCE);
   });
 });
 

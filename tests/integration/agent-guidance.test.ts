@@ -13,7 +13,12 @@ import {
 } from 'vitest';
 
 import { apply } from '../../src/index.js';
-import { PARENT_GUIDANCE, SUBAGENT_GUIDANCE } from '../../src/host/guidance.js';
+import {
+  COMMON_GUIDANCE,
+  PARENT_GUIDANCE,
+  SUBAGENT_GUIDANCE,
+  guidanceRegistration,
+} from '../../src/host/guidance.js';
 import { installSessionRecordApi } from '../../src/records.js';
 import type {
   AssembleContextLike,
@@ -21,7 +26,7 @@ import type {
   ContextLike,
   HostServices,
   ProfileContextLike,
-  PromptSectionRegistrationLike,
+  PromptContextRegistrationLike,
 } from '../../src/host/types.js';
 import type { AgentLike, SessionEventLike } from '../../src/snapshot.js';
 import {
@@ -32,11 +37,11 @@ import {
 /**
  * Standing agent guidance through the real plugin entry point.
  *
- * The contract is the host's public system-prompt hook, not a string builder: a
- * composition with the prompt registry receives one section registration, the
- * section decides its text per assembly from the backend-confirmed admission,
- * and disposing the plugin releases the registration. Nothing here asserts that
- * some prose was concatenated.
+ * The contract is the host's public system-context hook, not a string builder: a
+ * composition with the prompt registry receives one required context
+ * registration, the hook decides its text per assembly from the
+ * backend-confirmed admission, and disposing the plugin releases the
+ * registration. Nothing here asserts that some prose was concatenated.
  */
 
 const homes: string[] = [];
@@ -107,13 +112,13 @@ function makeSession(
 
 /** One registration the host registry actually holds. */
 interface Held {
-  readonly registration: PromptSectionRegistrationLike;
+  readonly registration: PromptContextRegistrationLike;
   live: boolean;
 }
 
 interface PromptStub {
   readonly held: readonly Held[];
-  /** The text the host would place in the system prompt for one assembly. */
+  /** The text the host would place in the runtime context for one assembly. */
   readonly textFor: (agent: AgentLike | undefined) => string;
 }
 
@@ -140,16 +145,16 @@ function createHarness(
   const injectRuns = options.injectRuns ?? true;
 
   const prompt = {
-    section(registration: PromptSectionRegistrationLike): () => void {
+    context(registration: PromptContextRegistrationLike): () => void {
       const entry: Held = { registration, live: true };
       held.push(entry);
       return () => {
         entry.live = false;
       };
     },
-    getSectionOrder(name: string): number {
+    getContextOrder(name: string): number {
       // The host's own placement table; the plugin only reads its order.
-      return name === 'DEPLOYMENT_PERSONA_PREFIX' ? 0 : Number.NaN;
+      return name === 'APPROVAL_POLICY' ? 115 : Number.NaN;
     },
   };
 
@@ -271,8 +276,11 @@ describe('agent guidance hook', () => {
       // Static prose: the host must not interpolate anything into it, so a
       // stray `{{...}}` in guidance can never fail an assembly.
       expect(entry?.registration.interpolate).toBe(false);
-      // Right after the deployment persona, before the first-party tools.
-      expect(entry?.registration.order).toBe(1);
+      // Right after the host's own approval-policy line.
+      expect(entry?.registration.order).toBe(116);
+      // A required context survives a complete persona and the suppression of
+      // optional runtime context.
+      expect(entry?.registration.required).toBe(true);
     } finally {
       harness.dispose();
     }
@@ -311,6 +319,14 @@ describe('agent guidance hook', () => {
       expect(harness.prompt.textFor(agentFor(child))).toBe(SUBAGENT_GUIDANCE);
       // And the parent that carries the record keeps the parent guidance.
       expect(harness.prompt.textFor(agentFor(parent))).toBe(PARENT_GUIDANCE);
+      // Both roles carry the shared non-execution semantics, not only their
+      // role-specific paragraph.
+      expect(harness.prompt.textFor(agentFor(parent))).toContain(
+        COMMON_GUIDANCE,
+      );
+      expect(harness.prompt.textFor(agentFor(child))).toContain(
+        COMMON_GUIDANCE,
+      );
     } finally {
       harness.dispose();
     }
@@ -377,6 +393,17 @@ describe('agent guidance hook', () => {
     } finally {
       reopened.dispose();
     }
+  });
+
+  test('the exported registration keeps guidance required and literal', () => {
+    const registration = guidanceRegistration(116, () => PARENT_GUIDANCE);
+    expect(registration.name).toBe('arbiter:agent-guidance');
+    expect(registration.order).toBe(116);
+    expect(registration.interpolate).toBe(false);
+    // The host must keep this context even when a complete persona replaced
+    // every section and optional runtime context is suppressed.
+    expect(registration.required).toBe(true);
+    expect(typeof registration.text).toBe('function');
   });
 
   test('a composition without the prompt service still applies', () => {

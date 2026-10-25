@@ -1,31 +1,71 @@
 /**
  * Real-host verification for standing execution guidance (#21).
  *
- * The evidence is the host's own session log, never the plugin's registration
- * object: the guidance has to appear in the `system/message` the host actually
- * composed for a managed main session and for a managed subagent, must be
- * absent for a session the plugin never took over, and must survive a real
- * compaction. The last case drives the three approval modes through the
- * host's own `ask_user_question` card, so "asking is still possible" and "an
- * answer is not an approval" are observed on the product path.
+ * What the model actually saw is the only honest evidence here, so this suite
+ * reads the requests the deterministic fixture received, not the session log:
+ * a log keeps historical messages even after a compaction replaced their span,
+ * which cannot distinguish the effective prompt from an older one. The one
+ * exception is the plugin's own committed decision records, which are read from
+ * the log because that is where the plugin writes them.
+ *
+ * Cases: unmanaged vs managed vs disabled in one profile, a real delegation, a
+ * real `/compact`, and the three approval modes driving a real
+ * `ask_user_question` card.
  */
+import { mkdir, readFile, readdir } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+
 import { expect, test, type Page } from '@playwright/test';
 
 import { createCaseHost, type CaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
+import { resolveDshCommand } from './dsh/profile.js';
 import { waitForSession, type LoggedSession } from './dsh/session-log.js';
+import {
+  PARENT_GUIDANCE,
+  guidanceRegistration,
+} from '../../src/host/guidance.js';
 
 const FORMAT = 'arbiter-config-v2';
 
-/** A distinctive fragment of each role's guidance, stable across rewording. */
-const PARENT_MARKER = 'relay the answer to the subtask accurately';
+/** Distinctive fragments of the guidance, stable across rewording. */
+const PARENT_MARKER = 'relay the answer to the subtask';
 const SUBAGENT_MARKER = 'report the pending operation';
+/** The part every managed agent gets, whichever role it plays. */
+const COMMON_MARKER = 'An approval-rejected tool call was not executed';
 
 interface ArbiterStateBody {
   readonly config?: Record<string, unknown>;
   readonly effectiveRevision?: string;
   /** The profile patch revision a save must carry to pass its guard. */
   readonly fileRevision?: string | null;
+}
+
+interface LoggedRequest {
+  readonly at: number;
+  readonly system: string | null;
+  readonly userTexts: readonly string[];
+}
+
+/**
+ * Every model-visible text of one request, system and user roles alike.
+ *
+ * The guidance is registered on the host's runtime-context entry, which the
+ * host materializes as a durable user-role snapshot rather than as a system
+ * section (see docs/architecture.md#agent-instruction-placement). Both roles
+ * are searched so an assertion about "what the model saw" cannot silently miss
+ * the contribution because it arrived in the other role.
+ */
+function requestText(request: LoggedRequest): string {
+  return [request.system ?? '', ...request.userTexts].join('\n');
+}
+
+/** The runtime-context snapshot contributions of one request. */
+function runtimeContext(request: LoggedRequest): string {
+  return request.userTexts
+    .filter((text) => text.includes('Current runtime context'))
+    .join('\n');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,7 +97,7 @@ async function arbiterState(host: DshHost): Promise<ArbiterStateBody> {
 async function saveConfig(
   host: DshHost,
   change: (config: Record<string, unknown>) => Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+): Promise<void> {
   const state = await arbiterState(host);
   const config = change(state.config ?? {});
   const response = await fetch(`${host.origin}/api/arbiter/config/save`, {
@@ -72,7 +112,21 @@ async function saveConfig(
   });
   const body: unknown = await response.json();
   expect(response.status, JSON.stringify(body)).toBe(200);
-  return recordOf(body);
+  expect(body).toMatchObject({ ok: true, effective: true });
+}
+
+async function setMainMode(
+  host: DshHost,
+  mode: 'normal' | 'strict' | 'progress',
+): Promise<void> {
+  await saveConfig(host, (config) => ({
+    ...config,
+    modes: { main: mode, subagent: 'strict' },
+  }));
+  // A save returning 200 is not the same as the mode being in effect; read the
+  // effective configuration back before a call is made under it.
+  const applied = await arbiterState(host);
+  expect(recordOf(recordOf(applied.config)['modes'])['main']).toBe(mode);
 }
 
 async function enableSession(host: DshHost, sessionId: string): Promise<void> {
@@ -89,22 +143,78 @@ async function enableSession(host: DshHost, sessionId: string): Promise<void> {
   expect(body).toMatchObject({ admission: { enabled: true, managed: true } });
 }
 
-/** Every system prompt the host composed, oldest first, joined. */
-function systemText(session: LoggedSession): string {
-  return session.events
-    .filter((event) => event.type === 'system/message')
-    .map((event) => {
-      const message = recordOf(recordOf(event.data)['message']);
-      const content: unknown = message['content'];
-      if (!Array.isArray(content)) return '';
-      return content
-        .map((block) => {
-          const entry = recordOf(block);
-          return typeof entry['text'] === 'string' ? entry['text'] : '';
-        })
-        .join('');
-    })
-    .join('\n');
+async function disableSession(host: DshHost, sessionId: string): Promise<void> {
+  const response = await fetch(`${host.origin}/api/arbiter/sessions`, {
+    method: 'POST',
+    headers: {
+      cookie: `${host.cookie.name}=${host.cookie.value}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ sessionId, action: 'disable' }),
+  });
+  expect(response.status).toBe(200);
+  const body: unknown = await response.json();
+  expect(body).toMatchObject({ admission: { enabled: false, managed: false } });
+}
+
+/** Every conversation request the fixture received, oldest first. */
+async function requests(directory: string): Promise<readonly LoggedRequest[]> {
+  const files = (await readdir(directory).catch(() => [] as string[]))
+    .filter((name) => name.endsWith('.json'))
+    .sort();
+  const out: LoggedRequest[] = [];
+  for (const file of files) {
+    const raw = await readFile(join(directory, file), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) continue;
+    const userTexts: unknown = parsed['userTexts'];
+    out.push({
+      at: typeof parsed['at'] === 'number' ? parsed['at'] : 0,
+      system: typeof parsed['system'] === 'string' ? parsed['system'] : null,
+      userTexts: Array.isArray(userTexts)
+        ? userTexts.filter((text): text is string => typeof text === 'string')
+        : [],
+    });
+  }
+  return out;
+}
+
+/**
+ * The one request whose user-role text carries `marker`.
+ *
+ * A marker appears in exactly one conversation request, because the fixture
+ * answers it with a single tool call and the following step re-sends the same
+ * history. Matching the marker is therefore a precise identity rather than
+ * "any later request".
+ */
+async function requestFor(
+  directory: string,
+  marker: string,
+  timeoutMs = 60_000,
+): Promise<LoggedRequest> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = (await requests(directory)).find((entry) =>
+      entry.userTexts.some((text) => text.includes(marker)),
+    );
+    if (found !== undefined) return found;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`no model request carried ${marker}`);
+}
+
+/** Open one existing session from the sidebar by its own title. */
+async function openExistingSession(
+  page: Page,
+  titleFragment: string,
+): Promise<void> {
+  const row = page.getByRole('treeitem', { name: new RegExp(titleFragment) });
+  await expect(row.first()).toBeVisible();
+  await row.first().click();
+  await expect(page.locator('[contenteditable="true"]').first()).toBeVisible();
+  // The client resolves the session through its own stream before the session
+  // is live on the host, so give it the same settle a human sees.
+  await page.waitForTimeout(1500);
 }
 
 /** Open the isolated host in the browser with its own bootstrap cookie. */
@@ -143,8 +253,8 @@ async function sendPrompt(page: Page, text: string): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
-/** Wait for a settled turn whose log already carries `marker`. */
-async function turnWith(
+/** Wait for the session whose log carries `marker`, without a session id. */
+async function sessionWithMarker(
   host: DshHost,
   marker: string,
   timeoutMs = 90_000,
@@ -156,7 +266,30 @@ async function turnWith(
         (event) =>
           event.type === 'user/message' &&
           JSON.stringify(event.data).includes(marker),
-      ) && candidate.events.some((event) => event.type === 'turn/end'),
+      ),
+    timeoutMs,
+  );
+  if (session === null) throw new Error(`no session carried ${marker}`);
+  return session;
+}
+
+/** Wait for one session's settled turn carrying `marker`. */
+async function settledTurnWith(
+  host: DshHost,
+  sessionId: string,
+  marker: string,
+  timeoutMs = 90_000,
+): Promise<LoggedSession> {
+  const session = await waitForSession(
+    host.home,
+    (candidate) =>
+      candidate.sessionId === sessionId &&
+      candidate.events.some(
+        (event) =>
+          event.type === 'user/message' &&
+          JSON.stringify(event.data).includes(marker),
+      ) &&
+      candidate.events.some((event) => event.type === 'turn/end'),
     timeoutMs,
   );
   if (session === null) throw new Error(`no settled turn carried ${marker}`);
@@ -175,6 +308,43 @@ async function waitFor(
   return session;
 }
 
+/**
+ * Wait for one session's ask call carrying `question` plus its own answer.
+ *
+ * The answer is matched by the exact call id, so a previous iteration's
+ * authorization result can never stand in for the current mode's call.
+ */
+async function waitForAnswer(
+  host: DshHost,
+  sessionId: string,
+  question: string,
+  timeoutMs = 90_000,
+): Promise<LoggedSession> {
+  const session = await waitForSession(
+    host.home,
+    (candidate) => {
+      if (candidate.sessionId !== sessionId) return false;
+      const call = askCalls(candidate).find((entry) =>
+        JSON.stringify(entry['arguments']).includes(question),
+      );
+      if (call === undefined) return false;
+      const rawCallId: unknown = call['callId'];
+      if (typeof rawCallId !== 'string') return false;
+      return candidate.events.some((event) => {
+        if (event.type !== 'tool/result') return false;
+        const source = recordOf(
+          recordOf(recordOf(event.data)['message'])['source'],
+        );
+        return source['callId'] === rawCallId;
+      });
+    },
+    timeoutMs,
+  );
+  if (session === null)
+    throw new Error(`no answered ask call carried ${question}`);
+  return session;
+}
+
 /** Every decision record the plugin committed for one session. */
 function decisions(session: LoggedSession): readonly Record<string, unknown>[] {
   return session.events
@@ -182,71 +352,303 @@ function decisions(session: LoggedSession): readonly Record<string, unknown>[] {
     .map((event) => recordOf(event.data));
 }
 
-/** Every decision result the plugin recorded for one session. */
-function decisionResults(session: LoggedSession): readonly string[] {
-  return decisions(session).map((data) =>
-    typeof data['result'] === 'string' ? data['result'] : '',
-  );
-}
-
-/** The call id the host assigned to the session's `ask_user_question` call. */
-function askCallIds(session: LoggedSession): readonly string[] {
+/** The session's `ask_user_question` calls, as the host logged them. */
+function askCalls(session: LoggedSession): readonly Record<string, unknown>[] {
   return session.events
     .filter((event) => event.type === 'tool/call')
     .map((event) => recordOf(event.data))
-    .filter((data) => data['name'] === 'ask_user_question')
-    .map((data) => (typeof data['callId'] === 'string' ? data['callId'] : ''))
-    .filter((id) => id.length > 0);
+    .filter((data) => data['name'] === 'ask_user_question');
 }
+
+/** One request directory under the case root. */
+async function prepareRequestDir(root: string, name: string): Promise<string> {
+  const directory = join(root, name);
+  await mkdir(directory, { recursive: true });
+  return directory;
+}
+
+/**
+ * The pinned host pieces this suite assembles against.
+ *
+ * The complete-persona case must run the host's own assembly: a fake registry
+ * could not prove that the real `SystemPrompt` keeps a `required` context when
+ * a persona replaces every section.
+ */
+interface HostPrompt {
+  section(registration: unknown): () => void;
+  context(registration: unknown): () => void;
+  getSectionOrder(name: string): number;
+  getContextOrder(name: string): number;
+  suppressRuntimeContext(): () => void;
+  assemble(context: unknown): Promise<{
+    readonly sections: readonly { readonly name: string }[];
+    readonly contexts: readonly { readonly name: string }[];
+  }>;
+}
+
+/** A host class that is only ever called through `Reflect.construct`. */
+interface HostConstructor {
+  readonly construct: (args: readonly unknown[]) => unknown;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function constructorOf(value: unknown, label: string): HostConstructor {
+  if (typeof value !== 'function')
+    throw new TypeError(`pinned host export ${label} is not a constructor`);
+  return {
+    construct: (args) => Reflect.construct(value, args) as unknown,
+  };
+}
+
+function constructChecked<T>(
+  value: HostConstructor,
+  args: readonly unknown[],
+  accepts: (candidate: unknown) => candidate is T,
+): T {
+  const created: unknown = value.construct(args);
+  if (!accepts(created))
+    throw new TypeError('constructed host object lacks the required members');
+  return created;
+}
+
+function isHostPrompt(value: unknown): value is HostPrompt {
+  if (!isRecordValue(value)) return false;
+  for (const member of [
+    'section',
+    'context',
+    'getSectionOrder',
+    'getContextOrder',
+    'suppressRuntimeContext',
+    'assemble',
+  ] as const) {
+    if (typeof value[member] !== 'function') return false;
+  }
+  return true;
+}
+
+interface PluginScope {
+  plugin(callback: (scope: unknown) => void): unknown;
+}
+
+function isPluginScope(value: unknown): value is PluginScope {
+  return isRecordValue(value) && typeof value['plugin'] === 'function';
+}
+
+interface HostAssembly {
+  readonly createContext: () => PluginScope;
+  readonly constructPrompt: (scope: unknown) => HostPrompt;
+  readonly promptAt: (scope: unknown) => HostPrompt;
+  readonly createScope: (ctx: unknown, key: object) => PluginScope;
+  readonly personaSection: string;
+  readonly renderPrompt: (assembly: unknown) => string;
+  readonly renderContext: (assembly: unknown) => string;
+}
+
+async function loadHostAssembly(): Promise<HostAssembly> {
+  const command = await resolveDshCommand();
+  const entry = command.args[0];
+  if (entry === undefined)
+    throw new Error('DSH_E2E_CLI must point at the host entry for this test.');
+  const hostRoot = entry.slice(0, entry.indexOf('/node_modules/@deepseek-ai/'));
+  const requireFromHost = createRequire(join(hostRoot, 'package.json'));
+  const load = async (name: string): Promise<Record<string, unknown>> => {
+    const loaded: unknown = await import(requireFromHost.resolve(name));
+    if (!isRecordValue(loaded))
+      throw new TypeError(`${name} namespace is not an object`);
+    return loaded;
+  };
+  const cordis = await load('@deepseek-ai/cordis');
+  const systemPrompt = await load('@deepseek-ai/dsh-system-prompt');
+  const scope = await load('@deepseek-ai/dsh-scope');
+  const context = constructorOf(cordis['Context'], 'Context');
+  const prompt = constructorOf(systemPrompt['SystemPrompt'], 'SystemPrompt');
+  const createScope = scope['createScope'];
+  const personaSection = systemPrompt['PERSONA_PREFIX_SECTION'];
+  const renderPrompt = systemPrompt['renderPrompt'];
+  const renderContext = systemPrompt['renderContextSnapshot'];
+  if (
+    typeof createScope !== 'function' ||
+    typeof personaSection !== 'string' ||
+    typeof renderPrompt !== 'function' ||
+    typeof renderContext !== 'function'
+  ) {
+    throw new TypeError('pinned host exports are missing a required member');
+  }
+  return {
+    createContext: () => constructChecked(context, [], isPluginScope),
+    constructPrompt: (scoped) =>
+      constructChecked(prompt, [scoped, {}], isHostPrompt),
+    // A scoped context inherits the registry, so its own access resolves the
+    // same instance through that scope: registering there creates that scope's
+    // layer rather than colliding with the root one.
+    promptAt: (scoped) => {
+      const service = isRecordValue(scoped)
+        ? scoped['systemPrompt']
+        : undefined;
+      if (!isHostPrompt(service))
+        throw new TypeError('the host scope exposes no prompt registry');
+      return service;
+    },
+    createScope: (ctx, key): PluginScope => {
+      const created: unknown = Reflect.apply(createScope, undefined, [
+        ctx,
+        key,
+      ]);
+      const scoped = isRecordValue(created) ? created['ctx'] : undefined;
+      if (!isPluginScope(scoped))
+        throw new TypeError('the host scope factory returned no context');
+      return scoped;
+    },
+    personaSection,
+    renderPrompt: (assembly) =>
+      String(Reflect.apply(renderPrompt, undefined, [assembly])),
+    renderContext: (assembly) =>
+      String(Reflect.apply(renderContext, undefined, [assembly])),
+  };
+}
+
+/** Ask a scoped context to run one plugin body and settle its fiber. */
+async function runPlugin(
+  scope: unknown,
+  body: (scoped: unknown) => void,
+): Promise<void> {
+  const plugin = isRecordValue(scope) ? scope['plugin'] : undefined;
+  if (typeof plugin !== 'function')
+    throw new TypeError('the host scope exposes no plugin()');
+  const fiber: unknown = Reflect.apply(plugin, scope, [body]);
+  await Promise.resolve(fiber).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+test('the guidance survives a complete persona and context suppression', async () => {
+  const host = await loadHostAssembly();
+  const ctx = host.createContext();
+  const box: { prompt?: HostPrompt; root?: unknown } = {};
+  await runPlugin(ctx, (scoped) => {
+    box.prompt = host.constructPrompt(scoped);
+    box.root = scoped;
+  });
+  const prompt = box.prompt;
+  if (prompt === undefined || box.root === undefined)
+    throw new Error('the pinned prompt registry did not mount');
+
+  // A per-agent scope with a complete persona: the shipped `minimal` preset.
+  // The host then reduces the system prompt to that one section.
+  const key = {};
+  const agentScope = host.createScope(box.root, key);
+  await runPlugin(agentScope, (scoped) => {
+    const scopedPrompt = host.promptAt(scoped);
+    scopedPrompt.section({
+      name: host.personaSection,
+      order: scopedPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+      text: 'PERSONA-ONLY',
+      complete: true,
+    });
+  });
+
+  // The same persona also disables optional runtime context, and the product's
+  // own registration is added here: only a `required` context survives both.
+  prompt.suppressRuntimeContext();
+  prompt.context(
+    guidanceRegistration(
+      prompt.getContextOrder('APPROVAL_POLICY') + 1,
+      () => PARENT_GUIDANCE,
+    ),
+  );
+  const assembly = await prompt.assemble({ scope: key });
+  // The complete persona really did replace the sections …
+  expect(assembly.sections.map((section) => section.name)).toEqual([
+    host.personaSection,
+  ]);
+  expect(host.renderPrompt(assembly)).toBe('PERSONA-ONLY');
+  // … and the guidance is still in the runtime context the model receives.
+  expect(assembly.contexts.map((entry) => entry.name)).toContain(
+    'arbiter:agent-guidance',
+  );
+  const snapshot = host.renderContext(assembly);
+  expect(snapshot).toContain('An approval-rejected tool call was not executed');
+  expect(snapshot).toContain(PARENT_GUIDANCE);
+});
 
 test.describe('standing agent guidance', () => {
   test(
-    'a managed main session carries the parent guidance and an unmanaged session carries none',
+    'a managed main session carries the guidance, an unmanaged one carries none, and disabling removes it',
     { tag: '@smoke' },
     async ({ page }, testInfo) => {
-      const caseHost: CaseHost = await createCaseHost(
-        testInfo.outputPath('guidance-scope'),
-        { arbiterRowConfig: { format: FORMAT, rules: [] } },
-      );
+      const artifacts = testInfo.outputPath('guidance-scope');
+      const requestDir = await prepareRequestDir(artifacts, 'requests');
+      const caseHost: CaseHost = await createCaseHost(artifacts, {
+        arbiterRowConfig: { format: FORMAT, rules: [] },
+        requestDir,
+      });
       try {
         const host = caseHost.current();
 
         // An unenabled session: the plugin must contribute nothing at all.
         await openHost(page, host);
         await sendPrompt(page, 'GUIDE-PLAIN RUN echo guide-plain');
-        const plain = await turnWith(host, 'GUIDE-PLAIN');
-        expect(systemText(plain)).not.toContain(PARENT_MARKER);
-        expect(systemText(plain)).not.toContain(SUBAGENT_MARKER);
+        const plainSession = await sessionWithMarker(host, 'GUIDE-PLAIN');
+        const plainRequest = await requestFor(requestDir, 'GUIDE-PLAIN');
+        expect(requestText(plainRequest)).not.toContain(COMMON_MARKER);
+        expect(requestText(plainRequest)).not.toContain(PARENT_MARKER);
 
-        // Enabling the same session makes the next assembly carry it.
-        await enableSession(host, plain.sessionId);
+        // Enabling the same session makes the next request carry it.
+        await enableSession(host, plainSession.sessionId);
         await openHost(page, host);
         await sendPrompt(page, 'GUIDE-MANAGED RUN echo guide-managed');
-        const managed = await waitFor(
+        const managed = await settledTurnWith(
           host,
-          (candidate) =>
-            candidate.sessionId === plain.sessionId &&
-            candidate.events.some(
-              (event) =>
-                event.type === 'user/message' &&
-                JSON.stringify(event.data).includes('GUIDE-MANAGED'),
-            ) &&
-            candidate.events.some((event) => event.type === 'turn/end'),
+          plainSession.sessionId,
+          'GUIDE-MANAGED',
         );
-        const managedSystem = systemText(managed);
-        expect(managedSystem).toContain(PARENT_MARKER);
-        // A main session never gets the subagent's reporting guidance.
-        expect(managedSystem).not.toContain(SUBAGENT_MARKER);
+        expect(managed.sessionId).toBe(plainSession.sessionId);
+        const managedRequest = await requestFor(requestDir, 'GUIDE-MANAGED');
+        // The contribution really is part of the host's runtime-context
+        // snapshot, not some text the test could have assembled itself.
+        const managedContext = runtimeContext(managedRequest);
+        expect(managedContext).toContain(COMMON_MARKER);
+        // A main session runs its own calls, so it gets the common
+        // non-execution semantics plus the parent's subtask handling.
+        expect(managedContext).toContain(PARENT_MARKER);
+        expect(managedContext).not.toContain(SUBAGENT_MARKER);
 
         // A second session in the same host is still unmanaged: guidance is
         // per admission, not per installation.
         await openHost(page, host);
         await newSession(page);
         await sendPrompt(page, 'GUIDE-OTHER RUN echo guide-other');
-        const other = await turnWith(host, 'GUIDE-OTHER');
-        expect(other.sessionId).not.toBe(plain.sessionId);
-        expect(systemText(other)).not.toContain(PARENT_MARKER);
-        expect(systemText(other)).not.toContain(SUBAGENT_MARKER);
+        const other = await sessionWithMarker(host, 'GUIDE-OTHER');
+        expect(other.sessionId).not.toBe(plainSession.sessionId);
+        const otherRequest = await requestFor(requestDir, 'GUIDE-OTHER');
+        expect(requestText(otherRequest)).not.toContain(COMMON_MARKER);
+
+        // Disabling the admitted session removes the contribution again: the
+        // scope is read per assembly, never cached at enable time.
+        await disableSession(host, plainSession.sessionId);
+        await openHost(page, host);
+        // The page is on the other session now, so reopen the admitted one:
+        // the prompt must continue that session to prove its own scope.
+        await openExistingSession(page, 'GUIDE-PLAIN');
+        await sendPrompt(
+          page,
+          'GUIDE-AFTER-DISABLE RUN echo guide-after-disable',
+        );
+        await settledTurnWith(
+          host,
+          plainSession.sessionId,
+          'GUIDE-AFTER-DISABLE',
+        );
+        const afterDisable = await requestFor(
+          requestDir,
+          'GUIDE-AFTER-DISABLE',
+        );
+        expect(afterDisable.system ?? '').not.toContain(COMMON_MARKER);
+        expect(afterDisable.system ?? '').not.toContain(PARENT_MARKER);
       } finally {
         await caseHost.dispose();
       }
@@ -256,95 +658,85 @@ test.describe('standing agent guidance', () => {
   test('a managed subagent carries the reporting guidance', async ({
     page,
   }, testInfo) => {
-    const caseHost: CaseHost = await createCaseHost(
-      testInfo.outputPath('guidance-subagent'),
-      { arbiterRowConfig: { format: FORMAT, rules: [] } },
-    );
+    const artifacts = testInfo.outputPath('guidance-subagent');
+    const requestDir = await prepareRequestDir(artifacts, 'requests');
+    const caseHost: CaseHost = await createCaseHost(artifacts, {
+      arbiterRowConfig: { format: FORMAT, rules: [] },
+      requestDir,
+    });
     try {
       const host = caseHost.current();
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-PARENT RUN echo guide-parent-warmup');
-      const parent = await turnWith(host, 'GUIDE-PARENT');
-      await enableSession(host, parent.sessionId);
+      const parentSession = await sessionWithMarker(host, 'GUIDE-PARENT');
+      await enableSession(host, parentSession.sessionId);
 
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-DELEGATE DELEGATE echo guide-child');
-      const child = await waitFor(
-        host,
-        (candidate) =>
-          candidate.header?.['parentSession'] === parent.sessionId &&
-          candidate.events.some(
-            (event) =>
-              event.type === 'user/message' &&
-              JSON.stringify(event.data).includes('guide-child'),
-          ) &&
-          candidate.events.some((event) => event.type === 'turn/end'),
+      // The child's own turn is the request carrying the delegated task.
+      const childContext = runtimeContext(
+        await requestFor(requestDir, 'Delegated task'),
       );
-      const childSystem = systemText(child);
-      expect(childSystem).toContain(SUBAGENT_MARKER);
-      expect(childSystem).not.toContain(PARENT_MARKER);
+      expect(childContext).toContain(COMMON_MARKER);
+      expect(childContext).toContain(SUBAGENT_MARKER);
+      expect(childContext).not.toContain(PARENT_MARKER);
+      // The parent's own request in that same turn still has the parent text.
+      const parentContext = runtimeContext(
+        await requestFor(requestDir, 'GUIDE-DELEGATE'),
+      );
+      expect(parentContext).toContain(PARENT_MARKER);
+      expect(parentContext).not.toContain(SUBAGENT_MARKER);
     } finally {
       await caseHost.dispose();
     }
   });
 
-  test('the guidance survives a real compaction', async ({
+  test('the guidance is present in the request after a real compaction', async ({
     page,
   }, testInfo) => {
-    const caseHost: CaseHost = await createCaseHost(
-      testInfo.outputPath('guidance-compact'),
-      { arbiterRowConfig: { format: FORMAT, rules: [] } },
-    );
+    const artifacts = testInfo.outputPath('guidance-compact');
+    const requestDir = await prepareRequestDir(artifacts, 'requests');
+    const caseHost: CaseHost = await createCaseHost(artifacts, {
+      arbiterRowConfig: { format: FORMAT, rules: [] },
+      requestDir,
+    });
     try {
       const host = caseHost.current();
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-C1 RUN echo compact-one');
-      const first = await turnWith(host, 'GUIDE-C1');
-      await enableSession(host, first.sessionId);
+      const session = await sessionWithMarker(host, 'GUIDE-C1');
+      await enableSession(host, session.sessionId);
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-C2 RUN echo compact-two');
-      await waitFor(
-        host,
-        (candidate) =>
-          candidate.sessionId === first.sessionId &&
-          candidate.events.some(
-            (event) =>
-              event.type === 'user/message' &&
-              JSON.stringify(event.data).includes('GUIDE-C2'),
-          ) &&
-          candidate.events.some((event) => event.type === 'turn/end'),
-      );
+      await settledTurnWith(host, session.sessionId, 'GUIDE-C2');
+      const beforeCompaction = await requestFor(requestDir, 'GUIDE-C2');
+      expect(runtimeContext(beforeCompaction)).toContain(PARENT_MARKER);
 
-      // The host's own `/compact`: a real compaction transaction, not a
-      // simulated replacement.
+      // The host's own `/compact`: a real compaction transaction.
       await openHost(page, host);
       await sendPrompt(page, '/compact');
       const compacted = await waitFor(
         host,
         (candidate) =>
-          candidate.sessionId === first.sessionId &&
+          candidate.sessionId === session.sessionId &&
           candidate.events.some((event) => event.type === 'compaction/end'),
       );
-      const ended = compacted.events.filter(
-        (event) => event.type === 'compaction/end',
-      );
-      expect(ended.length).toBeGreaterThan(0);
-      // The compaction really replaced history: the plugin's own guidance is
-      // still in the system prompt the host keeps for every later step.
+      expect(
+        compacted.events.filter((event) => event.type === 'compaction/end')
+          .length,
+      ).toBeGreaterThan(0);
+
+      // The next turn's *actual request* must still carry the guidance. Reading
+      // the accumulated log could not distinguish this from an older prompt.
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-C3 RUN echo compact-three');
-      const after = await waitFor(
-        host,
-        (candidate) =>
-          candidate.sessionId === first.sessionId &&
-          candidate.events.some(
-            (event) =>
-              event.type === 'user/message' &&
-              JSON.stringify(event.data).includes('GUIDE-C3'),
-          ) &&
-          candidate.events.some((event) => event.type === 'turn/end'),
-      );
-      expect(systemText(after)).toContain(PARENT_MARKER);
+      await settledTurnWith(host, session.sessionId, 'GUIDE-C3');
+      const afterCompaction = await requestFor(requestDir, 'GUIDE-C3');
+      // The guidance is re-projected after the span holding the previous
+      // snapshot was replaced, so the model still receives it.
+      const afterContext = runtimeContext(afterCompaction);
+      expect(afterContext).toContain(COMMON_MARKER);
+      expect(afterContext).toContain(PARENT_MARKER);
     } finally {
       await caseHost.dispose();
     }
@@ -353,89 +745,83 @@ test.describe('standing agent guidance', () => {
   test('all three approval modes still let the agent ask and never record the answer as human-allow', async ({
     page,
   }, testInfo) => {
-    const caseHost: CaseHost = await createCaseHost(
-      testInfo.outputPath('guidance-ask'),
-      { arbiterRowConfig: { format: FORMAT, rules: [] } },
-    );
+    const artifacts = testInfo.outputPath('guidance-ask');
+    const requestDir = await prepareRequestDir(artifacts, 'requests');
+    const caseHost: CaseHost = await createCaseHost(artifacts, {
+      arbiterRowConfig: { format: FORMAT, rules: [] },
+      requestDir,
+    });
     try {
       const host = caseHost.current();
       await openHost(page, host);
       await sendPrompt(page, 'GUIDE-ASK-WARMUP RUN echo ask-warmup');
-      const session = await turnWith(host, 'GUIDE-ASK-WARMUP');
-      await enableSession(host, session.sessionId);
+      const warmup = await sessionWithMarker(host, 'GUIDE-ASK-WARMUP');
+      await enableSession(host, warmup.sessionId);
 
       for (const mode of ['normal', 'strict', 'progress'] as const) {
-        await saveConfig(host, (config) => ({
-          ...config,
-          modes: { main: mode, subagent: 'strict' },
-        }));
+        await setMainMode(host, mode);
         await openHost(page, host);
         const marker = `GUIDE-ASK-${mode.toUpperCase()}`;
-        await sendPrompt(
-          page,
-          `${marker} ASK 是否允许执行 /workspace/app/build 的清理？`,
-        );
+        const question = `是否允许执行 ${mode} 的 /workspace/app/build 清理？`;
+        await sendPrompt(page, `${marker} ASK ${question}`);
 
         // The host's own question card appears: the plugin neither answered it
-        // nor suppressed it in any mode.
+        // nor suppressed it in this mode.
         const card = page.getByRole('radiogroup').first();
         await expect(card).toBeVisible({ timeout: 60_000 });
         await expect(
-          page
-            .getByText('/workspace/app/build 的清理', { exact: false })
-            .first(),
+          page.getByText(question, { exact: false }).first(),
         ).toBeVisible();
         await card.getByRole('radio', { name: '允许', exact: true }).click();
         await page.getByRole('button', { name: '提交', exact: true }).click();
 
-        const answered = await waitFor(
-          host,
-          (candidate) =>
-            candidate.sessionId === session.sessionId &&
-            candidate.events.some(
-              (event) =>
-                event.type === 'user/message' &&
-                JSON.stringify(event.data).includes(marker),
-            ) &&
-            candidate.events.some(
-              (event) =>
-                event.type === 'tool/result' &&
-                JSON.stringify(event.data).includes('authorization'),
-            ),
+        // Wait for this iteration's own ask call and its answer. The call id is
+        // the identity: the answer is the tool result the host recorded for
+        // that exact call, so an earlier authorization result cannot satisfy it.
+        const answered = await waitForAnswer(host, warmup.sessionId, question);
+        const call = askCalls(answered).find((entry) =>
+          JSON.stringify(entry['arguments']).includes(question),
         );
-        const results = decisionResults(answered);
-        // Whatever the review decided about the ask call, an answer is never an
-        // approval: no recorded decision may claim human-allow.
-        expect(results).not.toContain('human-allow');
-        // The ask call itself was admitted in this mode rather than refused, so
-        // the mode never forbids asking. (The plugin does not special-case the
-        // tool; this asserts the outcome, not an exemption.)
-        const asked = askCallIds(answered);
-        expect(asked.length).toBeGreaterThan(0);
-        const askDecisions = decisions(answered).filter((data) =>
-          asked.includes(String(data['callId'])),
+        expect(call, `${mode} must issue its own ask call`).toBeDefined();
+        const rawCallId: unknown = call?.['callId'];
+        const callId = typeof rawCallId === 'string' ? rawCallId : '';
+        expect(callId.length).toBeGreaterThan(0);
+
+        const callDecisions = decisions(answered).filter(
+          (entry) => entry['callId'] === callId,
         );
-        expect(askDecisions.length).toBeGreaterThan(0);
-        for (const decision of askDecisions) {
+        expect(
+          callDecisions.length,
+          `${mode} ask call must be decided by the plugin`,
+        ).toBeGreaterThan(0);
+        for (const decision of callDecisions) {
+          // The call was admitted (not refused) in this mode, and an answer is
+          // never recorded as an approval.
           expect([
             'allow',
             'review-allow',
-            'human-allow',
             'force-ask',
             'review-escalate',
           ]).toContain(decision['result']);
           expect(decision['result']).not.toBe('human-allow');
         }
-        // And the answer reached the model as the host's own tool result, so
-        // the ask call itself was not refused in this mode.
-        expect(
-          answered.events.some(
-            (event) =>
-              event.type === 'tool/result' &&
-              JSON.stringify(event.data).includes('authorization') &&
-              JSON.stringify(event.data).includes('允许'),
-          ),
-        ).toBe(true);
+        // The answer reached the model as the host's own tool result for this
+        // exact call, and it carries the human's choice.
+        const answerResult = answered.events.find((event) => {
+          if (event.type !== 'tool/result') return false;
+          const message = recordOf(recordOf(event.data)['message']);
+          return recordOf(message['source'])['callId'] === callId;
+        });
+        expect(answerResult, `${mode} answer must be recorded`).toBeDefined();
+        const answerContent = recordOf(recordOf(answerResult?.data)['message'])[
+          'content'
+        ];
+        expect(JSON.stringify(answerContent)).toContain('允许');
+        // The request for this mode's marker carried the guidance under the
+        // mode that was confirmed effective above.
+        const request = await requestFor(requestDir, marker);
+        expect(runtimeContext(request)).toContain(COMMON_MARKER);
+        expect(runtimeContext(request)).toContain(PARENT_MARKER);
       }
     } finally {
       await caseHost.dispose();

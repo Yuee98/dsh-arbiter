@@ -9,10 +9,21 @@
  *
  * Scope is the backend-confirmed admission, not an installation flag or a host
  * preset name: a session the plugin has not taken over gets no guidance, and a
- * subagent inherits its parent's admission exactly as the gate does. The
- * contribution is the host's public system-prompt section entry — the same one
- * the first-party tool packages use for their own standing instructions — so it
- * stays in the system prompt every step and is never inside a compacted span.
+ * subagent inherits its parent's admission exactly as the gate does.
+ *
+ * Placement is the host's registered runtime-context entry
+ * (`ctx.systemPrompt.context()`), which the architecture note already designates
+ * for this guidance. It is registered as `required`, for two verified reasons in
+ * the pinned host:
+ *   - a deployment persona with `complete: true` (the shipped `minimal` preset)
+ *     replaces every prompt *section* with itself, so a section registration
+ *     would silently disappear in that composition while the runtime contexts
+ *     are untouched;
+ *   - `includeRuntimeContext: false` drops optional contexts but keeps
+ *     `required` ones.
+ * A runtime snapshot is also re-projected after a compaction replaces the span
+ * that held it, so the guidance returns on the next request. The text therefore
+ * stays identical between requests and never grows the history by itself.
  * The reviewer keeps its own separate contract in `reviewer/prompt.ts`.
  */
 
@@ -22,7 +33,7 @@ import { sessionKindOf } from './common.js';
 import type { SessionAdmissions } from './session-admission.js';
 import type {
   HostEnvironment,
-  PromptSectionRegistrationLike,
+  PromptContextRegistrationLike,
   SystemPromptLike,
 } from './types.js';
 
@@ -30,25 +41,33 @@ import type {
 export const GUIDANCE_SECTION = 'arbiter:agent-guidance';
 
 /**
- * Guidance for a subagent.
+ * The part every managed agent needs, regardless of role.
  *
- * It states the meaning of a rejected call, the order of recovery (a permitted
- * alternative first), and the report a parent needs. It never claims which
- * approval mode is active or why a particular call failed.
+ * It states what a rejected call means and the order of recovery: a permitted
+ * alternative first, a request for help only when that is not enough. It never
+ * claims which approval mode is active, why a particular call failed, or which
+ * evidence a review lacked — all of that arrives with the tool result.
  */
-export const SUBAGENT_GUIDANCE =
-  'An approval-rejected tool call was not executed. First try an allowed alternative that the stated reason permits. When genuinely blocked, report the pending operation, the blocking reason and the help you need to the parent agent. After the authorization or the operation scope changes you may submit again; do not repeat the same blocked effect with different wording while the conditions are unchanged.';
+export const COMMON_GUIDANCE =
+  'An approval-rejected tool call was not executed. First try an allowed alternative that the stated reason permits. Do not repeat the same blocked effect with different wording while the conditions are unchanged; after the authorization or the operation scope changes you may submit again.';
 
 /**
- * Guidance for a parent agent.
+ * What a subagent additionally does when genuinely blocked.
  *
- * A subagent's request for help is a planning question first: adjust the plan
- * when that is enough, and only then ask the user — precisely, through whatever
- * asking surface the host offers. Asking is never restricted by the approval
- * mode, and the answer is relayed without widening its scope.
+ * It reports upward rather than inventing authority, and says exactly what the
+ * parent needs in order to decide.
  */
-export const PARENT_GUIDANCE =
-  'When a subtask is blocked by permissions and asks for help, first judge whether the plan can be adjusted. When more authorization is needed, state the exact operation and scope through the ask surface available to you or in chat, then relay the answer to the subtask accurately. Approval modes do not restrict these questions. A subtask review may use the parent session original human words; only when the authorization still cannot be verified or is insufficient should you guide the user to confirm directly in the subtask session.';
+export const SUBAGENT_GUIDANCE = `${COMMON_GUIDANCE} When genuinely blocked, report the pending operation, the blocking reason and the help you need to the parent agent.`;
+
+/**
+ * What a parent agent additionally does when a subtask asks for help.
+ *
+ * A request for help is a planning question first: adjust the plan when that is
+ * enough, and only then ask the user — precisely, through whatever asking
+ * surface the host offers. Asking is never restricted by the approval mode, and
+ * the relay keeps the human's original words and scope unchanged.
+ */
+export const PARENT_GUIDANCE = `${COMMON_GUIDANCE} When a subtask is blocked by permissions and asks for help, first judge whether the plan can be adjusted. When more authorization is needed, state the exact operation and scope through the ask surface available to you or in chat, then relay the answer to the subtask with the original words and authorization scope unchanged. Approval modes do not restrict these questions. A subtask review may use the parent session original human words; only when the authorization still cannot be verified or is insufficient should you guide the user to confirm directly in the subtask session.`;
 
 /** The standing text for one orchestration role. */
 export function guidanceText(kind: SessionKind): string {
@@ -65,8 +84,8 @@ export function guidanceText(kind: SessionKind): string {
 function isSystemPrompt(value: unknown): value is SystemPromptLike {
   if (value === null || typeof value !== 'object') return false;
   return (
-    typeof Reflect.get(value, 'section') === 'function' &&
-    typeof Reflect.get(value, 'getSectionOrder') === 'function'
+    typeof Reflect.get(value, 'context') === 'function' &&
+    typeof Reflect.get(value, 'getContextOrder') === 'function'
   );
 }
 
@@ -88,6 +107,31 @@ export interface GuidanceScope {
 export function selectGuidance(scope: GuidanceScope): string {
   if (!scope.active || !scope.managed) return '';
   return guidanceText(scope.kind);
+}
+
+/**
+ * The one registration this module contributes, for a given order.
+ *
+ * Exported so the host-compatibility proof can register it on the real
+ * `SystemPrompt` together with a complete persona, instead of re-deriving the
+ * shape in a test.
+ */
+export function guidanceRegistration(
+  order: number,
+  textFor: (agent: AgentLike | undefined) => string,
+): PromptContextRegistrationLike {
+  return {
+    name: GUIDANCE_SECTION,
+    order,
+    // Literal prose, never a template: no current mode, failure, or evidence.
+    interpolate: false,
+    // A complete persona replaces every section, and
+    // `includeRuntimeContext: false` drops optional contexts. Only a required
+    // context survives both, and the guidance must not silently vanish just
+    // because the deployment chose one of those compositions.
+    required: true,
+    text: (context) => textFor(context.agent),
+  };
 }
 
 export class AgentGuidance {
@@ -112,7 +156,7 @@ export class AgentGuidance {
       const prompt = child.get('systemPrompt');
       if (!isSystemPrompt(prompt)) return;
       child.effect(
-        () => prompt.section(this.registration(prompt)),
+        () => prompt.context(this.registration(prompt)),
         'arbiter agent guidance',
       );
     });
@@ -121,17 +165,13 @@ export class AgentGuidance {
   /** The registration handed to the host registry. */
   private registration(
     prompt: SystemPromptLike,
-  ): PromptSectionRegistrationLike {
-    return {
-      name: GUIDANCE_SECTION,
-      // Immediately after the deployment persona and before the first-party
-      // tool instructions: the paragraph frames how a blocked call is read, so
-      // it belongs with the standing instructions rather than with one tool.
-      order: prompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
-      // Literal prose, never a template: no current mode, failure, or evidence.
-      interpolate: false,
-      text: (context) => this.textFor(context.agent),
-    };
+  ): PromptContextRegistrationLike {
+    // Immediately after the host's own approval-policy line: the guidance
+    // explains what an Arbiter rejection means, not what the policy is.
+    return guidanceRegistration(
+      prompt.getContextOrder('APPROVAL_POLICY') + 1,
+      (agent) => this.textFor(agent),
+    );
   }
 
   /**
@@ -147,14 +187,18 @@ export class AgentGuidance {
     const sessionId = session?.id;
     if (agent === undefined || session === undefined || sessionId === undefined)
       return '';
+    const { runtime } = this.host;
+    // Check the cheap fact first: a disabled or unloading plugin contributes
+    // nothing, so it must not pay for an admission fold on every assembly.
+    const active = runtime.config.enabled && runtime.accepting;
+    if (!active) return '';
     // Remember the session object before reading its admission: an assembly can
     // happen before this session ever reached the gate, and the fold needs the
     // object to resolve a parent chain or a cold-restored record.
     this.admissions.observe(session);
-    const { runtime } = this.host;
     const view = this.admissions.view(sessionId, runtime.effectiveRevision);
     return selectGuidance({
-      active: runtime.config.enabled && runtime.accepting,
+      active,
       managed: view !== null && view.managed,
       kind: sessionKindOf(agent),
     });

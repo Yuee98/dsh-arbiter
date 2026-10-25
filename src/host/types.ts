@@ -98,27 +98,28 @@ export interface AssembleContextLike {
   readonly agent?: AgentLike;
 }
 
-/** One system-prompt section, as the host registry accepts it. */
-export interface PromptSectionRegistrationLike {
+/** One runtime-context contribution, as the host registry accepts it. */
+export interface PromptContextRegistrationLike {
   readonly name: string;
   readonly order: number;
   readonly text: string | ((context: AssembleContextLike) => string);
   readonly interpolate?: boolean;
+  /** Keep this context when the deployment suppresses optional runtime context. */
+  readonly required?: boolean;
 }
 
 /** The centrally ordered placements this plugin reads. */
-export type PromptSectionOrderNameLike = 'DEPLOYMENT_PERSONA_PREFIX';
+export type PromptContextOrderNameLike = 'APPROVAL_POLICY';
 
 /**
  * The slice of the host `systemPrompt` service this plugin uses.
  *
- * Only section registration and the central order lookup are read: assembly,
- * runtime contexts, tools and variables belong to the host and to other
- * plugins.
+ * Only context registration and the central order lookup are read: assembly,
+ * sections, tools and variables belong to the host and to other plugins.
  */
 export interface SystemPromptLike {
-  section(registration: PromptSectionRegistrationLike): () => void;
-  getSectionOrder(name: PromptSectionOrderNameLike): number;
+  context(registration: PromptContextRegistrationLike): () => void;
+  getContextOrder(name: PromptContextOrderNameLike): number;
 }
 
 export interface CredentialsLike {
