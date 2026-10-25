@@ -15,9 +15,22 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest';
 
 import { apply } from '../../src/index.js';
+import {
+  admitSession,
+  recordingSessionApi,
+} from '../helpers/session-records.js';
+import { installSessionRecordApi } from '../../src/records.js';
 import type { ContextLike, FetchRouteLike } from '../../src/host/types.js';
 import type { ToolExecutionLike } from '../../src/host/types.js';
 import { createStubContext, stubEditor } from '../helpers/host-stub.js';
@@ -57,6 +70,25 @@ interface Harness {
     execution: ToolExecutionLike,
   ) => Promise<{ readonly kind: string; readonly reason?: string }>;
   readonly documentPath: string;
+  readonly session: StubSession;
+}
+
+interface StubSession {
+  readonly id: string;
+  readonly header: { readonly cwd: string };
+  readonly events: {
+    type: string;
+    data?: unknown;
+    seq: number;
+    ignorable?: boolean;
+  }[];
+  readonly append: (type: string, data: unknown) => void;
+  readonly snapshotEvents: () => readonly {
+    readonly type: string;
+    readonly data?: unknown;
+    readonly seq: number;
+    readonly ignorable?: boolean;
+  }[];
 }
 
 async function createHarness(config: unknown): Promise<Harness> {
@@ -66,6 +98,27 @@ async function createHarness(config: unknown): Promise<Harness> {
   await mkdir(profileDir, { recursive: true });
   await writeFile(documentPath, `${JSON.stringify(config)}\n`, 'utf8');
 
+  const events: {
+    type: string;
+    data?: unknown;
+    seq: number;
+    ignorable?: boolean;
+  }[] = [];
+  const session: StubSession = {
+    id: 'session-1',
+    header: { cwd: root },
+    events,
+    append: (type, data) => {
+      // The host marks plugin records ignorable; the reader keeps only those.
+      events.push({
+        type,
+        data,
+        seq: events.length,
+        ...(type.startsWith('plugin:') ? { ignorable: true } : {}),
+      });
+    },
+    snapshotEvents: () => events,
+  };
   const routes = new Map<string, FetchRouteLike>();
   let gate:
     ((execution: ToolExecutionLike) => Promise<{ kind: string }>) | undefined;
@@ -73,6 +126,12 @@ async function createHarness(config: unknown): Promise<Harness> {
     {
       profileContext: { home, dir: profileDir, name: 'rule-agreement' },
       sandboxPolicy: { defaultMode: 'workspace-write' },
+      // The gate resolves a session through this service; the stub session is
+      // the one the case admits and drives.
+      sessions: {
+        get: (id: string) => (id === session.id ? session : undefined),
+        list: () => [session],
+      },
       approval: {
         config: { policy: 'ask' },
         request: () => Promise.resolve('unavailable'),
@@ -132,9 +191,12 @@ async function createHarness(config: unknown): Promise<Harness> {
   });
   apply(parts.ctx, config);
 
+  // The user enabled this session; the gate reviews only admitted sessions.
+  admitSession(session);
   return {
     routes,
     documentPath,
+    session,
     gate: (execution) => {
       if (gate === undefined) throw new Error('gate was not registered');
       return gate(execution);
@@ -142,9 +204,23 @@ async function createHarness(config: unknown): Promise<Harness> {
   };
 }
 
+/**
+ * The plugin writes admission through the host's record writer, and the gate
+ * only reviews a session the user enabled. These cases install the same
+ * contract double `snapshot-gate` uses and admit the session they drive.
+ */
+beforeAll(() => {
+  installSessionRecordApi(recordingSessionApi());
+});
+
+afterAll(() => {
+  installSessionRecordApi(null);
+});
+
 function executionOf(
   tool: string,
   args: unknown,
+  session: StubSession,
   callId = 'call-1',
 ): ToolExecutionLike {
   return {
@@ -152,7 +228,7 @@ function executionOf(
     name: tool,
     arguments: args,
     signal: new AbortController().signal,
-    agent: { session: { id: 'session-1', header: { cwd: root } } },
+    agent: { session },
   };
 }
 
@@ -199,7 +275,7 @@ describe('rule tester and real gate agreement', () => {
     });
 
     const gated = await harness.gate(
-      executionOf('deploy', { environment: 'production' }),
+      executionOf('deploy', { environment: 'production' }, harness.session),
     );
     expect(gateVerdict(gated)).toBe('deny');
 
@@ -221,7 +297,7 @@ describe('rule tester and real gate agreement', () => {
     });
 
     const gated = await harness.gate(
-      executionOf('deploy', { environment: 'staging' }),
+      executionOf('deploy', { environment: 'staging' }, harness.session),
     );
     // A call outside the rule falls through to the normal review path. The
     // decision may still be a fallback deny when approval is unavailable, but it

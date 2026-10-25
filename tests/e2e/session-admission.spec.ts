@@ -300,6 +300,31 @@ async function runOneCall(
   return settledTurn(host, session.sessionId);
 }
 
+/**
+ * A deny rule for the fixture's `aria-*` marker command.
+ *
+ * The canonical rule format matches a whole value, so a `bash` call is denied
+ * by its `command` argument through a JSONPath selector rather than a legacy
+ * `node`/`kind` prefix pattern.
+ */
+const FORMAT = 'arbiter-config-v2';
+
+function denyCommandRule(id: string): Record<string, unknown> {
+  return {
+    id,
+    scope: { tools: ['bash'] },
+    conditions: [
+      {
+        target: 'argument',
+        path: '$.command',
+        kind: 'regex',
+        pattern: 'echo arbiter-deny.*',
+      },
+    ],
+    verdict: 'deny',
+  };
+}
+
 test.describe('session admission', () => {
   test(
     'an unenabled session takes zero gate; enabling gates it; the same-value native command exits',
@@ -309,17 +334,8 @@ test.describe('session admission', () => {
         testInfo.outputPath('dsh-case'),
         {
           arbiterRowConfig: {
-            rules: [
-              {
-                id: 'deny-marker',
-                match: {
-                  node: 'command',
-                  kind: 'regex',
-                  pattern: '^echo arbiter-deny',
-                },
-                verdict: 'deny',
-              },
-            ],
+            format: FORMAT,
+            rules: [denyCommandRule('deny-marker')],
           },
         },
       );
@@ -518,17 +534,8 @@ test.describe('session admission', () => {
   }, testInfo) => {
     const caseHost = await createCaseHost(testInfo.outputPath('dsh-restart'), {
       arbiterRowConfig: {
-        rules: [
-          {
-            id: 'deny-marker',
-            match: {
-              node: 'command',
-              kind: 'regex',
-              pattern: '^echo arbiter-deny',
-            },
-            verdict: 'deny',
-          },
-        ],
+        format: FORMAT,
+        rules: [denyCommandRule('deny-marker')],
       },
     });
     try {
@@ -696,17 +703,8 @@ test.describe('session admission', () => {
   }, testInfo) => {
     const caseHost = await createCaseHost(testInfo.outputPath('dsh-subagent'), {
       arbiterRowConfig: {
-        rules: [
-          {
-            id: 'deny-marker',
-            match: {
-              node: 'command',
-              kind: 'regex',
-              pattern: '^echo arbiter-deny',
-            },
-            verdict: 'deny',
-          },
-        ],
+        format: FORMAT,
+        rules: [denyCommandRule('deny-marker')],
       },
     });
     try {
