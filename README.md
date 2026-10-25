@@ -131,6 +131,8 @@ mise exec -- pnpm verify
 | `pnpm check:i18n:release`   | 在上述检查外要求所有已声明语言完整覆盖中文                        |
 | `pnpm test`                 | 运行 unit、integration 与 UI 三个 Vitest 项目                     |
 | `pnpm test:coverage`        | 全量源码覆盖率报告，无百分比门槛和过渡名单                        |
+| `pnpm test:e2e:dsh:smoke`   | 构建后在真实隔离 DSH 中运行 `@smoke` 浏览器用例                   |
+| `pnpm test:e2e:dsh`         | 构建后运行全部已实现的真实 DSH 场景                               |
 | `pnpm build`                | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
 | `pnpm check:build`          | publint 检查 tarball，并由离线消费者验证类型、工厂与打包资源      |
 | `pnpm check:regressions`    | 运行评审提供的 R1–R9 复现脚本（生命周期夹具，不启动 DSH）         |
@@ -148,4 +150,8 @@ node scripts/check.mjs
 
 文案按 `locale/<语言>/<功能模块>.json` 分文件，内部使用嵌套对象，所有语言共用 `locale/schema.json`。组件保留点号 key；新增资源同步登记到 `src/client/i18n/resources.ts`。开发允许缺少译文并逐条回退中文，发布前补齐英文及其他已声明语言，详见[资源组织与校验](docs/development-baseline.md#i18n-的开发与发布检查)。
 
-CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周检查 npm 开发依赖和 Actions 更新，通过 PR 验证，不自动合并。
+CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周分别检查根目录 npm 依赖、DSH 独立运行时与 Actions 更新，通过 PR 验证，不自动合并。
+
+真实 DSH smoke 独立运行：相关代码／locale／构建 PR 和 main 推送自动使用 GitHub-hosted Ubuntu；改动 `tests/e2e/runtime/` 的升级 PR 按实际 Git diff 自动跑 Linux／macOS／Windows，适用于 Dependabot 和手动更新。手动入口仍可选单个平台或三平台。宿主从独立清单和 lockfile 安装统一固定版本，不需要模型凭据或 self-hosted runner；发布前需要新版时先完成升级 PR，不在发布任务中临时选择 `latest`。完整权限与生命周期验收随功能补齐并在发布前按支持系统检查；Release Action 尚未实现。详见[执行分层与版本维护](docs/development-baseline.md#真实-dsh-e2e)及[已有平台证据](validation/engineering/2026-10-25-dsh-hosted/REPORT.md)。
+
+DSH 独立目录的 Dependabot 配置与升级 PR 自动分流结果另见[版本维护验证报告](validation/engineering/2026-10-25-dsh-updates/REPORT.md)；配置需合并到 main 后才开始定时检查。

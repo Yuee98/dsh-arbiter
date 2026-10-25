@@ -1,7 +1,33 @@
 name: DSH E2E
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/dsh-e2e.yml'
+      - '.github/dependabot.yml'
+      - 'tooling/ci/dsh-platforms.mjs'
+      - 'tests/tooling/dsh-platforms.test.ts'
+      - 'src/**'
+      - 'locale/**'
+      - 'tests/e2e/**'
+      - 'scripts/build-client.ts'
+      - 'scripts/clean.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'mise.toml'
+      - 'tsconfig*.json'
+      - 'playwright.config.ts'
+      - 'cordis.patch.yml'
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Host platform for compatibility smoke (all before release or a DSH upgrade)
+        type: choice
+        default: ubuntu-24.04
+        options: [ubuntu-24.04, macos-15, windows-2025, all]
 
 permissions:
   contents: read
@@ -11,11 +37,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dsh-e2e:
-    name: Real DSH browser smoke
-    runs-on: [self-hosted, dsh-e2e]
-    timeout-minutes: 10
+  platforms:
+    name: Select DSH platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      platforms: ${{ steps.select.outputs.platforms }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select platforms from actual PR changes or manual input
+        id: select
+        env:
+          DSH_E2E_EVENT: ${{ github.event_name }}
+          DSH_E2E_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DSH_E2E_PLATFORMS: ${{ inputs.platforms }}
+        run: node tooling/ci/dsh-platforms.mjs
+
+  dsh-e2e:
+    name: Real DSH smoke (${{ matrix.os }})
+    needs: platforms
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.platforms.outputs.platforms) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Allow historical evidence paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,17 +81,46 @@ jobs:
         uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           version: '2026.10.9'
+          install_args: node npm:pnpm
+      - name: Find dependency cache paths
+        id: stores
+        run: |
+          echo "pnpm=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore plugin dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.stores.outputs.pnpm }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
+      - name: Restore DSH download cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.stores.outputs.npm }}
+          key: ${{ runner.os }}-${{ runner.arch }}-dsh-${{ hashFiles('tests/e2e/runtime/package*.json', 'mise.toml') }}
       - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Install pinned public DSH CLI
+        run: |
+          mkdir -p .local/e2e
+          mkdir -p "$RUNNER_TEMP/dsh-runtime"
+          cp tests/e2e/runtime/package*.json "$RUNNER_TEMP/dsh-runtime/"
+          npm ci --prefix "$RUNNER_TEMP/dsh-runtime" --strict-allow-scripts --no-audit --no-fund 2>&1 | tee .local/e2e/install.log
+          cp "$RUNNER_TEMP/dsh-runtime/package-lock.json" .local/e2e/dsh-package-lock.json
+          node --input-type=module -e 'import manifest from "./tests/e2e/runtime/package.json" with { type: "json" }; console.log("DSH_E2E_VERSION=" + manifest.dependencies["@deepseek-ai/dsh"])' >> "$GITHUB_ENV"
+          node "$RUNNER_TEMP/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" --version | tee .local/e2e/dsh-version.txt
       - name: Install browser
-        run: pnpm exec playwright install chromium
+        timeout-minutes: 5
+        run: pnpm exec playwright install --with-deps chromium
       - name: Run isolated real DSH smoke
-        run: pnpm test:e2e:dsh
+        env:
+          DSH_E2E_CLI: ${{ runner.temp }}/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js
+        run: pnpm test:e2e:dsh:smoke
       - name: Save browser and host evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: dsh-e2e-${{ github.run_id }}
+          name: dsh-e2e-${{ matrix.os }}-${{ github.run_id }}
           path: .local/e2e/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7

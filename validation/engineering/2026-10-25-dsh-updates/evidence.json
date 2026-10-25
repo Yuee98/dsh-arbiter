@@ -1,0 +1,570 @@
+{
+  "recordedAt": "2026-10-25T08:21:11.613Z",
+  "testedHead": "9c76af037043ac52d76d18e143e8412f76739568",
+  "event": "pull_request",
+  "runId": 40175794511,
+  "runUrl": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511",
+  "conclusion": "success",
+  "selection": {
+    "jobId": 121116075606,
+    "jobUrl": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116075606",
+    "reason": "runtime-change",
+    "platforms": [
+      "ubuntu-24.04",
+      "macos-15",
+      "windows-2025"
+    ]
+  },
+  "dependabotConfigCheck": {
+    "__typename": "CheckRun",
+    "completedAt": "2026-10-25T08:13:49Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://dependabot-api.githubapp.com",
+    "name": ".github/dependabot.yml",
+    "startedAt": "2026-10-25T08:13:47Z",
+    "status": "COMPLETED",
+    "workflowName": ""
+  },
+  "dependabotScheduledService": "not-run: the separate runtime configuration is not on main; PR #29 remains open",
+  "localVerification": {
+    "command": "pnpm verify",
+    "unit": 162,
+    "integration": 46,
+    "ui": 18,
+    "regressions": "R1-R9 passed",
+    "routingContractCases": 17,
+    "passed": true
+  },
+  "platforms": [
+    {
+      "artifact": "dsh-e2e-macos-15-40175794511",
+      "jobId": 121116108273,
+      "jobUrl": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108273",
+      "jobSeconds": 116,
+      "steps": [
+        {
+          "name": "Install pinned public DSH CLI",
+          "conclusion": "success",
+          "seconds": 23
+        },
+        {
+          "name": "Install browser",
+          "conclusion": "success",
+          "seconds": 10
+        },
+        {
+          "name": "Run isolated real DSH smoke",
+          "conclusion": "success",
+          "seconds": 29
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-25T08:15:08.733Z",
+        "duration": 22510.464,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "calls": [
+        {
+          "test": "plugin-smoke-loads-the-rea-568e0-tracted-configuration-panel-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "locale-smoke-switches-the--cfc5c-configuration-after-refresh-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "accessibility-the-real-plu-3f18c-ed-accessibility-violations-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        }
+      ],
+      "fingerprint": {
+        "cordis.patch.yml": "bc8b550bec0df07f6fc500a5df08cf7c29da610d8c2f2e234db6549e2237c6d7",
+        "lib/audit.js": "60a360463d0f9071c7a1582187f328fdf8fa07370ad7e5f2da9afdce387296c5",
+        "lib/audit/metadata.js": "bf1c9ac38fc977aeebd81fefb892140a0e5dc7e31a0a199dcfbd299eb451a78e",
+        "lib/audit/queries.js": "d65afb53abc147555801ee972244da6b698d17421d7b92d1cff8181ac43c191f",
+        "lib/audit/retention.js": "474a875bead4724e9412ba902f67b10b335367566cf81348d09123f9b9eb19df",
+        "lib/audit/rows.js": "0e4039292e6250170a6f160bfddeefe97f19900ae659e5ac70403d37d321b5ef",
+        "lib/audit/schema.js": "84fd21b3607adf05d39d7a71aba4a8e613a4a9dba0399c198acaf3ff45c4f2e9",
+        "lib/audit/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/audit/writer.js": "2df6f1dda939a3110d8e164725387b7f3015c993cf0be9a9064f795d597cd10e",
+        "lib/client.cjs": "70d5f7b05d2bfbcc5a2367dafb442d6ec734ce005edac38c1347c2351988196e",
+        "lib/config.js": "e8e241bf91b35ea72e4f5d3ec642a6ead74ea353004e52b298897993a9b5d673",
+        "lib/config/context.js": "669e5807c4078684ddc0741d3bbf39e2dc03ff825bf02fdfc3cde4e14f5cb8f7",
+        "lib/config/defaults.js": "82c84643ad707cc0fe340e71d0e544eb62f36ede2ac80a4ed1f3d3c8a568f27f",
+        "lib/config/policy.js": "433f009ec4c3e7d1ef092ab5770ed93619bce9156a816723ea483e8387c88f76",
+        "lib/config/reviewer.js": "da9011b278b6d872cbf9ee8794bda02fff0f3435b2b80d020e20008b38cfabdb",
+        "lib/config/rules.js": "c767cf9fe36b3f6de7d4412f0e19ccaa384407a69c9a62edd94438e0476f3e0c",
+        "lib/config/runtime.js": "353d78cd39c2310aa288acafdadeb7c2b273a60d65cef0e430970a3029614a3d",
+        "lib/config/values.js": "01ef474aaf015286932db44e87791596468df6eeaa8e451c1ceb6ff95b8c4b25",
+        "lib/host/audit-routes.js": "3c9a19fe3743c4b7a9291c0c40c19434982084a54fa1804d04f17f117fb1ec66",
+        "lib/host/commands.js": "c4440455279d98fb73fdade15a2013d16477156d871215f9844703f0e9aaf024",
+        "lib/host/common.js": "9cf161bbc59eac2f8b6a795fcf13c0b4e96a1d60ee1f790c250d82c10045cfde",
+        "lib/host/config-routes.js": "bb6d6c1fe19cebf25acdfe75303b325f5ce6a5c943522b03978af1358f98752d",
+        "lib/host/configuration.js": "3a49930a0adf225975b6c0fd5e07da3a21a57e179e9b5fdbaeb3b93d4ee5219b",
+        "lib/host/gate.js": "7ff4b1a84c1cd9865538f37f7e84de7cf56264129b644a7a4d7a5af40273cbd9",
+        "lib/host/history.js": "38c8ad7baf2b3eb498e9aad6756b174891abe898e77627625d6587098ba4887a",
+        "lib/host/http.js": "cdd40fad90cd9893f9e0d0e9a12cc28cd6ce641ec72ee68e1684553a81bd3d8b",
+        "lib/host/permissions.js": "aba741dcb64f8d850ce6ea4f8890039e0bec01896badaf07fd1322344b4e06c3",
+        "lib/host/routes.js": "0a72b17afc0db912f90cf9030941e0508fd9105d54061c373247e8ee522e65e0",
+        "lib/host/runtime.js": "fc152fb56212c060146c38a31e137ffd104c7ad84b1c76eb9ef21cd6bfd116b1",
+        "lib/host/settlement.js": "4fa6d4dca446733e7734bcaaf4c3da0f4830fbf13b1a49b37ab693387375d0a5",
+        "lib/host/state.js": "d0f50bae2555ce386edd2c267bb5d7f2762c3371d0ec23769d6bdf58dc2e10a6",
+        "lib/host/suggestion-routes.js": "4189a0ca6df6c9a795688133251e6d617c61855638ccf98cbceb1f0e1bffa59f",
+        "lib/host/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/index.js": "8a745de7ca781b5854dec79ebff4366c713f138ef6c8b39abe07d13ed7807cca",
+        "lib/policy.js": "13dc12fbafff626db61f8c1fe1c79c07082f7e848530b6d119b0b7daf4e3a671",
+        "lib/records.js": "9240380abd1692e3e192ac14f33f74896f3e1c819b0563e6a994f3ee6cc17213",
+        "lib/repair.js": "04bda0863d335483a6c111722ec320a61f3e5d7263e18f6fce19e677b3434ac2",
+        "lib/reviewer.js": "6eafa47b7cf774f82e595077b15d9f7483faf2308dcc43e5ef1074f9987b651a",
+        "lib/reviewer/chat.js": "c3df187e1293113e5b50227436a4dd27997f1aeb820584371bece71752d024c7",
+        "lib/reviewer/decision.js": "a800d7fb0b4e693b1082ced29d77df49be427674df506ce6805dfc2f93cec144",
+        "lib/reviewer/prompt.js": "e9f6726dda2b304022ab8ddee36b2705936adfc0cf8bd5af822c2d47b1793a2f",
+        "lib/reviewer/signals.js": "6744b8e3e75b39fa2dfcbfa133be1338b16be0f38482e16a873da871cb048a44",
+        "lib/rules/compile.js": "041b50619b0447bf8de0fe1e0a42b5f33d32d664ef7d9f18e810221ea9f888a9",
+        "lib/rules/match.js": "bd8036fe18e227c15c15d154e2acbb4fd7ed7c737cd975ec4dbc04d13b566a10",
+        "lib/shell/constants.js": "a7750d27e34a579189106c00b919d96bf48e142d106d62a6b3547ea4e9c74d84",
+        "lib/shell/facts.js": "057dd63d6c4a4fe187fe6cdeb8a79b585dcd7895992c6e2c597fd76b250f78fe",
+        "lib/shell/parse.js": "37c7d881aa4e2fe3b58655b4614f5022514fab3b4f0d5b9dbfa1ea973d6daf0e",
+        "lib/shell/paths.js": "9d72838a02038f8e15991d1fd2d196324468c33622fc05eaf279f53dd80c198b",
+        "lib/shell/reader.js": "3f55bbdfa1d0aef93f44fdd924e61da4d0ee21f689955112e5154fe51d1437b9",
+        "lib/shell/tokenize.js": "53b20dccef93d80d7d736fde95d52bea715b1aa190c116ea7a30ace441e955a2",
+        "lib/shell/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/shell/words.js": "92bc3996e936fc1f88372bf67662326c378af3e2dfbffce7e2879a783de69dae",
+        "lib/snapshot.js": "242dcadafb457f3fd93516d5f31108bc8e7eaafed68b597f43d3f42de8a3ea78",
+        "lib/snapshot/budget.js": "cc57ce41db7b39b4dac75a684f65e0edb127956fcd2d05a5f9d0207201a7f84c",
+        "lib/snapshot/evidence.js": "7782b86f1791d3f80dd8d6057bc498503da2748e1a39b05e373a494e6ca6532e",
+        "lib/snapshot/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/suggestions.js": "524a19f60ec7ee9962502aa8a689d1447ad93e1d5ccf9925af7a39bc72f0d800",
+        "lib/types.js": "1cdf7cbdb243a0702bf48e05a9890bc1f6519c4ed061a197ad5d2bd83ea056b1",
+        "locale/en/common.json": "b1fe581c52b8bbf5cad05f14b8b3788936f9de9a70d5f20749dd4c135fcb195d",
+        "locale/schema.json": "cc0c566bcbab4a187e2173f2c53f5f8d93353a9894c5b20f0e417154305474c5",
+        "locale/zh/about.json": "64e84effb874f63f8e5b192af78c8576a22f0789f85547aae549b4a49f8d4b12",
+        "locale/zh/advanced.json": "99e50977a69a82b7b01167b3ca38b6f0beda2adc616e16ac6930ed26f87827d5",
+        "locale/zh/common.json": "409bc1df3db7396b0aef14363ca494b408374a87e7444869d64e25e83fe40911",
+        "locale/zh/config.json": "95a66f44ad5af6ae860ead070ccc1be21f4361ecf5a784204e1eca3ff4a8bebb",
+        "locale/zh/logs.json": "7807d4802344830fe7a2a4c7926db8c872d0e227888b34fe988b4641b5f8938a",
+        "locale/zh/page.json": "452d3c63063153dd580ec4c2fdb8a4932c18a392dd3a6700f4ea954eda57e2bc",
+        "locale/zh/reviewer.json": "c951a54ed2f8eacfc9c90f1d5ab1119055b2d5ab6d71d537850a46ae60af86a6",
+        "locale/zh/rules.json": "042ab39342004f151d8bd8e1cdbac15d1ab2f5b403966f7fc37628221c386795",
+        "locale/zh/status.json": "e17244d7c198ff149a1c624136d5a27c39f51eaabe240f525a6725fed83585ed",
+        "locale/zh/suggestions.json": "fdb777ba8ddf90750921141d1778f42a99d2b0edbaa50cac60bc6256017a51e7",
+        "package.json": "56ebf5ab30dc1fd573ab6f9a21d0d98700f6a944a63d929ebf04d391c4f051fb"
+      }
+    },
+    {
+      "artifact": "dsh-e2e-ubuntu-24.04-40175794511",
+      "jobId": 121116108274,
+      "jobUrl": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108274",
+      "jobSeconds": 92,
+      "steps": [
+        {
+          "name": "Install pinned public DSH CLI",
+          "conclusion": "success",
+          "seconds": 15
+        },
+        {
+          "name": "Install browser",
+          "conclusion": "success",
+          "seconds": 27
+        },
+        {
+          "name": "Run isolated real DSH smoke",
+          "conclusion": "success",
+          "seconds": 21
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-25T08:15:10.054Z",
+        "duration": 15645.023,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "calls": [
+        {
+          "test": "plugin-smoke-loads-the-rea-568e0-tracted-configuration-panel-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "linux",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "locale-smoke-switches-the--cfc5c-configuration-after-refresh-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "linux",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "accessibility-the-real-plu-3f18c-ed-accessibility-violations-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "linux",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        }
+      ],
+      "fingerprint": {
+        "cordis.patch.yml": "bc8b550bec0df07f6fc500a5df08cf7c29da610d8c2f2e234db6549e2237c6d7",
+        "lib/audit.js": "60a360463d0f9071c7a1582187f328fdf8fa07370ad7e5f2da9afdce387296c5",
+        "lib/audit/metadata.js": "bf1c9ac38fc977aeebd81fefb892140a0e5dc7e31a0a199dcfbd299eb451a78e",
+        "lib/audit/queries.js": "d65afb53abc147555801ee972244da6b698d17421d7b92d1cff8181ac43c191f",
+        "lib/audit/retention.js": "474a875bead4724e9412ba902f67b10b335367566cf81348d09123f9b9eb19df",
+        "lib/audit/rows.js": "0e4039292e6250170a6f160bfddeefe97f19900ae659e5ac70403d37d321b5ef",
+        "lib/audit/schema.js": "84fd21b3607adf05d39d7a71aba4a8e613a4a9dba0399c198acaf3ff45c4f2e9",
+        "lib/audit/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/audit/writer.js": "2df6f1dda939a3110d8e164725387b7f3015c993cf0be9a9064f795d597cd10e",
+        "lib/client.cjs": "70d5f7b05d2bfbcc5a2367dafb442d6ec734ce005edac38c1347c2351988196e",
+        "lib/config.js": "e8e241bf91b35ea72e4f5d3ec642a6ead74ea353004e52b298897993a9b5d673",
+        "lib/config/context.js": "669e5807c4078684ddc0741d3bbf39e2dc03ff825bf02fdfc3cde4e14f5cb8f7",
+        "lib/config/defaults.js": "82c84643ad707cc0fe340e71d0e544eb62f36ede2ac80a4ed1f3d3c8a568f27f",
+        "lib/config/policy.js": "433f009ec4c3e7d1ef092ab5770ed93619bce9156a816723ea483e8387c88f76",
+        "lib/config/reviewer.js": "da9011b278b6d872cbf9ee8794bda02fff0f3435b2b80d020e20008b38cfabdb",
+        "lib/config/rules.js": "c767cf9fe36b3f6de7d4412f0e19ccaa384407a69c9a62edd94438e0476f3e0c",
+        "lib/config/runtime.js": "353d78cd39c2310aa288acafdadeb7c2b273a60d65cef0e430970a3029614a3d",
+        "lib/config/values.js": "01ef474aaf015286932db44e87791596468df6eeaa8e451c1ceb6ff95b8c4b25",
+        "lib/host/audit-routes.js": "3c9a19fe3743c4b7a9291c0c40c19434982084a54fa1804d04f17f117fb1ec66",
+        "lib/host/commands.js": "c4440455279d98fb73fdade15a2013d16477156d871215f9844703f0e9aaf024",
+        "lib/host/common.js": "9cf161bbc59eac2f8b6a795fcf13c0b4e96a1d60ee1f790c250d82c10045cfde",
+        "lib/host/config-routes.js": "bb6d6c1fe19cebf25acdfe75303b325f5ce6a5c943522b03978af1358f98752d",
+        "lib/host/configuration.js": "3a49930a0adf225975b6c0fd5e07da3a21a57e179e9b5fdbaeb3b93d4ee5219b",
+        "lib/host/gate.js": "7ff4b1a84c1cd9865538f37f7e84de7cf56264129b644a7a4d7a5af40273cbd9",
+        "lib/host/history.js": "38c8ad7baf2b3eb498e9aad6756b174891abe898e77627625d6587098ba4887a",
+        "lib/host/http.js": "cdd40fad90cd9893f9e0d0e9a12cc28cd6ce641ec72ee68e1684553a81bd3d8b",
+        "lib/host/permissions.js": "aba741dcb64f8d850ce6ea4f8890039e0bec01896badaf07fd1322344b4e06c3",
+        "lib/host/routes.js": "0a72b17afc0db912f90cf9030941e0508fd9105d54061c373247e8ee522e65e0",
+        "lib/host/runtime.js": "fc152fb56212c060146c38a31e137ffd104c7ad84b1c76eb9ef21cd6bfd116b1",
+        "lib/host/settlement.js": "4fa6d4dca446733e7734bcaaf4c3da0f4830fbf13b1a49b37ab693387375d0a5",
+        "lib/host/state.js": "d0f50bae2555ce386edd2c267bb5d7f2762c3371d0ec23769d6bdf58dc2e10a6",
+        "lib/host/suggestion-routes.js": "4189a0ca6df6c9a795688133251e6d617c61855638ccf98cbceb1f0e1bffa59f",
+        "lib/host/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/index.js": "8a745de7ca781b5854dec79ebff4366c713f138ef6c8b39abe07d13ed7807cca",
+        "lib/policy.js": "13dc12fbafff626db61f8c1fe1c79c07082f7e848530b6d119b0b7daf4e3a671",
+        "lib/records.js": "9240380abd1692e3e192ac14f33f74896f3e1c819b0563e6a994f3ee6cc17213",
+        "lib/repair.js": "04bda0863d335483a6c111722ec320a61f3e5d7263e18f6fce19e677b3434ac2",
+        "lib/reviewer.js": "6eafa47b7cf774f82e595077b15d9f7483faf2308dcc43e5ef1074f9987b651a",
+        "lib/reviewer/chat.js": "c3df187e1293113e5b50227436a4dd27997f1aeb820584371bece71752d024c7",
+        "lib/reviewer/decision.js": "a800d7fb0b4e693b1082ced29d77df49be427674df506ce6805dfc2f93cec144",
+        "lib/reviewer/prompt.js": "e9f6726dda2b304022ab8ddee36b2705936adfc0cf8bd5af822c2d47b1793a2f",
+        "lib/reviewer/signals.js": "6744b8e3e75b39fa2dfcbfa133be1338b16be0f38482e16a873da871cb048a44",
+        "lib/rules/compile.js": "041b50619b0447bf8de0fe1e0a42b5f33d32d664ef7d9f18e810221ea9f888a9",
+        "lib/rules/match.js": "bd8036fe18e227c15c15d154e2acbb4fd7ed7c737cd975ec4dbc04d13b566a10",
+        "lib/shell/constants.js": "a7750d27e34a579189106c00b919d96bf48e142d106d62a6b3547ea4e9c74d84",
+        "lib/shell/facts.js": "057dd63d6c4a4fe187fe6cdeb8a79b585dcd7895992c6e2c597fd76b250f78fe",
+        "lib/shell/parse.js": "37c7d881aa4e2fe3b58655b4614f5022514fab3b4f0d5b9dbfa1ea973d6daf0e",
+        "lib/shell/paths.js": "9d72838a02038f8e15991d1fd2d196324468c33622fc05eaf279f53dd80c198b",
+        "lib/shell/reader.js": "3f55bbdfa1d0aef93f44fdd924e61da4d0ee21f689955112e5154fe51d1437b9",
+        "lib/shell/tokenize.js": "53b20dccef93d80d7d736fde95d52bea715b1aa190c116ea7a30ace441e955a2",
+        "lib/shell/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/shell/words.js": "92bc3996e936fc1f88372bf67662326c378af3e2dfbffce7e2879a783de69dae",
+        "lib/snapshot.js": "242dcadafb457f3fd93516d5f31108bc8e7eaafed68b597f43d3f42de8a3ea78",
+        "lib/snapshot/budget.js": "cc57ce41db7b39b4dac75a684f65e0edb127956fcd2d05a5f9d0207201a7f84c",
+        "lib/snapshot/evidence.js": "7782b86f1791d3f80dd8d6057bc498503da2748e1a39b05e373a494e6ca6532e",
+        "lib/snapshot/types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/suggestions.js": "524a19f60ec7ee9962502aa8a689d1447ad93e1d5ccf9925af7a39bc72f0d800",
+        "lib/types.js": "1cdf7cbdb243a0702bf48e05a9890bc1f6519c4ed061a197ad5d2bd83ea056b1",
+        "locale/en/common.json": "b1fe581c52b8bbf5cad05f14b8b3788936f9de9a70d5f20749dd4c135fcb195d",
+        "locale/schema.json": "cc0c566bcbab4a187e2173f2c53f5f8d93353a9894c5b20f0e417154305474c5",
+        "locale/zh/about.json": "64e84effb874f63f8e5b192af78c8576a22f0789f85547aae549b4a49f8d4b12",
+        "locale/zh/advanced.json": "99e50977a69a82b7b01167b3ca38b6f0beda2adc616e16ac6930ed26f87827d5",
+        "locale/zh/common.json": "409bc1df3db7396b0aef14363ca494b408374a87e7444869d64e25e83fe40911",
+        "locale/zh/config.json": "95a66f44ad5af6ae860ead070ccc1be21f4361ecf5a784204e1eca3ff4a8bebb",
+        "locale/zh/logs.json": "7807d4802344830fe7a2a4c7926db8c872d0e227888b34fe988b4641b5f8938a",
+        "locale/zh/page.json": "452d3c63063153dd580ec4c2fdb8a4932c18a392dd3a6700f4ea954eda57e2bc",
+        "locale/zh/reviewer.json": "c951a54ed2f8eacfc9c90f1d5ab1119055b2d5ab6d71d537850a46ae60af86a6",
+        "locale/zh/rules.json": "042ab39342004f151d8bd8e1cdbac15d1ab2f5b403966f7fc37628221c386795",
+        "locale/zh/status.json": "e17244d7c198ff149a1c624136d5a27c39f51eaabe240f525a6725fed83585ed",
+        "locale/zh/suggestions.json": "fdb777ba8ddf90750921141d1778f42a99d2b0edbaa50cac60bc6256017a51e7",
+        "package.json": "56ebf5ab30dc1fd573ab6f9a21d0d98700f6a944a63d929ebf04d391c4f051fb"
+      }
+    },
+    {
+      "artifact": "dsh-e2e-windows-2025-40175794511",
+      "jobId": 121116108279,
+      "jobUrl": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108279",
+      "jobSeconds": 354,
+      "steps": [
+        {
+          "name": "Install pinned public DSH CLI",
+          "conclusion": "success",
+          "seconds": 49
+        },
+        {
+          "name": "Install browser",
+          "conclusion": "success",
+          "seconds": 203
+        },
+        {
+          "name": "Run isolated real DSH smoke",
+          "conclusion": "success",
+          "seconds": 35
+        }
+      ],
+      "stats": {
+        "startTime": "2026-10-25T08:19:09.684Z",
+        "duration": 27771.916999999998,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "calls": [
+        {
+          "test": "plugin-smoke-loads-the-rea-568e0-tracted-configuration-panel-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "win32",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "locale-smoke-switches-the--cfc5c-configuration-after-refresh-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "win32",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        },
+        {
+          "test": "accessibility-the-real-plu-3f18c-ed-accessibility-violations-dsh-chromium",
+          "dshVersion": "0.2.1-rc.3",
+          "nodeVersion": "v24.21.0",
+          "platform": "win32",
+          "architecture": "x64",
+          "fingerprintFileCount": 71,
+          "cleanup": {
+            "profileRemoved": true,
+            "processExited": true
+          }
+        }
+      ],
+      "fingerprint": {
+        "cordis.patch.yml": "bc8b550bec0df07f6fc500a5df08cf7c29da610d8c2f2e234db6549e2237c6d7",
+        "lib/audit.js": "60a360463d0f9071c7a1582187f328fdf8fa07370ad7e5f2da9afdce387296c5",
+        "lib/audit\\metadata.js": "bf1c9ac38fc977aeebd81fefb892140a0e5dc7e31a0a199dcfbd299eb451a78e",
+        "lib/audit\\queries.js": "d65afb53abc147555801ee972244da6b698d17421d7b92d1cff8181ac43c191f",
+        "lib/audit\\retention.js": "474a875bead4724e9412ba902f67b10b335367566cf81348d09123f9b9eb19df",
+        "lib/audit\\rows.js": "0e4039292e6250170a6f160bfddeefe97f19900ae659e5ac70403d37d321b5ef",
+        "lib/audit\\schema.js": "84fd21b3607adf05d39d7a71aba4a8e613a4a9dba0399c198acaf3ff45c4f2e9",
+        "lib/audit\\types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/audit\\writer.js": "2df6f1dda939a3110d8e164725387b7f3015c993cf0be9a9064f795d597cd10e",
+        "lib/client.cjs": "70d5f7b05d2bfbcc5a2367dafb442d6ec734ce005edac38c1347c2351988196e",
+        "lib/config.js": "e8e241bf91b35ea72e4f5d3ec642a6ead74ea353004e52b298897993a9b5d673",
+        "lib/config\\context.js": "669e5807c4078684ddc0741d3bbf39e2dc03ff825bf02fdfc3cde4e14f5cb8f7",
+        "lib/config\\defaults.js": "82c84643ad707cc0fe340e71d0e544eb62f36ede2ac80a4ed1f3d3c8a568f27f",
+        "lib/config\\policy.js": "433f009ec4c3e7d1ef092ab5770ed93619bce9156a816723ea483e8387c88f76",
+        "lib/config\\reviewer.js": "da9011b278b6d872cbf9ee8794bda02fff0f3435b2b80d020e20008b38cfabdb",
+        "lib/config\\rules.js": "c767cf9fe36b3f6de7d4412f0e19ccaa384407a69c9a62edd94438e0476f3e0c",
+        "lib/config\\runtime.js": "353d78cd39c2310aa288acafdadeb7c2b273a60d65cef0e430970a3029614a3d",
+        "lib/config\\values.js": "01ef474aaf015286932db44e87791596468df6eeaa8e451c1ceb6ff95b8c4b25",
+        "lib/host\\audit-routes.js": "3c9a19fe3743c4b7a9291c0c40c19434982084a54fa1804d04f17f117fb1ec66",
+        "lib/host\\commands.js": "c4440455279d98fb73fdade15a2013d16477156d871215f9844703f0e9aaf024",
+        "lib/host\\common.js": "9cf161bbc59eac2f8b6a795fcf13c0b4e96a1d60ee1f790c250d82c10045cfde",
+        "lib/host\\config-routes.js": "bb6d6c1fe19cebf25acdfe75303b325f5ce6a5c943522b03978af1358f98752d",
+        "lib/host\\configuration.js": "3a49930a0adf225975b6c0fd5e07da3a21a57e179e9b5fdbaeb3b93d4ee5219b",
+        "lib/host\\gate.js": "7ff4b1a84c1cd9865538f37f7e84de7cf56264129b644a7a4d7a5af40273cbd9",
+        "lib/host\\history.js": "38c8ad7baf2b3eb498e9aad6756b174891abe898e77627625d6587098ba4887a",
+        "lib/host\\http.js": "cdd40fad90cd9893f9e0d0e9a12cc28cd6ce641ec72ee68e1684553a81bd3d8b",
+        "lib/host\\permissions.js": "aba741dcb64f8d850ce6ea4f8890039e0bec01896badaf07fd1322344b4e06c3",
+        "lib/host\\routes.js": "0a72b17afc0db912f90cf9030941e0508fd9105d54061c373247e8ee522e65e0",
+        "lib/host\\runtime.js": "fc152fb56212c060146c38a31e137ffd104c7ad84b1c76eb9ef21cd6bfd116b1",
+        "lib/host\\settlement.js": "4fa6d4dca446733e7734bcaaf4c3da0f4830fbf13b1a49b37ab693387375d0a5",
+        "lib/host\\state.js": "d0f50bae2555ce386edd2c267bb5d7f2762c3371d0ec23769d6bdf58dc2e10a6",
+        "lib/host\\suggestion-routes.js": "4189a0ca6df6c9a795688133251e6d617c61855638ccf98cbceb1f0e1bffa59f",
+        "lib/host\\types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/index.js": "8a745de7ca781b5854dec79ebff4366c713f138ef6c8b39abe07d13ed7807cca",
+        "lib/policy.js": "13dc12fbafff626db61f8c1fe1c79c07082f7e848530b6d119b0b7daf4e3a671",
+        "lib/records.js": "9240380abd1692e3e192ac14f33f74896f3e1c819b0563e6a994f3ee6cc17213",
+        "lib/repair.js": "04bda0863d335483a6c111722ec320a61f3e5d7263e18f6fce19e677b3434ac2",
+        "lib/reviewer.js": "6eafa47b7cf774f82e595077b15d9f7483faf2308dcc43e5ef1074f9987b651a",
+        "lib/reviewer\\chat.js": "c3df187e1293113e5b50227436a4dd27997f1aeb820584371bece71752d024c7",
+        "lib/reviewer\\decision.js": "a800d7fb0b4e693b1082ced29d77df49be427674df506ce6805dfc2f93cec144",
+        "lib/reviewer\\prompt.js": "e9f6726dda2b304022ab8ddee36b2705936adfc0cf8bd5af822c2d47b1793a2f",
+        "lib/reviewer\\signals.js": "6744b8e3e75b39fa2dfcbfa133be1338b16be0f38482e16a873da871cb048a44",
+        "lib/rules\\compile.js": "041b50619b0447bf8de0fe1e0a42b5f33d32d664ef7d9f18e810221ea9f888a9",
+        "lib/rules\\match.js": "bd8036fe18e227c15c15d154e2acbb4fd7ed7c737cd975ec4dbc04d13b566a10",
+        "lib/shell\\constants.js": "a7750d27e34a579189106c00b919d96bf48e142d106d62a6b3547ea4e9c74d84",
+        "lib/shell\\facts.js": "057dd63d6c4a4fe187fe6cdeb8a79b585dcd7895992c6e2c597fd76b250f78fe",
+        "lib/shell\\parse.js": "37c7d881aa4e2fe3b58655b4614f5022514fab3b4f0d5b9dbfa1ea973d6daf0e",
+        "lib/shell\\paths.js": "9d72838a02038f8e15991d1fd2d196324468c33622fc05eaf279f53dd80c198b",
+        "lib/shell\\reader.js": "3f55bbdfa1d0aef93f44fdd924e61da4d0ee21f689955112e5154fe51d1437b9",
+        "lib/shell\\tokenize.js": "53b20dccef93d80d7d736fde95d52bea715b1aa190c116ea7a30ace441e955a2",
+        "lib/shell\\types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/shell\\words.js": "92bc3996e936fc1f88372bf67662326c378af3e2dfbffce7e2879a783de69dae",
+        "lib/snapshot.js": "242dcadafb457f3fd93516d5f31108bc8e7eaafed68b597f43d3f42de8a3ea78",
+        "lib/snapshot\\budget.js": "cc57ce41db7b39b4dac75a684f65e0edb127956fcd2d05a5f9d0207201a7f84c",
+        "lib/snapshot\\evidence.js": "7782b86f1791d3f80dd8d6057bc498503da2748e1a39b05e373a494e6ca6532e",
+        "lib/snapshot\\types.js": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+        "lib/suggestions.js": "524a19f60ec7ee9962502aa8a689d1447ad93e1d5ccf9925af7a39bc72f0d800",
+        "lib/types.js": "1cdf7cbdb243a0702bf48e05a9890bc1f6519c4ed061a197ad5d2bd83ea056b1",
+        "locale/en\\common.json": "b1fe581c52b8bbf5cad05f14b8b3788936f9de9a70d5f20749dd4c135fcb195d",
+        "locale/schema.json": "cc0c566bcbab4a187e2173f2c53f5f8d93353a9894c5b20f0e417154305474c5",
+        "locale/zh\\about.json": "64e84effb874f63f8e5b192af78c8576a22f0789f85547aae549b4a49f8d4b12",
+        "locale/zh\\advanced.json": "99e50977a69a82b7b01167b3ca38b6f0beda2adc616e16ac6930ed26f87827d5",
+        "locale/zh\\common.json": "409bc1df3db7396b0aef14363ca494b408374a87e7444869d64e25e83fe40911",
+        "locale/zh\\config.json": "95a66f44ad5af6ae860ead070ccc1be21f4361ecf5a784204e1eca3ff4a8bebb",
+        "locale/zh\\logs.json": "7807d4802344830fe7a2a4c7926db8c872d0e227888b34fe988b4641b5f8938a",
+        "locale/zh\\page.json": "452d3c63063153dd580ec4c2fdb8a4932c18a392dd3a6700f4ea954eda57e2bc",
+        "locale/zh\\reviewer.json": "c951a54ed2f8eacfc9c90f1d5ab1119055b2d5ab6d71d537850a46ae60af86a6",
+        "locale/zh\\rules.json": "042ab39342004f151d8bd8e1cdbac15d1ab2f5b403966f7fc37628221c386795",
+        "locale/zh\\status.json": "e17244d7c198ff149a1c624136d5a27c39f51eaabe240f525a6725fed83585ed",
+        "locale/zh\\suggestions.json": "fdb777ba8ddf90750921141d1778f42a99d2b0edbaa50cac60bc6256017a51e7",
+        "package.json": "56ebf5ab30dc1fd573ab6f9a21d0d98700f6a944a63d929ebf04d391c4f051fb"
+      }
+    }
+  ],
+  "checks": [
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116255502",
+      "name": "Verify",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116183602",
+      "name": "Merge coverage reports",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/runs/121116179675",
+      "name": "CodeQL",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108273",
+      "name": "Real DSH smoke (macos-15)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108274",
+      "name": "Real DSH smoke (ubuntu-24.04)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116108279",
+      "name": "Real DSH smoke (windows-2025)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075724",
+      "name": "Check (Testing Library lint)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075782",
+      "name": "Check (code lint)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075638",
+      "name": "Check (workflows, locales and peers)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075712",
+      "name": "Test (unit)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794511/job/121116075606",
+      "name": "Select DSH platforms",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075662",
+      "name": "Test (integration)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075640",
+      "name": "Check (types)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075851",
+      "name": "Test (ui)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075833",
+      "name": "Check (dependency boundaries)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075961",
+      "name": "Build, consumer and regressions",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175792756/job/121116072093",
+      "name": "Analyze (javascript-typescript)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175794513/job/121116075694",
+      "name": "Check (formatting)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/Yuee98/dsh-arbiter/actions/runs/40175792756/job/121116072319",
+      "name": "Analyze (actions)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://dependabot-api.githubapp.com",
+      "name": ".github/dependabot.yml",
+      "state": "SUCCESS"
+    }
+  ],
+  "fingerprintValidation": "Every recorded file hash matched the tested checkout, allowing LF/CRLF equivalents; raw per-platform hashes retained.",
+  "releaseAction": "not implemented; release must use the same exact manifest version and lockfile as PR/main"
+}

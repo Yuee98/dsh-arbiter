@@ -32,8 +32,26 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-/** An explicit executable override or the installed public CLI on PATH. */
-export async function resolveDshBinary(): Promise<string> {
+export interface DshCommand {
+  readonly executable: string;
+  readonly args: readonly string[];
+}
+
+/** Use the npm CLI directly on every OS, or preserve an installed launcher. */
+export async function resolveDshCommand(): Promise<DshCommand> {
+  const cli = process.env['DSH_E2E_CLI']?.trim() || undefined;
+  if (cli !== undefined) {
+    if (!isAbsolute(cli)) {
+      throw new Error('DSH_E2E_CLI must be an absolute JavaScript entry path.');
+    }
+    if (process.env['DSH_E2E_BIN']?.trim()) {
+      throw new Error('Set only one of DSH_E2E_CLI and DSH_E2E_BIN.');
+    }
+    await access(cli, constants.R_OK);
+    if (!(await stat(cli)).isFile())
+      throw new Error('DSH_E2E_CLI is not a file.');
+    return { executable: process.execPath, args: [cli] };
+  }
   const override = process.env['DSH_E2E_BIN']?.trim() || undefined;
   if (override !== undefined && !isAbsolute(override)) {
     throw new Error('DSH_E2E_BIN must be an absolute executable path.');
@@ -50,7 +68,7 @@ export async function resolveDshBinary(): Promise<string> {
       await access(candidate, constants.X_OK);
       if (!(await stat(candidate)).isFile()) continue;
       // Preserve the launcher path: the installed CLI resolves its own assets.
-      return candidate;
+      return { executable: candidate, args: [] };
     } catch {
       // Continue through PATH, then fail clearly rather than skipping the suite.
     }

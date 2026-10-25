@@ -11,6 +11,14 @@ updates:
       tooling:
         dependency-type: development
         update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /tests/e2e/runtime
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
+    versioning-strategy: increase
   - package-ecosystem: github-actions
     directory: /
     schedule:

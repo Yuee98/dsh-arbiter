@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  access,
   mkdir,
   readFile,
   readdir,
@@ -14,7 +15,7 @@ import {
   createIsolatedProfile,
   isolatedEnv,
   profileName,
-  resolveDshBinary,
+  resolveDshCommand,
 } from './profile.js';
 import { launchHost, redactHostLog, stopHost } from './process.js';
 
@@ -87,7 +88,7 @@ export async function startDshHost(
 ): Promise<DshHost> {
   await mkdir(artifacts, { recursive: true });
   const fingerprint = await buildFingerprint(repoRoot);
-  const executable = await resolveDshBinary();
+  const command = await resolveDshCommand();
   const profile = await createIsolatedProfile(repoRoot);
   const env = isolatedEnv(profile.home);
   let host: ReturnType<typeof launchHost> | undefined;
@@ -107,18 +108,58 @@ export async function startDshHost(
       }
       await rm(profile.root, { recursive: true, force: true });
     }
+    const profileExists = await access(profile.root).then(
+      () => true,
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        )
+          return false;
+        throw error;
+      },
+    );
+    const processExited =
+      host === undefined ||
+      host.child.exitCode !== null ||
+      host.child.signalCode !== null;
+    await writeFile(
+      join(artifacts, 'cleanup.json'),
+      JSON.stringify(
+        { profileRemoved: !profileExists, processExited },
+        null,
+        2,
+      ),
+    );
+    if (profileExists || !processExited)
+      throw new Error('DSH fixture cleanup did not complete.');
   };
   try {
-    const version = await execFileAsync(executable, ['--version'], {
-      env,
-      timeout: 10_000,
-    });
+    const version = await execFileAsync(
+      command.executable,
+      [...command.args, '--version'],
+      {
+        env,
+        timeout: 10_000,
+      },
+    );
+    const expectedVersion = process.env['DSH_E2E_VERSION'];
+    if (
+      expectedVersion !== undefined &&
+      version.stdout.trim() !== expectedVersion
+    ) {
+      throw new Error(
+        `Expected DSH ${expectedVersion}, received ${version.stdout.trim()}.`,
+      );
+    }
     await writeFile(
       join(artifacts, 'environment.json'),
       JSON.stringify(
         {
-          executable,
-          resolvedExecutable: await realpath(executable),
+          executable: command.executable,
+          resolvedExecutable: await realpath(command.executable),
+          args: command.args,
           dshVersion: version.stdout.trim(),
           nodeVersion: process.version,
           platform: process.platform,
@@ -133,7 +174,7 @@ export async function startDshHost(
         2,
       ),
     );
-    host = launchHost(executable, profileName, profile.workspace, env);
+    host = launchHost(command, profileName, profile.workspace, env);
     const tokenUrl = await host.ready;
     const origin = new URL(tokenUrl).origin;
     const cookie = await authenticate(tokenUrl);
