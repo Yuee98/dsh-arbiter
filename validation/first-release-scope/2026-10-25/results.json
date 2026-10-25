@@ -1,0 +1,57 @@
+{
+  "recordedAt": "2026-10-25T09:50:42.867Z",
+  "tests": 3,
+  "failures": 0,
+  "results": [
+    {
+      "id": "S1",
+      "description": "Offline suggestion routes are absent from the public surface",
+      "passes": true,
+      "actual": {
+        "missing": [
+          "/api/arbiter/suggestions",
+          "/api/arbiter/analyze",
+          "/api/arbiter/replay",
+          "/api/arbiter/suggestions/act"
+        ],
+        "registered": [
+          "/api/arbiter/state",
+          "/api/arbiter/config/save",
+          "/api/arbiter/validate",
+          "/api/arbiter/credentials",
+          "/api/arbiter/test",
+          "/api/arbiter/logs",
+          "/api/arbiter/log",
+          "/api/arbiter/clear"
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "description": "An attempted acceptance is unroutable and leaves candidates and rules unchanged",
+      "passes": true,
+      "actual": {
+        "routeRegistered": false,
+        "acceptStatus": null,
+        "acceptBody": null,
+        "edits": [],
+        "candidateStatus": "pending",
+        "ruleIds": [
+          "keep-me"
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "description": "Rule testing and logs keep working while the seeded call row is retained",
+      "passes": true,
+      "actual": {
+        "testOk": true,
+        "ruleMatched": true,
+        "logsOk": true,
+        "logsTotal": 1,
+        "auditTotal": 1
+      }
+    }
+  ]
+}
