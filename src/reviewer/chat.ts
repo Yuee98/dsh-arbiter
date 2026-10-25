@@ -209,10 +209,11 @@ export async function runChatReviewer(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
     const messages = chatMessages(request.user, repair);
-    const attemptSignal = AbortSignal.any([
-      ctx.signal,
-      AbortSignal.timeout(ctx.chat.timeoutMs),
-    ]);
+    // Keep the attempt timer separate from the caller's lifetime: a timeout is
+    // this adapter's own outcome, and reporting it as a caller cancellation
+    // would tell the operator the wrong thing.
+    const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
+    const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
     const options: StreamOptionsLike = {
       provider: route.provider,
       model: route.model,
@@ -250,6 +251,12 @@ export async function runChatReviewer(
       repair = parsed.error ?? 'invalid reviewer output';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // A provider may abort for its own reasons, so the timer's own state — not
+      // the error's name — is what proves this attempt timed out.
+      const failure =
+        attemptTimeout.aborted && !ctx.signal.aborted
+          ? `reviewer request timed out after ${String(ctx.chat.timeoutMs)}ms`
+          : message;
       attempts.push({
         ...chatAttemptBase(
           callId,
@@ -261,11 +268,11 @@ export async function runChatReviewer(
         ),
         responseText: null,
         parsed: null,
-        error: message,
+        error: failure,
         usage: null,
       });
       // Provider failures are not retried; only format/schema repair is.
-      return { ok: false, kind: 'review-failure', error: message, attempts };
+      return { ok: false, kind: 'review-failure', error: failure, attempts };
     }
   }
   return {

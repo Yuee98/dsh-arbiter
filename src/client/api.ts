@@ -75,6 +75,38 @@ export async function getJson(
   return decode === undefined ? value : decode(value);
 }
 
+/**
+ * Post with a caller-owned lifetime.
+ *
+ * The Reviewer connection test is cancellable: aborting the signal stops the
+ * fetch, which the host observes and forwards to the in-flight model request.
+ * Every other caller keeps the plain `postJson` form.
+ */
+export function postJsonWithSignal(
+  path: string,
+  body: unknown,
+  signal: AbortSignal,
+): Promise<unknown>;
+export function postJsonWithSignal<T>(
+  path: string,
+  body: unknown,
+  signal: AbortSignal,
+  decode: Decoder<T>,
+): Promise<T>;
+export async function postJsonWithSignal(
+  path: string,
+  body: unknown,
+  signal: AbortSignal,
+  decode?: Decoder<unknown>,
+): Promise<unknown> {
+  const value = await request(path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    signal,
+  });
+  return decode === undefined ? value : decode(value);
+}
+
 export function postJson(path: string, body: unknown): Promise<unknown>;
 export function postJson<T>(
   path: string,

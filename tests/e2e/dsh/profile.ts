@@ -26,6 +26,19 @@ export interface SeededModelGroup {
   readonly provider: string;
   readonly displayName: string;
   readonly models: readonly { readonly id: string; readonly name: string }[];
+  /**
+   * Endpoint for this route. Defaults to a closed local port, so a probe fails
+   * fast; a test that needs an in-flight window passes a controllable server.
+   */
+  readonly baseURL?: string;
+  /**
+   * Static request headers for the route.
+   *
+   * The OpenAI-compatible protocol refuses to dispatch with no credential and
+   * no authorization header. This is a configuration value for a local test
+   * server, not a stored credential: nothing is written to a credential store.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface ProfileOptions {
@@ -105,9 +118,9 @@ export async function resolveDshCommand(): Promise<DshCommand> {
  * A `llm-pi-ai` row that declares the given routes itself.
  *
  * No `apiKeyEnv` is named, so the adapter reads no credential; models resolve
- * from the declared catalog. The base URL points at a closed local port, which
- * only matters if a test ever streams a request — the catalog listing never
- * connects.
+ * from the declared catalog. The default base URL is a closed local port, which
+ * only matters if a test streams a request — the catalog listing never connects.
+ * A group may name its own endpoint when a test needs a reachable one.
  */
 function seededModelRow(
   groups: readonly SeededModelGroup[] | undefined,
@@ -119,7 +132,8 @@ function seededModelRow(
       {
         displayName: group.displayName,
         api: 'openai-completions',
-        baseURL: 'http://127.0.0.1:9/v1',
+        baseURL: group.baseURL ?? 'http://127.0.0.1:9/v1',
+        ...(group.headers === undefined ? {} : { headers: group.headers }),
         models: group.models.map((model) => ({
           id: model.id,
           name: model.name,

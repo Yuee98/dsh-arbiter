@@ -3,6 +3,7 @@ import { credentialsRoute, testRoute, validateRoute } from './config-routes.js';
 import { ConfigurationAccess } from './configuration.js';
 import { jsonResponse } from './http.js';
 import { modelCatalogRoute } from './model-catalog-routes.js';
+import { reviewerTestRoute } from './reviewer-test-routes.js';
 import { statePayload } from './state.js';
 import type { FetchRouteLike, HostEnvironment } from './types.js';
 
@@ -29,6 +30,7 @@ export function registerRoutes(host: HostEnvironment): void {
       validateRoute(),
       credentialsRoute(host),
       modelCatalogRoute(host),
+      reviewerTestRoute(host),
       testRoute(host),
       logsRoute(host),
       logRoute(host),

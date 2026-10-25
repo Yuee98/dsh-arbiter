@@ -27,3 +27,4 @@ export type {
   LlmProviderLike,
 } from './reviewer/chat.js';
 export { runDecisionReviewer } from './reviewer/decision.js';
+export { PROBE_SNAPSHOT, runReviewerProbe } from './reviewer/diagnostic.js';
