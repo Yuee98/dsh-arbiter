@@ -201,13 +201,47 @@ export class SessionAdmissions {
       }
       return;
     }
-    if (!folded.enabled || folded.boundary === boundary) return;
+    if (!folded.enabled) return;
+    // The record is not evidence that the host is confined: a guarded enable
+    // can have committed its record and then failed to write the sandbox. Only
+    // the live host value proves the boundary is in force.
+    const narrow = boundary === 'guarded' && !this.confined(session);
+    if (folded.boundary === boundary && !narrow) return;
     this.writeKnobs(session, this.boundaryWrites(session, boundary));
     if (this.writeRecord(session, true, boundary) === 'written') return;
     this.host.ctx.logger.warn(
       'arbiter: boundary sync for session %s could not be recorded',
       id,
     );
+  }
+
+  /**
+   * Bring every managed session back to a safe host boundary.
+   *
+   * Used when the gate stops protecting sessions for a configuration reason
+   * (master switch off) rather than an unload; the admission records stay, so a
+   * later re-enable of the plugin can restore the sessions it still covers.
+   */
+  private releaseManagedScope(): void {
+    this.discover();
+    for (const [id, session] of this.teardownTargets()) {
+      // Main sessions return to the guarded bundle (sandbox + ask); a
+      // delegated child only loses its captured sandbox, because the host
+      // pinned its approval at delegation.
+      this.writeKnobs(
+        session,
+        session.header?.parentSession === undefined
+          ? this.boundaryWrites(session, 'guarded')
+          : this.narrowWrites(session),
+      );
+      if (!this.atSafeBoundary(session)) {
+        this.markFailingClosed(id);
+        this.host.ctx.logger.error(
+          'arbiter: session %s is not back at a safe boundary after the plugin was disabled',
+          id,
+        );
+      }
+    }
   }
 
   /** The backend-confirmed view for one session, under one config revision. */
@@ -296,16 +330,32 @@ export class SessionAdmissions {
     return [{ type: 'sandbox/mode', value: 'workspace-write' }];
   }
 
-  private writeKnobs(session: SessionLike, writes: readonly KnobWrite[]): void {
-    if (typeof session.append !== 'function') return;
+  /**
+   * Write the knob events, reporting whether every one committed.
+   *
+   * A host can refuse an append while it is publishing another commit; the
+   * caller must know so it can verify the real boundary instead of assuming
+   * the write landed.
+   */
+  private writeKnobs(
+    session: SessionLike,
+    writes: readonly KnobWrite[],
+  ): boolean {
+    if (typeof session.append !== 'function') return writes.length === 0;
+    let written = true;
     for (const write of writes) {
-      session.append(
-        write.type,
-        write.type === 'sandbox/mode'
-          ? { mode: write.value }
-          : { policy: write.value },
-      );
+      try {
+        session.append(
+          write.type,
+          write.type === 'sandbox/mode'
+            ? { mode: write.value }
+            : { policy: write.value },
+        );
+      } catch {
+        written = false;
+      }
     }
+    return written;
   }
 
   private writeRecord(
@@ -403,16 +453,23 @@ export class SessionAdmissions {
       }
     }
     // A guarded admission is only honest when the host really is confined.
-    // Enabling a session that already sits at danger-full-access cannot claim
-    // guarded: the record must describe the sandbox in force, or a cold reader
-    // would believe the workspace fence exists when it does not.
-    const effective = this.knobsOf(session).sandbox;
-    if (boundary === 'guarded' && effective === 'danger-full-access') {
+    // Neither the record nor an absent sandbox event proves it: the deployment
+    // default may be full access, and the sandbox write may have been refused.
+    // Compensate in the log so a cold reader cannot believe an effective
+    // guarded admission exists when the fence does not.
+    if (boundary === 'guarded' && !this.confined(session)) {
+      this.covered.delete(id);
+      const crossed = this.writeRecord(session, false, boundary);
+      this.host.ctx.logger.warn(
+        'arbiter: guarded activation for session %s could not be confirmed; admission withdrawn (%s)',
+        id,
+        crossed,
+      );
       return {
         ok: false,
         code: 'boundary-not-applied',
         message:
-          'the host still reports danger-full-access; guarded was not applied',
+          'the host does not report workspace confinement; guarded was not applied',
       };
     }
     return this.result(id);
@@ -450,6 +507,31 @@ export class SessionAdmissions {
   }
 
   /**
+   * Whether the host currently confines this session to the workspace.
+   *
+   * An absent sandbox event is not proof of confinement: the deployment
+   * default can be full access, so only an observed workspace-write counts.
+   */
+  private confined(session: SessionLike): boolean {
+    return this.knobsOf(session).sandbox === 'workspace-write';
+  }
+
+  /**
+   * Whether this session already satisfies everything teardown must restore.
+   *
+   * A main session must end at `workspace-write + ask`; a delegated child only
+   * needs its captured sandbox narrowed, because the host pinned its approval
+   * policy at delegation and this plugin must not rewrite it.
+   */
+  atSafeBoundary(session: SessionLike): boolean {
+    const current = this.knobsOf(session);
+    if (current.sandbox !== null && current.sandbox !== 'workspace-write')
+      return false;
+    if (session.header?.parentSession !== undefined) return true;
+    return current.approval === null || current.approval === 'ask';
+  }
+
+  /**
    * Narrow one session, retrying a bounded number of times.
    *
    * The write is the last protection before gate protection ends, so a single
@@ -481,6 +563,9 @@ export class SessionAdmissions {
    * only ever needs its captured sandbox narrowed, never its pinned approval.
    */
   private narrowCovered(root: SessionLike): void {
+    // A live descendant may never have reached the gate, so pick up the whole
+    // branch before narrowing instead of trusting only what has been observed.
+    this.discover();
     this.writeKnobs(root, this.boundaryWrites(root, 'guarded'));
     for (const [id, session] of this.covered) {
       if (id === root.id) continue;
@@ -497,6 +582,13 @@ export class SessionAdmissions {
    */
   syncBoundary(config: ArbiterConfig): void {
     const boundary = configuredBoundary(config);
+    if (!config.enabled) {
+      // The master switch turning off stops the gate, so a session this plugin
+      // widened would become ungated while keeping that permission. Narrow the
+      // whole managed scope first: the same direction as teardown.
+      this.releaseManagedScope();
+      return;
+    }
     for (const [id, session] of this.covered) {
       const folded = this.admissionOf(id);
       if (folded === null) {
@@ -544,13 +636,18 @@ export class SessionAdmissions {
   discover(): number {
     const sessions = this.host.services.sessions;
     if (sessions?.list === undefined) return 0;
+    // Two passes: the first observes every live session so parent chains can
+    // resolve, the second classifies each one by its *effective* scope. A
+    // subagent has no record of its own, so classifying on the record alone
+    // would drop exactly the inherited sessions teardown must still narrow.
+    const live = sessions.list();
+    for (const session of live) this.observe(session);
     let found = 0;
-    for (const session of sessions.list()) {
-      this.observe(session);
+    for (const session of live) {
       const id = session.id;
       if (id === undefined) continue;
-      const folded = this.admissionOf(id);
-      if (folded === null || !folded.enabled) {
+      const scope = resolveScope(id, this.lookup());
+      if (!scope.managed) {
         this.covered.delete(id);
         continue;
       }

@@ -388,3 +388,73 @@ describe('scope resolution', () => {
     });
   });
 });
+
+describe('commandless native preset exit', () => {
+  test('a preset with no command open is a durable exit', () => {
+    // Another surface (a picker) selected read-only; the plugin's own deferred
+    // record can be lost, and the fold must still reproduce the exit.
+    const events: SessionEventLike[] = [
+      record(1, { enabled: true, boundary: 'guarded' }),
+      { seq: 2, type: 'permission/preset', data: { preset: 'read-only' } },
+    ];
+    expect(foldAdmission(events, 's1')).toMatchObject({
+      enabled: false,
+      seq: 2,
+      sessionId: 's1',
+    });
+  });
+
+  test('a preset written inside a command is not an exit by itself', () => {
+    const events: SessionEventLike[] = [
+      record(1, { enabled: true, boundary: 'guarded' }),
+      {
+        seq: 2,
+        type: 'command/run',
+        data: { commandId: 'cmd-1', name: 'permission', args: ' read-only' },
+      },
+      { seq: 3, type: 'permission/preset', data: { preset: 'read-only' } },
+    ];
+    // Still open: the preset is the handler's partial write, not an exit.
+    expect(foldAdmission(events, 's1')).toMatchObject({ enabled: true });
+    // A failed settlement leaves admission exactly as it was.
+    expect(
+      foldAdmission(
+        [
+          ...events,
+          {
+            seq: 4,
+            type: 'command/done',
+            data: { commandId: 'cmd-1', kind: 'error', text: 'boom' },
+          },
+        ],
+        's1',
+      ),
+    ).toMatchObject({ enabled: true });
+    // A successful settlement is the exit.
+    expect(
+      foldAdmission(
+        [
+          ...events,
+          {
+            seq: 4,
+            type: 'command/done',
+            data: { commandId: 'cmd-1', kind: 'success' },
+          },
+        ],
+        's1',
+      ),
+    ).toMatchObject({ enabled: false });
+  });
+
+  test('a later enable is not undone by an older commandless preset', () => {
+    const events: SessionEventLike[] = [
+      record(1, { enabled: true, boundary: 'guarded' }),
+      { seq: 2, type: 'permission/preset', data: { preset: 'read-only' } },
+      record(3, { enabled: true, boundary: 'guarded' }),
+    ];
+    expect(foldAdmission(events, 's1')).toMatchObject({
+      enabled: true,
+      seq: 3,
+    });
+  });
+});

@@ -276,6 +276,39 @@ export class PermissionLifecycle {
     }
   }
 
+  /**
+   * Bring every covered session back to a safe boundary before the drain.
+   *
+   * A session that already left keeps its own permission; every still-managed
+   * one — main or inherited descendant — is narrowed, and one that cannot be
+   * confirmed stays fail-closed so the gate keeps refusing it.
+   */
+  private rollBackCovered(
+    covered: readonly (readonly [string, SessionLike])[],
+  ): void {
+    for (const [sessionId, session] of covered) {
+      // Re-read the folded admission: a switch may have landed since the call
+      // that covered this session.
+      const admission = this.admissions.admission(sessionId);
+      if (admission !== null && !admission.enabled) continue;
+      // Retry a transient failure before giving up: a session left wide with
+      // no gate is the one state teardown must not hand over.
+      const rolled = this.admissions.narrowSession(session)
+        ? this.rollbackSession(session, 'plugin-unload')
+        : 'failed';
+      // A successful sandbox write is not the whole target: a main session
+      // also restores `ask`. Only both together let teardown stop protecting it.
+      const safe = this.admissions.atSafeBoundary(session);
+      if (rolled === 'failed' || !safe)
+        this.admissions.markFailingClosed(sessionId);
+      this.host.lifecycle('unload/rollback', {
+        sessionId,
+        outcome: rolled,
+        failingClosed: rolled === 'failed' || !safe,
+      });
+    }
+  }
+
   /** Roll back before draining: new ungated calls must see the narrowed sandbox. */
   private async unload(): Promise<void> {
     this.host.runtime.accepting = false;
@@ -291,24 +324,7 @@ export class PermissionLifecycle {
       managed: covered.length,
       discovered,
     });
-    for (const [sessionId, session] of covered) {
-      // Re-read the folded admission: a switch may have landed since the call
-      // that covered this session, and a session that already left keeps its
-      // own permission.
-      const admission = this.admissions.admission(sessionId);
-      if (admission !== null && !admission.enabled) continue;
-      // Retry a transient failure before giving up: a session left wide with
-      // no gate is the one state teardown must not hand over.
-      const rolled = this.admissions.narrowSession(session)
-        ? this.rollbackSession(session, 'plugin-unload')
-        : 'failed';
-      if (rolled === 'failed') this.admissions.markFailingClosed(sessionId);
-      this.host.lifecycle('unload/rollback', {
-        sessionId,
-        outcome: rolled,
-        failingClosed: rolled === 'failed',
-      });
-    }
+    this.rollBackCovered(covered);
     const rolledAt = Date.now();
     const started = Date.now();
     while (
@@ -336,7 +352,10 @@ export class PermissionLifecycle {
         .coveredSessions()
         .find(([id]) => id === sessionId)?.[1];
       if (session === undefined) continue;
-      if (!this.admissions.narrowSession(session)) {
+      if (
+        !this.admissions.narrowSession(session) ||
+        !this.admissions.atSafeBoundary(session)
+      ) {
         this.host.ctx.logger.error(
           'arbiter: session %s is still %s after unload: every narrowing write was refused by the host, so calls from it will not be gated and carry its previous permission. Select a permission again for that session.',
           sessionId,

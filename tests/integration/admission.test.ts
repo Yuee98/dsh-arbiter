@@ -76,9 +76,25 @@ interface StubSession {
 
 function makeSession(
   id: string,
-  options: { readonly parentSession?: string } = {},
+  options: {
+    readonly parentSession?: string;
+    /** Refuse `sandbox/mode` writes while still accepting records. */
+    readonly refuseSandboxWrites?: boolean;
+    /** Seed the host sandbox the session already had before admission. */
+    readonly initialSandbox?: string;
+  } = {},
 ): StubSession {
-  const events: SessionEventLike[] = [];
+  const events: SessionEventLike[] = [
+    ...(options.initialSandbox === undefined
+      ? []
+      : [
+          {
+            type: 'sandbox/mode',
+            seq: 0,
+            data: { mode: options.initialSandbox },
+          },
+        ]),
+  ];
   return {
     id,
     header: {
@@ -90,6 +106,9 @@ function makeSession(
     },
     events,
     append(type, data) {
+      if (type === 'sandbox/mode' && options.refuseSandboxWrites === true) {
+        throw new Error('append refused while the host is publishing');
+      }
       events.push({
         type,
         seq: events.length,
@@ -201,7 +220,11 @@ function stubContext(
 function createHarness(
   sessions: readonly StubSession[],
   config: unknown,
-  options: { readonly blockAudit?: boolean } = {},
+  options: {
+    readonly blockAudit?: boolean;
+    /** Refuse every sandbox write, as a host stuck mid-publish would. */
+    readonly refuseSandboxWrites?: boolean;
+  } = {},
 ): Harness {
   const routes = new Map<string, FetchRouteLike>();
   const disposers: (() => unknown)[] = [];
@@ -982,6 +1005,121 @@ describe('restore and scope', () => {
       } finally {
         trusted.dispose();
       }
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('failed activation and master switch', () => {
+  test('a guarded activation the host cannot confine is withdrawn', async () => {
+    // The host reports full access and every sandbox write is refused, so the
+    // plugin cannot make the guarded promise true.
+    const session = makeSession('s-unconfined', {
+      refuseSandboxWrites: true,
+      initialSandbox: 'danger-full-access',
+    });
+    const harness = createHarness([session], ALLOW_ECHO, {
+      refuseSandboxWrites: true,
+    });
+    try {
+      const result = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-unconfined', action: 'enable' },
+      });
+      expect(result.status).toBe(409);
+      expect(String(result.body['message'])).toContain('workspace confinement');
+      // No durable record may claim an effective guarded admission.
+      expect(admissions(session).at(-1)?.['enabled']).toBe(false);
+      // With the admission withdrawn the session is simply unmanaged: the
+      // plugin does not gate it, and it keeps no record claiming guarded.
+      expect(
+        await harness.gate(call(session, 'unconfined-call'), allow),
+      ).toEqual({
+        kind: 'allow',
+      });
+      expect(
+        decisions(session).filter(
+          (entry) => entry['callId'] === 'unconfined-call',
+        ),
+      ).toHaveLength(0);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('turning the master switch off narrows admitted sessions', async () => {
+    const main = makeSession('s-off-root');
+    main.append('sandbox/mode', { mode: 'workspace-write' });
+    main.append('approval/policy', { policy: 'ask' });
+    const child = makeSession('s-off-child', { parentSession: 's-off-root' });
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([main, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-off-root', action: 'enable' },
+      });
+      expect(modeEvents(main).at(-1)).toEqual({ mode: 'danger-full-access' });
+      // The plugin is disabled in the effective configuration: the gate stops,
+      // so the session must not keep the sandbox the plugin widened.
+      harness.reread({ ...ALLOW_ECHO, enabled: false, boundary: 'trusted' });
+      expect(modeEvents(main).at(-1)).toEqual({ mode: 'workspace-write' });
+      // A main session also returns to `ask`; the child keeps the approval the
+      // host pinned at delegation and only loses its captured sandbox.
+      expect(approvalEvents(main).at(-1)).toEqual({ policy: 'ask' });
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(approvalEvents(child).at(-1)).toEqual({
+        policy: 'never',
+        source: 'delegation',
+      });
+      expect(await harness.gate(call(main, 'off-call'), allow)).toMatchObject({
+        kind: 'allow',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('API disable reaches unobserved descendants', () => {
+  test('a live child that never called the gate is narrowed too', async () => {
+    const main = makeSession('s-d-root');
+    main.append('sandbox/mode', { mode: 'workspace-write' });
+    main.append('approval/policy', { policy: 'ask' });
+    const child = makeSession('s-d-child', { parentSession: 's-d-root' });
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([main, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-d-root', action: 'enable' },
+      });
+      // The child never calls the gate, so it is only known from the list.
+      const disabled = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-d-root', action: 'disable' },
+      });
+      expect(disabled.status).toBe(200);
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(approvalEvents(child).at(-1)).toEqual({
+        policy: 'never',
+        source: 'delegation',
+      });
     } finally {
       harness.dispose();
     }

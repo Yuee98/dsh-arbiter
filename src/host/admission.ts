@@ -105,6 +105,13 @@ function commandRunOf(event: SessionEventLike): {
   };
 }
 
+/** The command id a `command/done` event settles, `null` for any other event. */
+function settledCommandOf(event: SessionEventLike): string | null {
+  if (event.type !== 'command/done' || !isRecord(event.data)) return null;
+  const commandId = event.data['commandId'];
+  return typeof commandId === 'string' ? commandId : null;
+}
+
 /** Whether one event settles a native `/permission <preset>` as successful. */
 function nativeExitOf(
   event: SessionEventLike,
@@ -151,6 +158,8 @@ export function foldAdmission(
     return folded.sessionId === owner ? folded : null;
   };
   let latest: FoldedAdmission | null = null;
+  // Only commands that are still open. A settled command is removed below, so
+  // an empty map means "nothing owns the next preset write".
   const runs = new Map<string, CommandRun>();
   for (const event of events) {
     const folded = admissionRecordOf(event);
@@ -160,23 +169,52 @@ export function foldAdmission(
       runs.set(command.commandId, command.run);
       continue;
     }
-    if (!nativeExitOf(event, runs)) continue;
-    if (latest !== null && event.seq <= latest.seq) continue;
-    const time: unknown = event.time;
-    latest = {
-      enabled: false,
-      // The record names the session it was written for; a native exit in this
-      // log belongs to this session by construction.
-      sessionId: latest?.sessionId ?? owner ?? null,
-      boundary: latest?.boundary ?? 'guarded',
-      seq: event.seq,
-      at: typeof time === 'number' && Number.isFinite(time) ? time : Date.now(),
-    };
+    const settled = settledCommandOf(event);
+    if (settled !== null) {
+      const exit = nativeExitOf(event, runs);
+      runs.delete(settled);
+      if (!exit || !laterThan(latest, event)) continue;
+      latest = exited(latest, event, owner);
+      continue;
+    }
+    // A preset write with no command open is another surface choosing the host
+    // permission, which is a durable exit on its own. A preset written inside a
+    // command is not: the command decides, so a failing command cannot exit
+    // through its own partial write.
+    if (event.type !== 'permission/preset' || runs.size > 0) continue;
+    if (!isRecord(event.data)) continue;
+    if (!laterThan(latest, event)) continue;
+    latest = exited(latest, event, owner);
   }
   return latest;
 }
 
-/** Stable identity of one admission state, reported to clients. */
+/** A native exit can only move the fold forward. */
+function laterThan(
+  latest: FoldedAdmission | null,
+  event: SessionEventLike,
+): boolean {
+  return latest === null || event.seq > latest.seq;
+}
+
+/** The disabled state one native exit leaves behind. */
+function exited(
+  latest: FoldedAdmission | null,
+  event: SessionEventLike,
+  owner: string | undefined,
+): FoldedAdmission {
+  const time: unknown = event.time;
+  return {
+    enabled: false,
+    // The record names the session it was written for; a native exit in this
+    // log belongs to this session by construction.
+    sessionId: latest?.sessionId ?? owner ?? null,
+    boundary: latest?.boundary ?? 'guarded',
+    seq: event.seq,
+    at: typeof time === 'number' && Number.isFinite(time) ? time : Date.now(),
+  };
+}
+
 export function admissionRevision(
   sessionId: string,
   folded: FoldedAdmission,

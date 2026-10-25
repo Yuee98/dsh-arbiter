@@ -509,6 +509,31 @@ describe('unload rollback', () => {
     expect(session.failAppend).toBe(true);
   });
 
+  test('a sandbox-only success is not treated as a complete rollback', async () => {
+    const events: StubEvent[] = [];
+    const session = makeSession('s13', events);
+    admit(events, 's13', { boundary: 'trusted' });
+    // The sandbox is already safe, but the approval this plugin widened still
+    // has to come back to `ask`, and that write is refused.
+    events.push({ type: 'sandbox/mode', data: { mode: 'workspace-write' } });
+    events.push({ type: 'approval/policy', data: { policy: 'never' } });
+    const { ctx, stub, disposers } = contextFor(session);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await stub.gate?.(exec(session, 'c13-warm'), allow);
+    session.onAppend = (type) => type !== 'approval/policy';
+    await unload(disposers);
+    // The unresolved approval is not silently accepted as a full rollback: the
+    // session stays refused instead of running unconfined in a wide bundle.
+    expect(
+      events.filter((event) => event.type === 'approval/policy').at(-1)?.data,
+    ).toEqual({ policy: 'never' });
+    expect((await stub.gate?.(exec(session, 'c13'), allow))?.kind).toBe('deny');
+  });
+
   test('a transient rollback failure is retried until the boundary lands', async () => {
     const events: StubEvent[] = [];
     const session = trustedSession('s10', events);
@@ -634,5 +659,57 @@ describe('unload rollback', () => {
     expect(
       events.filter((event) => event.type === 'plugin:arbiter/decision'),
     ).toHaveLength(0);
+  });
+});
+
+describe('discovery covers inherited subagents', () => {
+  test('a listed trusted child is narrowed even before it is observed', async () => {
+    // The real host lists live sessions; the child here has never passed the
+    // gate in this process, which is exactly the cold-restore case.
+    const parent = trustedSession('s11-root', []);
+    const childEvents: StubEvent[] = [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+      { type: 'approval/policy', data: { policy: 'never' } },
+    ];
+    const child = subagentSession('s11-child', 's11-root', childEvents);
+    const listed = [parent, child];
+    const { ctx, disposers } = contextFor(parent, undefined, {
+      sessions: {
+        get: (id: string) =>
+          listed.find((session) => session.id === id) ?? undefined,
+        list: () => listed,
+      },
+    });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await unload(disposers);
+    expect(
+      childEvents
+        .filter((event) => event.type === 'sandbox/mode')
+        .map((event) => event.data),
+    ).toContainEqual({ mode: 'workspace-write' });
+    // The host-pinned approval is never rewritten.
+    expect(
+      childEvents.filter((event) => event.type === 'approval/policy'),
+    ).toHaveLength(1);
+  });
+
+  test('a listed but unadmitted branch is left alone', async () => {
+    const parent = makeSession('s12-root', []);
+    const events: StubEvent[] = [];
+    const child = subagentSession('s12-child', 's12-root', events);
+    const listed = [parent, child];
+    const { ctx, disposers } = contextFor(parent, undefined, {
+      sessions: {
+        get: (id: string) => listed.find((session) => session.id === id),
+        list: () => listed,
+      },
+    });
+    apply(ctx, ALLOW_ECHO);
+    await unload(disposers);
+    expect(events).toHaveLength(0);
   });
 });

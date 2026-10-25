@@ -37,6 +37,11 @@ export function apply(ctx: ContextLike, rawConfig: unknown): void {
   host.runtime.configListeners.add((config) => {
     admissions.syncBoundary(config);
   });
+  // The startup activation already happened inside `initializeHost`, before
+  // this listener existed. Reconcile once here as well: a profile that starts
+  // with the master switch off must not leave a previously admitted session
+  // holding the permission the plugin widened for it.
+  admissions.syncBoundary(host.runtime.config);
   ctx.effect(
     () => () => {
       host.runtime.configListeners.clear();

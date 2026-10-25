@@ -1031,6 +1031,7 @@ interface TraceEntry {
   readonly at: number;
   readonly event: string;
   readonly outcome?: string;
+  readonly active?: number;
 }
 
 /** Read the plugin's read-only lifecycle trace. */
@@ -1045,10 +1046,12 @@ async function readTrace(path: string): Promise<readonly TraceEntry[]> {
     const event: unknown = record['event'];
     if (typeof at !== 'number' || typeof event !== 'string') continue;
     const outcome: unknown = record['outcome'];
+    const active: unknown = record['active'];
     entries.push({
       at,
       event,
       ...(typeof outcome === 'string' ? { outcome } : {}),
+      ...(typeof active === 'number' ? { active } : {}),
     });
   }
   return entries;
