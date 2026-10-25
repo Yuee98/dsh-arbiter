@@ -87,18 +87,51 @@ export interface SaveResponse {
   readonly warnings: readonly ConfigIssueView[];
 }
 
+/**
+ * One row of the call list.
+ *
+ * The row exists to locate a call: identity, the one-line operation summary and
+ * the final verdict. The reason, stage chain, arguments and model traffic are
+ * read only when the row is opened, so a page never carries them.
+ */
 export interface LogRow {
   readonly callId: string;
   readonly ts: number;
   readonly sessionId: string;
   readonly sessionKind: string;
   readonly tool: string;
+  /** The command, the code, or a bounded JSON excerpt — never the whole input. */
   readonly command: string;
   readonly result: string;
-  readonly reason: string;
   readonly ruleId: string | null;
-  readonly approvalMode: string;
-  readonly decisionRules: readonly string[];
+  /** True when the stored record's format is newer than this build. */
+  readonly unreadable: boolean;
+}
+
+/** The newest record a traversal is anchored at. */
+export interface LogAnchor {
+  readonly ts: number;
+  readonly callId: string;
+}
+
+/**
+ * One decoded list page and the window the host actually read.
+ *
+ * `anchor` is the traversal's fixed upper bound: while the reader holds it, a
+ * call arriving above it cannot shift the pages under the reader. `newer`
+ * counts the matching records above the anchor, so the "new records" notice
+ * reports arrivals rather than a total that cleanup can cancel out.
+ */
+export interface LogPage {
+  /** False when the host could not read the audit store at all. */
+  readonly ok: boolean;
+  readonly rows: readonly LogRow[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly anchor: LogAnchor | null;
+  readonly newer: number;
+  readonly code: string | undefined;
 }
 
 export interface LogDetail {

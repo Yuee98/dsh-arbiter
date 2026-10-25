@@ -3,9 +3,10 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
+import { clampToLastPage } from '../src/audit/call-list.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -2271,5 +2272,525 @@ describe('WAL bytes never justify deleting retained calls', () => {
     reader.exec('COMMIT');
     reader.close();
     store.close();
+  });
+});
+
+/** The store's database handle, checked rather than asserted. */
+function databaseOf(store: AuditStore): DatabaseSync {
+  const value: unknown = Reflect.get(store, 'db');
+  if (!(value instanceof DatabaseSync))
+    throw new TypeError('the store must expose its database');
+  return value;
+}
+
+/** Every statement a store operation prepared, so a read's SQL is inspectable. */
+function preparedStatements(
+  db: DatabaseSync,
+  run: () => void,
+): readonly unknown[] {
+  const spy = vi.spyOn(db, 'prepare');
+  try {
+    run();
+    return spy.mock.calls.map((call) => call[0]);
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+/**
+ * The paged, filtered call list.
+ *
+ * The list is the audit trail's index: it has to stay a stable reading surface
+ * while calls keep arriving, and it must not carry the material that only the
+ * detail read needs. Both properties are storage behaviour, so they are proven
+ * against a real SQLite database rather than a decoded payload.
+ */
+describe('call list paging and filtering', () => {
+  /** Enqueue `count` calls with deterministic, descending timestamps. */
+  async function seed(
+    store: AuditStore,
+    count: number,
+    overrides: (index: number) => Partial<CallRecord> = () => ({}),
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const callId = `pag-${String(index).padStart(3, '0')}`;
+      ids.push(callId);
+      store.enqueue(
+        record({
+          callId,
+          result: 'allow',
+          ts: 1_000 + (count - index) * 10,
+          ...overrides(index),
+        }),
+      );
+    }
+    await store.flush();
+    return ids;
+  }
+
+  test('walks every page of a multi-page result without gaps or repeats', async () => {
+    const { store } = await makeStore();
+    const ids = await seed(store, 60);
+    const pageSize = 25;
+    const seen: string[] = [];
+    let anchor: { readonly ts: number; readonly callId: string } | null = null;
+    for (let offset = 0; offset < 60; offset += pageSize) {
+      const page = store.listCalls({
+        limit: pageSize,
+        offset,
+        ...(anchor === null ? {} : { anchor }),
+      });
+      anchor = page.anchor;
+      expect(page.total).toBe(60);
+      expect(page.limit).toBe(pageSize);
+      seen.push(...page.rows.map((row) => row.callId));
+    }
+    expect(seen).toHaveLength(60);
+    expect(new Set(seen).size).toBe(60);
+    expect(seen).toEqual(ids);
+    store.close();
+  });
+
+  test('orders equal timestamps deterministically across reads and pages', async () => {
+    const { store } = await makeStore();
+    const shared = 5_000;
+    for (const callId of ['same-a', 'same-b', 'same-c', 'same-d']) {
+      store.enqueue(
+        record({ callId, result: 'allow', ts: shared, tool: 'bash' }),
+      );
+    }
+    store.enqueue(
+      record({ callId: 'newest', result: 'allow', ts: shared + 1 }),
+    );
+    await store.flush();
+    const first = store.listCalls({ limit: 2 });
+    const second = store.listCalls({ limit: 2, offset: 2 });
+    const third = store.listCalls({ limit: 2, offset: 4 });
+    const walked = [...first.rows, ...second.rows, ...third.rows].map(
+      (row) => row.callId,
+    );
+    // call_id DESC is the tie-break, so the four equal rows come back in a
+    // defined order rather than in whatever order the planner produced.
+    expect(walked).toEqual(['newest', 'same-d', 'same-c', 'same-b', 'same-a']);
+    expect(store.listCalls({ limit: 2 }).rows.map((row) => row.callId)).toEqual(
+      ['newest', 'same-d'],
+    );
+    store.close();
+  });
+
+  test('a call arriving above the anchor cannot shift the reader page', async () => {
+    const { store } = await makeStore();
+    const ids = await seed(store, 30);
+    const pageSize = 10;
+    const first = store.listCalls({ limit: pageSize });
+    const anchor = first.anchor;
+    expect(anchor).not.toBeNull();
+    // Two calls land while the reader is on page one: one newer than everything,
+    // one sharing the anchor's timestamp but sorting above it. Both are outside
+    // the traversal, so neither can shift the rows under the reader.
+    store.enqueue(
+      record({ callId: 'arrived-new', result: 'allow', ts: 5_000 }),
+    );
+    if (anchor !== null) {
+      store.enqueue(
+        record({ callId: 'zz-arrived', result: 'allow', ts: anchor.ts }),
+      );
+    }
+    await store.flush();
+    const second = store.listCalls({
+      limit: pageSize,
+      offset: pageSize,
+      ...(anchor === null ? {} : { anchor }),
+    });
+    // Page two is exactly rows 11–20 of the traversal the reader started: no
+    // repeated row, no skipped row.
+    expect(second.rows.map((row) => row.callId)).toEqual(ids.slice(10, 20));
+    expect(second.total).toBe(30);
+    expect(second.newer).toBe(2);
+    // The same holds for the rest of the walk: the window never drifts.
+    const third = store.listCalls({
+      limit: pageSize,
+      offset: pageSize * 2,
+      ...(anchor === null ? {} : { anchor }),
+    });
+    expect(third.rows.map((row) => row.callId)).toEqual(ids.slice(20, 30));
+    store.close();
+  });
+
+  test('a fresh traversal without an anchor includes the newly arrived calls', async () => {
+    const { store } = await makeStore();
+    await seed(store, 3);
+    store.enqueue(record({ callId: 'later', result: 'allow', ts: 9_000 }));
+    await store.flush();
+    const page = store.listCalls({ limit: 10 });
+    expect(page.rows[0]?.callId).toBe('later');
+    expect(page.newer).toBe(0);
+    store.close();
+  });
+
+  test('combines every filter in SQL before the window', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 12; index += 1) {
+      const denied = index % 2 === 0;
+      store.enqueue(
+        record({
+          callId: `combo-${String(index)}`,
+          result: denied ? 'review-deny' : 'review-allow',
+          tool: index % 3 === 0 ? 'bash' : 'write',
+          sessionKind: index % 4 === 0 ? 'subagent' : 'main',
+          sessionId: index % 5 === 0 ? 'session-x' : 'session-y',
+          reason: index % 2 === 0 ? 'needs human review' : 'looks safe',
+          ts: 2_000 + index * 10,
+          trace: [
+            {
+              stage: 'review',
+              result: denied ? 'review-deny' : 'review-allow',
+              decisionRules: index % 2 === 0 ? ['R7'] : ['R8'],
+              at: 2,
+            },
+          ],
+          decisionRules: index % 2 === 0 ? ['R7'] : ['R8'],
+        }),
+      );
+    }
+    await store.flush();
+    const deniedBash = store.listCalls({
+      limit: 50,
+      deniedOnly: true,
+      tool: 'bash',
+    });
+    expect(deniedBash.total).toBe(2);
+    expect(
+      deniedBash.rows.every(
+        (row) => row.result === 'review-deny' && row.tool === 'bash',
+      ),
+    ).toBe(true);
+    const ruleRows = store.listCalls({ limit: 50, ruleId: 'R8' });
+    expect(ruleRows.total).toBe(6);
+    expect(ruleRows.rows.every((row) => row.result === 'review-allow')).toBe(
+      true,
+    );
+    const sessionRows = store.listCalls({ limit: 50, sessionId: 'session-x' });
+    expect(sessionRows.total).toBe(3);
+    const subagentRows = store.listCalls({
+      limit: 50,
+      sessionKind: 'subagent',
+    });
+    expect(subagentRows.total).toBe(3);
+    const timeRows = store.listCalls({ limit: 50, from: 2_050, to: 2_090 });
+    expect(timeRows.total).toBe(5);
+    const combined = store.listCalls({
+      limit: 50,
+      deniedOnly: true,
+      tool: 'bash',
+      ruleId: 'R7',
+      sessionId: 'session-y',
+    });
+    expect(combined.total).toBe(1);
+    expect(combined.rows[0]?.callId).toBe('combo-6');
+    // A filtered empty result is a total of zero, not a failed read.
+    expect(store.listCalls({ limit: 50, tool: 'nonexistent' }).total).toBe(0);
+    store.close();
+  });
+
+  test('the rule filter matches a short-circuit rule and a review decision rule', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'short-circuit',
+        result: 'deny',
+        decisionRules: [],
+        trace: [
+          {
+            stage: 'rule',
+            result: 'deny',
+            ruleId: 'no-push',
+            ruleName: 'Block force push',
+            at: 1,
+          },
+        ],
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'reviewed',
+        result: 'review-deny',
+        decisionRules: ['R7'],
+        trace: [
+          {
+            stage: 'review',
+            result: 'review-deny',
+            decisionRules: ['R7'],
+            at: 2,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const byRule = store.listCalls({ ruleId: 'no-push' });
+    expect(byRule.rows.map((row) => row.callId)).toEqual(['short-circuit']);
+    expect(byRule.rows[0]?.ruleName).toBe('Block force push');
+    expect(
+      store.listCalls({ ruleId: 'R7' }).rows.map((row) => row.callId),
+    ).toEqual(['reviewed']);
+    store.close();
+  });
+
+  test('the review-failure shortcut only matches a failed review stage', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'failed',
+        result: 'human-allow',
+        trace: [
+          {
+            stage: 'review',
+            result: 'error-escalate',
+            reason: 'circuit_open',
+            at: 2,
+          },
+          { stage: 'human', result: 'human-allow', at: 3 },
+        ],
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'reviewed',
+        result: 'review-allow',
+        trace: [{ stage: 'review', result: 'review-allow', at: 2 }],
+      }),
+    );
+    await store.flush();
+    const failed = store.listCalls({ reviewFailureOnly: true });
+    expect(failed.rows.map((row) => row.callId)).toEqual(['failed']);
+    expect(failed.total).toBe(1);
+    store.close();
+  });
+
+  test('search treats wildcard characters literally', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'percent',
+        result: 'allow',
+        arguments: { command: 'echo 100%' },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'plain',
+        result: 'allow',
+        arguments: { command: 'echo 1000' },
+      }),
+    );
+    await store.flush();
+    const matched = store.listCalls({ query: '100%' });
+    expect(matched.rows.map((row) => row.callId)).toEqual(['percent']);
+    expect(matched.total).toBe(1);
+    store.close();
+  });
+
+  test('a window past the last row is reported, and clamping lands on real rows', async () => {
+    const { store } = await makeStore();
+    await seed(store, 26);
+    const beyond = store.listCalls({ limit: 25, offset: 50 });
+    expect(beyond.rows).toEqual([]);
+    expect(beyond.total).toBe(26);
+    const target = clampToLastPage(50, beyond.total, beyond.limit);
+    expect(target).toBe(25);
+    const corrected = store.listCalls({ limit: 25, offset: target });
+    expect(corrected.rows).toHaveLength(1);
+    // An empty audit is a real empty page, not a correction target.
+    expect(clampToLastPage(50, 0, 25)).toBe(0);
+    store.close();
+  });
+
+  test('page size boundaries are clamped to the readable window', async () => {
+    const { store } = await makeStore();
+    await seed(store, 3);
+    expect(store.listCalls({ limit: 0 }).limit).toBe(1);
+    expect(store.listCalls({ limit: -5 }).limit).toBe(1);
+    expect(store.listCalls({ limit: 1 }).rows).toHaveLength(1);
+    expect(store.listCalls({ limit: 500 }).limit).toBe(200);
+    expect(store.listCalls({ limit: Number.NaN }).limit).toBe(25);
+    expect(store.listCalls({ offset: -10 }).offset).toBe(0);
+    expect(store.listCalls({ limit: 2.7 }).limit).toBe(2);
+    store.close();
+  });
+
+  test('a list page carries neither stored arguments nor prompt or response text', async () => {
+    const { store } = await makeStore();
+    const prompt = 'PROMPT-MATERIAL-MUST-NOT-APPEAR';
+    const response = 'RESPONSE-MATERIAL-MUST-NOT-APPEAR';
+    store.enqueue(
+      record({
+        callId: 'with-model-call',
+        result: 'review-allow',
+        arguments: { command: 'echo hi', secretInput: 'ARGUMENT-BODY' },
+        modelAttempts: [
+          {
+            requestId: 'with-model-call:model:1',
+            callId: 'with-model-call',
+            attempt: 1,
+            backend: 'chat',
+            protocol: 'chat',
+            request: {
+              system: 'REVIEW_POLICY\nPROMPT-MATERIAL-MUST-NOT-APPEAR',
+              messages: [{ role: 'user', content: prompt }],
+            },
+            responseText: response,
+            parsed: { verdict: 'allow' },
+            error: null,
+            startedAt: 1,
+            durationMs: 2,
+            estimatedInputTokens: 3,
+            usage: null,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const page = store.listCalls({ limit: 10 });
+    expect(page.rows).toHaveLength(1);
+    const serialized = JSON.stringify(page);
+    expect(serialized).not.toContain(prompt);
+    expect(serialized).not.toContain(response);
+    expect(serialized).not.toContain('ARGUMENT-BODY');
+    // The row's fields are the list contract, not a truncated detail record.
+    const row = asRecord(page.rows[0]);
+    expect(Object.keys(row).sort()).toEqual(
+      [
+        'callId',
+        'command',
+        'recordFormatVersion',
+        'result',
+        'ruleId',
+        'ruleName',
+        'sessionId',
+        'sessionKind',
+        'tool',
+        'ts',
+        'unreadable',
+        'unreadableReason',
+      ].sort(),
+    );
+    // The detail read still returns the material unchanged.
+    const detail = store.getCall('with-model-call');
+    expect(JSON.stringify(detail)).toContain(prompt);
+    expect(JSON.stringify(detail)).toContain(response);
+    store.close();
+  });
+
+  test('the list query never reads model traffic or stored snapshots', async () => {
+    const { store } = await makeStore();
+    store.enqueue(record({ callId: 'plain', result: 'allow' }));
+    await store.flush();
+    const prepared = preparedStatements(databaseOf(store), () => {
+      store.listCalls({ limit: 5, query: 'echo' });
+    });
+    const statements = prepared;
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement).not.toContain('model_calls');
+      expect(statement).not.toContain('snapshots');
+      expect(statement).not.toContain('templates');
+      expect(statement).not.toContain('response_text');
+      expect(statement).not.toContain('SELECT *');
+    }
+    store.close();
+  });
+
+  test('an oversized stored command is truncated instead of returned whole', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'long-command',
+        result: 'allow',
+        arguments: { command: 'x'.repeat(400_000) },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'long-code',
+        result: 'allow',
+        arguments: { code: 'y'.repeat(400_000) },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'numeric-command',
+        result: 'allow',
+        arguments: { command: 42, code: 'fallback-code' },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'multiline',
+        result: 'allow',
+        arguments: { command: 'echo one\necho two' },
+      }),
+    );
+    await store.flush();
+    const page = store.listCalls({ limit: 10 });
+    const byId = new Map(page.rows.map((row) => [row.callId, row]));
+    expect(byId.get('long-command')?.command).toHaveLength(240);
+    expect(byId.get('long-code')?.command).toHaveLength(240);
+    // A non-string command does not win over a valid string code.
+    expect(byId.get('numeric-command')?.command).toBe('fallback-code');
+    expect(byId.get('multiline')?.command).toContain('echo one');
+    const bytes = JSON.stringify(page).length;
+    expect(bytes).toBeLessThan(20_000);
+    // The stored value is untouched for the detail read.
+    expect(
+      stringField(
+        asRecord(store.getCall('long-command'))['arguments'],
+        'command',
+      ),
+    ).toHaveLength(400_000);
+    store.close();
+  });
+
+  test('unreadable, legacy and current records all remain in the default list', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(record({ callId: 'current', result: 'allow', ts: 1_000 }));
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    db.prepare(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+          tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
+          approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
+          signals, policy_strategy, decision_rules, execution_status, record_format_version,
+          execution_started_at, execution_finished_at)
+       VALUES (?, ?, 'session-1', 'main', NULL, NULL, NULL, 'bash', '{"command":"legacy"}', NULL,
+          '/w', 'fp', 'rev', 'cfg', 'normal', 'trusted', 'allow', 'legacy reason', '[]', 'null',
+          'written', NULL, NULL, '[]', 'pending', ?, NULL, NULL)`,
+    ).run('legacy', 2_000, 1);
+    db.prepare(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+          tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
+          approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
+          signals, policy_strategy, decision_rules, execution_status, record_format_version,
+          execution_started_at, execution_finished_at)
+       VALUES (?, ?, 'session-1', 'main', NULL, NULL, NULL, 'bash', '{"command":"future"}', NULL,
+          '/w', 'fp', 'rev', 'cfg', 'normal', 'trusted', 'allow', 'future reason', '[]', 'null',
+          'written', NULL, NULL, '[]', 'pending', ?, NULL, NULL)`,
+    ).run('future', 3_000, 99);
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const page = reopened.listCalls({ limit: 10 });
+    expect(page.rows.map((row) => row.callId)).toEqual([
+      'future',
+      'legacy',
+      'current',
+    ]);
+    const rows = new Map(page.rows.map((row) => [row.callId, row]));
+    expect(rows.get('future')?.unreadable).toBe(true);
+    expect(rows.get('future')?.command).toBe('future');
+    expect(rows.get('legacy')?.unreadable).toBe(false);
+    expect(rows.get('current')?.unreadable).toBe(false);
+    reopened.close();
   });
 });

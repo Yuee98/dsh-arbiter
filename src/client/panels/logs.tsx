@@ -1,143 +1,259 @@
 import { logsResponse, logResponse } from '../decoders/logs.js';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { getJson } from '../api.js';
-import {
-  Button,
-  Field,
-  JsonBlock,
-  Notice,
-  Section,
-  Select,
-  TextInput,
-} from '../components/controls.js';
+import { Button, JsonBlock, Notice, Section } from '../components/controls.js';
+import { LogFilters } from '../components/log-filters.js';
+import { LogPager } from '../components/log-pager.js';
+import { LogTable } from '../components/log-table.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
+import {
+  clampToLastPage,
+  hasFilters,
+  initialQuery,
+  paramsOf,
+  withFilters,
+} from '../log-list.js';
+import type { LogAnchor, LogDetail, LogRow } from '../view-types.js';
+import type { LogQuery } from '../log-list.js';
 import { errorText, formatTime } from '../view-helpers.js';
-import type { LogRow, LogDetail } from '../view-types.js';
 
+/** What one committed page response contains, including its traversal anchor. */
+interface LoadedPage {
+  readonly rows: readonly LogRow[];
+  readonly total: number;
+  readonly anchor: LogAnchor | null;
+  readonly newer: number;
+}
+
+/**
+ * The call log: a bounded, filterable page list with on-demand details.
+ *
+ * Three state rules the panel has to keep, each of which used to be absent:
+ *
+ * - The request generation decides who may commit. A slow response for an older
+ *   filter can arrive after a newer one; without the guard it would replace the
+ *   rows while the controls still show the new filter.
+ * - The traversal anchor, not the current newest record, decides which rows a
+ *   page may contain. That is what keeps a reader on a historical page when a
+ *   new call arrives.
+ * - A window that outlives its rows is corrected by one bounded re-request. The
+ *   last page being cleared must not leave an empty table above a nonzero total.
+ */
 export function LogsPanel(): ReactNode {
   const t = useArbiterTranslation();
-  const [rows, setRows] = useState<readonly LogRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [result, setResult] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState<LogQuery>(initialQuery);
+  const [draft, setDraft] = useState<LogQuery>(initialQuery);
+  const [loaded, setLoaded] = useState<LoadedPage | null>(null);
+  const [anchor, setAnchor] = useState<LogAnchor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<LogDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  /** Monotonic guard: only the newest request may commit its result. */
+  const generation = useRef(0);
 
-  const load = useCallback(async (): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ limit: '100' });
-      if (result.length > 0) params.set('result', result);
-      if (query.length > 0) params.set('q', query);
-      const response = await getJson(
-        `/logs?${params.toString()}`,
-        logsResponse,
-      );
-      setRows(response.rows);
-      setTotal(response.total);
-      if (response.code === 'audit-unavailable')
-        setError(t('logs.auditUnavailable'));
-    } catch (errorValue) {
-      setError(errorText(errorValue));
-    } finally {
-      setBusy(false);
-    }
-  }, [query, result, t]);
+  const load = useCallback(
+    async (
+      next: LogQuery,
+      options: {
+        readonly keepAnchor: LogAnchor | null;
+        /** True for the one corrective read after a window fell off the end. */
+        readonly corrected?: boolean;
+        readonly refresh?: boolean;
+      },
+    ): Promise<void> => {
+      generation.current += 1;
+      const current = generation.current;
+      setBusy(true);
+      setError(null);
+      const params = paramsOf(next);
+      if (options.keepAnchor !== null) {
+        params.set('anchorTs', String(options.keepAnchor.ts));
+        params.set('anchorCallId', options.keepAnchor.callId);
+      }
+      try {
+        const response = await getJson(
+          `/logs?${params.toString()}`,
+          logsResponse,
+        );
+        if (generation.current !== current) return;
+        // A failed read is not an empty history: the host says so explicitly,
+        // and the panel must show the localized error instead of the ordinary
+        // empty-state sentence.
+        if (!response.ok || response.code === 'audit-unavailable') {
+          setError(t('logs.auditUnavailable'));
+          return;
+        }
+        if (
+          next.offset > 0 &&
+          response.rows.length === 0 &&
+          response.total > 0
+        ) {
+          // The page this window pointed at is gone (cleared, expired, or the
+          // filter shrank). One bounded correction lands on the last real page;
+          // a second empty answer is reported as empty rather than retried.
+          if (options.corrected !== true) {
+            const target = clampToLastPage(
+              next.offset,
+              response.total,
+              response.limit,
+            );
+            await load(
+              { ...next, offset: target },
+              {
+                keepAnchor: response.anchor,
+                corrected: true,
+                refresh: options.refresh === true,
+              },
+            );
+            return;
+          }
+        }
+        // "New records" is a property of the traversal, not of the current
+        // page: an anchor keeps arrivals above it out of the window. Only an
+        // explicit refresh asks how many are waiting there — a total delta would
+        // also fire on the first load and on every filter change, when nothing
+        // arrived at all.
+        const arrivals = options.refresh === true ? response.newer : 0;
+        setLoaded({
+          rows: response.rows,
+          total: response.total,
+          anchor: response.anchor,
+          newer: response.newer,
+        });
+        setAnchor(response.anchor);
+        setQuery(next);
+        setDraft(next);
+        setNotice(
+          arrivals > 0 ? t('logs.newRecords', { count: arrivals }) : null,
+        );
+      } catch (errorValue) {
+        if (generation.current !== current) return;
+        setError(`${t('logs.loadFailed')} ${errorText(errorValue)}`);
+      } finally {
+        if (generation.current === current) setBusy(false);
+      }
+    },
+    [t],
+  );
+
+  /**
+   * Run one read, reporting a transport failure through the panel's error slot.
+   *
+   * `load` already owns the generation guard and the in-band error states; this
+   * only covers the promise itself, so no event handler has to spell out a
+   * catch for a read it did not await.
+   */
+  const run = useCallback(
+    (next: LogQuery, options: Parameters<typeof load>[1]): void => {
+      load(next, options).catch((failure: unknown) => {
+        setError(`${t('logs.loadFailed')} ${errorText(failure)}`);
+      });
+    },
+    [load, t],
+  );
 
   useEffect(() => {
-    load().catch((failure: unknown) => {
-      setError(errorText(failure));
-    });
-  }, [load]);
+    // The initial read runs once; every later read is an explicit interaction,
+    // which is what keeps a new record from moving the reader's page.
+    run(initialQuery(), { keepAnchor: null });
+  }, [run]);
 
-  const open = async (callId: string): Promise<void> => {
+  /** Every filter is confirmed through here, so a change always restarts the set. */
+  const applyFilters = (): void => {
+    run(withFilters(draft, {}), { keepAnchor: null });
+  };
+
+  const clearFilters = (): void => {
+    run(initialQuery(), { keepAnchor: null });
+  };
+
+  const moveTo = (offset: number): void => {
+    if (loaded === null) return;
+    run(
+      { ...query, offset: clampToLastPage(offset, loaded.total, query.limit) },
+      { keepAnchor: anchor },
+    );
+  };
+
+  const backToLatest = (): void => {
+    run({ ...query, offset: 0 }, { keepAnchor: null });
+  };
+
+  const refresh = (): void => {
+    run(query, { keepAnchor: anchor, refresh: true });
+  };
+
+  /** Open one call's detail through the existing detail entry point. */
+  const open = (callId: string): void => {
     setBusy(true);
     setError(null);
-    try {
-      const response = await getJson(
-        `/log?callId=${encodeURIComponent(callId)}`,
-        logResponse,
-      );
-      setDetail(response.record);
-    } catch (errorValue) {
-      setError(errorText(errorValue));
-    } finally {
-      setBusy(false);
-    }
+    getJson(`/log?callId=${encodeURIComponent(callId)}`, logResponse)
+      .then((response) => {
+        setDetail(response.record);
+      })
+      .catch((errorValue: unknown) => {
+        setError(`${t('logs.loadFailed')} ${errorText(errorValue)}`);
+      })
+      .finally(() => {
+        setBusy(false);
+      });
   };
+
+  const rows = loaded?.rows ?? [];
+  const total = loaded?.total ?? 0;
+  const emptyText =
+    total === 0
+      ? hasFilters(query)
+        ? t('logs.emptyFiltered')
+        : t('logs.empty')
+      : t('logs.emptyPage');
 
   return (
     <>
       <Section title={t('logs.title')} description={t('logs.description')}>
+        <LogFilters
+          draft={draft}
+          onDraft={setDraft}
+          onApply={applyFilters}
+          onClear={clearFilters}
+        />
         <div
           style={{
             display: 'flex',
             gap: 8,
-            alignItems: 'flex-end',
+            alignItems: 'center',
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ width: 180 }}>
-            <Field label={t('logs.result')}>
-              <Select
-                value={result}
-                options={
-                  [
-                    '',
-                    'allow',
-                    'deny',
-                    'review-allow',
-                    'review-deny',
-                    'review-escalate',
-                    'human-allow',
-                    'human-deny',
-                    'human-abort',
-                    'fallback-deny',
-                  ] as const
-                }
-                labels={{ '': t('logs.all') }}
-                onChange={setResult}
-              />
-            </Field>
-          </div>
-          <div style={{ width: 260 }}>
-            <Field label={t('logs.search')}>
-              <TextInput
-                value={query}
-                onChange={setQuery}
-                placeholder={t('logs.searchPlaceholder')}
-              />
-            </Field>
-          </div>
-          <Button
-            onClick={() => {
-              load().catch((failure: unknown) => {
-                setError(errorText(failure));
-              });
-            }}
-            disabled={busy}
-            tone="primary"
-          >
+          <Button onClick={refresh} disabled={busy} tone="primary">
             {busy ? t('logs.loading') : t('logs.refresh')}
           </Button>
-          <span
-            style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}
-          >
-            {t('logs.total', { count: total })}
-          </span>
+          {notice === null ? null : (
+            <>
+              <span
+                role="status"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--dsw-alias-label-secondary)',
+                }}
+              >
+                {notice}
+              </span>
+              <Button onClick={backToLatest} disabled={busy}>
+                {t('logs.backToLatest')}
+              </Button>
+            </>
+          )}
         </div>
         {error === null ? null : <Notice kind="error" text={error} />}
         <LogTable
           rows={rows}
-          onOpen={(callId) => {
-            open(callId).catch((failure: unknown) => {
-              setError(errorText(failure));
-            });
-          }}
+          emptyText={error === null ? emptyText : ''}
+          onOpen={open}
         />
+        <LogPager query={query} total={total} busy={busy} onOffset={moveTo} />
       </Section>
       {detail === null ? null : <CallDetails detail={detail} />}
     </>
@@ -267,90 +383,5 @@ function CallDetails({ detail }: { readonly detail: LogDetail }): ReactNode {
         <JsonBlock value={detail.modelCalls} />
       </details>
     </Section>
-  );
-}
-
-function LogTable({
-  rows,
-  onOpen,
-}: {
-  readonly rows: readonly LogRow[];
-  readonly onOpen: (callId: string) => void;
-}): ReactNode {
-  const t = useArbiterTranslation();
-
-  return (
-    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
-      <thead>
-        <tr
-          style={{
-            textAlign: 'left',
-            color: 'var(--dsw-alias-label-secondary)',
-          }}
-        >
-          <th style={{ padding: 6 }}>{t('logs.time')}</th>
-          <th style={{ padding: 6 }}>{t('logs.tool')}</th>
-          <th style={{ padding: 6 }}>{t('logs.command')}</th>
-          <th style={{ padding: 6 }}>{t('logs.result')}</th>
-          <th style={{ padding: 6 }}>{t('logs.rule')}</th>
-          <th style={{ padding: 6 }}>{t('logs.approvalMode')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr
-            key={row.callId}
-            onClick={() => {
-              onOpen(row.callId);
-            }}
-            style={{
-              borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-              cursor: 'pointer',
-              verticalAlign: 'top',
-            }}
-          >
-            <td style={{ padding: 6, whiteSpace: 'nowrap' }}>
-              {formatTime(row.ts)}
-            </td>
-            <td
-              style={{
-                padding: 6,
-                fontFamily: 'var(--dsw-font-mono, monospace)',
-              }}
-            >
-              {row.tool}
-            </td>
-            <td
-              style={{
-                padding: 6,
-                fontFamily: 'var(--dsw-font-mono, monospace)',
-                maxWidth: 420,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {row.command}
-            </td>
-            <td style={{ padding: 6 }}>{row.result}</td>
-            <td style={{ padding: 6 }}>{row.ruleId ?? '—'}</td>
-            <td style={{ padding: 6 }}>{row.approvalMode}</td>
-          </tr>
-        ))}
-        {rows.length === 0 ? (
-          <tr>
-            <td
-              colSpan={6}
-              style={{
-                padding: 12,
-                color: 'var(--dsw-alias-label-tertiary)',
-              }}
-            >
-              {t('logs.empty')}
-            </td>
-          </tr>
-        ) : null}
-      </tbody>
-    </table>
   );
 }

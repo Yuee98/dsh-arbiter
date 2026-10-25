@@ -1,4 +1,4 @@
-import type { LogDetail, LogRow } from '../view-types.js';
+import type { LogAnchor, LogDetail, LogPage, LogRow } from '../view-types.js';
 import {
   array,
   boolean,
@@ -12,6 +12,9 @@ import {
   unknownValue,
 } from './values.js';
 
+/** The page size the client asks for when it has no reason to ask otherwise. */
+export const LOG_PAGE_SIZE = 25;
+
 function logRow(value: unknown): LogRow {
   const source = object(value);
   return {
@@ -22,19 +25,40 @@ function logRow(value: unknown): LogRow {
     tool: field(source, 'tool', text),
     command: field(source, 'command', text),
     result: field(source, 'result', text),
-    reason: field(source, 'reason', text),
     ruleId: field(source, 'ruleId', nullable(text)),
-    approvalMode: field(source, 'approvalMode', text),
-    decisionRules: field(source, 'decisionRules', strings),
+    unreadable: field(source, 'unreadable', boolean),
   };
 }
 
-export function logsResponse(value: unknown) {
+/**
+ * One list page.
+ *
+ * `limit` and `offset` are decoded with a fallback rather than required: the
+ * host echoes the window it actually read, and an older or unavailable store
+ * answers without one. Falling back to the requested page keeps the pager
+ * usable instead of failing the whole list over an advisory field.
+ */
+function anchor(value: unknown): LogAnchor | null {
+  if (value === null) return null;
+  const source = object(value);
+  return {
+    ts: field(source, 'ts', number),
+    callId: field(source, 'callId', text),
+  };
+}
+
+export function logsResponse(value: unknown): LogPage {
   const source = object(value);
   return {
     ok: field(source, 'ok', boolean),
     rows: field(source, 'rows', array(logRow)),
     total: field(source, 'total', number),
+    limit: field(source, 'limit', optional(number)) ?? LOG_PAGE_SIZE,
+    offset: field(source, 'offset', optional(number)) ?? 0,
+    // An unavailable store answers before any traversal started, so it carries
+    // no anchor. Absence means "no traversal", not a malformed page.
+    anchor: field(source, 'anchor', optional(anchor)) ?? null,
+    newer: field(source, 'newer', optional(number)) ?? 0,
     code: field(source, 'code', optional(text)),
   };
 }
