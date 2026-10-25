@@ -221,7 +221,10 @@ function rememberedDetail(
   if (item.ruleId !== undefined) gaps.push('rule-name-missing');
   // A proven review makes its absent material a real gap; a short-circuit does
   // not, and an unprovable state is left to the reviewState field.
-  const reviewState = reviewStateOf(trace, chain);
+  // A session record keeps result strings only, so it has no stage reasons and no
+  // attempt records: the classifier then reports `unknown` wherever the trace
+  // cannot prove either way.
+  const reviewState = reviewStateOf(trace, chain, 0);
   if (reviewState === 'reviewed')
     gaps.push('snapshot-missing', 'model-attempts-missing');
   gaps.push('execution-not-observed');

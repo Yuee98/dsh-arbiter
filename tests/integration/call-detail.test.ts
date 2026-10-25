@@ -139,6 +139,11 @@ function startHarness(
       request: unknown,
     ) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>;
     readonly session?: StubSession;
+    /** Use the decision backend, whose credential resolution can fail early. */
+    readonly decisionReviewer?: boolean;
+    readonly credentials?: {
+      resolve(ref: string): Promise<{ value: string } | undefined>;
+    };
   } = {},
 ): Harness {
   const session = options.session ?? makeSession(`session-${String(seq)}`);
@@ -162,11 +167,17 @@ function startHarness(
       },
       permissionPresets: { registerAuto: () => () => undefined },
       workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+      ...(options.credentials === undefined
+        ? {}
+        : { credentials: options.credentials }),
     },
     { on: capture.on },
   );
   admitSession(session);
-  const started = apply(ctx, baseConfig());
+  const started = apply(
+    ctx,
+    baseConfig(options.decisionReviewer === true ? 'decision' : 'chat'),
+  );
   const push = (config: unknown): void => {
     apply(ctx, config);
   };
@@ -178,7 +189,9 @@ function startHarness(
   };
 }
 
-function baseConfig(): Record<string, unknown> {
+function baseConfig(
+  reviewerType: 'chat' | 'decision' = 'chat',
+): Record<string, unknown> {
   return {
     format: 'arbiter-config-v2',
     rules: [
@@ -196,17 +209,29 @@ function baseConfig(): Record<string, unknown> {
       },
     ],
     modes: { main: 'normal', subagent: 'strict' },
-    reviewer: {
-      type: 'chat',
-      chat: {
-        provider: 'session',
-        model: '',
-        temperature: 0,
-        maxTokens: 400,
-        timeoutMs: 8_000,
-        maxRepairRetries: 1,
-      },
-    },
+    reviewer:
+      reviewerType === 'decision'
+        ? {
+            type: 'decision',
+            decision: {
+              url: 'https://reviewer.invalid/decide',
+              model: 'clef-flash',
+              apiKeyRef: 'MISSING_TOKEN',
+              timeoutMs: 2_000,
+              costTier: 'paid',
+            },
+          }
+        : {
+            type: 'chat',
+            chat: {
+              provider: 'session',
+              model: '',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 8_000,
+              maxRepairRetries: 1,
+            },
+          },
     audit: { enabled: true, retentionDays: 30 },
   };
 }
@@ -731,6 +756,68 @@ describe('pre-request review failures', () => {
     expect(missing).not.toContain('snapshot-missing');
     expect(missing).not.toContain('model-attempts-missing');
     expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toEqual([]);
+  });
+
+  test('a Reviewer that fails before calling out does not report lost attempts', async () => {
+    // A decision Reviewer with a credential reference nothing resolves: the
+    // adapter fails before any fetch, so no attempt record is produced at all.
+    const harness = startHarness({
+      approval: () => Promise.resolve('unavailable'),
+      decisionReviewer: true,
+      credentials: { resolve: () => Promise.resolve(undefined) },
+    });
+    expect(await run(harness, 'no-credential', 'echo needs-review')).not.toBe(
+      'allow',
+    );
+    await persisted(harness.host, 'no-credential');
+
+    const detail = await detailOf(harness.host, 'no-credential');
+    const basis = fieldOf(detail, 'basis');
+    const chain = listField(basis, 'chain');
+    const escalation = chain.find(
+      (stage) => fieldOf(stage, 'result') === 'error-escalate',
+    );
+    if (escalation === undefined)
+      throw new Error('the review failure was not recorded');
+    // The adapter failed before the request; the record proves no attempt.
+    expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toEqual([]);
+    expect(fieldOf(basis, 'reviewState')).toBe('unknown');
+    expect(missingOf(detail)).not.toContain('model-attempts-missing');
+    expect(missingOf(detail)).not.toContain('snapshot-missing');
+  });
+
+  test('a real failed attempt is unknown, not "no request", after audit cleanup', async () => {
+    // A transport failure really did issue one request, so the row stores one
+    // failed attempt. Afterwards the audit row is gone and only the session
+    // record — result strings without reasons or attempts — remains.
+    const harness = startHarness({
+      decisionReviewer: true,
+      approval: () => Promise.resolve('unavailable'),
+      credentials: { resolve: () => Promise.resolve({ value: 'token-1' }) },
+    });
+    // The adapter uses the host's own fetch; making it reject is exactly the
+    // transport failure that still records one attempt.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = () => Promise.reject(new Error('backend unreachable'));
+    try {
+      expect(
+        await run(harness, 'transport-failed', 'echo needs-review'),
+      ).not.toBe('allow');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    await persisted(harness.host, 'transport-failed');
+    const audited = await detailOf(harness.host, 'transport-failed');
+    // With the audit row present, the recorded failed attempt is proof.
+    expect(listField(fieldOf(audited, 'raw'), 'modelAttempts')).toHaveLength(1);
+    expect(fieldOf(fieldOf(audited, 'basis'), 'reviewState')).toBe('reviewed');
+
+    harness.host.currentAudit()?.clearCalls();
+    harness.host.runtime.priorVerdicts.clear();
+    const detail = await detailOf(harness.host, 'transport-failed');
+    // The session record cannot tell a request from a routing-only entry, so the
+    // answer is "cannot establish", not "no request was issued".
+    expect(fieldOf(fieldOf(detail, 'basis'), 'reviewState')).toBe('unknown');
   });
 
   test('a human-allow reached without a review does not claim a model request', async () => {

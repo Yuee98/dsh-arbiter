@@ -304,7 +304,9 @@ export function auditDetail(record: StoredCall): CallDetail {
       attempts,
       templates,
       trace,
-      reviewState: reviewStateOf(trace, chain ?? null),
+      // The stored attempt list is positive evidence of a request, so it is
+      // passed to the classifier rather than used only for the gap check.
+      reviewState: reviewStateOf(trace, chain ?? null, attempts.length),
     }),
     ...(rule.missing === null ? [] : [rule.missing]),
     // No structured chain: either the source kept result strings only, or it
@@ -354,7 +356,7 @@ export function auditDetail(record: StoredCall): CallDetail {
       conflictsTruncated: false,
       policyStrategy: textOf(record, 'policyStrategy'),
       chain,
-      reviewState: reviewStateOf(trace, chain),
+      reviewState: reviewStateOf(trace, chain, attempts.length),
       trace,
       signals: valueOf(record, 'signals'),
       evidence: basis.evidence,
