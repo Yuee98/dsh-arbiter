@@ -362,6 +362,31 @@ describe('rule list header and inline editing', () => {
   });
 });
 
+describe('locale fallback', () => {
+  test('an English host falls back to Chinese per missing rules key, never a bare key', async () => {
+    baseHandlers();
+    const view = renderClient(<ArbiterPage />, { locale: 'en' });
+    await view.user.click(await screen.findByRole('button', { name: '规则' }));
+    // en only carries common.json, so the whole rules module falls back to zh.
+    await screen.findByRole('heading', { name: '规则' });
+    await view.user.click(screen.getByRole('button', { name: '新建规则' }));
+    expect(
+      screen.getByRole('textbox', { name: '显示名称' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /^行为/ })).toHaveValue(
+      'force-review',
+    );
+    expect(screen.getByText('满足以下任一条件')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: '添加条件（或）' }),
+    ).toBeVisible();
+    // No raw key, blank label or undefined placeholder anywhere in the editor.
+    expect(document.body.textContent).not.toMatch(
+      /rules\.[A-Za-z]+|undefined|\[object Object\]/u,
+    );
+  });
+});
+
 describe('rule validation feedback', () => {
   test('an empty condition list stays editable but the save is rejected', async () => {
     baseHandlers();
