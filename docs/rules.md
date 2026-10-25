@@ -175,14 +175,50 @@ glob 复用现成库并固定选项，不自建方言，也不要求字段必须
 
 ### 规则 Schema
 
-当前已确认稳定规则 ID、可选自定义名称、启用状态、适用范围、多个“或”匹配条件、行为及可选备注等语义，具体 JSON 字段组织留给后续实现设计。名称默认由条件摘要生成，允许自定义且不参与匹配；与稳定 ID 的区别见[命名契约](configuration-and-audit.md#rule-naming)，有效性和告警见[保存校验](configuration-and-audit.md#rule-validation)。下方及后续的 `match` 示例沿用原稿的单条件写法以说明匹配含义，不表示最终 Schema 只能包含一个条件，也不限制新界面必须暴露 AST 节点字段；参数条件以[当前契约](#parameter-matching)为准，初版实现不作为需求约束。
+稳定规则 ID、可选自定义名称、启用状态、适用范围、多个“或”匹配条件、行为及可选备注。名称不参与匹配，且与稳定 ID 彼此独立；区别见[命名契约](configuration-and-audit.md#rule-naming)，有效性和告警见[保存校验](configuration-and-audit.md#rule-validation)。
+
+**格式声明**。规则结构随 `format` 区分。声明 `"format": "arbiter-config-v2"` 的文档使用下方结构；未声明格式或声明 `"format": "arbiter-config-v1"` 的文档按旧版单条件 `match` 结构读取，并只在可证明等价时转换（见[旧格式转换](#legacy-conversion)）。新旧结构不在同一文档内混用：旧格式文档出现 `conditions` 会作为配置错误拒绝，避免同一字段组合在不同格式下得到不同含义。
+
+```jsonc
+{
+  "format": "arbiter-config-v2",
+  "rules": [
+    {
+      "id": "block-production-deploy",   // 稳定 ID，重命名或编辑都不改变
+      "name": "禁止生产部署",             // 可选显示名，不参与匹配
+      "comment": "生产部署必须由人确认。",
+      "enabled": true,                  // 可选，缺省启用
+      "scope": {                        // 可选适用范围
+        "tools": ["deploy"],            // 名称或命名空间 glob；缺省不限
+        "agents": ["main"]              // main | subagent | preset:<name>；缺省不限
+      },
+      "conditions": [                   // 至少一条，条件之间为“或”
+        {
+          "target": "argument",         // command | file_redirect | variable_assignment | tool | argument
+          "path": "$.environment",      // 仅 argument 必填；RFC 9535
+          "kind": "exact",              // exact | regex | glob
+          "pattern": "production",      // exact 可为字符串/数字/布尔/null
+          "caseSensitive": true,        // 可选，缺省大小写敏感
+          "multi": "any"                // 仅 argument：any（缺省）| all
+        }
+      ],
+      "verdict": "deny",                // allow | deny | force-ask | force-review
+      "hint": "确认目标环境后放行"       // 可选，仅作为审查关注点
+    }
+  ]
+}
+```
+
+字段约束：`path` 只用于 `argument` 且必填，`multi` 只用于 `argument`；`regex` 与 `glob` 的 `pattern` 必须是字符串，空表达式是配置错误；`exact` 接受字符串、数字、布尔或 null，其它类型（对象、数组）不接受。`scope.tools`、`scope.agents` 出现时不得为空数组。位置不合法、类型不符、未知枚举值都是配置错误，不会被静默降级为默认值；被禁用的规则同样要通过校验，因为之后可以启用。
+
+旧的单条件写法（`match`）在 `arbiter-config-v1` 中保持可读：
 
 ```jsonc
 {
   "id": "relay-full-trust",
   "comment": "Relay：信任整个 CLI，包括提交内容、会话控制和后端绑定。",
   "match": {
-    "node": "command",            // command | file_redirect | variable_assignment
+    "node": "command",            // command | file_redirect | variable_assignment | tool
     "kind": "regex",              // exact | regex | glob
     "pattern": "(?s)gpt-relay(?: .*)?",
     "agents": ["main"]            // 可选：main | subagent | preset:<name>，缺省不限
@@ -202,23 +238,52 @@ glob 复用现成库并固定选项，不自建方言，也不要求字段必须
 - **未知身份永不匹配**（fail-closed）——若拿不到身份候选，`agents` 受限的规则不生效；
 - 典型用途：给子 agent 一套更窄的 allow 白名单（子 agent 无法弹审批，规则层是它唯一的自主空间）。
 
-规则示例（迁移自 `agent-home.rules`）：
+规则示例（迁移自 `agent-home.rules`，按当前整值匹配语义书写）：
 
 ```jsonc
 { "id": "relay-full-trust", "match": { "node": "command", "kind": "regex",
     "pattern": "(?s)gpt-relay(?: .*)?" }, "verdict": "allow" }
 
 { "id": "gh-pr-readonly", "match": { "node": "command", "kind": "regex",
-    "pattern": "(?s)gh pr (view|list|status|checks|diff)(?: .*)?" }, "verdict": "allow" }
+    "pattern": "(?s)gh pr (?:view|list|status|checks|diff)(?: .*)?" }, "verdict": "allow" }
 
 { "id": "gh-issue-readonly", "match": { "node": "command", "kind": "regex",
-    "pattern": "(?s)gh issue (view|list|status)(?: .*)?" }, "verdict": "allow" }
+    "pattern": "(?s)gh issue (?:view|list|status)(?: .*)?" }, "verdict": "allow" }
 // 同理 gh repo / gh run / gh search
 ```
 
+这些表达式可以在 `arbiter-config-v1` 中继续使用，也可以在改成 `conditions` 后放入 `arbiter-config-v2`。旧稿里把备选分支写在外层的 `gh pr (view|list)(?: .*)?` 仍能完整匹配，但 `^safe|bad$` 一类把锚点分别写进两个分支的表达式在旧格式中匹配过更多文本，不能直接沿用（见[旧格式转换](#legacy-conversion)）。
+
 **匹配语义**：先检查更高优先级的 `deny`、`force-ask`、`force-review`；均未命中时，命令的每个待匹配 AST 节点都必须被 `allow` 覆盖，才能整体放行。任一节点未被覆盖 → 整条命令进入 `review(default)`。因此 `cmd1 && cmd2` 只有一半可信时不会整体放行；“默认审查”也不只指零条规则命中的情况。
 
+覆盖按目标分别计算，`scope` 本身不产生覆盖：
+
+- 命中整工具（`target: "tool"`）的 allow 覆盖整个工具调用；
+- 没有 Shell 结构的工具（非 Shell 工具）没有 AST 节点可覆盖，命中的参数条件即覆盖该次调用，因为参数就是这次调用被判断的全部输入；
+- 其余情况要求调用中的每个结构节点都被命中的 allow 条件覆盖，且结构解析完整。参数条件不单独覆盖 Shell AST 节点，只命中某个参数不会让整条命令放行。
+
+参数条件与 AST 节点覆盖不能互相替代：复合命令仍必须逐个节点覆盖，`scope.tools` 只决定规则是否适用于该工具，永远不会因为“工具在范围内”而授权。进入审查时记录具体原因（`no-match`、`incomplete`、`unresolved`、`partial-allow`）。Shell 规范化与更精细的覆盖算法属于后续实现，不在规则模型这一环提前实现。
+
 上述“未命中”须与“无法判断”区分；高优先级规则或调用覆盖因结构缺失而无法判断时，不能仅凭较低优先级 allow 整体放行，见[解析状态与无法判断](#matching-uncertainty)。
+
+<a id="legacy-conversion"></a>
+
+#### 旧格式转换（2026-10-25 已确认）
+
+旧格式的匹配语义与新格式不同：RE2 使用搜索（匹配任意位置），glob 保留了取反与 extglob，工具选择器按点路径导航并把数字、布尔转成字符串。因此旧规则**只在可证明等价时**转换：
+
+| 旧规则 | 处理 |
+|---|---|
+| `exact` | 直接转换；两种格式都以相等判断，结构目标与工具名同理 |
+| `regex` 可证明整值匹配 | 转换。要求以 `^` 开头、在分组深度 0 处以未转义 `$` 结尾、深度 0 无 `\|`、无多行标记、无 `\A`/`\z`/`\Z` |
+| `glob` 无取反、无 extglob | 转换；表达式文本不变 |
+| `tool` 节点无 `selector` | 转成 `tool` 目标条件，并把旧 `match.tool` 写进 `scope.tools`；不含 `*` 的值在两种格式中都是字面相等，含 `*` 且无取反/extglob 的才按 glob |
+| 任意 `selector` | 拒绝：旧选择器会字符串化数字/布尔并展开字符串数组，类型化 JSONPath 无法证明等价 |
+| 其余（未锚定 regex、取反 glob、多行 regex 等） | 拒绝，`rule.not-convertible` |
+
+`^safe|bad$` 是必须拒绝的典型例子：两个锚点分别约束两个分支，旧格式下 `dangerbad` 命中，整值匹配下不命中。`(?m)^a$` 同理。转换失败时整份文档作为候选配置无效，宿主保留上一份生效配置，原文件不被改写；不会为了“能用”而放宽表达式。
+
+拒绝转换而不是猜测等价，是有意的取舍：自动改写可能扩大 `allow`，也可能缩小 `deny`，两种都不可接受。
 
 <a id="matching-uncertainty"></a>
 
