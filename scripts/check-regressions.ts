@@ -5,68 +5,54 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import {
+  historicalVerdict,
+  parseCases,
+  scopeVerdict,
+} from './regression-verdict.ts';
+import type { RunVerdict } from './regression-verdict.ts';
+
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, '.local', 'regressions');
 await mkdir(artifacts, { recursive: true });
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Failed case ids from a runner's `results.json`; null when unreadable. */
-function failedIds(path: string): readonly string[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed)) return null;
-  const results = parsed['results'];
-  if (!Array.isArray(results)) return null;
-  const failed: string[] = [];
-  for (const entry of results) {
-    if (!isRecord(entry)) return null;
-    const id = entry['id'];
-    const passes = entry['passes'];
-    if (typeof id !== 'string' || typeof passes !== 'boolean') return null;
-    if (!passes) failed.push(id);
-  }
-  return failed;
-}
-
-/**
- * Two independent runners, each copied to the same relative depth as its source
- * so its `../../../lib/...` imports exercise the current build.
- *
- * 1. The historical R1–R9 reproducer stays byte-identical as evidence of the
- *    prototype's behavior. R8 covers an accept flow the first release removes,
- *    so its recorded failure is expected and named explicitly.
- * 2. The first-release scope runner states the current contract: suggestion
- *    endpoints are absent, an attempted acceptance changes nothing, and rules,
- *    rule testing and logs keep working with existing rows retained.
- */
-const runs = [
+const runs: readonly {
+  readonly name: string;
+  readonly source: string;
+  readonly verdict: (
+    cases: readonly {
+      readonly id: string;
+      readonly passes: boolean;
+      readonly actual: unknown;
+    }[],
+  ) => RunVerdict;
+}[] = [
   {
     name: 'R1–R9',
     source: 'validation/codex-review/2026-10-21/reproduce.mjs',
-    // R8's historical expectation no longer matches the current contract.
-    allowedFailures: ['R8'],
+    verdict: historicalVerdict,
   },
   {
     name: 'S1–S3',
     source: 'validation/first-release-scope/2026-10-25/reproduce.mjs',
-    allowedFailures: [] as readonly string[],
+    verdict: scopeVerdict,
   },
 ];
+
+/** Read a runner report as untrusted JSON; null when unreadable or malformed. */
+function readReport(path: string): ReturnType<typeof parseCases> {
+  try {
+    return parseCases(JSON.parse(readFileSync(path, 'utf8')));
+  } catch {
+    return null;
+  }
+}
 
 let failedRuns = 0;
 for (const run of runs) {
   const directory = await mkdtemp(join(artifacts, 'run-'));
   const script = join(directory, 'reproduce.mjs');
   await copyFile(join(root, run.source), script);
-  // Capture output so an expected historical failure reads as a documented
-  // exception instead of an alarming FAIL line in the verify log.
   const result = spawnSync(process.execPath, [script], {
     cwd: root,
     encoding: 'utf8',
@@ -79,25 +65,30 @@ for (const run of runs) {
   if (result.stderr.length > 0) process.stderr.write(result.stderr);
 
   const reportPath = join(directory, 'results.json');
-  const failed = failedIds(reportPath);
-  const unexpected =
-    failed === null
-      ? result.status === 0
-        ? []
-        : ['<unreadable result>']
-      : failed.filter((id) => !run.allowedFailures.includes(id));
-  if (unexpected.length > 0) {
+  const cases = readReport(reportPath);
+  if (cases === null) {
+    failedRuns += 1;
+    process.stderr.write(`${run.name}: results.json is unreadable\n`);
+    continue;
+  }
+  const verdict = run.verdict(cases);
+  if (!verdict.ok) {
     failedRuns += 1;
     process.stderr.write(
-      `${run.name} failed unexpectedly: ${unexpected.join(', ')}\n`,
+      `${run.name} failed: ${verdict.problems.join('; ')}\n`,
     );
-  }
-  for (const id of run.allowedFailures) {
-    if (failed?.includes(id) === true) {
-      process.stdout.write(
-        `${run.name}: ${id} covers a prototype flow removed from the first release (documented historical evidence)\n`,
-      );
-    }
+  } else if (run.name === 'R1–R9') {
+    // R8's own summary line reads FAIL because the prototype flow it describes
+    // no longer exists. The gate above replaced a name-based exemption with the
+    // observation checks, so state what was actually verified.
+    process.stdout.write(
+      'R1–R9: R1–R7 and R9 passed, and R8 recorded the expected end state ' +
+        '(candidate pending, no rule added, accept route unreachable)\n',
+    );
+  } else {
+    process.stdout.write(
+      `${run.name}: observations match the current contract\n`,
+    );
   }
   process.stdout.write(`Regression evidence (${run.name}): ${reportPath}\n`);
 }
