@@ -41,6 +41,8 @@
     "test:watch": "vitest",
     "check:unused": "knip",
     "check:workflows": "actionlint && zizmor --offline --no-progress --strict-collection .github",
+    "check:pr-title": "node scripts/check-pr-title.ts",
+    "pr:merge": "node scripts/merge-pr.ts",
     "check:build": "node scripts/check-build.ts",
     "verify": "pnpm run check:peers && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run check:unused && pnpm run check:dependencies && pnpm run check:workflows && pnpm run check:i18n && pnpm run test && pnpm run build && pnpm run check:build && pnpm run check:regressions",
     "check:regressions": "node scripts/check-regressions.ts",
