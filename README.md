@@ -150,6 +150,8 @@ node scripts/check.mjs
 
 文案按 `locale/<语言>/<功能模块>.json` 分文件，内部使用嵌套对象，所有语言共用 `locale/schema.json`。组件保留点号 key；新增资源同步登记到 `src/client/i18n/resources.ts`。开发允许缺少译文并逐条回退中文，发布前补齐英文及其他已声明语言，详见[资源组织与校验](docs/development-baseline.md#i18n-的开发与发布检查)。
 
-CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周检查 npm 开发依赖和 Actions 更新，通过 PR 验证，不自动合并。
+CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周分别检查根目录 npm 依赖、DSH 独立运行时与 Actions 更新，通过 PR 验证，不自动合并。
 
-真实 DSH smoke 独立运行：相关代码／locale／构建 PR 和 main 推送自动使用 GitHub-hosted Ubuntu；手动入口可选 macOS、Windows 或三平台并行。宿主从独立 lockfile 安装固定 DSH 0.2.1-rc.3，不需要模型凭据或 self-hosted runner。完整权限与生命周期验收随功能补齐并在发布前按支持系统检查，详见[执行分层与命令](docs/development-baseline.md#真实-dsh-e2e)及[实际平台证据](validation/engineering/2026-10-25-dsh-hosted/REPORT.md)。
+真实 DSH smoke 独立运行：相关代码／locale／构建 PR 和 main 推送自动使用 GitHub-hosted Ubuntu；改动 `tests/e2e/runtime/` 的升级 PR 按实际 Git diff 自动跑 Linux／macOS／Windows，适用于 Dependabot 和手动更新。手动入口仍可选单个平台或三平台。宿主从独立清单和 lockfile 安装统一固定版本，不需要模型凭据或 self-hosted runner；发布前需要新版时先完成升级 PR，不在发布任务中临时选择 `latest`。完整权限与生命周期验收随功能补齐并在发布前按支持系统检查；Release Action 尚未实现。详见[执行分层与版本维护](docs/development-baseline.md#真实-dsh-e2e)及[已有平台证据](validation/engineering/2026-10-25-dsh-hosted/REPORT.md)。
+
+DSH 独立目录的 Dependabot 配置与升级 PR 自动分流结果另见[版本维护验证报告](validation/engineering/2026-10-25-dsh-updates/REPORT.md)；配置需合并到 main 后才开始定时检查。

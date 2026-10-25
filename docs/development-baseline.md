@@ -92,14 +92,17 @@ fast-check 已接入现有规则优先级测试，每项 100 轮，失败输出 
 
 `pnpm test:e2e:dsh:smoke` 只运行带 `@smoke` 标签的轻量用例；`pnpm test:e2e:dsh` 运行全部真实宿主场景，目前两者均为三个已实现用例，后续功能交付时加入适用场景，不添加占位或跳过。两个入口都会先构建当前代码，再以临时 `DSH_HOME`、profile、工作区和系统分配端口启动宿主；不会复用日常会话或发送模型请求。现有 smoke 最多使用三个 worker 并行，每例独立启动并清理宿主；后续需要共享生命周期的场景应在对应测试内明确组织。
 
-GitHub-hosted runner 从独立的 `tests/e2e/runtime/package.json` 和 `package-lock.json` 安装 DSH **0.2.1-rc.3**，不依赖机器预装或 `latest`。`npm ci` 锁定完整依赖树，安装脚本只允许清单中的五个依赖，新增脚本需明确审查；该运行时不进入插件依赖或发布包。工作流自动读取期望版本，fixture 在启动前核对 `--version`，不接受实际版本漂移。升级 DSH 时同时更新该清单和 lockfile，再执行平台兼容验证。
+GitHub-hosted runner 从独立的 `tests/e2e/runtime/package.json` 和 `package-lock.json` 安装精确锁定的 DSH，本轮实测版本为 **0.2.1-rc.3**。PR、main 与后续 release 共用该版本来源，不依赖机器预装或发布当天的 `latest`。`npm ci` 锁定完整依赖树，安装脚本只允许清单中的五个依赖，新增脚本需明确审查；该运行时不进入插件依赖或发布包。工作流自动读取期望版本，fixture 在启动前核对 `--version`，不接受实际版本漂移。
+
+DSH 通过升级 PR 维护：Dependabot 为 `/tests/e2e/runtime` 单独每周检查，沿用 7 天 cooldown，最多保留一个常规更新 PR，不与根目录开发依赖分组；也允许维护者手动更新清单和 lockfile。升级 PR 自动跑三平台 smoke，由人工检查候选版本、预发布通道、兼容结果及必要的完整宿主回归后合并，不自动合并。当前使用 RC，候选 RC／正式版本及跨通道变化仍需明确审核；不把机器人提出更新当作版本已获接受。
 
 本地复现 npm 运行时（以下为 POSIX shell；Windows 可设置同名环境变量并使用绝对入口路径）：
 
 ```sh
 npm ci --prefix tests/e2e/runtime --strict-allow-scripts --no-audit --no-fund
 DSH_E2E_CLI="$PWD/tests/e2e/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-DSH_E2E_VERSION=0.2.1-rc.3 pnpm test:e2e:dsh:smoke
+DSH_E2E_VERSION="$(node -p 'require("./tests/e2e/runtime/package.json").dependencies["@deepseek-ai/dsh"]')" \
+pnpm test:e2e:dsh:smoke
 ```
 
 fixture 给当前原型显式配置空对象以加载有效默认值。未提供配置时原型会报告 `configuration must be an object`，因此本 smoke 证明的是“已配置插件”的加载与接线，不宣称裸安装默认流程已通过首版验收。相关默认值行为仍由首版配置任务处理。
@@ -118,17 +121,24 @@ axe 已对真实插件初始配置页的 `[data-arbiter-root]` 区域运行默�
 
 验证包括运行时依赖循环、actionlint 和 zizmor 离线静态检查；zizmor 由 mise 固定版本，使用标准 regular persona，无需凭据或远端服务。Dependabot 的普通更新设置 7 天 cooldown。
 
-独立的 `DSH E2E` 工作流使用 GitHub-hosted runner，不再要求预装 DSH 或部署 self-hosted runner。其 job 与普通 CI 独立，两个工作流同时运行，不把 smoke 串在 `Verify` 后面；三个 smoke 保持并行，跨平台 matrix 使用 `fail-fast: false`。复用 pnpm store 和 npm 下载缓存，每次仍通过冻结安装和 `npm ci` 校验依赖。失败时不重试掩盖问题，工件保留七天。
+独立的 `DSH E2E` 工作流使用 GitHub-hosted runner，不再要求预装 DSH 或部署 self-hosted runner。其 job 与普通 CI 独立，两个工作流同时运行，不把 smoke 串在 `Verify` 后面。工作流先用不安装依赖的轻量 job 选择平台，再并行启动选中的系统；三个 smoke 保持并行，跨平台 matrix 使用 `fail-fast: false`。复用 pnpm store 和 npm 下载缓存，每次仍通过冻结安装和 `npm ci` 校验依赖。失败时不重试掩盖问题，工件保留七天。
 
 | 时机 | 运行范围 |
 |---|---|
 | 普通 PR | 普通并行 CI；纯文档、纯 Node 测试等未命中路径的改动不触发 DSH smoke |
 | 相关 PR | `src/`、locale、E2E、构建、清单／lockfile、固定工具或宿主 patch 等路径变化，自动在 `ubuntu-24.04` 跑 smoke |
+| DSH 运行时升级 PR | 改动 `tests/e2e/runtime/`，自动在 Ubuntu、macOS、Windows 三平台并行跑 smoke；Dependabot 与手动升级相同 |
 | main 推送 | 自动在 `ubuntu-24.04` 跑 smoke，确认合并后的集成 |
 | 手动兼容验证 | `platforms` 可选 Ubuntu、`macos-15`、`windows-2025` 或 `all`；`all` 三个平台同时运行 smoke |
-| 发布前／DSH 升级 | 手动 `all` 验证基础兼容，并按实际支持的系统完成关键权限与生命周期验收；完整 UI 旅程主要在基准系统执行 |
+| 发布前 | 使用仓库已接受的固定 DSH 版本，手动 `all` 验证基础兼容，并按实际支持的系统完成关键权限与生命周期验收；完整 UI 旅程主要在基准系统执行 |
+
+自动平台选择读取 PR base 与 checkout 合并树之间的整份 Git diff，不依赖作者、机器人身份、分支名或最后一个提交。运行时目录内的新增、修改、删除、移出与 lockfile 单独更新均触发三平台；解析使用 NUL 分隔文件名，diff 无法读取时失败，不降级成 Ubuntu 通过。main 仍固定一个 Ubuntu 平台；手动触发仍以 `platforms` 的明确选项为准。
+
+DSH 独立目录配置及升级 PR 自动三平台分流的运行证据见[版本维护验证报告](../validation/engineering/2026-10-25-dsh-updates/REPORT.md)。Dependabot 配置检查通过与定时服务实际产生更新分开记录；配置合并到 main 后才开始定时检查，不把分支验证写成服务已运行。
 
 手动入口示例：`gh workflow run dsh-e2e.yml -f platforms=all`。该入口只运行 smoke，不等于完整发布验收。`pnpm check:release` 仍要求全语言完整性、`pnpm verify` 与完整 `pnpm test:e2e:dsh`，各功能的宿主场景随 issue 交付，不推迟到发布前才首次运行。涉及接管、沙箱和卸载回退的改动，在合并前还应提交适用真实宿主证据，不能只凭常规 smoke 放行。
+
+Release Action 尚未实现，`pnpm check:release` 是当前机器上的检查命令，不会自行创建三平台矩阵。后续发布流程必须复用仓库中的 DSH 清单和 lockfile；发布前发现新版时，先提升级 PR、验证并合并，再开始发布，不在 release job 中临时解析或安装另一个 `latest`。平台与版本支持声明以实际验收证据为准。
 
 不同系统共用 Chromium 不能证明宿主语义相同：文件边界、命令／沙箱、启动退出、冷恢复和真实停用／卸载需在每个声明支持的系统分别验收；Windows 还需关注启动器、路径及进程树清理。通用自动化使用真实宿主和插件，在 Reviewer 边界提供确定性响应；真实模型质量与真人操作另留证据，不让日常 CI 等待人工或付费模型。具体已运行平台与能力见[GitHub-hosted 验证报告](../validation/engineering/2026-10-25-dsh-hosted/REPORT.md)，不以 smoke 通过直接宣布该平台首版功能全部受支持。
 
