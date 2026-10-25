@@ -25,6 +25,7 @@ export const test = base.extend<DshFixtures>({
     } finally {
       for (const name of [
         'environment.json',
+        'cleanup.json',
         'host.stdout.log',
         'host.stderr.log',
       ]) {

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  access,
   mkdir,
   readFile,
   readdir,
@@ -107,6 +108,32 @@ export async function startDshHost(
       }
       await rm(profile.root, { recursive: true, force: true });
     }
+    const profileExists = await access(profile.root).then(
+      () => true,
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        )
+          return false;
+        throw error;
+      },
+    );
+    const processExited =
+      host === undefined ||
+      host.child.exitCode !== null ||
+      host.child.signalCode !== null;
+    await writeFile(
+      join(artifacts, 'cleanup.json'),
+      JSON.stringify(
+        { profileRemoved: !profileExists, processExited },
+        null,
+        2,
+      ),
+    );
+    if (profileExists || !processExited)
+      throw new Error('DSH fixture cleanup did not complete.');
   };
   try {
     const version = await execFileAsync(

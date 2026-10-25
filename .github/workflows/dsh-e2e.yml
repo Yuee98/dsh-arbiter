@@ -1,7 +1,30 @@
 name: DSH E2E
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/dsh-e2e.yml'
+      - 'src/**'
+      - 'locale/**'
+      - 'tests/e2e/**'
+      - 'scripts/build-client.ts'
+      - 'scripts/clean.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'mise.toml'
+      - 'tsconfig*.json'
+      - 'playwright.config.ts'
+      - 'cordis.patch.yml'
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Host platform for compatibility smoke (all before release or a DSH upgrade)
+        type: choice
+        default: ubuntu-24.04
+        options: [ubuntu-24.04, macos-15, windows-2025, all]
 
 permissions:
   contents: read
@@ -18,11 +41,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: ${{ fromJSON(inputs.platforms == 'all' && '["ubuntu-24.04", "macos-15", "windows-2025"]' || inputs.platforms == 'macos-15' && '["macos-15"]' || inputs.platforms == 'windows-2025' && '["windows-2025"]' || '["ubuntu-24.04"]') }}
     defaults:
       run:
         shell: bash
     steps:
+      - name: Allow historical evidence paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,8 +58,23 @@ jobs:
         with:
           version: '2026.10.9'
           install_args: node npm:pnpm
+      - name: Find dependency cache paths
+        id: stores
+        run: |
+          echo "pnpm=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore plugin dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.stores.outputs.pnpm }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
+      - name: Restore DSH download cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.stores.outputs.npm }}
+          key: ${{ runner.os }}-${{ runner.arch }}-dsh-${{ hashFiles('tests/e2e/runtime/package*.json', 'mise.toml') }}
       - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Install pinned public DSH CLI
@@ -47,7 +88,7 @@ jobs:
       - name: Run isolated real DSH smoke
         env:
           DSH_E2E_CLI: ${{ runner.temp }}/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js
-        run: pnpm test:e2e:dsh
+        run: pnpm test:e2e:dsh:smoke
       - name: Save browser and host evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

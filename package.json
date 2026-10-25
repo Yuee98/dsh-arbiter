@@ -48,6 +48,7 @@
     "test:integration": "vitest run --project integration",
     "test:ui": "vitest run --project ui",
     "test:e2e:dsh": "pnpm build && playwright test",
+    "test:e2e:dsh:smoke": "pnpm build && playwright test --grep @smoke",
     "check:i18n": "node scripts/check-i18n.ts",
     "check:i18n:release": "node scripts/check-i18n.ts --release",
     "check:release": "pnpm check:i18n:release && pnpm verify && pnpm test:e2e:dsh",
