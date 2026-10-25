@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 
-import { appendRecord, recordOf, sessionRecordError } from '../src/records.js';
+import {
+  appendRecord,
+  hostInstallationRoot,
+  recordOf,
+  sessionRecordError,
+} from '../src/records.js';
 
 /**
  * These tests pin the contract of the record layer, not the host:
@@ -21,6 +26,34 @@ function stubSession() {
 }
 
 describe('plugin record layer', () => {
+  test.each([
+    ['/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js', '/opt/dsh'],
+    [
+      'C:\\runtime\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+      'C:\\runtime',
+    ],
+    [
+      'D:\\a\\_temp/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js',
+      'D:\\a\\_temp/dsh-runtime',
+    ],
+    [
+      '\\\\server\\share\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\cli.js',
+      '\\\\server\\share\\dsh',
+    ],
+    [
+      '/Applications/DSH.app/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js',
+      '/Applications/DSH.app/Resources/app.asar/dsh',
+    ],
+  ])('locates the running host installation from %s', (entry, root) => {
+    expect(hostInstallationRoot(['node', entry])).toBe(root);
+  });
+
+  test('does not invent a host installation when argv has no host package', () => {
+    expect(
+      hostInstallationRoot(['node', '/workspace/plugin.js']),
+    ).toBeUndefined();
+  });
+
   test('resolves the host writer', async () => {
     // The package is shipped with DSH; a failure here means the resolver is
     // broken, not that the assertion is optional.

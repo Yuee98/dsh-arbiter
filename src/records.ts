@@ -101,9 +101,15 @@ export function loadSessionRecordApi(): Promise<SessionRecordApi | null> {
  * and a source checkout at `<root>/node_modules/@deepseek-ai/dsh/lib/bin.js`.
  * Nothing here assumes a particular absolute prefix.
  */
-function hostInstallationRoot(): string | undefined {
-  for (const arg of process.argv) {
-    const marker = arg.indexOf('/node_modules/@deepseek-ai/');
+export function hostInstallationRoot(
+  argv: readonly string[] = process.argv,
+): string | undefined {
+  for (const arg of argv) {
+    // Node's argv uses native separators, including mixed paths from Git Bash.
+    // Keep the original prefix for the native resolver after locating it.
+    const marker = arg
+      .replaceAll('\\', '/')
+      .indexOf('/node_modules/@deepseek-ai/');
     if (marker > 0) return arg.slice(0, marker);
   }
   return undefined;
