@@ -33,7 +33,9 @@ export interface DshHost {
 }
 
 export interface HostOptions {
-  readonly arbiterConfig?: 'empty' | 'unset';
+  /** A value object is written verbatim, for a case that needs its own document. */
+  readonly arbiterConfig?:
+    'empty' | 'unset' | Readonly<Record<string, unknown>>;
   readonly modelGroups?: readonly SeededModelGroup[];
 }
 

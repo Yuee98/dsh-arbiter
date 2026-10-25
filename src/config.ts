@@ -19,9 +19,11 @@ import type {
 import { DEFAULT_CONFIG } from './config/defaults.js';
 import { isRecord } from './config/values.js';
 import { parseConfigV1 } from './config/v1.js';
+import { parseConfigV2 } from './config/v2.js';
 import {
   CONFIG_FORMAT_FIELD,
-  DEFAULT_CONFIG_FORMAT,
+  CONFIG_FORMAT_V1,
+  CONFIG_FORMAT_V2,
   identifyConfigFormat,
   registerConfigFormat,
 } from './config/format.js';
@@ -32,9 +34,14 @@ export {
 } from './config/format.js';
 
 registerConfigFormat({
-  id: DEFAULT_CONFIG_FORMAT,
+  id: CONFIG_FORMAT_V1,
   legacy: true,
   parse: parseConfigV1,
+});
+
+registerConfigFormat({
+  id: CONFIG_FORMAT_V2,
+  parse: parseConfigV2,
 });
 
 /**
@@ -101,7 +108,7 @@ function parseDocumentRecord(raw: Record<string, unknown>): ConfigParseResult {
   if (!format.explicit && config.rules.length > 0) {
     warnings.push({
       path: CONFIG_FORMAT_FIELD,
-      message: `no "${CONFIG_FORMAT_FIELD}" is declared; rules use the legacy prefix semantics of "${format.handler.id}"`,
+      message: `no "${CONFIG_FORMAT_FIELD}" is declared; legacy rules keep the prefix semantics of "${format.handler.id}" and are converted only where equivalence is provable`,
       code: 'config.format-implicit',
       params: { format: format.handler.id },
     });

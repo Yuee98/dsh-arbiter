@@ -1,15 +1,26 @@
 /**
- * Command-rule compilation, matching, priority and coverage.
+ * Rule evaluation: subjects, matching, priority and coverage.
  *
  * Rule priority is fixed: deny > force-ask > force-review > allow >
  * review(default). The last item is the fallback path, not a configurable
  * verdict. A complete `allow` never grants a partial parse, and a matching
  * higher-priority rule shadows an allow even when the allow pattern is more
  * specific.
+ *
+ * Conditions are ORed inside a rule. A condition may also be `unknown` when the
+ * structure it needs could not be determined; an unknown is never a verdict. A
+ * certain higher-priority match still decides, but an unknown higher-priority
+ * rule keeps an `allow` from short-circuiting, so the call goes to review
+ * default instead of being allowed on an incomplete judgement.
  */
 
 import { compileRules } from './compile.js';
-import type { CompiledRule, RuleCompileError, Subject } from './compile.js';
+import type {
+  CallSubjects,
+  CompiledRule,
+  RuleCompileError,
+  Subject,
+} from './compile.js';
 export type { RuleCompileError } from './compile.js';
 
 import {
@@ -21,9 +32,11 @@ import {
 } from '../shell/parse.js';
 import type {
   CommandRule,
+  RuleConditionResult,
   RuleEvaluation,
   RuleMatchDetail,
   RulePath,
+  RuleResult,
   RuleTestResult,
   RuleVerdict,
   SessionKind,
@@ -48,26 +61,15 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function selectArgument(argumentsValue: unknown, selector: string): string[] {
-  let current: unknown = argumentsValue;
-  for (const part of selector.split('.')) {
-    if (!isPlainRecord(current) && !Array.isArray(current)) return [];
-    if (Array.isArray(current)) {
-      const index = Number(part);
-      current = Number.isSafeInteger(index) ? current[index] : undefined;
-    } else {
-      current = current[part];
-    }
-  }
-  if (typeof current === 'string') return [current];
-  if (typeof current === 'number' || typeof current === 'boolean')
-    return [String(current)];
-  if (Array.isArray(current)) {
-    return current.filter((item): item is string => typeof item === 'string');
-  }
-  return [];
-}
-
+/**
+ * Text a shell call carries as its command line.
+ *
+ * This reader is deliberately conservative: it only finds the conventional
+ * command fields and never invents a normalized form. Shell normalization and
+ * per-word static values are #8's responsibility; until then the raw text is
+ * what a command condition sees, and an unresolved variable keeps its original
+ * spelling instead of becoming a guessed value.
+ */
 function shellTextOf(argumentsValue: unknown): string | null {
   if (!isPlainRecord(argumentsValue)) return null;
   for (const key of ['command', 'cmd', 'script'] as const) {
@@ -84,90 +86,154 @@ function shellTextOf(argumentsValue: unknown): string | null {
   return null;
 }
 
-function selectAll(
-  argumentsValue: unknown,
-  selectors: readonly string[],
-): Record<string, string> {
-  const selected: Record<string, string> = {};
-  for (const selector of selectors) {
-    const [value] = selectArgument(argumentsValue, selector);
-    if (value !== undefined) selected[selector] = value;
-  }
-  return selected;
+interface SubjectInputs {
+  readonly tool: string;
+  readonly argumentsValue: unknown;
+  readonly parse: ShellParse | null;
 }
 
-function subjectsFor(
+function structuralSubjects(inputs: SubjectInputs): Subject[] {
+  const { parse } = inputs;
+  const subjects: Subject[] = [];
+  if (parse === null) return subjects;
+  for (const command of parse.commands) {
+    subjects.push({
+      target: 'command',
+      text: command.argv.join(' '),
+      nodeIndex: subjects.length,
+      // A command whose words include an unresolved expansion still has a
+      // comparable text (the raw expression is preserved), so it stays
+      // matchable; it is not treated as unknown text.
+      unresolved: false,
+    });
+  }
+  for (const redirect of parse.redirects) {
+    const absolute = redirect.target.startsWith('/');
+    const cwdKnown = redirect.cwd !== null;
+    const unresolved = !absolute && (redirect.unresolved || !cwdKnown);
+    subjects.push({
+      target: 'file_redirect',
+      text:
+        absolute || !unresolved
+          ? resolvePath(redirect.target, redirect.cwd ?? '/')
+          : redirect.target,
+      nodeIndex: subjects.length,
+      unresolved,
+    });
+  }
+  for (const assignment of parse.assignments) {
+    subjects.push({
+      target: 'variable_assignment',
+      text: `${assignment.name}=${assignment.value}`,
+      nodeIndex: subjects.length,
+      unresolved: false,
+    });
+  }
+  return subjects;
+}
+
+function callSubjects(
   tool: string,
   argumentsValue: unknown,
   parse: ShellParse | null,
   identity: SessionKind,
-  selectors: readonly string[],
-  _cwd: string,
-): Subject[] {
-  const subjects: Subject[] = [];
-  if (parse !== null) {
-    for (const command of parse.commands) {
-      subjects.push({
-        node: 'command',
-        text: command.argv.join(' '),
-        tool,
-        identity,
-        selected: {},
-        unresolved: false,
-        nodeIndex: subjects.length,
-        commandIndex: command.index,
-        raw: command.raw,
-      });
-    }
-    for (const redirect of parse.redirects) {
-      const absolute = redirect.target.startsWith('/');
-      const cwdKnown = redirect.cwd !== null;
-      subjects.push({
-        node: 'file_redirect',
-        text: absolute
-          ? redirect.target
-          : redirect.target.includes('$') || !cwdKnown
-            ? redirect.target
-            : resolvePath(redirect.target, redirect.cwd),
-        tool,
-        identity,
-        selected: {},
-        unresolved: !absolute && (redirect.target.includes('$') || !cwdKnown),
-        nodeIndex: subjects.length,
-        commandIndex: redirect.commandIndex,
-        raw: redirect.raw,
-      });
-    }
-    for (const assignment of parse.assignments) {
-      subjects.push({
-        node: 'variable_assignment',
-        text: `${assignment.name}=${assignment.value}`,
-        tool,
-        identity,
-        selected: {},
-        unresolved: false,
-        nodeIndex: subjects.length,
-        commandIndex: assignment.commandIndex,
-        raw: assignment.raw,
-      });
-    }
-  }
-
-  // One bare tool subject (name matching) plus one subject per selector used by
-  // the current rule set. Selector subjects are deduplicated so coverage is not
-  // inflated by several rules naming the same argument.
-  subjects.push({
-    node: 'tool',
-    text: '',
+): CallSubjects {
+  // The tool category is a fact about the tool name, not about whether a command
+  // could be extracted. A shell tool whose arguments carry no usable command text
+  // still carries shell structure in principle; treating it as a non-shell tool
+  // would let an argument condition cover a call whose structure is unknown.
+  const isShellCall = SHELL_TOOLS.has(tool);
+  const complete =
+    parse === null
+      ? false
+      : parse.status === 'ok' && parse.completeness === 'complete';
+  return {
     tool,
     identity,
-    selected: selectAll(argumentsValue, selectors),
-    unresolved: false,
-    nodeIndex: subjects.length,
-    commandIndex: 0,
-    raw: '',
-  });
-  return subjects;
+    argumentsValue,
+    subjects: structuralSubjects({ tool, argumentsValue, parse }),
+    shellCall: isShellCall,
+    // A shell call with no readable command text has no trustworthy structure at
+    // all, which is as undetermined as a parse error. A partial parse does have
+    // usable nodes, so its existing commands stay matchable; #8 refines how
+    // incomplete structure propagates into coverage.
+    structureUnknown:
+      isShellCall && (parse === null || parse.status === 'error'),
+    structureComplete: !isShellCall || complete,
+  };
+}
+
+interface MatchEntry {
+  detail: RuleMatchDetail;
+  layer: number;
+  order: number;
+  subject: Subject | null;
+}
+
+/** The concrete subject a matched condition refers to, when it has one. */
+function matchSubject(
+  call: CallSubjects,
+  condition: RuleConditionResult,
+): Subject | null {
+  if (condition.target === 'argument' || condition.target === 'tool')
+    return null;
+  return (
+    call.subjects.find(
+      (candidate) =>
+        candidate.target === condition.target &&
+        !candidate.unresolved &&
+        candidate.text === condition.matchedValue,
+    ) ?? null
+  );
+}
+
+function ruleResults(
+  compiled: readonly CompiledRule[],
+  call: CallSubjects,
+): {
+  readonly results: readonly RuleResult[];
+  readonly matched: readonly MatchEntry[];
+} {
+  const results: RuleResult[] = [];
+  const matched: MatchEntry[] = [];
+  for (const rule of compiled) {
+    const evaluation = rule.evaluate(call);
+    results.push({
+      index: rule.index,
+      id: rule.rule.id,
+      verdict: rule.rule.verdict,
+      outcome: evaluation.outcome,
+      ...(rule.rule.name === undefined ? {} : { name: rule.rule.name }),
+      conditions: evaluation.conditions,
+    });
+    if (evaluation.outcome !== 'match') continue;
+    const condition = evaluation.conditions.find(
+      (result) => result.outcome === 'match',
+    );
+    if (condition === undefined) continue;
+    const subject = matchSubject(call, condition);
+    matched.push({
+      detail: {
+        index: rule.index,
+        id: rule.rule.id,
+        verdict: rule.rule.verdict,
+        effective: false,
+        target: condition.target,
+        conditionIndex: condition.index,
+        nodeIndex: subject?.nodeIndex ?? 0,
+        matchedText: subject?.text ?? condition.matchedValue ?? '',
+        ...(rule.rule.name === undefined ? {} : { name: rule.rule.name }),
+        ...(rule.rule.hint === undefined ? {} : { hint: rule.rule.hint }),
+      },
+      layer: VERDICT_PRIORITY[rule.rule.verdict],
+      order: rule.index,
+      subject,
+    });
+  }
+  matched.sort(
+    (left, right) => left.layer - right.layer || left.order - right.order,
+  );
+  return { results, matched };
 }
 
 export interface EvaluateOptions {
@@ -183,121 +249,120 @@ export interface EvaluateOptions {
   readonly environment?: Readonly<Record<string, string>>;
 }
 
-interface MatchEntry {
-  detail: RuleMatchDetail;
-  layer: number;
-  order: number;
-  subject: Subject;
-}
-
-function collectMatches(
-  compiled: readonly CompiledRule[],
-  subjects: readonly Subject[],
-): MatchEntry[] {
-  const matches: MatchEntry[] = [];
-  for (const rule of compiled) {
-    for (const subject of subjects) {
-      if (!rule.matches(subject)) continue;
-      matches.push({
-        detail: {
-          index: rule.index,
-          id: rule.rule.id,
-          verdict: rule.rule.verdict,
-          effective: false,
-          node: subject.node,
-          nodeIndex: subject.nodeIndex,
-          matchedText:
-            subject.node === 'tool'
-              ? rule.rule.match.selector === undefined
-                ? subject.tool
-                : (subject.selected[rule.rule.match.selector] ?? subject.tool)
-              : subject.text,
-          ...(rule.rule.hint === undefined ? {} : { hint: rule.rule.hint }),
-        },
-        layer: VERDICT_PRIORITY[rule.rule.verdict],
-        order: rule.index,
-        subject,
-      });
-      break;
-    }
-  }
-
-  matches.sort(
-    (left, right) => left.layer - right.layer || left.order - right.order,
-  );
-  return matches;
-}
-
+/**
+ * Whether a complete `allow` covers the whole call.
+ *
+ * Three cases are enough for the first version:
+ *
+ *   - a matched `tool`-target condition covers the whole tool call;
+ *   - for a call with no shell structure at all (a non-shell tool), a matched
+ *     `argument` condition covers the call, because the arguments are the whole
+ *     input the rule judged;
+ *   - otherwise a structural allow covers the call only when every structural
+ *     subject is covered and the parse is complete.
+ *
+ * `scope` contributes nothing: it decides which calls a rule applies to, never
+ * that those calls are allowed. An `argument` condition on a shell call covers no
+ * AST node, so it narrows rather than widens. #8 owns the refined evaluator.
+ */
 function allowCoverage(
-  compiled: readonly CompiledRule[],
-  subjects: readonly Subject[],
-  parse: ShellParse | null,
-): { readonly complete: boolean; readonly covered: boolean } {
-  const coverageSubjects =
-    parse !== null && subjects.some((subject) => subject.node !== 'tool')
-      ? subjects.filter((subject) => subject.node !== 'tool')
-      : subjects;
-  const allowCoverage = new Map<number, boolean>();
-  for (const subject of coverageSubjects)
-    allowCoverage.set(subject.nodeIndex, false);
-  for (const rule of compiled) {
-    if (rule.rule.verdict !== 'allow') continue;
-    for (const subject of coverageSubjects) {
-      if (!rule.matches(subject)) continue;
-      allowCoverage.set(subject.nodeIndex, true);
-    }
-  }
-  const toolSubject = subjects.find((subject) => subject.node === 'tool');
-  const wholeToolAllow =
-    toolSubject !== undefined &&
-    compiled.some(
-      (rule) =>
-        rule.rule.verdict === 'allow' &&
-        rule.rule.match.node === 'tool' &&
-        rule.rule.match.selector === undefined &&
-        rule.matches(toolSubject),
+  call: CallSubjects,
+  results: readonly RuleResult[],
+): { readonly wholeTool: boolean; readonly covered: boolean } {
+  const structural = call.subjects;
+  const allows = results.filter(
+    (result) => result.verdict === 'allow' && result.outcome === 'match',
+  );
+  // The rule matched because some alternative matched. A tool target only
+  // covers the whole call when that alternative is the one that matched;
+  // otherwise a matching command alternative would silently extend its coverage
+  // to an unrelated tool alternative.
+  const wholeTool = allows.some((result) =>
+    result.conditions.some(
+      (condition) =>
+        condition.target === 'tool' && condition.outcome === 'match',
+    ),
+  );
+  // A non-shell call has no AST to cover; its arguments are the entire judged
+  // input, so a matching argument condition covers it. The tool category decides
+  // this, never an empty subject list: a shell call whose structure could not be
+  // determined also has no subjects, and its arguments are not the whole input.
+  const argumentOnly =
+    !call.shellCall &&
+    allows.some((result) =>
+      result.conditions.some(
+        (condition) =>
+          condition.target === 'argument' && condition.outcome === 'match',
+      ),
     );
-  const complete = parse === null || parse.completeness === 'complete';
+  // Compare against every text the condition actually matched: one condition can
+  // match several distinct subjects (a case-insensitive exact value, or a regex
+  // over several commands), and keeping only the first would mark the rest as
+  // uncovered.
+  const covers = (subject: Subject): boolean =>
+    allows.some((result) =>
+      result.conditions.some(
+        (condition) =>
+          condition.outcome === 'match' &&
+          condition.target === subject.target &&
+          (condition.matchedValues ?? []).includes(subject.text),
+      ),
+    );
+  // An argument condition covers no structural node, and a partial parse hides
+  // nodes the matcher never saw, so neither can complete a structural cover.
   const covered =
-    wholeToolAllow ||
-    (coverageSubjects.length > 0 && [...allowCoverage.values()].every(Boolean));
-  return { complete, covered };
+    argumentOnly ||
+    (structural.length > 0 &&
+      call.structureComplete &&
+      structural.every((subject) => covers(subject)));
+  return { wholeTool, covered };
 }
 
 function evaluationRulePath(
-  matches: readonly MatchEntry[],
-  compiled: readonly CompiledRule[],
-  subjects: readonly Subject[],
-  parse: ShellParse | null,
+  call: CallSubjects,
+  results: readonly RuleResult[],
+  matched: readonly MatchEntry[],
 ): RulePath {
-  const winner = matches[0];
-  let path: RulePath;
+  const winner = matched[0];
   if (winner !== undefined && winner.detail.verdict !== 'allow') {
-    path = {
+    return {
       kind: 'rule',
       verdict: winner.detail.verdict,
       ruleId: winner.detail.id,
       ...(winner.detail.hint === undefined ? {} : { hint: winner.detail.hint }),
     };
-  } else {
-    const { complete, covered } = allowCoverage(compiled, subjects, parse);
-    if (matches.length > 0 && complete && covered) {
-      const allow = matches.find((entry) => entry.detail.verdict === 'allow');
-      if (allow !== undefined) {
-        path = { kind: 'rule', verdict: 'allow', ruleId: allow.detail.id };
-      } else {
-        path = { kind: 'review-default', reason: 'partial-allow' };
-      }
-    } else if (matches.length === 0) {
-      path = { kind: 'review-default', reason: 'no-match' };
-    } else if (!complete) {
-      path = { kind: 'review-default', reason: 'incomplete' };
-    } else {
-      path = { kind: 'review-default', reason: 'partial-allow' };
-    }
   }
-
-  return path;
+  // An allow only decides when nothing more authoritative is undecided. A rule
+  // with higher priority that could not be judged might have denied this call, so
+  // letting the allow through would turn an unknown into an authorization.
+  const allow = matched.find((entry) => entry.detail.verdict === 'allow');
+  if (allow !== undefined) {
+    const priority = VERDICT_PRIORITY.allow;
+    const blocking = results.some(
+      (result) =>
+        result.outcome === 'unknown' &&
+        VERDICT_PRIORITY[result.verdict] < priority,
+    );
+    if (blocking) return { kind: 'review-default', reason: 'unresolved' };
+    const { wholeTool, covered } = allowCoverage(call, results);
+    if (wholeTool || covered)
+      return { kind: 'rule', verdict: 'allow', ruleId: allow.detail.id };
+    // Every node that was read is allowed, but the parse hid others, so the
+    // reason is incompleteness rather than a partial cover.
+    if (!call.structureComplete)
+      return { kind: 'review-default', reason: 'incomplete' };
+    return { kind: 'review-default', reason: 'partial-allow' };
+  }
+  // Nothing was certain. An unknown rule might have decided this call, so the
+  // honest reason is not "no rule matched".
+  if (results.some((result) => result.outcome === 'unknown'))
+    return { kind: 'review-default', reason: 'unresolved' };
+  if (matched.length === 0) {
+    return call.structureUnknown
+      ? { kind: 'review-default', reason: 'incomplete' }
+      : { kind: 'review-default', reason: 'no-match' };
+  }
+  return { kind: 'review-default', reason: 'partial-allow' };
 }
 
 export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
@@ -306,32 +371,18 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
     : null;
   const parse =
     commandText === null ? null : parseShell(commandText, options.cwd);
-  const selectors = [
-    ...new Set(
-      options.rules.flatMap((rule) =>
-        rule.match.node === 'tool' && rule.match.selector !== undefined
-          ? [rule.match.selector]
-          : [],
-      ),
-    ),
-  ];
-  const subjects = subjectsFor(
+  const call = callSubjects(
     options.tool,
     options.arguments,
     parse,
     options.identity,
-    selectors,
-    options.cwd,
   );
-
   const compiled = compileRules(options.rules);
-  const matches = collectMatches(compiled.compiled, subjects);
-  const details = matches.map((entry) => entry.detail);
-  if (matches[0] !== undefined && details[0] !== undefined) {
-    details[0] = { ...details[0], effective: true };
-  }
+  const { results, matched } = ruleResults(compiled.compiled, call);
+  const details = matched.map((entry) => entry.detail);
+  if (details[0] !== undefined) details[0] = { ...details[0], effective: true };
 
-  const path = evaluationRulePath(matches, compiled.compiled, subjects, parse);
+  const path = evaluationRulePath(call, results, matched);
 
   const factsResult =
     parse === null
@@ -347,6 +398,7 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
   return {
     path,
     matches: details,
+    rules: results,
     parse: parse ?? {
       status: 'ok',
       statements: 1,
@@ -447,6 +499,7 @@ export function testRules(
     path: evaluationPath(evaluation),
     rule,
     matches: evaluation.matches,
+    rules: evaluation.rules,
     parse: {
       status: evaluation.parse.status,
       statements: evaluation.parse.statements,
@@ -466,6 +519,7 @@ export function testRules(
 /** Validate only the pattern-bearing fields, used while editing a draft. */
 export function validateRules(
   rules: readonly CommandRule[],
+  sourceIndices?: readonly number[],
 ): readonly RuleCompileError[] {
-  return compileRules(rules).errors;
+  return compileRules(rules, sourceIndices).errors;
 }

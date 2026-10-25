@@ -13,26 +13,66 @@ export type SessionKind = 'main' | 'subagent';
 
 export type RuleVerdict = 'allow' | 'deny' | 'force-ask' | 'force-review';
 export type RuleKind = 'exact' | 'regex' | 'glob';
-export type RuleNode =
-  'command' | 'file_redirect' | 'variable_assignment' | 'tool';
 
-export interface RuleMatchSpec {
-  readonly node: RuleNode;
+/**
+ * What one condition inspects.
+ *
+ * `command`, `file_redirect` and `variable_assignment` read structure the shell
+ * reader produced; `tool` reads the tool name; `argument` selects values from the
+ * tool-call arguments with RFC 9535 JSONPath. The argument target is not a path
+ * helper: a field named `path` carries no file semantics.
+ */
+export type RuleTarget =
+  'command' | 'file_redirect' | 'variable_assignment' | 'tool' | 'argument';
+
+/** How multiple selected values are combined for one `argument` condition. */
+export type RuleMultiMode = 'any' | 'all';
+
+/**
+ * A pattern keeps the JSON type it was written with.
+ *
+ * `regex` and `glob` only apply to strings; `exact` compares the actual JSON
+ * type, so `1` never matches `"1"` and `null` never matches an absent field.
+ */
+export type RulePattern = string | number | boolean | null;
+
+export interface RuleCondition {
+  readonly target: RuleTarget;
+  /**
+   * RFC 9535 expression, required for `argument` and absent for every other
+   * target. `$` is the tool-call arguments object.
+   */
+  readonly path?: string;
   readonly kind: RuleKind;
-  readonly pattern: string;
-  /** Required for `node: "tool"`; an explicit tool name or namespace glob. */
-  readonly tool?: string;
-  /** Argument selector for tool rules, e.g. `path`, `command`, `arguments.url`. */
-  readonly selector?: string;
-  /** `main`, `subagent`, or `preset:<name>`; absent means any known identity. */
+  readonly pattern: RulePattern;
+  /** Matches case-insensitively when `false`; absent means case-sensitive. */
+  readonly caseSensitive?: boolean;
+  /** `argument` only: `any` (default) or `all`. */
+  readonly multi?: RuleMultiMode;
+}
+
+/**
+ * What a rule applies to before its conditions are checked.
+ *
+ * A tool entry is an exact name or a namespace glob. An agent entry is `main`,
+ * `subagent`, or `preset:<name>`; a rule with an agent scope never matches an
+ * unknown identity.
+ */
+export interface RuleScope {
+  readonly tools?: readonly string[];
   readonly agents?: readonly string[];
 }
 
 export interface CommandRule {
+  /** Stable identity; renaming or editing the rule never changes it. */
   readonly id: string;
+  /** Optional custom display name; never used for matching or identity. */
+  readonly name?: string;
   readonly comment?: string;
   readonly enabled?: boolean;
-  readonly match: RuleMatchSpec;
+  readonly scope?: RuleScope;
+  /** At least one condition; several conditions are alternatives (OR). */
+  readonly conditions: readonly RuleCondition[];
   readonly verdict: RuleVerdict;
   readonly hint?: string;
 }
@@ -400,12 +440,60 @@ export type ModelResult =
       readonly kind: 'review-failure';
     };
 
+/** How one rule condition evaluated against one call. */
+export type RuleConditionOutcome = 'match' | 'no-match' | 'unknown';
+
+/**
+ * One condition's result, kept per condition so the configuration UI can explain
+ * a decision without re-running the matcher.
+ *
+ * `unknown` means the needed structure could not be determined (for example an
+ * unresolved redirect target); it is not a match and never grants a verdict. A
+ * target that simply does not exist for this call is `no-match` and carries a
+ * reason instead.
+ */
+export interface RuleConditionResult {
+  readonly index: number;
+  readonly target: RuleTarget;
+  readonly kind: RuleKind;
+  readonly pattern: RulePattern;
+  readonly outcome: RuleConditionOutcome;
+  readonly reason?:
+    | 'scope'
+    | 'missing'
+    | 'empty-selection'
+    | 'unsupported-value'
+    | 'value-mismatch'
+    | 'resolved'
+    | 'unresolved-structure'
+    | 'parse-error';
+  /** JSONPath expression for an `argument` condition. */
+  readonly path?: string;
+  readonly multi?: RuleMultiMode;
+  /** Selected values, in document order, for an `argument` condition. */
+  readonly values?: readonly unknown[];
+  readonly matchedValues?: readonly unknown[];
+  readonly matchedValue?: string;
+}
+
+/** One rule's result, including every condition it evaluated. */
+export interface RuleResult {
+  readonly index: number;
+  readonly id: string;
+  readonly name?: string;
+  readonly verdict: RuleVerdict;
+  readonly outcome: RuleConditionOutcome;
+  readonly conditions: readonly RuleConditionResult[];
+}
+
 export interface RuleMatchDetail {
   readonly index: number;
   readonly id: string;
+  readonly name?: string;
   readonly verdict: RuleVerdict;
   readonly effective: boolean;
-  readonly node: RuleNode;
+  readonly target: RuleTarget;
+  readonly conditionIndex: number;
   readonly nodeIndex: number;
   readonly matchedText: string;
   readonly hint?: string;
@@ -420,7 +508,8 @@ export type RulePath =
     }
   | {
       readonly kind: 'review-default';
-      readonly reason: 'no-match' | 'incomplete' | 'partial-allow';
+      readonly reason:
+        'no-match' | 'incomplete' | 'unresolved' | 'partial-allow';
     };
 
 export interface RuleTestResult {
@@ -429,6 +518,8 @@ export interface RuleTestResult {
   readonly path: RuleMatchDetail['verdict'] | 'review(default)';
   readonly rule: RuleMatchDetail | null;
   readonly matches: readonly RuleMatchDetail[];
+  /** Every rule's condition-level result, for the rule tester's explanation. */
+  readonly rules: readonly RuleResult[];
   readonly parse: {
     readonly status: 'ok' | 'error';
     readonly statements: number;
@@ -445,6 +536,7 @@ export interface RuleTestResult {
 export interface RuleEvaluation {
   readonly path: RulePath;
   readonly matches: readonly RuleMatchDetail[];
+  readonly rules: readonly RuleResult[];
   readonly parse: ShellParse;
   readonly argv: readonly string[];
   readonly facts: DerivedFacts | null;

@@ -8,12 +8,12 @@
   "match": "匹配",
   "toolSelector": "Tool / 参数选择器",
   "verdict": "行为",
-  "scope": "匹配范围",
+  "scope": "身份范围",
   "comment": "备注 / hint",
   "actions": "操作",
   "add": "+ 添加规则",
-  "syntax": "regex 使用 RE2 并要求以 ^ 锚定；路径目标使用 glob。命令规则只决定是否进入审查，不覆盖已形成的审查拒绝，也不是沙箱升权。",
-  "selector": "selector",
+  "syntax": "精确匹配、RE2 与 glob 都要求整个值匹配；regex 不再要求以 ^ 开头，需要前缀或包含关系时请直接写进表达式。可以选择命令、重定向、赋值、工具名或以 JSONPath 取出的工具参数；同一规则内多个条件是“或”。参数匹配保留 JSON 类型，数字、布尔与 null 不会被转成字符串。",
+  "selector": "参数 JSONPath",
   "allow": "免审放行",
   "deny": "禁止",
   "forceAsk": "必须人工",
@@ -31,5 +31,6 @@
   "shadowed": "被遮蔽 / 事实",
   "unmatched": "(未命中)",
   "kind": "匹配类型",
-  "pattern": "匹配表达式"
+  "pattern": "匹配表达式",
+  "pathPlaceholder": "$.files[*].path"
 }

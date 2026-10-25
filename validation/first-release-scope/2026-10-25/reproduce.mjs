@@ -47,8 +47,10 @@ function context(profile, session, extraServices = {}) {
 try {
   const session = { id: 's', header: { cwd: home }, snapshotEvents: () => [], append() {},
     requestHeader: () => ({ config: { provider: 'fixture', model: 'fixture' } }) };
-  const seededRule = { id: 'keep-me', match: { node: 'command', kind: 'regex', pattern: '^gh pr view\\b' }, verdict: 'allow' };
-  const configured = { rules: [seededRule], audit: DEFAULT_CONFIG.audit };
+  // The document states the canonical shape explicitly, so these cases exercise
+  // the release behaviour rather than legacy conversion.
+  const seededRule = { id: 'keep-me', conditions: [{ target: 'command', kind: 'regex', pattern: 'gh pr view(?: .*)?' }], verdict: 'allow' };
+  const configured = { format: 'arbiter-config-v2', rules: [seededRule], audit: DEFAULT_CONFIG.audit };
 
   // Historical rows must survive the scope change: one audited call and one
   // pending candidate written before the plugin starts.

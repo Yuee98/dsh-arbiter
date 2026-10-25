@@ -4,6 +4,8 @@ import type {
   ContextConfig,
   PolicyThresholds,
   ReviewerConfig,
+  RuleCondition,
+  RuleScope,
 } from '../../types.js';
 import {
   array,
@@ -19,36 +21,69 @@ import {
 } from './values.js';
 
 export const ruleVerdict = choice('allow', 'deny', 'force-ask', 'force-review');
-export const ruleNode = choice(
+export const ruleTarget = choice(
   'command',
   'file_redirect',
   'variable_assignment',
   'tool',
+  'argument',
 );
+export const ruleKind = choice('exact', 'regex', 'glob');
+export const ruleMulti = choice('any', 'all');
+
+/** A pattern keeps the JSON type it was written with. */
+function rulePattern(value: unknown): string | number | boolean | null {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  )
+    return value;
+  throw new TypeError('expected a string, number, boolean or null');
+}
+
+function ruleCondition(value: unknown): RuleCondition {
+  const source = object(value);
+  const path = field(source, 'path', optional(text));
+  const caseSensitive = field(source, 'caseSensitive', optional(boolean));
+  const multi = field(source, 'multi', optional(ruleMulti));
+  return {
+    target: field(source, 'target', ruleTarget),
+    kind: field(source, 'kind', ruleKind),
+    pattern: field(source, 'pattern', rulePattern),
+    ...(path === undefined ? {} : { path }),
+    ...(caseSensitive === undefined ? {} : { caseSensitive }),
+    ...(multi === undefined ? {} : { multi }),
+  };
+}
+
+function ruleScope(value: unknown): RuleScope {
+  const source = object(value);
+  const tools = field(source, 'tools', optional(strings));
+  const agents = field(source, 'agents', optional(strings));
+  return {
+    ...(tools === undefined ? {} : { tools }),
+    ...(agents === undefined ? {} : { agents }),
+  };
+}
 
 export function commandRule(value: unknown): CommandRule {
   const source = object(value);
-  const match = field(source, 'match', object);
+  const name = field(source, 'name', optional(text));
   const comment = field(source, 'comment', optional(text));
   const enabled = field(source, 'enabled', optional(boolean));
   const hint = field(source, 'hint', optional(text));
-  const tool = field(match, 'tool', optional(text));
-  const selector = field(match, 'selector', optional(text));
-  const agents = field(match, 'agents', optional(strings));
+  const scope = field(source, 'scope', optional(ruleScope));
   return {
     id: field(source, 'id', text),
     verdict: field(source, 'verdict', ruleVerdict),
+    conditions: field(source, 'conditions', array(ruleCondition)),
+    ...(name === undefined ? {} : { name }),
     ...(comment === undefined ? {} : { comment }),
     ...(enabled === undefined ? {} : { enabled }),
     ...(hint === undefined ? {} : { hint }),
-    match: {
-      node: field(match, 'node', ruleNode),
-      kind: field(match, 'kind', choice('exact', 'regex', 'glob')),
-      pattern: field(match, 'pattern', text),
-      ...(tool === undefined ? {} : { tool }),
-      ...(selector === undefined ? {} : { selector }),
-      ...(agents === undefined ? {} : { agents }),
-    },
+    ...(scope === undefined ? {} : { scope }),
   };
 }
 
