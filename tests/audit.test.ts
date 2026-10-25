@@ -224,8 +224,9 @@ describe('audit store', () => {
     );
     await store.flush();
     const prior = store.priorVerdictsForSession('session-1', 10);
-    expect(prior.map((item) => item.callId)).toEqual(['denied']);
-    expect(prior[0]?.result).toBe('review-deny');
+    expect(prior.verdicts.map((item) => item.callId)).toEqual(['denied']);
+    expect(prior.verdicts[0]?.result).toBe('review-deny');
+    expect(prior.unreadableCount).toBe(0);
     store.close();
   });
 
@@ -819,6 +820,119 @@ describe('credential boundary in stored material', () => {
       request,
     );
     store.close();
+  });
+});
+
+describe('prior verdicts: window, ordering and unreadable count', () => {
+  function deniedRow(overrides: Record<string, unknown> = {}) {
+    return {
+      ...record({ callId: 'x', result: 'review-deny' }),
+      ...overrides,
+    };
+  }
+
+  test('same-millisecond rows are ordered by call_id so the newest survive LIMIT', async () => {
+    const { store } = await makeStore();
+    const ts = 1_700_000_000_000;
+    for (const suffix of ['1', '2', '3', '4', '5']) {
+      store.enqueue(
+        deniedRow({ callId: `c${suffix}`, result: 'review-deny', ts }),
+      );
+    }
+    await store.flush();
+    const prior = store.priorVerdictsForSession('session-1', 3);
+    // Without the tie-break SQLite returned the three oldest (c1,c2,c3).
+    expect(prior.verdicts.map((item) => item.callId)).toEqual([
+      'c5',
+      'c4',
+      'c3',
+    ]);
+    store.close();
+  });
+
+  test('an unreadable format is filtered before LIMIT, not after', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    for (const suffix of ['1', '2', '3']) {
+      store.enqueue(
+        deniedRow({
+          callId: `readable-${suffix}`,
+          result: 'review-deny',
+          ts: 1_700_000_000_000 + Number(suffix),
+        }),
+      );
+    }
+    await store.flush();
+    store.close();
+    // A newer row this build cannot read: its format must not consume a window
+    // slot, or the result would be silently shorter than the limit.
+    const db = new DatabaseSync(path);
+    db.prepare(
+      'UPDATE calls SET record_format_version = 99 WHERE call_id = ?',
+    ).run('readable-3');
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const prior = reopened.priorVerdictsForSession('session-1', 2);
+    // Two readable rows are returned even though an unreadable row is newer.
+    expect(prior.verdicts.map((item) => item.callId)).toEqual([
+      'readable-2',
+      'readable-1',
+    ]);
+    // And the exclusion is reported rather than disappearing.
+    expect(prior.unreadableCount).toBe(1);
+    reopened.close();
+  });
+
+  test('a session with no unreadable rows reports a zero count', async () => {
+    const { store } = await makeStore();
+    store.enqueue(deniedRow({ callId: 'plain', result: 'review-deny' }));
+    await store.flush();
+    expect(store.priorVerdictsForSession('session-1', 10).unreadableCount).toBe(
+      0,
+    );
+    // A session that never existed is distinguishable: empty list, zero excluded.
+    const absent = store.priorVerdictsForSession('other-session', 10);
+    expect(absent.verdicts).toEqual([]);
+    expect(absent.unreadableCount).toBe(0);
+    store.close();
+  });
+
+  test('an unreadable denial counts even when it is the only row', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(deniedRow({ callId: 'only', result: 'review-deny' }));
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    db.prepare('UPDATE calls SET record_format_version = 99').run();
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const prior = reopened.priorVerdictsForSession('session-1', 10);
+    // This is the dangerous shape: an empty list that is *not* "nothing happened".
+    expect(prior.verdicts).toEqual([]);
+    expect(prior.unreadableCount).toBe(1);
+    reopened.close();
+  });
+
+  test('an unreadable allowance is not counted as a missing denial', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(deniedRow({ callId: 'deny', result: 'review-deny' }));
+    store.enqueue(deniedRow({ callId: 'allow', result: 'review-allow' }));
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    db.prepare(
+      'UPDATE calls SET record_format_version = 99 WHERE call_id = ?',
+    ).run('allow');
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const prior = reopened.priorVerdictsForSession('session-1', 10);
+    expect(prior.verdicts.map((item) => item.callId)).toEqual(['deny']);
+    // Only denial-shaped rows are counted; an unreadable allowance is outside
+    // this query's subject and must not inflate the count.
+    expect(prior.unreadableCount).toBe(0);
+    reopened.close();
   });
 });
 

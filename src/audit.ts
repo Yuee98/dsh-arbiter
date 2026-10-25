@@ -604,23 +604,35 @@ export class AuditStore {
     }
   }
 
+  /**
+   * Prior verdicts for one session, with the count of rows excluded by format.
+   *
+   * A caller must be able to distinguish "no history" from "history exists but
+   * this build cannot read it"; both are an empty list otherwise.
+   */
   priorVerdictsForSession(
     sessionId: string,
     limit: number,
-  ): readonly {
-    readonly ts: number;
-    readonly callId: string;
-    readonly configRevision: string;
-    readonly tool: string;
-    readonly fingerprint: string;
-    readonly trace: readonly string[];
-    readonly result: string;
-    readonly reason: string;
-    readonly ruleId: string | null;
-    readonly decisionRules: readonly string[];
-    readonly effect: unknown;
-  }[] {
-    return priorVerdictsForSession(this.db, sessionId, limit);
+  ): {
+    readonly verdicts: readonly {
+      readonly ts: number;
+      readonly callId: string;
+      readonly configRevision: string;
+      readonly tool: string;
+      readonly fingerprint: string;
+      readonly trace: readonly string[];
+      readonly result: string;
+      readonly reason: string;
+      readonly ruleId: string | null;
+      readonly decisionRules: readonly string[];
+      readonly effect: unknown;
+    }[];
+    readonly unreadableCount: number;
+  } {
+    return this.readGuard(
+      () => priorVerdictsForSession(this.db, sessionId, limit),
+      { verdicts: [], unreadableCount: 0 },
+    );
   }
 
   recentForReplay(limit = 200): readonly {

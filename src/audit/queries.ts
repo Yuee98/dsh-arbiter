@@ -465,42 +465,77 @@ export function callsForAnalysis(
   });
 }
 
+/**
+ * Prior verdicts for one session, plus how many rows were excluded for format.
+ *
+ * Two properties matter beyond the rows themselves:
+ *
+ * - The filter is in `WHERE`, not applied to a `LIMIT`ed page. Filtering after
+ *   the limit would let unreadable rows consume window slots and silently
+ *   shorten the result.
+ * - `unreadableCount` reports rows this build could not interpret. A caller that
+ *   reasons about "this session has no history" must be able to tell a truly
+ *   empty session from one whose records exist but cannot be read; both look
+ *   like an empty array otherwise.
+ *
+ * The count is deliberately *not* limited to the window: the caller's question is
+ * whether interpretable-but-absent history can be distinguished, and a single
+ * unreadable row anywhere in the session answers it. Deleted or expired rows are
+ * not counted, because they are genuinely gone rather than unreadable.
+ */
 export function priorVerdictsForSession(
   db: DatabaseSync,
   sessionId: string,
   limit: number,
-): readonly {
-  readonly ts: number;
-  readonly callId: string;
-  readonly configRevision: string;
-  readonly tool: string;
-  readonly fingerprint: string;
-  readonly trace: readonly string[];
-  readonly result: string;
-  readonly reason: string;
-  readonly ruleId: string | null;
-  readonly decisionRules: readonly string[];
-  readonly effect: unknown;
-}[] {
+): {
+  readonly verdicts: readonly {
+    readonly ts: number;
+    readonly callId: string;
+    readonly configRevision: string;
+    readonly tool: string;
+    readonly fingerprint: string;
+    readonly trace: readonly string[];
+    readonly result: string;
+    readonly reason: string;
+    readonly ruleId: string | null;
+    readonly decisionRules: readonly string[];
+    readonly effect: unknown;
+  }[];
+  readonly unreadableCount: number;
+} {
+  // The placeholders keep the filter and the JS reader in one definition: the
+  // readable formats are decided by `READABLE_CALL_FORMATS`.
+  const placeholders = READABLE_CALL_FORMATS.map(() => '?').join(', ');
   const rows = asRows(
     db
       .prepare(
         `SELECT ts, call_id, config_revision, tool, fingerprint, trace, result, reason,
-                decision_rules, effect, record_format_version
-           FROM calls WHERE session_id = ? AND result NOT IN ('allow', 'review-allow', 'human-allow')
-           ORDER BY ts DESC LIMIT ?`,
+                decision_rules, effect
+           FROM calls
+          WHERE session_id = ?
+            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND record_format_version IN (${placeholders})
+          ORDER BY ts DESC, call_id DESC
+          LIMIT ?`,
       )
-      .all(sessionId, limit),
+      .all(sessionId, ...READABLE_CALL_FORMATS, limit),
   );
-  return rows.flatMap((row) => {
-    // A row this build cannot interpret must not become prior-verdict evidence:
-    // recovery reads a denial as a fact, and a guessed shape could make an
-    // unknown record look like a known authorization decision.
-    if (!readableFormat(formatOf(row))) return [];
-    const trace = rowTrace(row['trace']);
-    const rule = trace.find((stage) => stage.stage === 'rule');
-    return [
-      {
+  const excluded = asRow(
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM calls
+          WHERE session_id = ?
+            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND record_format_version NOT IN (${placeholders})`,
+      )
+      .get(sessionId, ...READABLE_CALL_FORMATS),
+  );
+  return {
+    unreadableCount: rowNumber(excluded['count']),
+    verdicts: rows.map((row) => {
+      const trace = rowTrace(row['trace']);
+      const rule = trace.find((stage) => stage.stage === 'rule');
+      return {
         ts: rowNumber(row['ts']),
         callId: rowText(row['call_id']),
         configRevision: rowText(row['config_revision']),
@@ -512,9 +547,9 @@ export function priorVerdictsForSession(
         ruleId: rule?.ruleId ?? null,
         decisionRules: rowStrings(row['decision_rules']),
         effect: rowJson(row['effect']),
-      },
-    ];
-  });
+      };
+    }),
+  };
 }
 
 export function recentForReplay(
