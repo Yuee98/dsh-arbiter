@@ -1313,3 +1313,47 @@ describe('guarded confinement that cannot be re-established', () => {
     }
   });
 });
+
+describe('an absent sandbox override is not proof of confinement', () => {
+  test('guarded admission writes an explicit boundary before approving', async () => {
+    // No sandbox event at all and a full-access deployment default: the plugin
+    // must state the boundary explicitly instead of assuming the default.
+    const session = makeSession('s-absent');
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      const enabled = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-absent', action: 'enable' },
+      });
+      expect(enabled.status).toBe(200);
+      expect(modeEvents(session)).toEqual([{ mode: 'workspace-write' }]);
+      expect(approvalEvents(session)).toEqual([{ policy: 'ask' }]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('guarded reconciliation cannot skip a missing override', async () => {
+    // A trusted record from an earlier run, no sandbox event, guarded now: the
+    // first call must establish the boundary before it can be approved.
+    const session = makeSession('s-absent-late');
+    session.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-absent-late',
+      rootSessionId: 's-absent-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      expect(
+        (await harness.gate(call(session, 'absent-call'), allow)).kind,
+      ).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'ask' });
+    } finally {
+      harness.dispose();
+    }
+  });
+});

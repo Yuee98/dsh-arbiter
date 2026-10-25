@@ -318,10 +318,13 @@ export class SessionAdmissions {
     const target = boundaryKnobs(boundary);
     const current = this.knobsOf(session);
     const writes: KnobWrite[] = [];
-    if (current.sandbox !== null && current.sandbox !== target.sandbox) {
+    // An absent event is not evidence that the deployment default matches the
+    // target: the default can be full access. A managed session states its
+    // boundary explicitly so the log, not an assumption, carries it.
+    if (current.sandbox !== target.sandbox) {
       writes.push({ type: 'sandbox/mode', value: target.sandbox });
     }
-    if (current.approval !== null && current.approval !== target.approval) {
+    if (current.approval !== target.approval) {
       writes.push({ type: 'approval/policy', value: target.approval });
     }
     return writes;
@@ -341,9 +344,11 @@ export class SessionAdmissions {
    * `never`, and replacing that would open prompts the delegation never had.
    */
   private narrowWrites(session: SessionLike): readonly KnobWrite[] {
-    const current = this.knobsOf(session);
-    if (current.sandbox === null || current.sandbox === 'workspace-write')
-      return [];
+    // Only a value that is actually wider is rewritten. Absent is not rewritten
+    // here because this narrowing must never widen a session the host confined
+    // more strictly (a child captured read-only or an explicit read-only
+    // choice); `atSafeBoundary` still refuses to call absent "safe".
+    if (this.knobsOf(session).sandbox !== 'danger-full-access') return [];
     return [{ type: 'sandbox/mode', value: 'workspace-write' }];
   }
 
@@ -583,8 +588,15 @@ export class SessionAdmissions {
    * An absent sandbox event is not proof of confinement: the deployment
    * default can be full access, so only an observed workspace-write counts.
    */
+  /** Whether the observed sandbox is a value this plugin can call safe. */
+  private atSafeSandbox(session: SessionLike): boolean {
+    const sandbox = this.knobsOf(session).sandbox;
+    return sandbox === 'workspace-write' || sandbox === 'read-only';
+  }
+
   private confined(session: SessionLike): boolean {
-    return this.knobsOf(session).sandbox === 'workspace-write';
+    const sandbox = this.knobsOf(session).sandbox;
+    return sandbox === 'workspace-write' || sandbox === 'read-only';
   }
 
   /**
@@ -596,10 +608,20 @@ export class SessionAdmissions {
    */
   atSafeBoundary(session: SessionLike): boolean {
     const current = this.knobsOf(session);
-    if (current.sandbox !== null && current.sandbox !== 'workspace-write')
-      return false;
-    if (session.header?.parentSession !== undefined) return true;
-    return current.approval === null || current.approval === 'ask';
+    // A delegated child is never widened by this plugin, so its obligations are
+    // narrower: it must not sit at full access, and an absent value is left to
+    // the host's own delegation defaults.
+    if (session.header?.parentSession !== undefined) {
+      return current.sandbox !== 'danger-full-access';
+    }
+    // A main session is the one this plugin widened, so both halves of the
+    // bundle must be observed: an absent sandbox event can mean a full-access
+    // deployment default, and `ask` is what the widening replaced.
+    return (
+      current.sandbox !== null &&
+      current.sandbox !== 'danger-full-access' &&
+      current.approval === 'ask'
+    );
   }
 
   /**
@@ -613,12 +635,15 @@ export class SessionAdmissions {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (typeof session.append !== 'function') return false;
       try {
-        const writes = this.narrowWrites(session);
-        if (writes.length === 0) return true;
-        this.writeKnobs(session, writes);
-        const current = this.knobsOf(session);
-        if (current.sandbox === null || current.sandbox === 'workspace-write')
-          return true;
+        // Write the explicit safe sandbox whenever the observed value is not
+        // already safe, including when it is absent: an absent override can
+        // fall back to a full-access deployment default.
+        if (!this.atSafeSandbox(session)) {
+          this.writeKnobs(session, [
+            { type: 'sandbox/mode', value: 'workspace-write' },
+          ]);
+        }
+        if (this.atSafeSandbox(session)) return true;
       } catch {
         // Retry: the host may still be publishing another append.
       }

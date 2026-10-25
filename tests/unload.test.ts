@@ -713,3 +713,28 @@ describe('discovery covers inherited subagents', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+describe('absent sandbox override at teardown', () => {
+  test('a main session without a sandbox event is not reported safe', async () => {
+    // The record says trusted but no sandbox event was ever written; the
+    // plugin must not treat an absent value as "already narrow".
+    const events: StubEvent[] = [];
+    admit(events, 's14', { boundary: 'trusted' });
+    events.push({ type: 'approval/policy', data: { policy: 'ask' } });
+    const session = makeSession('s14', events);
+    // Production hosts list live sessions; teardown discovers through it rather
+    // than relying on this process having gated a call from the session.
+    const { ctx, disposers } = contextFor(session, undefined, {
+      sessions: { get: () => session, list: () => [session] },
+    });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await unload(disposers);
+    expect(
+      events.filter((event) => event.type === 'sandbox/mode').at(-1)?.data,
+    ).toEqual({ mode: 'workspace-write' });
+  });
+});

@@ -101,10 +101,12 @@ export class PermissionLifecycle {
       // A delegated child keeps the approval policy the host pinned at
       // delegation; only its captured sandbox is this plugin's to narrow.
       const delegated = session.header?.parentSession !== undefined;
+      // An absent value is not "already narrow": the deployment default can be
+      // full access, so a managed session states its safe boundary explicitly.
       const needsSandbox =
-        current.sandbox !== null && current.sandbox !== 'workspace-write';
-      const needsApproval =
-        !delegated && current.approval !== null && current.approval !== 'ask';
+        current.sandbox !== 'workspace-write' &&
+        current.sandbox !== 'read-only';
+      const needsApproval = !delegated && current.approval !== 'ask';
       // Nothing this plugin widened: leave the log alone rather than writing a
       // no-op permission event into it.
       if (!needsSandbox && !needsApproval) return 'unchanged';
