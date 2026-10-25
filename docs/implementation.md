@@ -173,6 +173,7 @@
 | F1 记录写入 | 新增 `src/records.ts`，只调用公开 `appendPluginRecord`；失败只记录，不回退 `session.append`。新增 `src/repair.ts` 与 `scripts/repair-session.ts` 处理旧日志（备份、只改 arbiter 记录、幂等） | **运行确认**：真实"写→关→退宿主→重启→重开"，记录 `ignorable: true` 且可读回；移走审计目录后仍恢复 |
 | F2 原生 auto 拒绝 | `registerAuto(admit)` 在权限写入前抛 `AutoEntryRejected`；用 `command/run`/`command/done` 区分用户切换与冷恢复；删除写原生 auto 的旧 `/arbiter mode` | **运行确认**：guarded / trusted / 未启用三档均拒绝且状态零变化；其他命令回归 |
 | F3 真实管理器停用／卸载 | 管理器开关及 removeBundle 路径已运行 | **基本操作运行确认**；与在途请求的重叠需按[复核](../evidence.md#permission-recovery-review)补测 |
+| #12 裁决链与在途切换 | 三档语义、两种 escalate、三种人工结果、结算一次、阶段版本 | **已实现**：单元用例覆盖 normal=strict 等价与 allow 集合包含关系、两协议同一授权标准；集成用例覆盖阶段边界切换（cwd 等待、模型请求发出后）、关闭与回答两种先后、通道缺失、并行独立调用与完整 trace；真实宿主用例覆盖规则路径与审查失败转入人工。真实人工点击与 PTC 取消**未运行** |
 | F4 收尾期新调用 | 新增 managed、accepting、drain（≤30s）与回退逻辑 | **真实收尾窗口未覆盖**；已有产物只证明回退后写入被挡住，不能认定并发绕过已修复 |
 | F5 真实人工审批 | 真人分别允许／拒绝 | **真人答复运行确认**；审批中切换已补测（换不同预设并经公开命令调用成功） |
 | F6 PTC 取消 | — | **运行确认**：`abort: sandbox mode changed`，内层未执行，迟到 allow 未放行 |
