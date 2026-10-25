@@ -3,6 +3,7 @@ import type { AgentLike, SessionLike, SessionsLike } from '../snapshot.js';
 import type { LlmLike } from '../reviewer.js';
 import type {
   ArbiterConfig,
+  HistoryStatus,
   PriorVerdictItem,
   ReviewSignals,
   ReviewSnapshot,
@@ -173,6 +174,21 @@ export interface RuntimeState {
   auditError: string | null;
   autoPresetError: string | null;
   readonly priorVerdicts: Map<string, PriorVerdictItem[]>;
+  /** How complete each session's last prior-verdict window is. */
+  readonly historyStatus: Map<string, HistoryStatus>;
+  /** Sessions whose runtime history was explicitly reset, and when. */
+  readonly historyReset: Map<string, number>;
+  /** Sessions this runtime already attempted a recovery read for, and when. */
+  readonly historyRecovered: Map<string, number>;
+  /** Sessions whose decision record could not be written, and why. */
+  readonly sessionRecordFailures: Map<string, string>;
+  /**
+   * Rows whose position relative to a reset cannot be determined.
+   *
+   * Separate from a write failure: the record exists, only its ordering is
+   * unknown, and the read must say so instead of claiming completeness.
+   */
+  readonly historyBoundaryAmbiguity: Map<string, string>;
   readonly breakers: Map<string, { readonly denials: number[] }>;
   readonly reviewCounts: Map<string, number>;
   readonly sessionRecordErrors: Map<string, string>;
@@ -216,6 +232,22 @@ export interface HostEnvironment {
   readonly currentAudit: () => AuditStore | null;
   readonly services: HostServices;
   readonly lifecycle: (event: string, data?: Record<string, unknown>) => void;
+  /**
+   * The runtime history owner, once the entry has constructed it.
+   *
+   * A reset is a lifecycle action on that object, so the owner of the lifecycle
+   * (a command, a session teardown, a test) needs a way to reach it without
+   * rebuilding the selector. It stays optional because the host is usable before
+   * the entry finishes wiring.
+   */
+  history?: {
+    resetSession(sessionId: string): void;
+    clearRecordFailure(sessionId: string): void;
+    windowFor(sessionId: string): {
+      readonly items: readonly PriorVerdictItem[];
+      readonly status: HistoryStatus;
+    };
+  };
 }
 
 export interface AuditExtras {

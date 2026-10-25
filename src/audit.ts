@@ -32,6 +32,8 @@ import {
   recentForReplay,
   listCandidates,
 } from './audit/queries.js';
+import { storedReads } from './audit/verdict-sources.js';
+import type { StoredStage, StoredVerdict } from './audit/verdict-sources.js';
 import {
   saveConfigSnapshot,
   recordActivation,
@@ -634,6 +636,46 @@ export class AuditStore {
    * A caller must be able to distinguish "no history" from "history exists but
    * this build cannot read it"; both are an empty list otherwise.
    */
+  /**
+   * The stored result of specific calls, including ones the window filter drops.
+   *
+   * Used to detect a cross-source contradiction on an already selected call: an
+   * audit `allow` against a session `deny` is invisible to the window query.
+   */
+  verdictsForCalls(
+    sessionId: string,
+    callIds: readonly string[],
+  ): readonly StoredVerdict[] {
+    try {
+      return storedReads(this.db).calls(sessionId, callIds);
+    } catch (error) {
+      this.markDegraded(error);
+      return [];
+    }
+  }
+
+  /**
+   * The full stored stage chain for one call, or `[]` when it has none.
+   *
+   * Recovery uses this to complete a chain another source recorded only partly; it
+   * reads stages rather than re-projecting the call row, so no new schema or
+   * migration is involved.
+   */
+  priorVerdictStages(callId: string): readonly StoredStage[] {
+    try {
+      return storedReads(this.db).stages(callId);
+    } catch (error) {
+      this.markDegraded(error);
+      return [];
+    }
+  }
+
+  /** Record a degraded completion read without failing the whole store. */
+  private markDegraded(error: unknown): void {
+    this.lastError = error instanceof Error ? error.message : String(error);
+    this.degraded = true;
+  }
+
   priorVerdictsForSession(
     sessionId: string,
     limit: number,

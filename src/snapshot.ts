@@ -15,6 +15,7 @@ import type {
   ContextToolCall,
   DerivedFacts,
   EvidenceItem,
+  HistoryStatus,
   PriorVerdictItem,
   ReviewSnapshot,
   SessionKind,
@@ -221,6 +222,14 @@ export interface SnapshotOptions {
   readonly hint?: string;
   readonly priorVerdicts: readonly PriorVerdictItem[];
   readonly sessionRecordGap: string | null;
+  /**
+   * How complete the prior-verdict window is.
+   *
+   * Omitted means the caller supplied a plain window with no recovery claim, and
+   * the snapshot reports it as a known-complete selection rather than inventing
+   * a gap that was never observed.
+   */
+  readonly historyStatus?: HistoryStatus;
 }
 
 export interface BuiltSnapshot {
@@ -329,9 +338,19 @@ function snapshotHistory(
       kind: 'verdict' as const,
       ts: verdict.ts,
       verdict,
+      callId: verdict.callId,
     })),
   ]
-    .sort((left, right) => right.ts - left.ts)
+    // Newest first, with a deterministic tie-break. Two verdicts settled in the
+    // same millisecond otherwise keep whatever order the source happened to
+    // produce, which would make the submitted history depend on the source
+    // rather than on the decision.
+    .sort((left, right) => {
+      if (left.ts !== right.ts) return right.ts - left.ts;
+      const leftId = 'callId' in left ? left.callId : '';
+      const rightId = 'callId' in right ? right.callId : '';
+      return leftId < rightId ? 1 : leftId > rightId ? -1 : 0;
+    })
     .slice(0, maxItems);
   const selectedCalls = combined.flatMap((entry) =>
     entry.kind === 'tool' ? [entry.call] : [],
@@ -345,10 +364,58 @@ function snapshotHistory(
   return { selectedCalls, selectedVerdicts, historyTruncated };
 }
 
+/**
+ * The status of a window the caller assembled itself.
+ *
+ * A direct caller (a test, or a review that already knows its window) supplies
+ * entries without a recovery read, so nothing is claimed about completeness
+ * beyond what the window itself shows.
+ */
+function defaultHistoryStatus(): HistoryStatus {
+  return {
+    coverage: 'known-empty',
+    windowTruncated: false,
+    reason: null,
+    sources: {
+      memory: { read: 0, unavailable: null },
+      session: { read: 0, unavailable: null },
+      audit: { read: 0, unavailable: null },
+    },
+    reset: false,
+  };
+}
+
+/**
+ * Describe what this submission can say about prior verdicts.
+ *
+ * Coverage and capacity are separate facts, so an absent history is never
+ * silently presented as a clean one: a window a source could not fill, a chain
+ * two sources disagree on, and a session that genuinely had no prior verdict are
+ * different facts, and only the last one means "nothing happened here".
+ */
+function historyGap(status: HistoryStatus): string[] {
+  switch (status.coverage) {
+    case 'known-empty':
+    case 'complete':
+      // A complete window may still be a cut one; that is the capacity fact
+      // reported through `historyTruncated`, not a missing source.
+      return [];
+    case 'partial':
+      return [
+        `prior verdict history is incomplete: ${status.reason ?? 'some entries could not be fully accounted for'}`,
+      ];
+    case 'unknown':
+      return [
+        `prior verdict history could not be recovered: ${status.reason ?? 'no source answered'}, so whether this session has earlier verdicts is unknown`,
+      ];
+  }
+}
+
 function missingEvidence(
   evidence: EvidenceState,
   sessionRecordGap: string | null,
   projectRulesMissing: string | null,
+  history: HistoryStatus,
 ): string[] {
   const {
     sessionEvidence,
@@ -398,6 +465,7 @@ function missingEvidence(
   }
   if (projectRulesMissing !== null) missing.push(projectRulesMissing);
   if (sessionRecordGap !== null) missing.push(sessionRecordGap);
+  missing.push(...historyGap(history));
 
   return missing;
 }
@@ -447,15 +515,21 @@ export async function buildReviewSnapshot(
     options.priorVerdicts,
     contextConfig.historyMaxItems,
   );
-
   const projectRules = await readProjectRules(
     options.cwd,
     contextConfig.projectRules,
   );
+  const history = options.historyStatus ?? defaultHistoryStatus();
+  // The runtime window is already trimmed to `historyMaxItems` before it gets
+  // here, so this pass alone cannot see that older verdicts were dropped. The
+  // history status observed that cut while selecting, and it is the only place
+  // that can still report it.
+  const windowTruncated = historyTruncated || history.windowTruncated;
   const missing = missingEvidence(
     evidence,
     options.sessionRecordGap,
     projectRules.missing,
+    history,
   );
 
   const facts: DerivedFacts | null =
@@ -464,7 +538,7 @@ export async function buildReviewSnapshot(
       : {
           ...options.facts,
           parentAuthorizationPresent,
-          historyTruncated: historyTruncated || options.facts.historyTruncated,
+          historyTruncated: windowTruncated || options.facts.historyTruncated,
           overlapsDeniedEffect: options.facts.overlapsDeniedEffect,
         };
 
@@ -503,7 +577,8 @@ export async function buildReviewSnapshot(
     checkpoints,
     contextTruncated: historyTruncated,
     priorVerdicts: selectedVerdicts,
-    historyTruncated,
+    historyTruncated: windowTruncated,
+    historyStatus: history,
     missing,
   };
   const truncated = truncateSnapshot(base, contextConfig.maxInputTokens);

@@ -1,8 +1,19 @@
 import { fingerprintOf, type CallRecord } from '../audit.js';
 import { appendRecord } from '../records.js';
-import type { CallResult, PreToolDecision, TraceStage } from '../types.js';
+import type {
+  CallResult,
+  PriorVerdictItem,
+  PreToolDecision,
+  TraceStage,
+} from '../types.js';
+import {
+  DECISION_RECORD,
+  decisionPayload,
+  isPriorVerdictCandidate,
+} from './history-record.js';
 import { deny, executionModeName, isAborted } from './common.js';
 import type { DecisionHistory } from './history.js';
+import type { CallContext as CallContextType } from './types.js';
 import type { AuditExtras, CallContext, HostEnvironment } from './types.js';
 
 interface HumanOutcome {
@@ -144,6 +155,41 @@ export class CallSettlement {
     this.history = history;
   }
 
+  /**
+   * Write the session record and record what happened.
+   *
+   * Returns the write state so the audit row can carry it. A failure is both a
+   * diagnostic entry and a history gap: the verdict exists in memory and cannot be
+   * recovered from the log, which the next review must be told.
+   */
+  private writeRecord(
+    session: CallContextType['session'],
+    callId: string,
+    prior: PriorVerdictItem,
+  ): CallRecord['sessionRecordState'] {
+    const { runtime } = this.host;
+    const state = appendRecord(
+      session,
+      DECISION_RECORD,
+      decisionPayload(prior),
+    );
+    const sessionId = session.id ?? 'unknown';
+    if (state === 'written') {
+      this.history.clearRecordFailure(sessionId);
+      return state;
+    }
+    runtime.sessionRecordErrors.set(callId, state);
+    // The map is diagnostic state, not history: keep the newest entries so a
+    // session with a persistent write failure cannot grow it without bound.
+    while (runtime.sessionRecordErrors.size > MAX_SESSION_RECORD_ERRORS) {
+      const oldest = runtime.sessionRecordErrors.keys().next().value;
+      if (oldest === undefined) break;
+      runtime.sessionRecordErrors.delete(oldest);
+    }
+    this.history.noteRecordFailure(sessionId, state);
+    return state;
+  }
+
   private createRecord(
     call: CallContext,
     result: CallResult,
@@ -153,37 +199,36 @@ export class CallSettlement {
     const { runtime, ctx } = this.host;
     const { exec, session, cwd } = call;
     const fingerprint = fingerprintOf(exec.name, exec.arguments);
-    const sessionRecordState = appendRecord(
-      session,
-      'plugin:arbiter/decision',
-      {
-        version: 1,
-        callId: exec.callId,
-        tool: exec.name,
-        fingerprint,
-        trace: call.trace.map((stage) => stage.result),
-        result,
-        reason,
-        ruleId: extras.ruleId,
-        decisionRules: extras.decisionRules,
-        configRevision: runtime.effectiveRevision,
-        effect: extras.effect,
-        ts: Date.now(),
-      },
-    );
-    if (sessionRecordState !== 'written') {
-      runtime.sessionRecordErrors.set(exec.callId, sessionRecordState);
-      // The map is diagnostic state, not history: keep the newest entries so a
-      // session with a persistent write failure cannot grow it without bound.
-      while (runtime.sessionRecordErrors.size > MAX_SESSION_RECORD_ERRORS) {
-        const oldest = runtime.sessionRecordErrors.keys().next().value;
-        if (oldest === undefined) break;
-        runtime.sessionRecordErrors.delete(oldest);
-      }
+    // One canonical time for this logical verdict. Memory, the session payload
+    // and the audit row all carry this same value, so a restart cannot reorder
+    // the window by observing three different clocks.
+    const ts = Date.now();
+    const prior: PriorVerdictItem = {
+      ts,
+      callId: exec.callId,
+      configRevision: runtime.effectiveRevision,
+      tool: exec.name,
+      fingerprint,
+      trace: call.trace.map((stage) => stage.result),
+      result,
+      reason,
+      ...(extras.ruleId === null ? {} : { ruleId: extras.ruleId }),
+      decisionRules: extras.decisionRules,
+    };
+    // Memory is updated first and independently, before either durable sink is
+    // asked to accept anything. Runtime history must not wait for persistence:
+    // a store that is slow, full or failing must not delay or lose the verdict
+    // the next review needs.
+    if (isPriorVerdictCandidate(result)) {
+      this.history.rememberPrior(session.id ?? 'unknown', prior);
     }
+    // One write, through the only public writer: the record carries every field
+    // the runtime window keeps, so a cold reader does not have to reconstruct a
+    // decision from a summary of it.
+    const sessionRecordState = this.writeRecord(session, exec.callId, prior);
     return {
       callId: exec.callId,
-      ts: Date.now(),
+      ts,
       sessionId: session.id ?? 'unknown',
       sessionKind: call.sessionKind,
       parentSession: session.header?.parentSession ?? null,

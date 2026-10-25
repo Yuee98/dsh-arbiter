@@ -369,6 +369,97 @@ export interface PriorVerdictItem {
   readonly ruleId?: string;
   readonly decisionRules?: readonly string[];
   readonly effect?: { readonly writes?: readonly string[] };
+  /**
+   * The stored stage chain, when a durable source could supply it.
+   *
+   * `trace` is the result sequence every record carries and is what ordering and
+   * dedup use. This keeps what a projection loses — each stage's own reason, rule
+   * and time — so a chain another source only partly recorded can be completed
+   * from evidence rather than guessed. It is absent when no source had it.
+   */
+  readonly stages?: readonly {
+    readonly stage: string;
+    readonly result: string;
+    readonly reason: string | null;
+    readonly ruleId: string | null;
+    readonly decisionRules: readonly string[];
+    readonly configRevision: string | null;
+    readonly ts: number;
+  }[];
+  /**
+   * Facts two sources disagreed on for this same call.
+   *
+   * They are reported, never resolved: a differing stage or result is shown as
+   * both observations so the reviewer cannot read a conclusion that no single
+   * source actually recorded.
+   */
+  readonly conflicts?: readonly {
+    readonly field: string;
+    readonly observed: readonly string[];
+  }[];
+  /**
+   * More disagreement was observed for this call than an entry can represent.
+   *
+   * It travels with the entry rather than in a side table, so it is bounded by the
+   * window and scoped to the session that produced it. A dropped call takes its
+   * flag with it, and no other session can inherit it.
+   */
+  readonly conflictsTruncated?: boolean;
+}
+
+/**
+ * How much of this session's prior-verdict history is accounted for.
+ *
+ * Coverage is a different question from capacity, and the two can hold at once:
+ * a window can be cut by capacity while every selected entry is fully known, or
+ * be small while a source could not answer. Reporting them as one exclusive
+ * value would have to hide one of the two facts.
+ *
+ *   - `known-empty`: every configured source answered, and there is no prior
+ *     verdict. Nothing is missing.
+ *   - `complete`: every selected entry is fully accounted for. It does not claim
+ *     the session had no older verdicts — `windowTruncated` says whether it did.
+ *   - `partial`: a source was unavailable or cleaned, or a chain is incomplete
+ *     or carries a disagreement. What was read is used; `reason` says what is
+ *     unknown.
+ *   - `unknown`: memory is gone and no source could supply a readable record, so
+ *     whether verdicts ever existed is unknown. It must not be presented as "no
+ *     prior verdicts".
+ */
+export type HistoryCoverage =
+  'known-empty' | 'complete' | 'partial' | 'unknown';
+
+/** Per-source outcome of one history read, for the detail view and tests. */
+export interface HistorySourceState {
+  /** Present when this source answered; the count it contributed afterwards. */
+  readonly read: number;
+  /** Set to why this source could not answer, or `null` when it did. */
+  readonly unavailable: string | null;
+}
+
+export interface HistoryStatus {
+  readonly coverage: HistoryCoverage;
+  /**
+   * Whether the capacity window dropped older candidates.
+   *
+   * This is the normal window cut, and it is kept separate from coverage so a
+   * truncated window is never reported as missing history. The review budget's
+   * own trim stays on `historyTruncated` and `budget.truncatedSegments`.
+   */
+  readonly windowTruncated: boolean;
+  /** What is unknown, when coverage is `partial` or `unknown`. */
+  readonly reason: string | null;
+  /**
+   * Sources that answered, so "0 because a new session" stays distinguishable
+   * from "0 because nothing could be read".
+   */
+  readonly sources: {
+    readonly memory: HistorySourceState;
+    readonly session: HistorySourceState;
+    readonly audit: HistorySourceState;
+  };
+  /** Whether an older, pre-reset history is being withheld on purpose. */
+  readonly reset: boolean;
 }
 
 export interface ReviewSnapshot {
@@ -400,6 +491,8 @@ export interface ReviewSnapshot {
   readonly contextTruncated: boolean;
   readonly priorVerdicts: readonly PriorVerdictItem[];
   readonly historyTruncated: boolean;
+  /** What this submission can say about prior verdicts; see {@link HistoryCoverage}. */
+  readonly historyStatus: HistoryStatus;
   readonly missing: readonly string[];
   readonly budget: {
     readonly maxInputTokens: number;

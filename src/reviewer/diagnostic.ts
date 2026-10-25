@@ -59,6 +59,20 @@ export const PROBE_SNAPSHOT: ReviewSnapshot = {
   contextTruncated: false,
   priorVerdicts: [],
   historyTruncated: false,
+  // A connection probe is a synthetic input: it belongs to no session, so it can
+  // have no prior verdict and no source to read. Saying so is honest, and it keeps
+  // the probe free of the caller's history by construction rather than by luck.
+  historyStatus: {
+    coverage: 'known-empty',
+    windowTruncated: false,
+    reason: null,
+    sources: {
+      memory: { read: 0, unavailable: null },
+      session: { read: 0, unavailable: null },
+      audit: { read: 0, unavailable: null },
+    },
+    reset: false,
+  },
   missing: [],
   budget: {
     maxInputTokens: 10_000,

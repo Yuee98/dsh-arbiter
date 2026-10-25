@@ -7,7 +7,7 @@ import { registerRoutes } from './host/routes.js';
 import { initializeHost } from './host/runtime.js';
 import { SessionAdmissions } from './host/session-admission.js';
 import { CallSettlement } from './host/settlement.js';
-import type { ContextLike } from './host/types.js';
+import type { ContextLike, HostEnvironment } from './host/types.js';
 
 export type { ContextLike } from './host/types.js';
 export {
@@ -26,9 +26,21 @@ export const inject = [
   'workingDirectory',
 ];
 
-export function apply(ctx: ContextLike, rawConfig: unknown): void {
+/**
+ * Apply the plugin and return the host it wired.
+ *
+ * The return value is the plugin's own environment object, exposed so a caller
+ * that owns the lifecycle (a command, a teardown, an integration test) can reach
+ * an operation such as an explicit history reset without rebuilding any of it.
+ * The DSH loader ignores an `apply` return value, so this changes no host
+ * behaviour.
+ */
+export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
   const host = initializeHost(ctx, rawConfig);
   const history = new DecisionHistory(host);
+  // One implementation of the explicit reset is reachable from the host, so a
+  // lifecycle owner does not have to rebuild the selector to use it.
+  host.history = history;
   const admissions = new SessionAdmissions(host);
   const permissions = new PermissionLifecycle(host, history, admissions);
   const settlement = new CallSettlement(host, history);
@@ -61,4 +73,5 @@ export function apply(ctx: ContextLike, rawConfig: unknown): void {
     runtime.config.reviewer.type,
     audit === null ? 'unavailable' : 'ready',
   );
+  return host;
 }
