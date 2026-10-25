@@ -75,8 +75,6 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-dsh-${{ hashFiles('tests/e2e/runtime/package*.json', 'mise.toml') }}
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Install browser
-        run: pnpm exec playwright install --with-deps chromium
       - name: Install pinned public DSH CLI
         run: |
           mkdir -p .local/e2e
@@ -85,6 +83,10 @@ jobs:
           npm ci --prefix "$RUNNER_TEMP/dsh-runtime" --strict-allow-scripts --no-audit --no-fund 2>&1 | tee .local/e2e/install.log
           cp "$RUNNER_TEMP/dsh-runtime/package-lock.json" .local/e2e/dsh-package-lock.json
           node --input-type=module -e 'import manifest from "./tests/e2e/runtime/package.json" with { type: "json" }; console.log("DSH_E2E_VERSION=" + manifest.dependencies["@deepseek-ai/dsh"])' >> "$GITHUB_ENV"
+          node "$RUNNER_TEMP/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" --version | tee .local/e2e/dsh-version.txt
+      - name: Install browser
+        timeout-minutes: 5
+        run: pnpm exec playwright install --with-deps chromium
       - name: Run isolated real DSH smoke
         env:
           DSH_E2E_CLI: ${{ runner.temp }}/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js
