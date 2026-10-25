@@ -1,0 +1,10 @@
+{
+  "status": "状态与模式",
+  "rules": "规则",
+  "advanced": "策略与高级",
+  "logs": "日志与详情",
+  "suggestions": "离线建议",
+  "about": "覆盖与试用",
+  "conflict": "配置文件已被外部修改。请刷新后重新合并草稿；草稿未被覆盖。",
+  "reviewer": "Reviewer"
+}

@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   writeFile,
@@ -173,12 +174,20 @@ try {
   }
   const patch = await readFile(join(packageRoot, 'cordis.patch.yml'), 'utf8');
   assert.match(patch, /name: dsh-arbiter/);
-  for (const locale of ['zh', 'en']) {
-    const dictionary: unknown = JSON.parse(
-      await readFile(join(packageRoot, `locale/${locale}.json`), 'utf8'),
+  const localeFiles = (
+    await readdir(join(root, 'locale'), { recursive: true })
+  ).filter((file) => file.endsWith('.json'));
+  assert.ok(localeFiles.includes('schema.json'));
+  assert.ok(localeFiles.includes('zh/common.json'));
+  assert.ok(localeFiles.includes('en/common.json'));
+  for (const file of localeFiles) {
+    const original = await readFile(join(root, 'locale', file), 'utf8');
+    const packaged = await readFile(join(packageRoot, 'locale', file), 'utf8');
+    assert.equal(
+      packaged,
+      original,
+      `Packaged locale resource differs: ${file}`,
     );
-    assert.ok(isRecord(dictionary), `Packaged ${locale} locale is invalid.`);
-    assert.equal(typeof dictionary['title'], 'string');
   }
   process.stdout.write(
     'Packed consumer: runtime, types, client factory, patch and locales passed.\n',

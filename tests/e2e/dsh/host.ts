@@ -37,7 +37,9 @@ async function buildFingerprint(
   )
     .filter((file) => /\.(?:js|cjs)$/.test(file))
     .map((file) => `lib/${file}`);
-  const localeFiles = (await readdir(join(repoRoot, 'locale')))
+  const localeFiles = (
+    await readdir(join(repoRoot, 'locale'), { recursive: true })
+  )
     .filter((file) => file.endsWith('.json'))
     .map((file) => `locale/${file}`);
   for (const file of [

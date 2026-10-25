@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Arbiter translation module",
+  "description": "Nested semantic keys and nonblank text. Language completeness and placeholders are checked separately.",
+  "$ref": "#/definitions/dictionary",
+  "definitions": {
+    "dictionary": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": { "$ref": "#/definitions/message" }
+    },
+    "message": {
+      "anyOf": [
+        { "type": "string", "pattern": "\\S" },
+        { "$ref": "#/definitions/dictionary" }
+      ]
+    }
+  }
+}

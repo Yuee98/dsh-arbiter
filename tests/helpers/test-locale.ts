@@ -5,18 +5,13 @@ import type {
 import type { LocaleCatalog } from '../../src/client/i18n/catalog.js';
 
 /** The public locale boundary only; components and Arbiter's adapter remain real. */
-export function createTestLocale(
-  initialLocale: 'zh' | 'en' = 'zh',
-): LocaleService & {
-  readonly setLocale: (locale: 'zh' | 'en') => void;
+export function createTestLocale(initialLocale = 'zh'): LocaleService & {
+  readonly setLocale: (locale: string) => void;
 } {
   let currentLocale = initialLocale;
   let snapshot = { active: currentLocale, revision: 0 };
   const listeners = new Set<() => void>();
-  const namespaces = new Map<
-    string,
-    { readonly zh: LocaleCatalog; readonly en: LocaleCatalog }
-  >();
+  const namespaces = new Map<string, Readonly<Record<string, LocaleCatalog>>>();
   return {
     register(namespace, dictionaries) {
       if (namespaces.has(namespace))
@@ -28,7 +23,8 @@ export function createTestLocale(
     },
     bind(namespace) {
       return (key: string, params?: TranslationParams): string => {
-        const template = namespaces.get(namespace)?.[currentLocale][key] ?? key;
+        const template =
+          namespaces.get(namespace)?.[currentLocale]?.[key] ?? key;
         return template.replace(/\{(\w+)\}/g, (match: string, name: string) =>
           params?.[name] === undefined ? match : String(params[name]),
         );
