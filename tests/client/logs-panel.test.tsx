@@ -74,7 +74,7 @@ function pageOf(
   const rows = ordered.slice(start, start + limit);
   const first = rows[0];
   const last = rows[rows.length - 1];
-  const hasMore = start + rows.length < ordered.length;
+  const remaining = Math.max(ordered.length - (start + rows.length), 0);
   return {
     ok: true,
     rows: rows.map(row),
@@ -89,7 +89,7 @@ function pageOf(
         ? null
         : { ts: ordered[0]?.ts ?? 0, callId: ordered[0]?.callId ?? '' },
     newer: 0,
-    hasMore,
+    remaining,
   };
 }
 
@@ -268,7 +268,7 @@ describe('log list paging', () => {
             prevCursor: null,
             anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
             newer: 0,
-            hasMore: false,
+            remaining: 0,
           });
         }
         requests.push(tail ? 'tail' : 'page');
@@ -312,7 +312,7 @@ describe('log list paging', () => {
         return HttpResponse.json({
           ...page,
           limit: 5,
-          hasMore: false,
+          remaining: 0,
         });
       }),
     );
@@ -328,27 +328,27 @@ describe('log list paging', () => {
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
   });
 
-  test('previous restores the page that was read, not a fresh backward query', async () => {
-    // Four rows served two at a time, plus an insertion between the two pages the
-    // reader visited. A backward *query* would return the inserted row in place of
-    // A; restoring the visited page shows A and B again.
+  test('previous restores the page that was read, and keeps walking back', async () => {
+    // Three pages of two rows. A backward *query* would return whatever now
+    // precedes the cursor; restoring shows exactly the pages that were read, and
+    // consumes each entry so repeated presses keep moving back.
     let withInsert = false;
     server.use(
       http.get('*/api/arbiter/logs', ({ request }) => {
         const url = new URL(request.url);
-        const order = ['A', 'B', 'C', 'D'];
-        const specs: RowSpec[] = (withInsert ? ['X', ...order] : order).map(
-          (callId) => ({
-            callId,
-            ts: 100 - order.indexOf(callId) * 10,
-          }),
-        );
-        // X sorts between A and B when it is present.
-        if (withInsert) {
-          const index = specs.findIndex((item) => item.callId === 'X');
-          const [x] = specs.splice(index === -1 ? 0 : index, 1);
-          if (x !== undefined) specs.splice(1, 0, { ...x, ts: 95 });
-        }
+        const six: readonly RowSpec[] = [
+          { callId: 'A', ts: 100 },
+          { callId: 'B', ts: 90 },
+          { callId: 'C', ts: 80 },
+          { callId: 'D', ts: 70 },
+          { callId: 'E', ts: 60 },
+          { callId: 'F', ts: 50 },
+        ];
+        // X sorts between A and B once it exists; the traversal still counts the
+        // six rows it started with.
+        const specs: readonly RowSpec[] = withInsert
+          ? [...six.slice(0, 1), { callId: 'X', ts: 95 }, ...six.slice(1)]
+          : six;
         const afterCallId = url.searchParams.get('afterCallId');
         const start =
           afterCallId === null
@@ -359,10 +359,7 @@ describe('log list paging', () => {
         return HttpResponse.json({
           ok: true,
           rows: page.map(row),
-          // The traversal counts the four original rows. X sits below the head,
-          // so it is not an arrival; the anchored re-read below is what keeps it
-          // out of the page the reader already saw.
-          total: 4,
+          total: 6,
           limit: 2,
           nextCursor:
             last === undefined ? null : { ts: last.ts, callId: last.callId },
@@ -372,28 +369,73 @@ describe('log list paging', () => {
               : { ts: page[0].ts, callId: page[0].callId },
           anchor: { ts: 100, callId: 'A' },
           newer: 0,
-          hasMore: start + page.length < 4,
+          remaining: Math.max(6 - (start + page.length), 0),
         });
       }),
     );
     const { user } = renderClient(<LogsPanel />);
-    await screen.findByText('共 4 条');
+    await screen.findByText('共 6 条');
     expect(rowButtonFor('echo A')).toBeInTheDocument();
-    expect(rowButtonFor('echo B')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '下一页' }));
     await waitFor(() => {
       expect(rowButtonFor('echo C')).toBeInTheDocument();
     });
-    expect(screen.queryByText('echo A', { exact: false })).toBeNull();
-    // The insertion lands between the two pages the reader visited.
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => {
+      expect(rowButtonFor('echo E')).toBeInTheDocument();
+    });
+    // The insertion lands between the pages the reader already walked.
     withInsert = true;
+    // First Previous returns page two, not the inserted row.
+    await user.click(screen.getByRole('button', { name: '上一页' }));
+    await waitFor(() => {
+      expect(rowButtonFor('echo C')).toBeInTheDocument();
+    });
+    expect(rowButtonFor('echo D')).toBeInTheDocument();
+    expect(screen.queryByText('echo X', { exact: false })).toBeNull();
+    // A second Previous keeps walking back instead of re-showing page two.
     await user.click(screen.getByRole('button', { name: '上一页' }));
     await waitFor(() => {
       expect(rowButtonFor('echo A')).toBeInTheDocument();
     });
     expect(rowButtonFor('echo B')).toBeInTheDocument();
-    expect(screen.queryByText('echo X', { exact: false })).toBeNull();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+    expect(screen.queryByText('echo C', { exact: false })).toBeNull();
+    // At the start of the traversal there is nowhere left to go back to.
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+  });
+
+  test('a failed read leaves the reading position and its history untouched', async () => {
+    let failNext = false;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        if (failNext && url.searchParams.get('afterCallId') !== null) {
+          return HttpResponse.json(
+            { ok: false, code: 'audit-unavailable', rows: [], total: 0 },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(pageOf(SEEDED, url));
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('第 1 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 2 / 3 页');
+    // Page three fails: the reader stays on page two, and Previous still goes to
+    // page one rather than to the page they were already looking at.
+    failNext = true;
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '审计存储不可用',
+    );
+    expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
+    failNext = false;
+    await user.click(screen.getByRole('button', { name: '上一页' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    });
+    expect(rowButtonFor('echo 0')).toBeInTheDocument();
   });
 
   test('the pager never advertises a page it cannot reach', async () => {
@@ -414,7 +456,7 @@ describe('log list paging', () => {
           prevCursor: { ts: specs[0]?.ts ?? 0, callId: specs[0]?.callId ?? '' },
           anchor: { ts: specs[0]?.ts ?? 0, callId: specs[0]?.callId ?? '' },
           newer: 0,
-          hasMore: false,
+          remaining: 0,
         });
       }),
     );
@@ -614,7 +656,7 @@ describe('log list stale responses', () => {
             prevCursor: { ts: 1, callId: 'stale' },
             anchor: { ts: 1, callId: 'stale' },
             newer: 0,
-            hasMore: false,
+            remaining: 0,
           });
         }
         return HttpResponse.json({
@@ -626,7 +668,7 @@ describe('log list stale responses', () => {
           prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
-          hasMore: false,
+          remaining: 0,
         });
       }),
     );
@@ -675,7 +717,7 @@ describe('log list stale responses', () => {
           prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
-          hasMore: false,
+          remaining: 0,
         });
       }),
     );
@@ -791,12 +833,74 @@ describe('log panel wiring on the page', () => {
   });
 });
 
+describe('log list page count', () => {
+  test('the page count is exact and does not shrink as the reader advances', async () => {
+    // Three pages of 25. An insertion behind the reader raises the total before
+    // page two is read; deriving pages from that total would advertise a fourth
+    // page and then retract it on the last page.
+    let withInsert = false;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        const rows = withInsert
+          ? [
+              SEEDED[0] ?? { callId: 'x', ts: 0 },
+              { callId: 'inserted', ts: 1_699_999_999_500 },
+              ...SEEDED.slice(1),
+            ]
+          : SEEDED;
+        const afterCallId = url.searchParams.get('afterCallId');
+        const start =
+          afterCallId === null
+            ? 0
+            : rows.findIndex((item) => item.callId === afterCallId) + 1;
+        const page = rows.slice(start, start + 25);
+        const last = page[page.length - 1];
+        return HttpResponse.json({
+          ok: true,
+          rows: page.map(row),
+          // The live total includes the insertion once it exists.
+          total: rows.length,
+          limit: 25,
+          nextCursor:
+            last === undefined ? null : { ts: last.ts, callId: last.callId },
+          prevCursor:
+            page[0] === undefined
+              ? null
+              : { ts: page[0].ts, callId: page[0].callId },
+          anchor: {
+            ts: SEEDED[0]?.ts ?? 0,
+            callId: SEEDED[0]?.callId ?? '',
+          },
+          newer: 0,
+          // The traversal itself still has the rows it started with.
+          remaining: Math.max(SEEDED.length - (start + page.length), 0),
+        });
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('共 60 条');
+    expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    withInsert = true;
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 3 / 3 页')).toBeInTheDocument();
+    });
+    // The count never advertised a fourth page along the way.
+    expect(screen.queryByText('第 2 / 4 页')).toBeNull();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  });
+});
+
 describe('log list position bookkeeping', () => {
-  test('a page shorter than the page size still offers the next page when rows remain', async () => {
-    // A tail read returns fewer rows than the page size by design; the "next"
-    // move must follow the total, not the row count of one page.
-    const specs = SEEDED.slice(0, 41);
-    server.use(listHandler(specs));
+  test('a last page shorter than the page size still ends the traversal', async () => {
+    // 41 rows: page two is not full by design, and the "next" move must follow
+    // the remaining count rather than a row count of one page.
+    server.use(listHandler(SEEDED.slice(0, 41)));
     const { user } = renderClient(<LogsPanel />);
     await screen.findByText('共 41 条');
     expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
@@ -804,8 +908,6 @@ describe('log list position bookkeeping', () => {
     await waitFor(() => {
       expect(screen.getByText('第 2 / 2 页')).toBeInTheDocument();
     });
-    // Page two holds 16 rows, so the forward move is exhausted even though the
-    // last page is not full.
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '上一页' })).toBeEnabled();
     expect(screen.getByText('第 26–41 条')).toBeInTheDocument();

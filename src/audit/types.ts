@@ -111,14 +111,14 @@ export interface CallPage {
   readonly anchor: CallAnchor | null;
   readonly newer: number;
   /**
-   * Whether another page exists after this one.
+   * How many matching rows follow this page inside the traversal.
    *
-   * Decided by probing for the next row, not by `index + limit < total`: a call
-   * arriving inside the already-read region raises the total without creating a
-   * page, and arithmetic would offer an empty page whose "correction" shows a
-   * row the reader had already seen.
+   * Counted against the traversal head, not derived from `total`: a call arriving
+   * inside the already-read region raises the total without adding a page after
+   * the reader, and deriving pages from the total would advertise pages that do
+   * not exist. Zero means the traversal ends here.
    */
-  readonly hasMore: boolean;
+  readonly remaining: number;
 }
 
 export interface CallFilter {

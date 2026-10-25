@@ -61,11 +61,11 @@ export function logsResponse(value: unknown): LogPage {
     prevCursor: field(source, 'prevCursor', optional(anchor)) ?? null,
     anchor: field(source, 'anchor', optional(anchor)) ?? null,
     newer: field(source, 'newer', optional(number)) ?? 0,
-    // An older host that does not report continuation: fall back to the page
-    // being full, which is what its window implies.
-    hasMore:
-      field(source, 'hasMore', optional(boolean)) ??
-      rows.length === LOG_PAGE_SIZE,
+    // An older host that does not report continuation: fall back to "the page was
+    // full", which is the most its window implies.
+    remaining:
+      field(source, 'remaining', optional(number)) ??
+      (rows.length === LOG_PAGE_SIZE ? LOG_PAGE_SIZE : 0),
     code: field(source, 'code', optional(text)),
   };
 }

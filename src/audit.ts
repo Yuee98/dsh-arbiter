@@ -476,7 +476,7 @@ export class AuditStore {
         prevCursor: null,
         anchor: filter.anchor ?? null,
         newer: 0,
-        hasMore: false,
+        remaining: 0,
         unreadable: true,
       },
     );

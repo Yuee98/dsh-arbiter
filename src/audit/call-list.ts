@@ -357,23 +357,27 @@ function windowOf(filter: CallFilter): {
   };
 }
 
-/** Whether one more row follows `cursor` inside this traversal. */
-function responseHasRow(
+/**
+ * How many rows follow `cursor` inside this traversal.
+ *
+ * The count is what lets a pager state the exact number of pages that remain
+ * without deriving it from `total`: the total includes calls that arrived behind
+ * the reader, and those must not become pages the traversal can reach.
+ */
+function remainingAfter(
   db: DatabaseSync,
   filter: CallFilter,
   cursor: Predicate,
   anchor: CallAnchor | null,
-): boolean {
+): number {
   const { where, values } = whereOf(
     filter,
     scopeAll(cursor, anchor === null ? null : headBound(anchor)),
   );
   const row = asRow(
-    db
-      .prepare(`SELECT 1 AS present FROM calls ${where} LIMIT 1`)
-      .get(...values),
+    db.prepare(`SELECT COUNT(*) AS count FROM calls ${where}`).get(...values),
   );
-  return row['present'] === 1;
+  return rowNumber(row['count']);
 }
 
 /**
@@ -436,23 +440,24 @@ export function callPage(db: DatabaseSync, filter: CallFilter = {}): CallPage {
   // that insertions and cleanup can change: `index + limit < total` can open a
   // page that has no rows, and the correction then shows an already-read one.
   const continuation = rows[rows.length - 1];
-  const hasMore =
-    continuation !== undefined &&
-    responseHasRow(
-      db,
-      filter,
-      afterCursor({ ts: continuation.ts, callId: continuation.callId }),
-      anchor,
-    );
+  const remaining =
+    continuation === undefined
+      ? 0
+      : remainingAfter(
+          db,
+          filter,
+          afterCursor({ ts: continuation.ts, callId: continuation.callId }),
+          anchor,
+        );
   const first = rows[0];
   const last = rows[rows.length - 1];
   return {
     total,
     limit,
     rows,
-    hasMore,
-    // A cursor exists only when the page has a row to continue from; whether
-    // another page follows is reported by `hasMore`, not inferred from `total`.
+    remaining,
+    // A cursor exists only when the page has a row to continue from; how many
+    // rows follow is reported by `remaining`, not inferred from `total`.
     nextCursor:
       last === undefined ? null : { ts: last.ts, callId: last.callId },
     prevCursor:

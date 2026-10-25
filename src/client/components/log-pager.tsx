@@ -20,6 +20,7 @@ export function LogPager({
   query,
   index,
   total,
+  remaining,
   hasNext,
   hasPrevious,
   busy,
@@ -29,6 +30,8 @@ export function LogPager({
   readonly query: LogQuery;
   readonly index: number;
   readonly total: number;
+  /** How many matching rows follow this page; the pager derives the rest. */
+  readonly remaining: number;
   readonly hasNext: boolean;
   readonly hasPrevious: boolean;
   readonly busy: boolean;
@@ -36,7 +39,7 @@ export function LogPager({
   readonly onPrevious: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const info = pageInfo(index, query.limit, total, hasNext);
+  const info = pageInfo(index, query.limit, total, remaining);
   return (
     <nav
       aria-label={t('logs.pager.label')}

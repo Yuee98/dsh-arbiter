@@ -2939,7 +2939,7 @@ describe('anchored traversal against insertions in every position', () => {
       anchor: first.anchor,
     });
     expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
-    expect(second.hasMore).toBe(false);
+    expect(second.remaining).toBe(0);
     store.close();
   });
 
@@ -2958,7 +2958,7 @@ describe('anchored traversal against insertions in every position', () => {
     });
     expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
     // The traversal is exhausted: no further row follows D.
-    expect(second.hasMore).toBe(false);
+    expect(second.remaining).toBe(0);
     // X lands between B and C, inside the region the reader already traversed.
     store.enqueue(record({ callId: 'X', result: 'allow', ts: 95 }));
     await store.flush();
@@ -2969,7 +2969,7 @@ describe('anchored traversal against insertions in every position', () => {
       after: second.nextCursor ?? firstCursor,
       anchor: first.anchor,
     });
-    expect(reread.hasMore).toBe(false);
+    expect(reread.remaining).toBe(0);
     expect(reread.rows).toEqual([]);
     // `total` counts every matching record below the traversal head, so the
     // insertion is included: it is a real matching record, and hiding it would
@@ -3014,7 +3014,7 @@ describe('anchored traversal against insertions in every position', () => {
     if (back === null) throw new Error('the second page must have a cursor');
     const previous = store.listCalls({ limit: 2, before: back });
     expect(previous.rows.map((row) => row.callId)).toEqual(['A', 'B']);
-    expect(previous.hasMore).toBe(true);
+    expect(previous.remaining).toBeGreaterThan(0);
     store.close();
   });
 });

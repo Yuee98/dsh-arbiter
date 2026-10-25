@@ -95,6 +95,7 @@ export function LogsPanel(): ReactNode {
           query={pages.query}
           index={pages.index}
           total={pages.loaded?.total ?? 0}
+          remaining={pages.loaded?.remaining ?? 0}
           hasNext={pages.hasNext}
           hasPrevious={pages.hasPrevious}
           busy={pages.busy || detailBusy}

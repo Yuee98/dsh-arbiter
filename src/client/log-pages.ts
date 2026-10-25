@@ -40,7 +40,8 @@ export interface LoadedPage {
   readonly total: number;
   readonly nextCursor: LogAnchor | null;
   readonly prevCursor: LogAnchor | null;
-  readonly hasMore: boolean;
+  /** How many matching rows follow this page, as the host counted them. */
+  readonly remaining: number;
   readonly index: number;
 }
 
@@ -56,11 +57,18 @@ export interface LoadOptions {
   readonly refresh?: boolean;
 }
 
-/** One page the reader has already seen, kept so "previous" is a restore. */
+/**
+ * One page the reader has already seen, kept so "previous" is a restore.
+ *
+ * `remaining` is the traversal's row count at the time the page was committed,
+ * which is what the pager showed then; replaying the page must replay its
+ * position label too, not recompute it from a total that has since changed.
+ */
 interface VisitedPage {
   readonly page: LoadedPage;
   readonly cursor: LogCursor;
   readonly anchor: LogAnchor | null;
+  readonly total: number;
 }
 
 export interface LogPages {
@@ -146,6 +154,28 @@ interface FetchInput {
   readonly setNotice: (notice: { readonly count: number } | null) => void;
   readonly unavailable: string;
   readonly failed: string;
+  /** Keep the page the reader is leaving; applied only after the move commits. */
+  /** Push the staged page, if the move committed. */
+  readonly remember: () => void;
+  /** Invalidate remembered pages when a correction replaces the traversal. */
+  readonly forget: () => void;
+}
+
+/**
+ * Whether an empty page is a lost window rather than an empty set.
+ *
+ * Only the first answer for a window may trigger the correction: a second empty
+ * result is reported as empty, so storage that keeps shrinking cannot spin.
+ */
+function needsCorrection(
+  response: { readonly rows: readonly unknown[]; readonly total: number },
+  options: LoadOptions,
+): boolean {
+  return (
+    response.rows.length === 0 &&
+    response.total > 0 &&
+    options.corrected !== true
+  );
 }
 
 /**
@@ -175,24 +205,22 @@ async function fetchPage(input: FetchInput): Promise<void> {
       input.setError(input.unavailable);
       return;
     }
-    if (response.rows.length === 0 && response.total > 0) {
-      if (input.options.corrected !== true) {
-        // The reader's page lost its rows. The last page is the only position
-        // that still exists after a deletion from the tail, and it is reached by
-        // name rather than by a count that the deletion invalidated.
-        input.passed.current = 0;
-        await fetchPage({
-          ...input,
-          where: LAST_PAGE,
-          options: {
-            keepAnchor: response.anchor,
-            index: 0,
-            corrected: true,
-            refresh: input.options.refresh === true,
-          },
-        });
-        return;
-      }
+    if (needsCorrection(response, input.options)) {
+      // The reader's page lost its rows. The last page is the only position that
+      // still exists after a deletion from the tail, and it is reached by name
+      // rather than by a count the deletion invalidated.
+      input.passed.current = 0;
+      await fetchPage({
+        ...input,
+        where: LAST_PAGE,
+        options: {
+          keepAnchor: response.anchor,
+          index: 0,
+          corrected: true,
+          refresh: input.options.refresh === true,
+        },
+      });
+      return;
     }
     // A tail read lands on the last page, so its position is the rows before it
     // rather than a count the reader already passed: the page it replaced may
@@ -207,7 +235,7 @@ async function fetchPage(input: FetchInput): Promise<void> {
       total: response.total,
       nextCursor: response.nextCursor,
       prevCursor: response.prevCursor,
-      hasMore: response.hasMore,
+      remaining: response.remaining,
       index,
     });
     input.setAnchor(response.anchor);
@@ -218,6 +246,11 @@ async function fetchPage(input: FetchInput): Promise<void> {
         ? { count: response.newer }
         : null,
     );
+    // Only now is the move complete, so the page the reader left can join the
+    // history. A failed read leaves them where they were, and a correction is an
+    // involuntary jump whose superseded pages cannot be restored.
+    if (input.options.corrected === true) input.forget();
+    else input.remember();
   } catch (errorValue) {
     if (input.generation.current !== current) return;
     input.setError(
@@ -230,12 +263,79 @@ async function fetchPage(input: FetchInput): Promise<void> {
   }
 }
 
+/** The mutable history state one traversal keeps. */
+interface HistoryRefs {
+  readonly history: { current: VisitedPage[] };
+  readonly staged: { current: VisitedPage | null };
+  readonly committed: { current: LoadedPage | null };
+  readonly openedWith: { current: LogCursor };
+  readonly anchor: LogAnchor | null;
+  readonly passed: { current: number };
+  readonly publish: (page: LoadedPage, head: LogAnchor | null) => void;
+}
+
+/**
+ * The visited-page stack: stage on a move, commit on success, restore on back.
+ *
+ * Separated from the hook so each transition is one function with one job, and so
+ * the ordering rule is visible in one place: a page joins the history only after
+ * the move that left it has committed.
+ */
+function historyOf(refs: HistoryRefs): {
+  readonly stage: () => void;
+  readonly remember: () => void;
+  readonly restore: () => void;
+  readonly forget: () => void;
+} {
+  return {
+    stage: () => {
+      const page = refs.committed.current;
+      if (page === null) return;
+      refs.staged.current = {
+        page,
+        cursor: refs.openedWith.current,
+        anchor: refs.anchor,
+        total: page.total,
+      };
+    },
+    remember: () => {
+      const entry = refs.staged.current;
+      refs.staged.current = null;
+      if (entry === null) return;
+      refs.history.current = [
+        ...refs.history.current.slice(-(HISTORY_LIMIT - 1)),
+        entry,
+      ];
+    },
+    restore: () => {
+      const visited = refs.history.current.at(-1);
+      if (visited === undefined) return;
+      // The entry is consumed as it is used, so repeated presses walk further
+      // back instead of re-showing the same page.
+      refs.history.current = refs.history.current.slice(0, -1);
+      refs.passed.current = visited.page.index;
+      refs.openedWith.current = visited.cursor;
+      refs.committed.current = visited.page;
+      refs.publish(visited.page, visited.anchor);
+    },
+    forget: () => {
+      refs.history.current = [];
+      refs.staged.current = null;
+    },
+  };
+}
+
 /** One page of the call list, with the interactions the panel offers. */
 export function useLogPages(): LogPages {
   const t = useArbiterTranslation();
   const [query, setQuery] = useState<LogQuery>(initialQuery);
   const [draft, setDraft] = useState<LogQuery>(initialQuery);
   const [loaded, setLoaded] = useState<LoadedPage | null>(null);
+  /** Publish a page and mirror it for callbacks that need the latest value. */
+  const commit = useCallback((page: LoadedPage): void => {
+    committed.current = page;
+    setLoaded(page);
+  }, []);
   const [anchor, setAnchor] = useState<LogAnchor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -246,6 +346,8 @@ export function useLogPages(): LogPages {
   const passed = useRef(0);
   /** The cursor the committed page was read with, so a refresh re-reads it. */
   const openedWith = useRef<LogCursor>(FIRST_PAGE);
+  /** The page currently on screen; a ref so `remember` needs no page argument. */
+  const committed = useRef<LoadedPage | null>(null);
   /**
    * Pages the reader has already seen, newest last.
    *
@@ -255,37 +357,23 @@ export function useLogPages(): LogPages {
    * change under them. Restoring keeps the boundary they actually observed.
    */
   const history = useRef<VisitedPage[]>([]);
+  /** The page and cursor the reader is leaving, staged until the move commits. */
+  const staged = useRef<VisitedPage | null>(null);
 
-  /** Record the current page before moving off it, bounded so it cannot grow. */
-  const remember = useCallback(
-    (
-      page: LoadedPage | null,
-      where: LogCursor,
-      head: LogAnchor | null,
-    ): void => {
-      if (page === null) return;
-      history.current = [
-        ...history.current.slice(-(HISTORY_LIMIT - 1)),
-        { page, cursor: where, anchor: head },
-      ];
+  const { stage, remember, restore, forget } = historyOf({
+    history,
+    staged,
+    committed,
+    openedWith,
+    anchor,
+    passed,
+    publish: (page, head) => {
+      setLoaded(page);
+      setAnchor(head);
+      setNotice(null);
+      setError(null);
     },
-    [],
-  );
-
-  /** Re-display a remembered page without reading it again. */
-  const restore = useCallback((visited: VisitedPage): void => {
-    passed.current = visited.page.index;
-    openedWith.current = visited.cursor;
-    setLoaded(visited.page);
-    setAnchor(visited.anchor);
-    setNotice(null);
-    setError(null);
-  }, []);
-
-  /** A new result set or an explicit jump invalidates the remembered pages. */
-  const forget = useCallback((): void => {
-    history.current = [];
-  }, []);
+  });
 
   const read = useCallback(
     (next: LogQuery, where: LogCursor, options: LoadOptions): Promise<void> =>
@@ -299,15 +387,17 @@ export function useLogPages(): LogPages {
         options,
         setBusy,
         setError,
-        setLoaded,
+        setLoaded: commit,
         setAnchor,
         setQuery,
         setDraft,
         setNotice,
         unavailable: t('logs.auditUnavailable'),
         failed: t('logs.loadFailed'),
+        remember,
+        forget,
       }),
-    [t],
+    [t, commit],
   );
 
   /** Run one read, covering only the promise the handler did not await. */
@@ -349,6 +439,7 @@ export function useLogPages(): LogPages {
     setDraft,
     startOver,
     run,
+    stage,
     remember,
     restore,
     forget,
@@ -378,12 +469,9 @@ function composePages(input: {
     where: LogCursor,
     options: LoadOptions,
   ) => void;
-  readonly remember: (
-    page: LoadedPage | null,
-    where: LogCursor,
-    head: LogAnchor | null,
-  ) => void;
-  readonly restore: (visited: VisitedPage) => void;
+  readonly stage: () => void;
+  readonly remember: () => void;
+  readonly restore: () => void;
   readonly forget: () => void;
 }): LogPages {
   const { page, query, anchor, t } = input;
@@ -397,7 +485,7 @@ function composePages(input: {
     busy: input.busy,
     index: input.index,
     emptyText: emptyTextFor(page, query, t),
-    hasNext: page !== null && page.hasMore,
+    hasNext: page !== null && page.remaining > 0,
     hasPrevious:
       page !== null && (previousPage !== undefined || page.index > 0),
     setDraft: input.setDraft,
@@ -424,10 +512,12 @@ function composePages(input: {
       });
     },
     next: () => {
-      if (page === null) return;
+      if (page === null || page.remaining <= 0) return;
       const move = forwardMove(page);
       if (move === null) return;
-      input.remember(page, input.openedWith, anchor);
+      // The page being left is staged now and remembered only if the move
+      // commits, so a failed read never records a page the reader stayed on.
+      input.stage();
       input.run(query, move.cursor, { keepAnchor: anchor, index: move.index });
     },
     previous: () => {
@@ -436,7 +526,7 @@ function composePages(input: {
       // backward query would return whatever now precedes the cursor, and a call
       // inserted above them would push a row they already read off the page.
       if (previousPage !== undefined) {
-        input.restore(previousPage);
+        input.restore();
         return;
       }
       const move = backwardMove(page, query.limit);

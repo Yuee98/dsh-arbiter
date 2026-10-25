@@ -114,17 +114,17 @@ export function initialQuery(): LogQuery {
 /**
  * Page numbers for a pager that reads by cursor.
  *
- * `index` is how many rows the reader has passed, and `hasMore` is the host's
- * probe for a row after this page. The page *count* is therefore only claimed
- * when it is provable: a set that has no further row ends at this page, so the
- * total cannot advertise one more page than the reader can actually reach.
- * `total` remains the size of the matching set and is shown separately.
+ * `remaining` is how many matching rows the host counted *after* this page inside
+ * the traversal, so the number of pages below is exact. It is deliberately not
+ * derived from `total`: the total includes calls that arrived behind the reader,
+ * and counting those would advertise pages that cannot be reached — the pager
+ * would then retract them as the reader advanced.
  */
 export function pageInfo(
   index: number,
   limit: number,
   total: number,
-  hasMore: boolean,
+  remaining: number,
 ): {
   readonly page: number;
   readonly pages: number;
@@ -133,13 +133,10 @@ export function pageInfo(
 } {
   if (total <= 0 || limit <= 0) return { page: 0, pages: 0, first: 0, last: 0 };
   const page = Math.floor(Math.max(index, 0) / limit) + 1;
-  // Without a following row the traversal ends here, whatever the live total
-  // says: an insertion below the reader's position can raise the total without
-  // creating a page they can reach.
-  const pages = hasMore ? Math.max(page + 1, Math.ceil(total / limit)) : page;
+  const ahead = Math.ceil(Math.max(remaining, 0) / limit);
   return {
     page,
-    pages,
+    pages: page + ahead,
     first: (page - 1) * limit + 1,
     last: Math.min(page * limit, total),
   };
