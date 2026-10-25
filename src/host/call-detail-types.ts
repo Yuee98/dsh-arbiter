@@ -27,11 +27,11 @@ export type CallDetailMissingCode =
   | 'model-attempts-missing'
   | 'template-missing'
   | 'template-unreadable'
+  | 'stages-missing'
   | 'stage-details-missing'
   | 'rule-name-missing'
   | 'arguments-missing'
-  | 'execution-not-observed'
-  | 'history-unavailable';
+  | 'execution-not-observed';
 
 /** Where the shown final verdict came from. */
 export type CallDetailSource = 'audit' | 'session';
@@ -90,6 +90,15 @@ export interface CallDetailBasis {
   readonly policyStrategy: string | null;
   /** Structured stages when the source stored them; otherwise null. */
   readonly chain: readonly CallDetailStage[] | null;
+  /**
+   * Whether this call reached a model review at all.
+   *
+   * A rule short-circuit never asked the model, so its absent snapshot and
+   * attempts are "not applicable" rather than missing material. Stating this
+   * once, from the stored chain, keeps the page from reporting a gap that never
+   * existed.
+   */
+  readonly reviewed: boolean;
   /** The stored result sequence every source carries. */
   readonly trace: readonly string[];
   readonly signals: unknown;

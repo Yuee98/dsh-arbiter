@@ -112,6 +112,7 @@ function auditDetailBody(): DetailBody {
           },
         ],
         trace: ['review(default)', 'review-deny'],
+        reviewed: true,
         signals: null,
         evidence: [
           {

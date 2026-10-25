@@ -32,7 +32,7 @@
   "chainResultsOnly": "只记录了阶段结果，未保存各阶段名称与原因：",
   "decisionRules": "命中的判定规则",
   "snapshotMissingInputs": "送审时已标注的缺失输入",
-  "noEvidence": "这次调用没有进入模型审查，因此没有送审证据。",
+  "noEvidence": "没有可展示的送审证据。",
   "evidenceTruncated": "部分授权证据因长度上限被截断。",
   "evidence": "授权证据（{count}）",
   "materials": "送审材料来源（{count}）",
@@ -77,6 +77,7 @@
     "recordFormatNewer": "记录格式高于当前插件版本，未按当前结构解释。",
     "snapshotMissing": "没有保存审查快照。",
     "snapshotUnreadable": "审查快照格式无法被当前版本解释。",
+    "stagesMissing": "这条记录没有保存判定链，无法判断是否进入过模型审查。",
     "configMissing": "没有保存当时的配置快照。",
     "configUnreadable": "当时的配置快照格式无法被当前版本解释。",
     "modelAttemptsMissing": "进入过模型审查，但没有保存模型尝试。",
@@ -123,5 +124,6 @@
   "overview": "调用概览",
   "missingTitle": "材料缺失",
   "signals": "信号与阈值",
-  "effect": "效果"
+  "effect": "效果",
+  "notReviewed": "这次调用由规则直接决定，没有进入模型审查。"
 }

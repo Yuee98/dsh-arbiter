@@ -130,11 +130,17 @@ test(
     await expect(basis).toContainText('E2E deny rule');
     await expect(basis).toContainText('no-e2e');
 
-    // A rule short-circuit stored no snapshot or model attempt, so the page
-    // states that material is unavailable rather than showing empty layers.
+    // A rule short-circuit never asked the model, so the basis says so instead
+    // of listing review material as missing; the named configuration snapshot
+    // has no row here, which is a genuine gap and is labelled as one.
+    await expect(
+      plugin.getByText('这次调用由规则直接决定，没有进入模型审查。', {
+        exact: true,
+      }),
+    ).toBeVisible();
     const missing = plugin.getByRole('group', { name: '材料缺失' });
-    await expect(missing).toContainText('没有保存审查快照');
     await expect(missing).toContainText('没有保存当时的配置快照');
+    await expect(missing).not.toContainText('没有保存审查快照');
 
     // Raw material stays collapsed until requested.
     const raw = plugin.getByRole('button', {

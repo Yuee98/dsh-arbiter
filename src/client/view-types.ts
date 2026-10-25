@@ -156,11 +156,11 @@ export type CallDetailMissingCode =
   | 'model-attempts-missing'
   | 'template-missing'
   | 'template-unreadable'
+  | 'stages-missing'
   | 'stage-details-missing'
   | 'rule-name-missing'
   | 'arguments-missing'
-  | 'execution-not-observed'
-  | 'history-unavailable';
+  | 'execution-not-observed';
 
 export interface CallDetailStageView {
   readonly seq: number;
@@ -235,6 +235,8 @@ export interface CallDetailView {
     readonly decisionRules: readonly string[];
     readonly policyStrategy: string | null;
     readonly chain: readonly CallDetailStageView[] | null;
+    /** Whether the call reached a model review at all. */
+    readonly reviewed: boolean;
     readonly trace: readonly string[];
     readonly signals: unknown;
     readonly evidence: readonly unknown[];

@@ -175,7 +175,9 @@ function SubmittedEvidence({
   if (evidence.length === 0 && materials.length === 0) {
     return (
       <div style={{ fontSize: 12.5 }} data-call-detail-evidence="none">
-        {t('callDetail.noEvidence')}
+        {detail.basis.reviewed
+          ? t('callDetail.noEvidence')
+          : t('callDetail.notReviewed')}
       </div>
     );
   }

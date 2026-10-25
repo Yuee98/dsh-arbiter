@@ -151,17 +151,23 @@ function materialMissing(options: {
   readonly trace: readonly string[];
 }): CallDetailMissingCode[] {
   const missing: CallDetailMissingCode[] = [];
-  if (options.snapshotUnreadable) missing.push('snapshot-unreadable');
-  else if (options.snapshot === null) missing.push('snapshot-missing');
+  const reviewed = reviewedTrace(options.trace);
+  // A rule short-circuit never asked the model, so its absent snapshot and
+  // attempts are not missing material. Reporting them would describe a gap the
+  // record never had, and would imply a review this call did not receive.
+  if (reviewed && options.snapshotUnreadable)
+    missing.push('snapshot-unreadable');
+  else if (reviewed && options.snapshot === null)
+    missing.push('snapshot-missing');
+  // Every call is decided under some configuration snapshot, so a missing row
+  // for it is a genuine gap even when the call never reached a model review.
   if (options.configUnreadable) missing.push('config-unreadable');
   else if (options.config === null) missing.push('config-missing');
   // `arguments` arrives already parsed from the stored JSON, so absence is a
   // null value rather than an empty string.
   if (valueOf(options.record, 'arguments') === null)
     missing.push('arguments-missing');
-  // A rule short-circuit never asked the model, so an empty attempt list is the
-  // record of what happened rather than a gap.
-  if (reviewedTrace(options.trace) && options.attempts.length === 0)
+  if (reviewed && options.attempts.length === 0)
     missing.push('model-attempts-missing');
   missing.push(...templateMissing(options.attempts, options.templates));
   if (textOf(options.record, 'executionStatus') === 'pending')
@@ -244,6 +250,7 @@ function unreadableDetail(record: StoredCall): CallDetail {
       decisionRules: [],
       policyStrategy: null,
       chain: null,
+      reviewed: false,
       trace: [],
       signals: null,
       evidence: [],
@@ -294,8 +301,14 @@ export function auditDetail(record: StoredCall): CallDetail {
       trace,
     }),
     ...(rule.missing === null ? [] : [rule.missing]),
+    // No structured chain: either the source kept result strings only, or it
+    // kept nothing at all. Those are different answers, so they are named
+    // differently rather than collapsed into "no stages".
     ...(chain === null && trace.length > 0
       ? (['stage-details-missing'] as const)
+      : []),
+    ...(chain === null && trace.length === 0
+      ? (['stages-missing'] as const)
       : []),
   ];
   return {
@@ -331,6 +344,7 @@ export function auditDetail(record: StoredCall): CallDetail {
       decisionRules: stringsOf(record, 'decisionRules'),
       policyStrategy: textOf(record, 'policyStrategy'),
       chain,
+      reviewed: reviewedTrace(trace),
       trace,
       signals: scrubValue(valueOf(record, 'signals')),
       evidence: basis.evidence,

@@ -79,7 +79,6 @@ const MISSING_KEYS: Readonly<Record<string, string>> = {
   'audit-record-cleared': 'callDetail.missing.auditRecordCleared',
   'audit-unreadable': 'callDetail.missing.auditUnreadable',
   'record-format-newer': 'callDetail.missing.recordFormatNewer',
-  'session-record-missing': 'callDetail.missing.sessionRecordMissing',
   'snapshot-missing': 'callDetail.missing.snapshotMissing',
   'snapshot-unreadable': 'callDetail.missing.snapshotUnreadable',
   'config-missing': 'callDetail.missing.configMissing',
@@ -92,7 +91,6 @@ const MISSING_KEYS: Readonly<Record<string, string>> = {
   'rule-name-missing': 'callDetail.missing.ruleNameMissing',
   'arguments-missing': 'callDetail.missing.argumentsMissing',
   'execution-not-observed': 'callDetail.missing.executionNotObserved',
-  'history-unavailable': 'callDetail.missing.historyUnavailable',
 };
 
 /** A missing-part code as a sentence, or `null` for a code this build lacks. */

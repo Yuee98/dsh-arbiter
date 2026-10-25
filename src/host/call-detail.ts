@@ -220,8 +220,9 @@ function rememberedDetail(
   // A remembered rule has no stored name: the session record does not carry one,
   // and reading it from the live rule list would relabel a past decision.
   if (item.ruleId !== undefined) gaps.push('rule-name-missing');
-  if (reviewedTrace(trace))
-    gaps.push('snapshot-missing', 'model-attempts-missing');
+  // Only a call that reached a review is expected to have review material.
+  const reviewed = reviewedTrace(trace);
+  if (reviewed) gaps.push('snapshot-missing', 'model-attempts-missing');
   gaps.push('execution-not-observed');
   return {
     callId: item.callId,
@@ -257,6 +258,7 @@ function rememberedDetail(
       decisionRules: item.decisionRules ?? [],
       policyStrategy: null,
       chain,
+      reviewed,
       trace,
       signals: null,
       evidence: [],

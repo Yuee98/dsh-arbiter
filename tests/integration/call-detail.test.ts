@@ -362,7 +362,11 @@ describe('full audit detail', () => {
     expect(fieldOf(basis, 'evidence')).toEqual([]);
     expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toEqual([]);
     const missing = missingOf(detail);
-    expect(missing).toContain('snapshot-missing');
+    // A rule short-circuit never asked the model, so no snapshot or attempt is
+    // reported as missing; the basis says the call was not reviewed instead.
+    expect(missing).not.toContain('snapshot-missing');
+    expect(missing).not.toContain('model-attempts-missing');
+    expect(fieldOf(basis, 'reviewed')).toBe(false);
     // A denied call never started, so its execution result is not a gap.
     expect(fieldOf(overview, 'execution')).toEqual({
       status: 'not-started',
@@ -495,6 +499,8 @@ describe('degraded sources', () => {
     );
     const missing = missingOf(detail);
     expect(missing).toContain('audit-record-cleared');
+    // The record proves a review happened, so its absent snapshot and attempts
+    // are real gaps rather than "not applicable".
     expect(missing).toContain('snapshot-missing');
     expect(missing).toContain('model-attempts-missing');
     // The minimal record has no execution observation, and none is invented.
@@ -619,11 +625,14 @@ describe('old records and endings', () => {
     const raw = fieldOf(detail, 'raw');
     expect(fieldOf(raw, 'snapshot')).toBeNull();
     expect(fieldOf(raw, 'config')).toBeNull();
-    // A v1 row has no stage table entries and no snapshot columns; both are
-    // reported, and no value is invented for either.
+    // A v1 row has no stage rows and no snapshot column, so whether a review
+    // happened is unknown: the view names that rather than claiming a snapshot
+    // went missing. The named configuration snapshot has no row, which is a
+    // real gap.
     const missing = missingOf(detail);
-    expect(missing).toContain('snapshot-missing');
+    expect(missing).toContain('stages-missing');
     expect(missing).toContain('config-missing');
+    expect(fieldOf(basis, 'reviewed')).toBe(false);
   });
 
   test('a record written by a newer plugin is reported, not reinterpreted', async () => {
