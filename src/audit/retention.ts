@@ -37,6 +37,25 @@ function compact(db: DatabaseSync): void {
   }
 }
 /**
+ * Reclaim WAL content into the main database and truncate the WAL file.
+ *
+ * Returns false when a reader prevented completion. That distinction matters:
+ * an untruncated WAL contains bytes a later checkpoint can still reclaim, so it
+ * must not be treated as permanently unavailable capacity.
+ */
+function checkpoint(db: DatabaseSync): boolean {
+  try {
+    // `wal_checkpoint` reports blocking by returning `busy = 1` rather than
+    // raising, so the row has to be inspected: assuming success would treat
+    // un-checkpointed WAL bytes as permanently unavailable capacity.
+    const row = asRow(db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get());
+    return rowNumber(row['busy'], 0) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Logical occupied bytes: pages actually in use, excluding free pages.
  *
  * A DELETE does not shrink the file, so evicting on the physical size would keep
@@ -122,6 +141,10 @@ export function runRetention(
   // make their templates orphaned, and reclaiming them now keeps that content
   // out of the capacity decision below.
   reclaimShared(db, cutoff);
+  // The deletion above grew the WAL, and WAL content is reclaimable. Checkpoint
+  // it before measuring, or its bytes would be counted as capacity that the
+  // database can never get back and would trigger needless eviction.
+  const checkpointed = checkpoint(db);
   let guard = 0;
   // Auxiliary files cannot be reclaimed by deleting rows, so the database budget
   // is what remains of the target after them. The budget is derived from the
@@ -129,6 +152,17 @@ export function runRetention(
   // SQLite's free pages, which compaction can reclaim and which must therefore
   // stay inside the database's own budget.
   const databaseBudget = Math.max(0, retentionBytes - auxiliaryBytes());
+  // When a reader blocked the checkpoint, the WAL still holds reclaimable bytes.
+  // They are not evidence that the database needs to shrink, so this pass defers
+  // the capacity decision instead of deleting calls for space it cannot measure
+  // honestly.
+  if (!checkpointed) {
+    return {
+      deleted,
+      irreducible: false,
+      bytes: occupiedBytes(db) + auxiliaryBytes(),
+    };
+  }
   while (occupiedBytes(db) > databaseBudget && guard < 40) {
     guard += 1;
     const remaining = rowNumber(
@@ -171,6 +205,9 @@ export function runRetention(
   reclaimShared(db, cutoff);
   if (deleted > 0 || occupiedBytes(db) + auxiliaryBytes() > retentionBytes)
     compact(db);
+  // VACUUM writes a fresh WAL. Checkpoint it before reporting, or the final
+  // footprint would include bytes the checkpoint is about to reclaim.
+  checkpoint(db);
   // After compaction the physical footprint may still exceed the target because
   // the single newest call (or a sidecar/backup) is larger than it. Say so
   // rather than deleting the last record to satisfy a number.

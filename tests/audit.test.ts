@@ -2199,3 +2199,77 @@ describe('retention does not mistake free pages for auxiliary files', () => {
     store.close();
   });
 });
+
+describe('WAL bytes never justify deleting retained calls', () => {
+  test('age cleanup plus checkpoint already meets a 1 MiB target', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const expiredTs = Date.now() - 5 * 24 * 60 * 60 * 1_000;
+    // Expired records sized so their deletion writes a material WAL, exactly as
+    // the reviewed reproduction described.
+    for (let index = 0; index < 8; index += 1) {
+      store.enqueue(
+        record({
+          callId: `wal-expired-${String(index)}`,
+          result: 'allow',
+          ts: expiredTs,
+          arguments: { command: 'echo hi', padding: 'w'.repeat(60_000) },
+        }),
+      );
+    }
+    for (let index = 0; index < 4; index += 1) {
+      store.enqueue(
+        record({
+          callId: `wal-recent-${String(index)}`,
+          result: 'allow',
+          arguments: { command: 'echo hi', padding: 'r'.repeat(120_000) },
+        }),
+      );
+    }
+    await store.flush();
+    const target = 1024 * 1024;
+    const outcome = store.runRetention(Date.now(), 1, target);
+    const remaining = store.listCalls({}).rows.map((row) => row.callId);
+    // All four recent calls must survive: after age cleanup and a checkpoint the
+    // footprint already fits, so WAL bytes must not be counted as missing room.
+    expect(remaining.filter((id) => id.startsWith('wal-recent-'))).toHaveLength(
+      4,
+    );
+    expect(outcome.deleted).toBeGreaterThanOrEqual(8);
+    // The reported footprint is measured after the final checkpoint, so it must
+    // not carry WAL bytes that were already reclaimed.
+    expect(outcome.irreducible).toBe(false);
+    store.close();
+  });
+
+  test('a checkpoint that cannot complete defers capacity eviction', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 6; index += 1) {
+      store.enqueue(
+        record({
+          callId: `defer-${String(index)}`,
+          result: 'allow',
+          arguments: { command: 'echo hi', padding: 'd'.repeat(5_000) },
+        }),
+      );
+    }
+    await store.flush();
+    const before = store.listCalls({}).total;
+    const path = store.databasePath;
+    // Hold a read transaction open on a second connection so the checkpoint
+    // cannot truncate the WAL.
+    const reader = new DatabaseSync(path);
+    reader.exec('BEGIN');
+    reader.prepare('SELECT COUNT(*) AS count FROM calls').get();
+    store.enqueue(record({ callId: 'during-read', result: 'allow' }));
+    await store.flush();
+    // An impossible target: without honest WAL accounting this would delete every
+    // call but the newest.
+    const outcome = store.runRetention(Date.now(), 365, 1);
+    expect(outcome.deleted).toBe(0);
+    expect(store.listCalls({}).total).toBe(before + 1);
+    expect(outcome.irreducible).toBe(false);
+    reader.exec('COMMIT');
+    reader.close();
+    store.close();
+  });
+});
