@@ -198,6 +198,30 @@ function SubmittedEvidence({
   );
 }
 
+/** The signals the policy read, and the effect it derived from them. */
+function Signals({ detail }: { readonly detail: CallDetailView }): ReactNode {
+  const t = useArbiterTranslation();
+  const { signals, effect } = detail.basis;
+  if (signals === null && effect === null) return null;
+  return (
+    <Collapsible summary={t('callDetail.signals')}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {signals === null ? null : (
+          <section aria-label={t('callDetail.signals')}>
+            <JsonBlock value={signals} />
+          </section>
+        )}
+        {effect === null ? null : (
+          <section aria-label={t('callDetail.effect')}>
+            <div style={{ fontSize: 12.5 }}>{t('callDetail.effect')}</div>
+            <JsonBlock value={effect} />
+          </section>
+        )}
+      </div>
+    </Collapsible>
+  );
+}
+
 /** The basis layer of one detail. */
 export function CallDetailBasis({
   detail,
@@ -224,6 +248,7 @@ export function CallDetailBasis({
       </div>
       <DecisionRules detail={detail} />
       <SubmittedEvidence detail={detail} />
+      <Signals detail={detail} />
     </div>
   );
 }

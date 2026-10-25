@@ -243,6 +243,25 @@ describe('shared call detail', () => {
     expect(answer.textContent).not.toContain('the review rejected this call');
   });
 
+  test('shows the policy signals without presenting them as the verdict', async () => {
+    const body = auditDetailBody();
+    body.detail.basis['signals'] = {
+      riskPoint: 9,
+      authPoint: 1,
+      riskClass: 'high',
+    };
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('region', { name: '最终裁决' });
+    await user.click(screen.getByRole('button', { name: '信号与阈值' }));
+
+    const signals = screen.getByRole('region', { name: '信号与阈值' });
+    expect(signals).toHaveTextContent('riskPoint');
+    // The verdict region stays the review's conclusion; signals are evidence.
+    expect(verdictRegion()).toHaveTextContent('审查拒绝');
+    expect(verdictRegion()).not.toHaveTextContent('riskPoint');
+  });
+
   test('uses the historical rule name rather than the live rule list', async () => {
     server.use(
       http.get('*/api/arbiter/state', () =>
