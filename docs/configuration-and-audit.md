@@ -179,7 +179,9 @@ chat 复用宿主已有 provider 的凭据；decision 配置仅保存凭据引�
 
 修改进入当前草稿，统一通过页面“保存并应用”生效。[测试 Reviewer](#reviewer-test-ui)读取点击时的草稿，成功不会自动保存或应用；保存也不要求先测试，且不自动发起模型请求。必填项、字段格式等配置错误阻止保存；网络、认证、配额等连接测试失败可提示，但不额外阻止保存。运行中若所选后端不可用，沿用 `error-escalate` 及既定人工／兜底流程，不自动切换其他后端。
 
-首次默认 `chat` + 跟随会话模型，替代旧稿的 decision 默认值，见[首版初始默认值](#initial-defaults)。DSH 模型列表的枚举、选择控件与凭据入口接入由实现侧核对，本节不表示已经完成宿主或客户端验证。
+首次默认 `chat` + 跟随会话模型，替代旧稿的 decision 默认值，见[首版初始默认值](#initial-defaults)。
+
+**首版实现（#13）**：插件新增只读路由 `GET /api/arbiter/models`，逐个 provider 读取宿主 `llm.listProviders()` / `llm.listModels()` 并原序分组返回；某个 provider 读取失败时以稳定代码 `provider-catalog-failed` 单列，不影响其他分组，未配置凭据的 provider 因无模型而省略。选择控件以 `provider / model` 作为稳定的选项标识（JSON 二元组编码，避免 `/`、`:` 等字符使两个路由塌缩为一个值），同名模型因此在不同 provider 分组下仍是两个选项；搜索按 provider 名、provider id、模型名和模型 id 过滤。目录加载失败、为空或当前选择已不在目录中时，控件保留草稿中已保存的 `provider` / `model` 并给出本地化说明，不伪造选项、不改写配置；当前选择只是被搜索条件隐藏时按“被搜索隐藏”区分，不当作模型已被删除。凭据状态路由接受 `?ref=`（省略时用生效配置的引用），但只返回状态，不返回密钥；引用按运行时使用原样查询，不做 trim，避免状态与真实请求指向不同引用。缺少 `describe()`、查询抛错和 HTTP 失败分别映射为 `unsupported` / `unavailable`，不会显示成“未设置”。运行中仍不发起模型请求，保存也不要求先测试。
 
 <a id="reviewer-test-ui"></a>
 
