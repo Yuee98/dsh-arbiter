@@ -23,11 +23,14 @@ const pullRequest = {
   isDraft: false,
 };
 
-function githubFixture(latest: unknown = pullRequest) {
+function githubFixture(
+  latest: unknown = pullRequest,
+  checks: unknown = [{ name: 'Verify', bucket: 'pass' }],
+) {
   return vi
     .fn<(args: string[], input?: string) => string>()
     .mockReturnValueOnce(JSON.stringify(pullRequest))
-    .mockReturnValueOnce('All checks passed')
+    .mockReturnValueOnce(JSON.stringify(checks))
     .mockReturnValueOnce(JSON.stringify(latest))
     .mockReturnValueOnce('Merged');
 }
@@ -134,6 +137,13 @@ describe('validated squash merge', () => {
       ['pr', 'view'],
       ['pr', 'merge'],
     ]);
+    expect(github).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'checks',
+      '30',
+      '--json',
+      'name,bucket',
+    ]);
     expect(github).toHaveBeenLastCalledWith(
       [
         'pr',
@@ -214,6 +224,43 @@ describe('validated squash merge', () => {
       });
     expect(() => squashMerge(['30'], github)).toThrow('Checks pending');
     expect(github).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['cancel', 'fail', 'pending', 'skipping', 'unknown'])(
+    'rejects %s even if gh returns exit success and required Verify passes',
+    (bucket) => {
+      const github = githubFixture(pullRequest, [
+        { name: 'Verify', bucket: 'pass' },
+        { name: 'Real DSH smoke (ubuntu-24.04)', bucket },
+      ]);
+      expect(() => squashMerge(['30'], github)).toThrow(
+        'All reported checks must pass',
+      );
+      expect(github).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([null, [], {}, [{ name: 'Verify' }], [{ bucket: 'pass' }]])(
+    'rejects missing or malformed check results: %j',
+    (checks) => {
+      const github = githubFixture(pullRequest, checks);
+      expect(() => squashMerge(['30'], github)).toThrow(
+        'All reported checks must pass',
+      );
+      expect(github).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('accepts successful required checks and independent smoke together', () => {
+    const github = githubFixture(pullRequest, [
+      { name: 'Verify', bucket: 'pass' },
+      { name: 'PR title', bucket: 'pass' },
+      { name: 'Real DSH smoke (ubuntu-24.04)', bucket: 'pass' },
+    ]);
+    expect(squashMerge(['30', '--dry-run'], github)).toContain(
+      'Dry run: squash',
+    );
+    expect(github).toHaveBeenCalledTimes(3);
   });
 
   it.each([

@@ -44,6 +44,31 @@ function readPullRequest(pr: string, github: GitHub) {
   return { title: data.title, head: data.headRefOid };
 }
 
+function assertChecksPassed(output: string): void {
+  const checks: unknown = JSON.parse(output);
+  if (!Array.isArray(checks) || checks.length === 0) {
+    throw new Error(
+      'All reported checks must pass; expected nonempty results.',
+    );
+  }
+  const entries: unknown[] = checks;
+  for (const check of entries) {
+    if (
+      !check ||
+      typeof check !== 'object' ||
+      !('name' in check) ||
+      typeof check.name !== 'string' ||
+      !check.name.trim() ||
+      !('bucket' in check) ||
+      check.bucket !== 'pass'
+    ) {
+      throw new Error(
+        `All reported checks must pass; received ${JSON.stringify(check)}.`,
+      );
+    }
+  }
+}
+
 export function squashMerge(
   args: string[],
   github: GitHub = runGitHub,
@@ -70,7 +95,8 @@ export function squashMerge(
 
   const before = readPullRequest(pr, github);
   // No --required: optional smoke and other reported checks must also finish.
-  github(['pr', 'checks', pr]);
+  // Exit success alone also permits cancelled checks in some gh versions.
+  assertChecksPassed(github(['pr', 'checks', pr, '--json', 'name,bucket']));
   const current = readPullRequest(pr, github);
   if (current.head !== before.head) {
     throw new Error(
