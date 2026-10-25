@@ -82,6 +82,28 @@ function consumeApplySource(
   return runtime.configApplications === 0 ? 'startup' : 'file';
 }
 
+/**
+ * Tell the runtime's own consumers that a new configuration is in effect.
+ *
+ * A listener failure is logged and contained: the configuration already
+ * committed, and a consumer that could not follow it must not roll it back.
+ */
+function notifyConfigListeners(
+  runtime: RuntimeState,
+  config: ArbiterConfig,
+): void {
+  for (const listener of runtime.configListeners) {
+    try {
+      listener(config);
+    } catch (error) {
+      console.warn(
+        'arbiter: configuration listener failed: %s',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}
+
 export function releaseRuntime(runtime: RuntimeState): void {
   if (runtime.instances > 0 || runtime.active > 0) return;
   runtime.audit?.close();
@@ -230,6 +252,7 @@ export function applyConfig(
   // The effective configuration commits only here, after validation succeeded
   // and after the host accepted the document.
   runtime.config = candidate;
+  notifyConfigListeners(runtime, candidate);
   // Continuity data follows the committed configuration, never the candidate
   // that was merely parsed: a later application failure must not leave a
   // recovery copy the runtime never actually ran. The first accepted document
@@ -397,6 +420,7 @@ function acquireRuntime(
     instances: 0,
     active: 0,
     accepting: true,
+    configListeners: new Set(),
   };
   if (existing === undefined) RUNTIMES.set(scopeKey, runtime);
   runtime.invalidConfigError = invalidConfigError;

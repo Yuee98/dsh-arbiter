@@ -130,6 +130,24 @@ async function importSessionModule(): Promise<unknown> {
   }
 }
 
+/**
+ * Install an already-resolved writer.
+ *
+ * The plugin resolves `@deepseek-ai/dsh-session` from the running host by
+ * default. A composition that already holds that package — or an in-process
+ * test that hosts the plugin without the desktop installation — can supply the
+ * same public function instead of relying on resolution. The contract is
+ * unchanged: records still go through `appendPluginRecord` only, and nothing
+ * falls back to `session.append`.
+ */
+export function installSessionRecordApi(api: SessionRecordApi | null): void {
+  if (loaded !== null && api !== null && loaded !== api) {
+    throw new Error('a different session record API is already installed');
+  }
+  loaded = api;
+  loadError = null;
+}
+
 /** The retained resolution failure, or `null` when the API is available. */
 export function sessionRecordError(): string | null {
   return loadError;

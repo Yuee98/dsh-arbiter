@@ -157,6 +157,12 @@ export function configuration(value: unknown): ArbiterConfig {
   return {
     ...(format === undefined ? {} : { format }),
     enabled: field(source, 'enabled', boolean),
+    // An older host answers without the field; absence keeps the confirmed
+    // default instead of failing the whole page, while a supplied value must
+    // still be one of the two boundaries.
+    boundary:
+      field(source, 'boundary', optional(choice('guarded', 'trusted'))) ??
+      'guarded',
     modes: {
       main: field(modes, 'main', choice('normal', 'strict', 'progress')),
       subagent: field(modes, 'subagent', choice('strict', 'progress')),

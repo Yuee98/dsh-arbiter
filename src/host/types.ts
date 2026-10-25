@@ -189,6 +189,12 @@ export interface RuntimeState {
   active: number;
   /** False once unload begins: no new call is gated. */
   accepting: boolean;
+  /**
+   * Called after every configuration activation (startup, file, UI). Used to
+   * re-apply the execution boundary to sessions that are still enabled; it is
+   * never a second configuration state.
+   */
+  readonly configListeners: Set<(config: ArbiterConfig) => void>;
 }
 
 export interface HostServices {

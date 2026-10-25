@@ -39,6 +39,33 @@ const PRODUCTION_RULE = {
 
 const CONFIG = { format: FORMAT, rules: [PRODUCTION_RULE] };
 
+interface GateEvent {
+  readonly type: string;
+  readonly data: unknown;
+  readonly seq: number;
+  readonly ignorable?: boolean;
+}
+
+/**
+ * Record the user's enable switch the way the host persists it.
+ *
+ * The plugin writes through the host's `appendPluginRecord`; here the same
+ * ignorable record is appended directly, which is exactly the committed
+ * envelope the cold reader folds.
+ */
+function appendAdmission(session: {
+  readonly append: (type: string, data: unknown) => void;
+}): void {
+  session.append('plugin:arbiter/admission', {
+    version: 1,
+    sessionId: 'sr-gate',
+    rootSessionId: 'sr-gate',
+    enabled: true,
+    boundary: 'guarded',
+    at: Date.now(),
+  });
+}
+
 interface GateDecision {
   readonly kind: string;
   readonly text: string;
@@ -285,6 +312,20 @@ async function mountGate(options: { readonly readOnly: boolean }): Promise<{
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
+  // The gate reviews only a session the user enabled, so the fixture states
+  // that admission the way the host does: one ignorable plugin record.
+  const log: GateEvent[] = [];
+  const gateSession = {
+    id: 'sr-gate',
+    header: { id: 'sr-gate', cwd: home },
+    snapshotEvents: () => log,
+    deriveMessages: () => [],
+    append: (type: string, data: unknown) => {
+      log.push({ type, data, seq: log.length, ignorable: true });
+    },
+  };
+  appendAdmission(gateSession);
+
   const runtime = box.runtime;
   if (runtime === undefined)
     throw new Error(
@@ -299,15 +340,7 @@ async function mountGate(options: { readonly readOnly: boolean }): Promise<{
         callId: `gate-${String(received.length + 1)}`,
         name,
         arguments: args,
-        agent: {
-          session: {
-            id: 'sr-gate',
-            header: { id: 'sr-gate', cwd: home },
-            snapshotEvents: () => [],
-            deriveMessages: () => [],
-            append: () => undefined,
-          },
-        },
+        agent: { session: gateSession },
         signal: new AbortController().signal,
       });
       // The host materializes a denied pre-execute decision as an error result

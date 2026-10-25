@@ -13,7 +13,7 @@ import type {
   ConfigError,
   ConfigWarning,
 } from '../types.js';
-import { asBoolean, asInteger } from './values.js';
+import { asBoolean, asEnum, asInteger } from './values.js';
 import { ruleWarnings } from './rules.js';
 import { parseModes, parseAudit, parseBreaker } from './runtime.js';
 import { parseReviewer } from './reviewer.js';
@@ -46,6 +46,13 @@ export function parseConfigSections(
     });
   return {
     enabled: asBoolean(raw['enabled'], true, 'enabled', errors),
+    boundary: asEnum(
+      raw['boundary'],
+      ['guarded', 'trusted'],
+      'guarded',
+      'boundary',
+      errors,
+    ),
     modes,
     reviewer,
     policy,
