@@ -261,6 +261,38 @@ export type ReviewerProbeView =
       readonly attempts: readonly ReviewerProbeAttemptView[];
     };
 
+/**
+ * The rules panel's stable interface.
+ *
+ * The draft and its mutator stay owned by the page, so the tester panel can be
+ * replaced or extended without the editor growing another responsibility. The
+ * selection is held by the panel rather than the page: it is view state, not
+ * configuration.
+ */
+export interface RulesPanelProps {
+  readonly draft: Draft;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  /** Backend validation findings for the current draft, already decoded. */
+  readonly errors?: readonly ConfigIssueView[];
+  readonly warnings?: readonly ConfigIssueView[];
+}
+
+/**
+ * The rule-list interface a tester panel can drive.
+ *
+ * `onTest` is a focus request, not an execution: the header action reveals the
+ * tester for one rule and never runs it, so saving never depends on testing.
+ */
+export interface RuleListProps {
+  readonly draft: Draft;
+  readonly selectedId: string | null;
+  readonly errors?: readonly ConfigIssueView[];
+  readonly warnings?: readonly ConfigIssueView[];
+  readonly onSelect: (id: string | null) => void;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  readonly onTest: (id: string) => void;
+}
+
 export interface SlotProps {
   readonly view?: string;
 }

@@ -106,8 +106,8 @@ describe('prototype page after panel extraction', () => {
     );
     const { user } = renderClient(<ArbiterPage />);
     await user.click(await screen.findByRole('button', { name: '规则' }));
-    await user.click(screen.getByRole('button', { name: '+ 添加规则' }));
-    await user.click(screen.getByRole('checkbox', { name: '启用' }));
+    await user.click(screen.getByRole('button', { name: '新建规则' }));
+    await user.click(screen.getByRole('checkbox', { name: /^启用规则/ }));
     const input = screen.getByRole('textbox', { name: '输入' });
     await user.clear(input);
     await user.type(input, 'pwd');

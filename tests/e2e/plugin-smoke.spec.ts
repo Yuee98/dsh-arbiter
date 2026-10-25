@@ -99,7 +99,7 @@ test(
     // tester parses static inputs; no tool or model call is executed here.
     await plugin.getByRole('button', { name: '规则', exact: true }).click();
     await expect(
-      plugin.getByRole('heading', { name: '规则表', exact: true }),
+      plugin.getByRole('heading', { name: '规则', exact: true }),
     ).toBeVisible();
     const [ruleTest] = await Promise.all([
       page.waitForResponse(

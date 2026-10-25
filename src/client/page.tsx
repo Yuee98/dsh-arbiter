@@ -221,7 +221,14 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       {tab === 'status' ? (
         <StatusPanel state={state} draft={draft} onDraft={onDraft} />
       ) : null}
-      {tab === 'rules' ? <RulesPanel draft={draft} onDraft={onDraft} /> : null}
+      {tab === 'rules' ? (
+        <RulesPanel
+          draft={draft}
+          onDraft={onDraft}
+          errors={validation.errors}
+          warnings={validation.warnings}
+        />
+      ) : null}
       {tab === 'reviewer' ? (
         <ReviewerPanel draft={draft} onDraft={onDraft} />
       ) : null}
