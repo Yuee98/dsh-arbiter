@@ -9,9 +9,9 @@
  */
 
 import type { StoredCall } from '../audit.js';
-import { scrubValue } from './call-detail-redact.js';
+import { reviewedRequest } from './call-detail-transport.js';
 import { snapshotBasis } from './call-detail-snapshot.js';
-import { reviewedTrace } from './call-detail-trace.js';
+import { reviewStateOf } from './call-detail-trace.js';
 import type {
   CallDetail,
   CallDetailBasis,
@@ -60,11 +60,9 @@ function valueOf(record: StoredCall, key: string): unknown {
   return record[key] ?? null;
 }
 
-/** One stored string field, with credentials masked but the text preserved. */
-function scrubbedText(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const cleaned = scrubValue(value);
-  return typeof cleaned === 'string' ? cleaned : null;
+/** A stored string field, or `null` when it is absent. */
+function storedText(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 /** One stored stage row as the detail presents it. */
@@ -103,16 +101,16 @@ function attemptOf(model: StoredCall): CallDetailModelAttempt {
     backend: textOf(model, 'backend') ?? '',
     protocol: textOf(model, 'protocol') ?? '',
     templateId: textOf(model, 'templateId'),
-    request: scrubValue(valueOf(model, 'request')),
-    // The model's own words stay exactly as received; only credential-shaped
-    // material is masked, never the answer itself.
-    responseText: scrubbedText(model['responseText']),
-    parsed: scrubValue(valueOf(model, 'parsed')),
-    error: scrubbedText(model['error']),
+    // Only the transport block is removed; the reviewed content is stored
+    // evidence and is shown as it is.
+    request: reviewedRequest(valueOf(model, 'request')),
+    responseText: storedText(model['responseText']),
+    parsed: valueOf(model, 'parsed'),
+    error: storedText(model['error']),
     startedAt: numberOf(model, 'startedAt') ?? 0,
     durationMs: numberOf(model, 'durationMs') ?? 0,
     estimatedInputTokens: numberOf(model, 'estimatedInputTokens') ?? 0,
-    usage: scrubValue(valueOf(model, 'usage')),
+    usage: valueOf(model, 'usage'),
   };
 }
 
@@ -151,13 +149,13 @@ function materialMissing(options: {
   readonly trace: readonly string[];
 }): CallDetailMissingCode[] {
   const missing: CallDetailMissingCode[] = [];
-  const reviewed = reviewedTrace(options.trace);
+  const reviewState = reviewStateOf(options.trace);
   // A rule short-circuit never asked the model, so its absent snapshot and
   // attempts are not missing material. Reporting them would describe a gap the
   // record never had, and would imply a review this call did not receive.
-  if (reviewed && options.snapshotUnreadable)
+  if (reviewState === 'reviewed' && options.snapshotUnreadable)
     missing.push('snapshot-unreadable');
-  else if (reviewed && options.snapshot === null)
+  else if (reviewState === 'reviewed' && options.snapshot === null)
     missing.push('snapshot-missing');
   // Every call is decided under some configuration snapshot, so a missing row
   // for it is a genuine gap even when the call never reached a model review.
@@ -167,7 +165,7 @@ function materialMissing(options: {
   // null value rather than an empty string.
   if (valueOf(options.record, 'arguments') === null)
     missing.push('arguments-missing');
-  if (reviewed && options.attempts.length === 0)
+  if (reviewState === 'reviewed' && options.attempts.length === 0)
     missing.push('model-attempts-missing');
   missing.push(...templateMissing(options.attempts, options.templates));
   if (textOf(options.record, 'executionStatus') === 'pending')
@@ -185,7 +183,10 @@ function templateMissing(
     const stored = templates.find(
       (template) => textOf(template, 'templateId') === attempt.templateId,
     );
-    if (stored === undefined) return ['template-missing'];
+    // No entry, or an entry that records no row, both mean the referenced
+    // template is missing — not that it exists with empty content.
+    if (stored === undefined || stored['present'] === false)
+      return ['template-missing'];
     return isTrue(stored['unreadable']) ? ['template-unreadable'] : [];
   });
 }
@@ -201,14 +202,14 @@ function rawOf(
   },
 ): CallDetailRaw {
   return {
-    arguments: scrubValue(valueOf(record, 'arguments')),
-    argumentsSchema: scrubValue(valueOf(record, 'argumentsSchema')),
-    snapshot: scrubValue(options.snapshot),
-    config: scrubValue(options.config),
+    arguments: valueOf(record, 'arguments'),
+    argumentsSchema: valueOf(record, 'argumentsSchema'),
+    snapshot: options.snapshot,
+    config: options.config,
     configFormatVersion: numberOf(record, 'configFormatVersion'),
     snapshotFormatVersion: numberOf(record, 'snapshotFormatVersion'),
     modelAttempts: options.attempts,
-    templates: options.templates.map((template) => scrubValue(template)),
+    templates: options.templates,
     sessionRecordState: textOf(record, 'sessionRecordState'),
   };
 }
@@ -248,9 +249,11 @@ function unreadableDetail(record: StoredCall): CallDetail {
     basis: {
       rule: null,
       decisionRules: [],
+      conflicts: [],
+      conflictsTruncated: false,
       policyStrategy: null,
       chain: null,
-      reviewed: false,
+      reviewState: 'unknown',
       trace: [],
       signals: null,
       evidence: [],
@@ -342,17 +345,21 @@ export function auditDetail(record: StoredCall): CallDetail {
     basis: {
       rule: rule.rule,
       decisionRules: stringsOf(record, 'decisionRules'),
+      // An audit row is one observation written by one settlement; the store has
+      // no second reading of it to disagree with.
+      conflicts: [],
+      conflictsTruncated: false,
       policyStrategy: textOf(record, 'policyStrategy'),
       chain,
-      reviewed: reviewedTrace(trace),
+      reviewState: reviewStateOf(trace),
       trace,
-      signals: scrubValue(valueOf(record, 'signals')),
+      signals: valueOf(record, 'signals'),
       evidence: basis.evidence,
       materials: basis.materials,
       evidenceTruncated: basis.evidenceTruncated,
       snapshotMissing: basis.missing,
       historyStatus: basis.historyStatus,
-      effect: scrubValue(valueOf(record, 'effect')),
+      effect: valueOf(record, 'effect'),
     },
     raw: rawOf(record, { snapshot, config, attempts, templates }),
     missing: [...new Set(missing)],

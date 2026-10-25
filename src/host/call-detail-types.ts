@@ -65,6 +65,14 @@ export interface CallDetailOverview {
   readonly cancelled: boolean;
 }
 
+/** One disagreement two sources recorded for the same call. */
+export interface CallDetailConflict {
+  /** The call-level field name, or `stages[i].<field>` for a stage field. */
+  readonly field: string;
+  /** Both observed values, in the order the sources reported them. */
+  readonly observed: readonly string[];
+}
+
 export interface CallDetailStage {
   readonly seq: number;
   readonly stage: string;
@@ -80,6 +88,9 @@ export interface CallDetailStage {
   readonly ts: number | null;
 }
 
+/** What the stored record proves about whether a model review ran. */
+export type CallDetailReviewState = 'none' | 'reviewed' | 'unknown';
+
 export interface CallDetailBasis {
   /** The rule that decided this call, with the name recorded at the time. */
   readonly rule: {
@@ -87,18 +98,33 @@ export interface CallDetailBasis {
     readonly ruleName: string | null;
   } | null;
   readonly decisionRules: readonly string[];
+  /**
+   * Disagreements between sources for this same call.
+   *
+   * #16 already preserves both readings instead of resolving them. The detail
+   * carries them so the visible verdict is not presented as uncontested when
+   * another stored observation contradicts it.
+   */
+  readonly conflicts: readonly CallDetailConflict[];
+  /** True when more disagreement was observed than an entry can represent. */
+  readonly conflictsTruncated: boolean;
   readonly policyStrategy: string | null;
   /** Structured stages when the source stored them; otherwise null. */
   readonly chain: readonly CallDetailStage[] | null;
   /**
-   * Whether this call reached a model review at all.
+   * Whether the record proves this call reached a model review.
    *
-   * A rule short-circuit never asked the model, so its absent snapshot and
-   * attempts are "not applicable" rather than missing material. Stating this
-   * once, from the stored chain, keeps the page from reporting a gap that never
-   * existed.
+   * Three states, because they mean different things and the page must not
+   * collapse them:
+   *
+   *   - `none`: the stored chain shows a rule short-circuit; no review happened,
+   *     so absent review material is not a gap;
+   *   - `reviewed`: the chain shows a review stage; absent material is a real
+   *     gap and is reported as missing;
+   *   - `unknown`: nothing proves either way (an old row with no stage rows), so
+   *     the page says the fact cannot be established instead of guessing.
    */
-  readonly reviewed: boolean;
+  readonly reviewState: CallDetailReviewState;
   /** The stored result sequence every source carries. */
   readonly trace: readonly string[];
   readonly signals: unknown;

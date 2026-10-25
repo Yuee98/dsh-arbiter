@@ -201,9 +201,25 @@ function detail(value: unknown): CallDetailView {
     basis: {
       rule: ruleBasis(field(basis, 'rule', unknownValue)),
       decisionRules: field(basis, 'decisionRules', strings),
+      conflicts: field(
+        basis,
+        'conflicts',
+        array((item) => {
+          const conflict = object(item);
+          return {
+            field: field(conflict, 'field', text),
+            observed: field(conflict, 'observed', strings),
+          };
+        }),
+      ),
+      conflictsTruncated: field(basis, 'conflictsTruncated', boolean),
       policyStrategy: field(basis, 'policyStrategy', nullable(text)),
       chain: field(basis, 'chain', nullable(array(stage))),
-      reviewed: field(basis, 'reviewed', boolean),
+      reviewState: field(
+        basis,
+        'reviewState',
+        choice('none', 'reviewed', 'unknown'),
+      ),
       trace: field(basis, 'trace', strings),
       signals: field(basis, 'signals', unknownValue),
       evidence: field(basis, 'evidence', array(unknownValue)),

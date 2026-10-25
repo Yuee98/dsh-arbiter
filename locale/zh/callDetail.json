@@ -32,7 +32,6 @@
   "chainResultsOnly": "只记录了阶段结果，未保存各阶段名称与原因：",
   "decisionRules": "命中的判定规则",
   "snapshotMissingInputs": "送审时已标注的缺失输入",
-  "noEvidence": "没有可展示的送审证据。",
   "evidenceTruncated": "部分授权证据因长度上限被截断。",
   "evidence": "授权证据（{count}）",
   "materials": "送审材料来源（{count}）",
@@ -49,7 +48,7 @@
   "rawTemplatesMissing": "没有引用模板。",
   "sessionRecordState": "会话记录写入状态",
   "modelAttempts": "模型尝试（{count}）",
-  "noAttempts": "没有模型尝试：这次调用没有送入模型审查。",
+  "noAttempts": "这次调用没有送入模型审查，因此没有模型尝试。",
   "attemptTitle": "第 {attempt} 次尝试",
   "attemptBackend": "后端",
   "attemptProtocol": "协议",
@@ -125,5 +124,13 @@
   "missingTitle": "材料缺失",
   "signals": "信号与阈值",
   "effect": "效果",
-  "notReviewed": "这次调用由规则直接决定，没有进入模型审查。"
+  "notReviewed": "这次调用由规则直接决定，没有进入模型审查。",
+  "reviewUnknown": "这条记录没有保存判定链，无法确认是否进入过模型审查；也没有可展示的送审证据。",
+  "evidenceLost": "这次调用进入过模型审查，但送审证据没有保存。",
+  "attemptsLost": "这次调用进入过模型审查，但模型尝试没有保存。",
+  "attemptsUnknown": "这条记录没有保存判定链，无法确认是否进入过模型审查，也没有模型尝试记录。",
+  "conflictsTitle": "两个来源对这次调用的记录不一致；以下同时保留两种读数，未作取舍。",
+  "conflictField": "字段",
+  "conflictObserved": "两种读数",
+  "conflictsTruncated": "更多不一致超出单条记录可表示的范围，只保留了前两条读数。"
 }

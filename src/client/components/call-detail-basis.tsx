@@ -17,7 +17,7 @@ import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { Collapsible } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
-import { JsonBlock } from './controls.js';
+import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
 import type { CallDetailView } from '../view-types.js';
 
@@ -173,11 +173,18 @@ function SubmittedEvidence({
   const t = useArbiterTranslation();
   const { evidence, materials, evidenceTruncated } = detail.basis;
   if (evidence.length === 0 && materials.length === 0) {
+    // The reason for the emptiness differs by what the record proves, so each
+    // state gets its own sentence: a short-circuit never had evidence, a review
+    // that lost its record did, and an old row may not say.
+    const text =
+      detail.basis.reviewState === 'reviewed'
+        ? t('callDetail.evidenceLost')
+        : detail.basis.reviewState === 'none'
+          ? t('callDetail.notReviewed')
+          : t('callDetail.reviewUnknown');
     return (
       <div style={{ fontSize: 12.5 }} data-call-detail-evidence="none">
-        {detail.basis.reviewed
-          ? t('callDetail.noEvidence')
-          : t('callDetail.notReviewed')}
+        {text}
       </div>
     );
   }
@@ -196,6 +203,51 @@ function SubmittedEvidence({
       >
         <JsonBlock value={materials} />
       </Collapsible>
+    </div>
+  );
+}
+
+/**
+ * Sources that disagree about this call.
+ *
+ * `#16` keeps both readings instead of choosing one; showing them is what stops
+ * a disputed verdict from reading as an established fact. The fields name where
+ * the readings differ, and no value here is resolved or averaged.
+ */
+function Conflicts({ detail }: { readonly detail: CallDetailView }): ReactNode {
+  const t = useArbiterTranslation();
+  const { conflicts, conflictsTruncated } = detail.basis;
+  if (conflicts.length === 0 && !conflictsTruncated) return null;
+  return (
+    <div data-call-detail-conflicts>
+      <Notice kind="info" text={t('callDetail.conflictsTitle')} />
+      {conflicts.length === 0 ? null : (
+        <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ textAlign: 'left' }}>
+              <th style={labelStyle}>{t('callDetail.conflictField')}</th>
+              <th style={labelStyle}>{t('callDetail.conflictObserved')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {conflicts.map((conflict) => (
+              <tr key={conflict.field}>
+                <td style={{ padding: '3px 12px 3px 0' }}>
+                  <code>{conflict.field}</code>
+                </td>
+                <td style={{ padding: '3px 0' }}>
+                  {conflict.observed.join(' / ')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {conflictsTruncated ? (
+        <p style={{ margin: 0, fontSize: 12 }}>
+          {t('callDetail.conflictsTruncated')}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -239,6 +291,7 @@ export function CallDetailBasis({
       style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
     >
       <strong style={{ fontSize: 13 }}>{t('callDetail.basisTitle')}</strong>
+      <Conflicts detail={detail} />
       <Grounds detail={detail} />
       <div>
         <div

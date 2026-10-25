@@ -20,8 +20,7 @@ import type { PriorVerdictItem } from '../types.js';
 import { recordOf } from '../records.js';
 import type { SessionLike } from '../snapshot.js';
 import { auditDetail } from './call-detail-audit.js';
-import { reviewedTrace } from './call-detail-trace.js';
-import { scrubValue } from './call-detail-redact.js';
+import { reviewStateOf } from './call-detail-trace.js';
 import {
   DECISION_RECORD,
   decodeDecisionRecord,
@@ -220,9 +219,11 @@ function rememberedDetail(
   // A remembered rule has no stored name: the session record does not carry one,
   // and reading it from the live rule list would relabel a past decision.
   if (item.ruleId !== undefined) gaps.push('rule-name-missing');
-  // Only a call that reached a review is expected to have review material.
-  const reviewed = reviewedTrace(trace);
-  if (reviewed) gaps.push('snapshot-missing', 'model-attempts-missing');
+  // A proven review makes its absent material a real gap; a short-circuit does
+  // not, and an unprovable state is left to the reviewState field.
+  const reviewState = reviewStateOf(trace);
+  if (reviewState === 'reviewed')
+    gaps.push('snapshot-missing', 'model-attempts-missing');
   gaps.push('execution-not-observed');
   return {
     callId: item.callId,
@@ -256,9 +257,13 @@ function rememberedDetail(
           ? null
           : { ruleId: item.ruleId, ruleName: null },
       decisionRules: item.decisionRules ?? [],
+      // Both readings travel with the entry; surfacing them is what keeps a
+      // disputed verdict from looking like an uncontested one.
+      conflicts: item.conflicts ?? [],
+      conflictsTruncated: item.conflictsTruncated === true,
       policyStrategy: null,
       chain,
-      reviewed,
+      reviewState,
       trace,
       signals: null,
       evidence: [],
@@ -266,7 +271,7 @@ function rememberedDetail(
       evidenceTruncated: false,
       snapshotMissing: [],
       historyStatus: null,
-      effect: item.effect === undefined ? null : scrubValue(item.effect),
+      effect: item.effect === undefined ? null : item.effect,
     },
     raw: {
       arguments: null,

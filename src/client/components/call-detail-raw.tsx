@@ -120,9 +120,15 @@ function Attempts({ detail }: { readonly detail: CallDetailView }): ReactNode {
   const t = useArbiterTranslation();
   const { modelAttempts } = detail.raw;
   if (modelAttempts.length === 0) {
+    const text =
+      detail.basis.reviewState === 'reviewed'
+        ? t('callDetail.attemptsLost')
+        : detail.basis.reviewState === 'none'
+          ? t('callDetail.noAttempts')
+          : t('callDetail.attemptsUnknown');
     return (
       <p style={{ margin: 0, fontSize: 12 }} data-call-detail-attempts="none">
-        {t('callDetail.noAttempts')}
+        {text}
       </p>
     );
   }

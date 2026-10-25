@@ -366,7 +366,7 @@ describe('full audit detail', () => {
     // reported as missing; the basis says the call was not reviewed instead.
     expect(missing).not.toContain('snapshot-missing');
     expect(missing).not.toContain('model-attempts-missing');
-    expect(fieldOf(basis, 'reviewed')).toBe(false);
+    expect(fieldOf(basis, 'reviewState')).toBe('none');
     // A denied call never started, so its execution result is not a gap.
     expect(fieldOf(overview, 'execution')).toEqual({
       status: 'not-started',
@@ -408,7 +408,7 @@ describe('full audit detail', () => {
     expect(missingOf(after)).not.toContain('execution-not-observed');
   });
 
-  test('shows every model attempt without authentication material', async () => {
+  test('shows every attempt and preserves original tool arguments', async () => {
     const harness = startHarness();
     const audit = harness.host.currentAudit();
     if (audit === null) throw new Error('the audit store did not start');
@@ -470,10 +470,19 @@ describe('full audit detail', () => {
     await persisted(harness.host, 'with-attempt');
 
     const detail = await detailOf(harness.host, 'with-attempt');
-    const serialized = JSON.stringify(detail);
-    expect(serialized).not.toContain('top-secret');
-    expect(serialized).toContain('[redacted]');
+    // The user's own command is original evidence and is shown as stored: a
+    // value inside a tool argument is not a Reviewer transport credential.
+    const argumentsValue = JSON.stringify(
+      fieldOf(fieldOf(detail, 'raw'), 'arguments'),
+    );
+    expect(argumentsValue).toContain('top-secret');
     const attempts = listField(fieldOf(detail, 'raw'), 'modelAttempts');
+    // The transport block is removed; the reviewed content is not rewritten.
+    const request = fieldOf(attempts[0], 'request');
+    expect(JSON.stringify(fieldOf(request, 'headers'))).not.toContain(
+      'top-secret',
+    );
+    expect(JSON.stringify(fieldOf(request, 'state'))).toContain('top-secret');
     expect(attempts).toHaveLength(1);
     // The model's own answer text is still shown, with only the credential masked.
     expect(stringField(attempts[0], 'responseText')).toContain('echoed');
@@ -561,6 +570,131 @@ describe('degraded sources', () => {
   });
 });
 
+describe('conflicting and partial evidence', () => {
+  test('surfaces two conflicting session observations instead of one verdict', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'disputed', 'rm -rf build')).toBe('deny');
+    await persisted(harness.host, 'disputed');
+    harness.host.currentAudit()?.clearCalls();
+    harness.host.runtime.priorVerdicts.clear();
+    // A second, contradicting observation of the same logical call, written the
+    // way a different settlement of the same call id would write it.
+    harness.session.append('plugin:arbiter/decision', {
+      version: 2,
+      callId: 'disputed',
+      tool: 'bash',
+      fingerprint: 'bash:disputed',
+      trace: ['review(default)', 'human-allow'],
+      result: 'human-allow',
+      reason: 'a human later allowed it',
+      ruleId: null,
+      decisionRules: [],
+      configRevision: 'rev-2',
+      ts: Date.now(),
+    });
+
+    const detail = await detailOf(harness.host, 'disputed');
+    const basis = fieldOf(detail, 'basis');
+    const conflicts = listField(basis, 'conflicts');
+    expect(conflicts.length).toBeGreaterThan(0);
+    const result = conflicts.find(
+      (conflict) => fieldOf(conflict, 'field') === 'result',
+    );
+    if (result === undefined)
+      throw new Error('no result conflict was reported');
+    expect(listField(result, 'observed')).toEqual(
+      expect.arrayContaining(['deny', 'human-allow']),
+    );
+    // Both readings survive; the visible verdict is not the only stored fact.
+    expect(JSON.stringify(detail).includes('a human later allowed it')).toBe(
+      true,
+    );
+  });
+
+  test('a reviewed call whose audit row is cleared says the material is lost', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'reviewed-then-cleared', 'echo hi')).toBe(
+      'allow',
+    );
+    await persisted(harness.host, 'reviewed-then-cleared');
+    harness.host.currentAudit()?.clearCalls();
+
+    const detail = await detailOf(harness.host, 'reviewed-then-cleared');
+    const basis = fieldOf(detail, 'basis');
+    // The stored chain proves a review happened, so the absent snapshot and
+    // attempts are reported as gaps rather than as "no review".
+    expect(fieldOf(basis, 'reviewState')).toBe('reviewed');
+    const missing = missingOf(detail);
+    expect(missing).toContain('snapshot-missing');
+    expect(missing).toContain('model-attempts-missing');
+  });
+
+  test('a referenced template with no row is reported missing', async () => {
+    const harness = startHarness();
+    const audit = harness.host.currentAudit();
+    if (audit === null) throw new Error('the audit store did not start');
+    audit.enqueue({
+      callId: 'dangling-template',
+      ts: Date.now(),
+      sessionId: harness.session.id,
+      sessionKind: 'main',
+      parentSession: null,
+      profile: 'detail',
+      workspace: process.cwd(),
+      tool: 'bash',
+      arguments: { command: 'echo hi' },
+      cwd: process.cwd(),
+      fingerprint: 'bash:tpl',
+      configRevision: 'rev-1',
+      configSnapshotId: 'cfg-1',
+      approvalMode: 'normal',
+      executionMode: 'guarded',
+      result: 'review-deny',
+      reason: 'denied',
+      trace: [
+        { stage: 'rule', result: 'review(default)', at: 1 },
+        { stage: 'review', result: 'review-deny', at: 2 },
+      ],
+      effect: null,
+      sessionRecordState: 'written',
+      snapshot: null,
+      modelAttempts: [
+        {
+          requestId: 'dangling-template:model:1',
+          callId: 'dangling-template',
+          attempt: 1,
+          backend: 'chat',
+          protocol: 'arbiter-chat-json-v1',
+          // A template id the templates table does not contain: `model_calls`
+          // declares no foreign key, so this state is representable.
+          templateId: 'tpl-absent',
+          request: { system: 'review this' },
+          responseText: '{"risk":9}',
+          parsed: { risk: 9 },
+          error: null,
+          startedAt: 1,
+          durationMs: 2,
+          estimatedInputTokens: 3,
+          usage: null,
+        },
+      ],
+      signals: null,
+      policyStrategy: 'normal',
+      decisionRules: [],
+      executionStatus: 'not-started',
+    });
+    await persisted(harness.host, 'dangling-template');
+
+    const detail = await detailOf(harness.host, 'dangling-template');
+    expect(missingOf(detail)).toContain('template-missing');
+    const templates = listField(fieldOf(detail, 'raw'), 'templates');
+    expect(templates).toHaveLength(1);
+    // It is reported as an absent row, not as a template with empty content.
+    expect(fieldOf(templates[0], 'present')).toBe(false);
+    expect(fieldOf(templates[0], 'content')).toBeNull();
+  });
+});
+
 describe('old records and endings', () => {
   test('a v1 row is shown with its absent columns unknown, not defaulted', async () => {
     const harness = startHarness();
@@ -632,7 +766,7 @@ describe('old records and endings', () => {
     const missing = missingOf(detail);
     expect(missing).toContain('stages-missing');
     expect(missing).toContain('config-missing');
-    expect(fieldOf(basis, 'reviewed')).toBe(false);
+    expect(fieldOf(basis, 'reviewState')).toBe('unknown');
   });
 
   test('a record written by a newer plugin is reported, not reinterpreted', async () => {

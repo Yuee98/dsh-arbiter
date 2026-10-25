@@ -233,10 +233,22 @@ export interface CallDetailView {
       readonly ruleName: string | null;
     } | null;
     readonly decisionRules: readonly string[];
+    /** Disagreements between sources for this same call, both readings kept. */
+    readonly conflicts: readonly {
+      readonly field: string;
+      readonly observed: readonly string[];
+    }[];
+    readonly conflictsTruncated: boolean;
     readonly policyStrategy: string | null;
     readonly chain: readonly CallDetailStageView[] | null;
-    /** Whether the call reached a model review at all. */
-    readonly reviewed: boolean;
+    /**
+     * Whether the record proves a model review ran.
+     *
+     * `none` is a rule short-circuit (no review material expected), `reviewed`
+     * means absent material is a real gap, and `unknown` means the stored record
+     * does not establish either.
+     */
+    readonly reviewState: 'none' | 'reviewed' | 'unknown';
     readonly trace: readonly string[];
     readonly signals: unknown;
     readonly evidence: readonly unknown[];

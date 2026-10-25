@@ -11,9 +11,24 @@
  * the review-failure stage) marks a model review.
  */
 
+import type { CallDetailReviewState } from './call-detail-types.js';
+
 /** Whether any stored stage result means the call reached a model review. */
 export function reviewedTrace(trace: readonly string[]): boolean {
   return trace.some(
     (result) => result.startsWith('review') || result === 'error-escalate',
   );
+}
+
+/**
+ * What a stored chain proves about a model review.
+ *
+ * A chain that records a review stage proves one happened. A chain that records
+ * only rule or tool stages proves a short-circuit. An empty chain proves
+ * nothing: an old row may simply never have stored its stages, so the honest
+ * answer is `unknown`, not "no review".
+ */
+export function reviewStateOf(trace: readonly string[]): CallDetailReviewState {
+  if (reviewedTrace(trace)) return 'reviewed';
+  return trace.length === 0 ? 'unknown' : 'none';
 }

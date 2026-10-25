@@ -112,7 +112,9 @@ function auditDetailBody(): DetailBody {
           },
         ],
         trace: ['review(default)', 'review-deny'],
-        reviewed: true,
+        reviewState: 'reviewed',
+        conflicts: [],
+        conflictsTruncated: false,
         signals: null,
         evidence: [
           {
@@ -263,6 +265,87 @@ describe('shared call detail', () => {
     expect(verdictRegion()).not.toHaveTextContent('riskPoint');
   });
 
+  test('says a review happened but its material is gone, not that none ran', async () => {
+    const body = auditDetailBody();
+    body.detail.source = 'session';
+    body.detail.recordFormatVersion = null;
+    body.detail.basis['chain'] = null;
+    body.detail.basis['reviewState'] = 'reviewed';
+    body.detail.raw['modelAttempts'] = [];
+    body.detail.basis['evidence'] = [];
+    body.detail.basis['materials'] = [];
+    body.detail.missing = ['snapshot-missing', 'model-attempts-missing'];
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('region', { name: '最终裁决' });
+
+    // The trace proves a review ran, so the page must not claim it did not.
+    expect(
+      screen.getByText('这次调用进入过模型审查，但送审证据没有保存。'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('这次调用由规则直接决定，没有进入模型审查。'),
+    ).toBeNull();
+
+    await user.click(
+      screen.getByRole('button', { name: '原始材料（默认折叠）' }),
+    );
+    expect(
+      screen.getByText('这次调用进入过模型审查，但模型尝试没有保存。'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('这次调用没有送入模型审查，因此没有模型尝试。'),
+    ).toBeNull();
+  });
+
+  test('does not claim a review ran when the record cannot say', async () => {
+    const body = auditDetailBody();
+    body.detail.source = 'session';
+    body.detail.recordFormatVersion = 3;
+    body.detail.basis['chain'] = null;
+    body.detail.basis['reviewState'] = 'unknown';
+    body.detail.basis['trace'] = [];
+    body.detail.raw['modelAttempts'] = [];
+    body.detail.basis['evidence'] = [];
+    body.detail.basis['materials'] = [];
+    body.detail.missing = ['stages-missing'];
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('region', { name: '最终裁决' });
+
+    expect(screen.getByText(/无法确认是否进入过模型审查/u)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: '原始材料（默认折叠）' }),
+    );
+    expect(
+      screen.getByText(/无法确认是否进入过模型审查，也没有模型尝试记录/u),
+    ).toBeInTheDocument();
+  });
+
+  test('shows a disputed verdict with both readings instead of one', async () => {
+    const body = auditDetailBody();
+    body.detail.basis['conflicts'] = [
+      { field: 'result', observed: ['deny', 'human-allow'] },
+      { field: 'stages[1].reason', observed: ['rule match', 'human approved'] },
+    ];
+    body.detail.basis['conflictsTruncated'] = true;
+    mockDetail(body);
+    renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('region', { name: '最终裁决' });
+
+    expect(
+      screen.getByText(/两个来源对这次调用的记录不一致/u),
+    ).toBeInTheDocument();
+    expect(screen.getByText('result', { exact: true })).toBeInTheDocument();
+    expect(
+      screen.getByText('deny / human-allow', { exact: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('stages[1].reason', { exact: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/超出单条记录可表示的范围/u)).toBeInTheDocument();
+  });
+
   test('uses the historical rule name rather than the live rule list', async () => {
     server.use(
       http.get('*/api/arbiter/state', () =>
@@ -295,6 +378,7 @@ describe('shared call detail', () => {
     };
     body.detail.basis['chain'] = null;
     body.detail.basis['trace'] = ['review-deny'];
+    body.detail.basis['reviewState'] = 'reviewed';
     body.detail.raw['modelAttempts'] = [];
     body.detail.missing = [
       'audit-record-cleared',
