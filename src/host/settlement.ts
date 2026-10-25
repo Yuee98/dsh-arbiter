@@ -105,19 +105,32 @@ function reapPending(pending: HostEnvironment['runtime']['pending']): void {
  * switch can land in between; each stage therefore records its own revision and
  * snapshot instead of inheriting the call's final values.
  */
+interface StageIdentity {
+  readonly configRevision: string;
+  readonly configSnapshotId: string;
+}
+
+/** The configuration in force right now. */
+function currentIdentity(host: HostEnvironment): StageIdentity {
+  return {
+    configRevision: host.runtime.effectiveRevision,
+    configSnapshotId: host.runtime.configSnapshotId,
+  };
+}
+
 function pushStage(
-  host: HostEnvironment,
   trace: TraceStage[],
   stage: 'human' | 'fallback',
   result: string,
   reason: string,
+  identity: StageIdentity,
 ): void {
   trace.push({
     stage,
     result,
     reason,
-    configRevision: host.runtime.effectiveRevision,
-    configSnapshotId: host.runtime.configSnapshotId,
+    configRevision: identity.configRevision,
+    configSnapshotId: identity.configSnapshotId,
     at: Date.now(),
   });
 }
@@ -258,7 +271,15 @@ export class CallSettlement {
     text: string,
     extras: AuditExtras,
   ): PreToolDecision {
-    pushStage(this.host, call.trace, 'fallback', 'fallback-deny', reason);
+    // A fallback decided now is governed by the configuration now: it begins and
+    // ends inside this call, with no pending window in between.
+    pushStage(
+      call.trace,
+      'fallback',
+      'fallback-deny',
+      reason,
+      currentIdentity(this.host),
+    );
     this.finalize(call, 'fallback-deny', text, extras);
     return deny(text);
   }
@@ -281,6 +302,11 @@ export class CallSettlement {
         'Not executed [fallback-deny]: no human approval channel is available.',
         extras,
       );
+    // The request is opened under this configuration. It may stay pending while
+    // the configuration changes, and the approval answers the question that was
+    // asked, so the resulting stage keeps this identity — not whatever is
+    // effective when the user finally answers.
+    const requestIdentity = currentIdentity(this.host);
     let outcome: keyof typeof HUMAN_OUTCOMES;
     try {
       outcome = await approval.request({
@@ -304,11 +330,11 @@ export class CallSettlement {
     }
     const mapped = HUMAN_OUTCOMES[outcome];
     pushStage(
-      this.host,
       call.trace,
       mapped.stage,
       mapped.result,
       mapped.reason,
+      requestIdentity,
     );
     this.finalize(call, mapped.result, mapped.text, extras);
     return mapped.result === 'human-allow'

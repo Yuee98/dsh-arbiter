@@ -1702,8 +1702,8 @@ describe('clear failure is not an empty database', () => {
     const second = new AuditStore(path, DEFAULT_CONFIG.audit);
     // Queue on the store that will NOT serve the clear.
     second.enqueue(record({ callId: 'pre-clear-sibling', result: 'allow' }));
-    // Wait long enough that the queued event's stamp precedes the cutoff.
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    // No delay: a timestamp-based cutoff would let a same-millisecond event slip
+    // through, which is exactly the race this generation counter removes.
     expect(first.clearCalls().ok).toBe(true);
     await second.flush();
     // The event predated the user's clear, so it must not resurrect the history.
@@ -1738,6 +1738,37 @@ describe('ownership survives the owner closing', () => {
     follower.close();
     later.close();
   });
+
+  test('a promoted owner keeps the inherited policy through routine refreshes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-promoted-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const owner = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    const follower = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    // The owner explicitly narrows the instance policy, then closes.
+    owner.updateConfig({ ...DEFAULT_CONFIG.audit, retentionDays: 7 });
+    owner.close();
+    expect(follower.retention.days).toBe(7);
+    // B's next routine refresh still carries its unchanged 30-day profile value:
+    // that is not an edit and must not republish it.
+    follower.updateConfig({ ...DEFAULT_CONFIG.audit, retentionDays: 30 });
+    expect(follower.retention.days).toBe(7);
+    expect(follower.health().state).toBe('ok');
+    // A third profile opening still reads the inherited seven days.
+    const later = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    expect(later.retention.days).toBe(7);
+    follower.close();
+    later.close();
+  });
 });
 
 describe('retention reclaims and protects the right references', () => {
@@ -1766,8 +1797,17 @@ describe('retention reclaims and protects the right references', () => {
 
   test('a configuration referenced only by a retained stage survives', async () => {
     const { store } = await makeStore({ retentionDays: 1 });
-    const historical = snapshotOf(store);
-    const current = snapshotOf(store);
+    // Two genuinely different configurations, so the stage's reference is the
+    // only thing keeping the historical one alive.
+    const historical = snapshotOf(store, {
+      ...DEFAULT_CONFIG,
+      audit: { ...DEFAULT_CONFIG.audit, retentionDays: 11 },
+    });
+    const current = snapshotOf(store, {
+      ...DEFAULT_CONFIG,
+      audit: { ...DEFAULT_CONFIG.audit, retentionDays: 22 },
+    });
+    expect(historical.snapshotId).not.toBe(current.snapshotId);
     store.enqueue(
       record({
         callId: 'stage-ref',
@@ -1839,6 +1879,125 @@ describe('retention reclaims and protects the right references', () => {
       .prepare('SELECT COUNT(*) AS count FROM templates')
       .get();
     expect(numberField(remaining, 'count')).toBe(0);
+    db.close();
+  });
+});
+
+describe('capacity pressure from auxiliary files', () => {
+  test('a large backup still drives eviction of reclaimable rows', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 10; index += 1) {
+      store.enqueue(
+        record({
+          callId: `backup-pressure-${String(index)}`,
+          result: 'allow',
+          ts: Date.now() - index * 1_000,
+          arguments: { command: 'echo hi', padding: 'q'.repeat(4_000) },
+        }),
+      );
+    }
+    await store.flush();
+    const path = store.databasePath;
+    const before = store.listCalls({}).total;
+    store.close();
+    // A retained migration backup consumes part of the budget, so the database
+    // must shrink even though its own pages are below the overall target.
+    const db = new DatabaseSync(path);
+    db.exec(`VACUUM INTO '${path}.backup-v1'`);
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const elapsed = await stat(`${path}.backup-v1`);
+    const target = Math.floor(reopened.databaseBytes * 0.85);
+    expect(elapsed.size).toBeGreaterThan(0);
+    const outcome = reopened.runRetention(Date.now(), 365, target);
+    expect(outcome.deleted).toBeGreaterThan(0);
+    expect(reopened.listCalls({}).total).toBeLessThan(before);
+    reopened.close();
+  });
+
+  test('expired calls with large unique templates do not evict recent calls', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const expired = Date.now() - 5 * 24 * 60 * 60 * 1_000;
+    for (let index = 0; index < 3; index += 1) {
+      const system = `REVIEW_POLICY\nEXPIRED ${String(index)} ${'e'.repeat(20_000)}`;
+      store.enqueue(
+        record({
+          callId: `expired-template-${String(index)}`,
+          result: 'allow',
+          ts: expired,
+          modelAttempts: [
+            {
+              requestId: `expired-template-${String(index)}:model:1`,
+              callId: `expired-template-${String(index)}`,
+              attempt: 1,
+              backend: 'chat',
+              protocol: 'arbiter-chat-json-v1',
+              request: { provider: 'p', model: 'm', system, messages: [] },
+              templateId: templateIdOf(system),
+              responseText: '{}',
+              parsed: null,
+              error: null,
+              startedAt: 1,
+              durationMs: 2,
+              estimatedInputTokens: 3,
+              usage: null,
+            },
+          ],
+        }),
+      );
+    }
+    for (let index = 0; index < 3; index += 1) {
+      store.enqueue(
+        record({ callId: `recent-${String(index)}`, result: 'allow' }),
+      );
+    }
+    await store.flush();
+    // A target the shared content alone would breach: reclaiming the expired
+    // templates before deciding has to be what meets it, not deleting the recent
+    // calls.
+    store.runRetention(Date.now(), 1, Math.floor(store.databaseBytes * 0.9));
+    const remaining = store.listCalls({}).rows.map((row) => row.callId);
+    expect(remaining.filter((id) => id.startsWith('recent-'))).toHaveLength(3);
+    store.close();
+  });
+
+  test('clearing the audit removes templates it made unreferenced', async () => {
+    const { store } = await makeStore();
+    const system = 'REVIEW_POLICY\nCLEARED TEMPLATE';
+    store.enqueue(
+      record({
+        callId: 'clear-template',
+        result: 'allow',
+        modelAttempts: [
+          {
+            requestId: 'clear-template:model:1',
+            callId: 'clear-template',
+            attempt: 1,
+            backend: 'chat',
+            protocol: 'arbiter-chat-json-v1',
+            request: { provider: 'p', model: 'm', system, messages: [] },
+            templateId: templateIdOf(system),
+            responseText: '{}',
+            parsed: null,
+            error: null,
+            startedAt: 1,
+            durationMs: 2,
+            estimatedInputTokens: 3,
+            usage: null,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const path = store.databasePath;
+    expect(store.clearCalls()).toEqual({ ok: true, deleted: 1 });
+    store.close();
+    const db = new DatabaseSync(path);
+    const templates = db
+      .prepare('SELECT COUNT(*) AS count FROM templates')
+      .get();
+    // The audit records are gone, so their template content must be too.
+    expect(numberField(templates, 'count')).toBe(0);
     db.close();
   });
 });

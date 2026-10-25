@@ -41,7 +41,7 @@ import {
 } from './audit/metadata.js';
 import {
   claimRetention,
-  clearCutoff,
+  clearGeneration,
   markCleared,
   ownsRetention,
   releaseRetention,
@@ -73,8 +73,11 @@ export class AuditStore {
   private queue: {
     readonly record: CallRecord;
     readonly attempt: number;
-    /** When this event entered the queue, used to honour a cross-store clear. */
-    readonly queuedAt: number;
+    /**
+     * The path's clear generation when this event was queued. An event from an
+     * older generation predates a clear of the shared database and is dropped.
+     */
+    readonly generation: number;
   }[] = [];
   private scheduled = false;
   private closedState = false;
@@ -131,11 +134,17 @@ export class AuditStore {
     }
   }
 
-  /** The retention policy this database actually uses. */
+  /**
+   * The retention policy this database actually uses.
+   *
+   * Read live from the path, so a follower observes the owner's current values
+   * rather than the copy it saw when it opened.
+   */
   get retention(): { readonly days: number; readonly bytes: number } {
+    const live = retentionPolicyOf(this.path);
     return {
-      days: this.config.retentionDays,
-      bytes: this.config.retentionBytes,
+      days: live?.days ?? this.config.retentionDays,
+      bytes: live?.bytes ?? this.config.retentionBytes,
     };
   }
 
@@ -175,8 +184,14 @@ export class AuditStore {
       };
       return;
     }
-    // The owning profile changed the instance-level setting: adopt all of it.
-    this.config = { ...config };
+    // Adopt the policy the registry actually holds. On a routine refresh that
+    // is the inherited instance policy, not the profile-local value the caller
+    // passed in, so a promoted owner cannot silently replace it.
+    this.config = {
+      ...config,
+      retentionDays: claim.days,
+      retentionBytes: claim.bytes,
+    };
     this.degraded = false;
     this.lastError = null;
   }
@@ -329,7 +344,11 @@ export class AuditStore {
       this.lastError = 'audit queue is full; oldest queued event was dropped';
       this.queue.shift();
     }
-    this.queue.push({ record, attempt: 0, queuedAt: Date.now() });
+    this.queue.push({
+      record,
+      attempt: 0,
+      generation: clearGeneration(this.path),
+    });
     this.schedule();
   }
 
@@ -348,8 +367,7 @@ export class AuditStore {
       if (this.queue.length === 0) break;
       const item = this.queue[0];
       if (item === undefined) break;
-      const cutoff = clearCutoff(this.path);
-      if (cutoff !== null && item.queuedAt < cutoff) {
+      if (item.generation !== clearGeneration(this.path)) {
         // This event predates a clear of the shared database: the user asked to
         // remove that history, so it is dropped rather than written back.
         this.queue.shift();
@@ -371,7 +389,7 @@ export class AuditStore {
           this.queue.push({
             record: item.record,
             attempt,
-            queuedAt: item.queuedAt,
+            generation: item.generation,
           });
         } else {
           this.dropped += 1;
@@ -667,7 +685,7 @@ export class AuditStore {
     // A second store on the same database may hold events queued before this
     // clear; they would be inserted afterwards and resurrect the cleared
     // history. The cutoff makes them discardable by any store on this path.
-    markCleared(this.path, Date.now());
+    markCleared(this.path);
     return { ok: true, deleted: cleared };
   }
 

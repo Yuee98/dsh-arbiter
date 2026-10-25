@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { AuditStore, resolveAuditPath } from '../../src/audit.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
-import { initializeHost } from '../../src/host/runtime.js';
+import { applyConfig, initializeHost } from '../../src/host/runtime.js';
 import { ConfigurationAccess } from '../../src/host/configuration.js';
 import { statePayload } from '../../src/host/state.js';
 import type { ConnectionLike, HostEnvironment } from '../../src/host/types.js';
@@ -82,7 +82,14 @@ interface Started {
 }
 
 async function startHost(
-  options: { readonly config?: unknown; readonly breakDatabase?: boolean } = {},
+  options: {
+    readonly config?: unknown;
+    readonly breakDatabase?: boolean;
+    /** Overrides the approval answerer; the default approves once. */
+    readonly approval?: () => Promise<
+      'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+    >;
+  } = {},
 ): Promise<Started> {
   const home = join(root, 'home');
   const profileDir = join(home, 'profiles', 'audit-isolation');
@@ -112,7 +119,7 @@ async function startHost(
     sessions: { get: () => undefined },
     approval: {
       config: { policy: 'ask' },
-      request: () => Promise.resolve('allowed-once'),
+      request: options.approval ?? (() => Promise.resolve('allowed-once')),
     },
     permissionPresets: { registerAuto: () => () => undefined },
     workingDirectory: { ensure: () => Promise.resolve(home) },
@@ -316,6 +323,67 @@ describe('an unmigratable audit database', () => {
     // configuration switch before settlement must not leave this stage bare.
     expect(recordField(stage, 'configRevision')).toEqual(expect.any(String));
     expect(recordField(stage, 'configSnapshotId')).toEqual(expect.any(String));
+  });
+
+  test('a paused approval keeps the configuration that opened it', async () => {
+    // The approval request opens under A; the configuration moves to B while the
+    // human is deciding; the granted stage must still be attributed to A.
+    let release: (() => void) | undefined;
+    const { host } = await startHost({
+      config: { modes: { main: 'strict' } },
+      approval: () =>
+        new Promise((resolve) => {
+          release = () => {
+            resolve('allowed-once');
+          };
+        }),
+    });
+    const session: SessionLike = { id: 'session' };
+    const call: CallContext = {
+      exec: {
+        callId: 'deferred-approval',
+        name: 'bash',
+        arguments: { command: 'echo hi' },
+        signal: new AbortController().signal,
+      },
+      agent: { session },
+      session,
+      sessionKind: 'main',
+      mode: 'normal',
+      cwd: '/w',
+      trace: [],
+    };
+    const extras: AuditExtras = {
+      effect: null,
+      signals: null,
+      snapshot: null,
+      strategy: 'normal',
+      decisionRules: [],
+      modelAttempts: [],
+      ruleId: null,
+    };
+    const revisionBefore = host.runtime.effectiveRevision;
+    const settlement = new CallSettlement(host, new DecisionHistory(host));
+    const pending = settlement.human(call, 'needs approval', extras);
+    // A configuration change lands while the request is still open.
+    applyConfig(
+      host,
+      {
+        ...host.runtime.config,
+        modes: { main: 'progress', subagent: 'progress' },
+      },
+      'file',
+    );
+    expect(host.runtime.effectiveRevision).not.toBe(revisionBefore);
+    release?.();
+    const decision = await pending;
+    expect(decision.kind).toBe('allow');
+    const stage = call.trace.find((entry) => entry.stage === 'human');
+    // The approval answered the question asked under A, so the stage says A.
+    expect(recordField(stage, 'configRevision')).toBe(revisionBefore);
+    expect(recordField(stage, 'configSnapshotId')).not.toBe(
+      host.runtime.configSnapshotId,
+    );
   });
 
   test('the payload keeps the effective revision while history is unavailable', async () => {

@@ -8,6 +8,14 @@ export function clearCalls(db: DatabaseSync): number {
   try {
     db.exec('DELETE FROM calls');
     db.exec('DELETE FROM candidates');
+    // Clearing the audit records must not leave their template content behind:
+    // once no model attempt references a template, the shared row has no user.
+    db.exec(
+      `DELETE FROM templates
+        WHERE template_id NOT IN (
+          SELECT template_id FROM model_calls WHERE template_id IS NOT NULL
+        )`,
+    );
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -57,6 +65,36 @@ export interface RetentionOutcome {
   readonly bytes: number;
 }
 
+/**
+ * Delete shared content with no remaining reference.
+ *
+ * Review snapshots go with their call. Configuration snapshots stay while an
+ * activation, a call or a retained stage references them. Templates stay while a
+ * model attempt references them. This runs before eviction so unreferenced
+ * content cannot inflate the page count and drive deletion of retainable calls,
+ * and again afterwards so a just-evicted call releases its shared rows.
+ */
+function reclaimShared(db: DatabaseSync, olderThan: number): void {
+  db.prepare(
+    'DELETE FROM snapshots WHERE call_id NOT IN (SELECT call_id FROM calls)',
+  ).run();
+  db.prepare(
+    `DELETE FROM config_snapshots
+      WHERE snapshot_id NOT IN (SELECT snapshot_id FROM config_activations)
+        AND snapshot_id NOT IN (SELECT config_snapshot_id FROM calls)
+        AND snapshot_id NOT IN (
+          SELECT config_snapshot_id FROM stages WHERE config_snapshot_id IS NOT NULL
+        )
+        AND created_at < ?`,
+  ).run(olderThan);
+  db.prepare(
+    `DELETE FROM templates
+      WHERE template_id NOT IN (
+        SELECT template_id FROM model_calls WHERE template_id IS NOT NULL
+      )`,
+  ).run();
+}
+
 export function runRetention(
   db: DatabaseSync,
   now: number,
@@ -70,14 +108,20 @@ export function runRetention(
     // Continue with the current page counts.
   }
   const cutoff = now - retentionDays * 24 * 60 * 60 * 1_000;
+  // Reclaim unreferenced shared content first: it may already be enough to meet
+  // the target without deleting a retainable call.
+  reclaimShared(db, cutoff);
   let deleted = rowChanges(
     db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
   );
   let guard = 0;
   // Auxiliary files (backups, sidecars) cannot be reclaimed by deleting rows, so
-  // they are accounted for but not chased: eviction targets occupied pages, and
-  // the loop stops as soon as the database itself no longer shrinks.
-  while (occupiedBytes(db) > retentionBytes && guard < 40) {
+  // the database budget is what remains of the target after them. That lets a
+  // large backup still trigger eviction of reclaimable rows, while the loop
+  // only measures pages a delete can actually free.
+  const auxiliary = Math.max(0, databaseBytes() - occupiedBytes(db));
+  const databaseBudget = Math.max(0, retentionBytes - auxiliary);
+  while (occupiedBytes(db) > databaseBudget && guard < 40) {
     guard += 1;
     const remaining = rowNumber(
       asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
@@ -93,7 +137,7 @@ export function runRetention(
         )
         .get(),
     );
-    const excess = occupiedBytes(db) - retentionBytes;
+    const excess = occupiedBytes(db) - databaseBudget;
     const batch = Math.max(
       1,
       Math.min(
@@ -112,36 +156,15 @@ export function runRetention(
     );
     if (changes === 0) break;
     deleted += changes;
+    // A deleted call may have been the last reference to shared content.
+    reclaimShared(db, cutoff);
   }
-  // Orphaned review snapshots go with their call. Configuration snapshots are
-  // different: an activation row is itself a reference, so a snapshot that no
-  // current call points at is still needed to explain configuration history.
-  db.prepare(
-    'DELETE FROM snapshots WHERE call_id NOT IN (SELECT call_id FROM calls)',
-  ).run();
-  // A retained call may reference a configuration without any activation row,
-  // so both references keep a snapshot alive.
-  db.prepare(
-    `DELETE FROM config_snapshots
-      WHERE snapshot_id NOT IN (SELECT snapshot_id FROM config_activations)
-        AND snapshot_id NOT IN (SELECT config_snapshot_id FROM calls)
-        AND snapshot_id NOT IN (
-          SELECT config_snapshot_id FROM stages WHERE config_snapshot_id IS NOT NULL
-        )
-        AND created_at < ?`,
-  ).run(cutoff);
-  // Templates are referenced by model attempts; once no retained attempt points
-  // at one, its content is no longer needed to explain any stored decision.
-  db.prepare(
-    `DELETE FROM templates
-      WHERE template_id NOT IN (
-        SELECT template_id FROM model_calls WHERE template_id IS NOT NULL
-      )`,
-  ).run();
+  // Final pass: the loop may have removed the last reference to shared rows.
+  reclaimShared(db, cutoff);
   if (deleted > 0 || databaseBytes() > retentionBytes) compact(db);
   // After compaction the physical footprint may still exceed the target because
   // the single newest call (or a sidecar/backup) is larger than it. Say so
   // rather than deleting the last record to satisfy a number.
-  const irreducible = occupiedBytes(db) > retentionBytes;
+  const irreducible = occupiedBytes(db) > databaseBudget;
   return { deleted, irreducible, bytes: databaseBytes() };
 }

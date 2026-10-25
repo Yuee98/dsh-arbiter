@@ -31,6 +31,14 @@ interface RetentionOwnership {
   owner: RetentionMember;
   /** Every open member for this path, in open order. */
   readonly members: RetentionMember[];
+  /**
+   * The policy each member last asked for.
+   *
+   * A promoted owner must not republish its own unchanged profile configuration
+   * over an explicitly changed instance policy, so a routine refresh is only
+   * treated as an edit when the member's own request actually changed.
+   */
+  readonly requested: Map<number, { days: number; bytes: number }>;
 }
 
 const RETENTION_OWNERS = new Map<string, RetentionOwnership>();
@@ -62,6 +70,12 @@ export function claimRetention(
       retentionBytes: config.retentionBytes,
       owner: member,
       members: [member],
+      requested: new Map([
+        [
+          member.id,
+          { days: config.retentionDays, bytes: config.retentionBytes },
+        ],
+      ]),
     });
     return {
       days: config.retentionDays,
@@ -70,16 +84,30 @@ export function claimRetention(
     };
   }
   if (!existing.members.includes(member)) existing.members.push(member);
-  if (existing.owner.id !== member.id) {
+  const previous = existing.requested.get(member.id);
+  const asked = { days: config.retentionDays, bytes: config.retentionBytes };
+  existing.requested.set(member.id, asked);
+  // A member whose own request did not change is doing a routine refresh; it
+  // must not overwrite an instance policy somebody else changed explicitly.
+  const changed =
+    previous === undefined ||
+    previous.days !== asked.days ||
+    previous.bytes !== asked.bytes;
+  if (existing.owner.id !== member.id || !changed) {
+    // A routine refresh is not a disagreement: the caller keeps the effective
+    // policy and must not be told it conflicts with itself. Only a member whose
+    // own request differs *and* is not the owner is a real conflict.
+    const isOwner = existing.owner.id === member.id;
     return {
       days: existing.retentionDays,
       bytes: existing.retentionBytes,
       conflict:
-        existing.retentionDays !== config.retentionDays ||
-        existing.retentionBytes !== config.retentionBytes,
+        !isOwner &&
+        (existing.retentionDays !== config.retentionDays ||
+          existing.retentionBytes !== config.retentionBytes),
     };
   }
-  // The owner is the controlled update path for this database's policy.
+  // The owner changed its own request: this is the controlled update path.
   existing.retentionDays = config.retentionDays;
   existing.retentionBytes = config.retentionBytes;
   return {
@@ -117,6 +145,7 @@ export function releaseRetention(path: string, member: RetentionMember): void {
   if (existing === undefined) return;
   const index = existing.members.findIndex((entry) => entry.id === member.id);
   if (index >= 0) existing.members.splice(index, 1);
+  existing.requested.delete(member.id);
   if (existing.members.length === 0) {
     RETENTION_OWNERS.delete(path);
     return;
@@ -128,21 +157,23 @@ export function releaseRetention(path: string, member: RetentionMember): void {
 }
 
 /**
- * When each database path was last cleared.
+ * Clear generation per database path.
  *
  * A clear must apply to the whole database, not only to the store that served
  * the request: another store sharing the file may still hold events queued
- * before the user clicked clear. Records enqueued before the cutoff are
- * discarded on write, so a clear cannot be undone by a sibling's queue.
+ * before the user clicked clear. A monotonic generation is used rather than a
+ * timestamp, because two events can share a millisecond and a timestamp
+ * comparison would then either resurrect cleared history or discard a
+ * legitimate post-clear event.
  */
-const CLEAR_CUTOFFS = new Map<string, number>();
+const CLEAR_GENERATIONS = new Map<string, number>();
 
-/** Mark a path as cleared at this instant. */
-export function markCleared(path: string, at: number): void {
-  CLEAR_CUTOFFS.set(path, at);
+/** The generation an event must carry to survive a later clear. */
+export function clearGeneration(path: string): number {
+  return CLEAR_GENERATIONS.get(path) ?? 0;
 }
 
-/** The instant a path was last cleared, or null when it never was. */
-export function clearCutoff(path: string): number | null {
-  return CLEAR_CUTOFFS.get(path) ?? null;
+/** Advance the generation: events from earlier generations are stale. */
+export function markCleared(path: string): void {
+  CLEAR_GENERATIONS.set(path, clearGeneration(path) + 1);
 }
