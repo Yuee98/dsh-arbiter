@@ -8,6 +8,7 @@ import {
   runDecisionReviewer,
   type LlmLike,
 } from '../reviewer.js';
+import { modeForSession } from '../config.js';
 import { stageView, type StageView } from './stage.js';
 import { decisionFeedback } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
@@ -278,6 +279,22 @@ export class CallGate {
     return deny(reason);
   }
 
+  /**
+   * The call as it stands when a human question is about to be asked.
+   *
+   * Nothing has been shown yet, so eligibility belongs to the configuration
+   * effective now — not to the mode captured before the snapshot took time. An
+   * approval that is already on screen is a different path: it keeps waiting
+   * and passes `approvalOpen`.
+   */
+  private humanCall(call: CallContext): CallContext {
+    const { runtime } = this.host;
+    return {
+      ...call,
+      mode: modeForSession(runtime.config, call.sessionKind),
+    };
+  }
+
   private async ensureCwd(
     agent: AgentLike,
     signal: AbortSignal,
@@ -373,6 +390,7 @@ export class CallGate {
         effect: evaluation.facts === null ? null : { ...evaluation.facts },
         signals: null,
         snapshot: null,
+        reviewReason: null,
         strategy,
         decisionRules: [],
         modelAttempts: [],
@@ -488,7 +506,7 @@ export class CallGate {
         at: Date.now(),
       });
       return this.settlement.human(
-        call,
+        this.humanCall(call),
         'Review circuit breaker is open for this session.',
         call.extras,
       );
@@ -506,7 +524,7 @@ export class CallGate {
         configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
-      return this.settlement.human(call, message, call.extras);
+      return this.settlement.human(this.humanCall(call), message, call.extras);
     }
     if (
       snapshot.bundle.snapshot.budget.truncatedSegments.includes('OVER_BUDGET')
@@ -524,7 +542,7 @@ export class CallGate {
         configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
-      return this.settlement.human(call, message, {
+      return this.settlement.human(this.humanCall(call), message, {
         ...call.extras,
         snapshot: snapshot.bundle.snapshot,
       });
@@ -557,10 +575,11 @@ export class CallGate {
   ): Promise<ModelResult> {
     const { lifecycle, services } = this.host;
     const thresholds = call.thresholds;
-    // Freeze the backend and its settings at dispatch: the response must be
-    // parsed by the protocol that was actually asked, even if the configuration
-    // changes while the request is out.
-    const reviewer = call.view.config.reviewer;
+    // A NEW request uses the configuration effective at dispatch, not the one
+    // captured before the snapshot was assembled; the response is then parsed by
+    // this same frozen protocol even if the configuration changes again while
+    // the request is out.
+    const reviewer = this.host.runtime.config.reviewer;
     if (reviewer.type === 'chat') {
       lifecycle('review/start', {
         callId: call.exec.callId,
@@ -661,6 +680,7 @@ export class CallGate {
       ...extras,
       signals,
       decisionRules: policy.decisionRules,
+      reviewReason: policy.reason,
     };
     if (policy.verdict === 'review-allow') {
       this.settlement.finalize(
@@ -683,7 +703,7 @@ export class CallGate {
       return deny(text);
     }
     return this.settlement.human(
-      current,
+      this.humanCall(current),
       `review requires a human decision: ${modelReasonFor(policy)}`,
       reviewedExtras,
     );

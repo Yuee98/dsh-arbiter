@@ -12,6 +12,7 @@ import {
   isPriorVerdictCandidate,
 } from './history-record.js';
 import { deny, executionModeName, isAborted } from './common.js';
+import { decisionFeedback } from './feedback.js';
 import type { DecisionHistory } from './history.js';
 import type { CallContext as CallContextType } from './types.js';
 import type { AuditExtras, CallContext, HostEnvironment } from './types.js';
@@ -35,27 +36,45 @@ const HUMAN_OUTCOMES = {
     result: 'human-allow',
     stage: 'human',
     reason: 'human_approved',
-    text: 'Arbiter: the user approved this call.',
   },
   rejected: {
     result: 'human-deny',
     stage: 'human',
     reason: 'human_rejected',
-    text: 'Not executed [human-deny]: the user rejected this call.',
   },
   cancelled: {
     result: 'human-abort',
     stage: 'human',
     reason: 'approval_cancelled',
-    text: 'Not executed [human-abort]: the approval ended without a grant or denial.',
   },
   unavailable: {
     result: 'fallback-deny',
     stage: 'fallback',
     reason: 'approval_unavailable',
-    text: 'Not executed [fallback-deny]: no approval answerer was available.',
   },
-} satisfies Record<string, HumanOutcome>;
+} satisfies Record<string, Omit<HumanOutcome, 'text'>>;
+
+/**
+ * The agent-facing text for one human or fallback ending.
+ *
+ * It goes through the same composer the rule and review paths use, so the rule,
+ * the review reason and the snapshot's missing/truncated facts reach the agent
+ * on every blocked outcome — not only on the two paths that deny directly.
+ */
+function humanText(
+  extras: AuditExtras,
+  result: CallResult,
+  outcomeReason: string,
+): string {
+  return decisionFeedback({
+    result,
+    outcomeReason,
+    ruleId: extras.ruleId,
+    decisionRules: extras.decisionRules,
+    reviewReason: extras.reviewReason,
+    snapshot: extras.snapshot,
+  });
+}
 
 function humanUnavailable(
   call: CallContext,
@@ -437,12 +456,14 @@ export class CallSettlement {
   private fallback(
     call: CallContext,
     reason: string,
-    text: string,
     extras: AuditExtras,
   ): PreToolDecision {
     // Claim first: a competing path may already own this call's ending, and the
     // trace must show one terminal stage, not two. A fallback decided now is
     // governed by the configuration now, so its stage carries the live identity.
+    // The agent gets the rule, the review reason and the snapshot facts here too:
+    // a fallback is a blocked outcome, not a bare channel error.
+    const text = humanText(extras, 'fallback-deny', reason);
     const claim = this.claim(call, 'fallback-deny', text);
     if (!claim.won) return dispositionOf(claim.outcome);
     pushStage(
@@ -454,6 +475,89 @@ export class CallSettlement {
     );
     const settled = this.finalize(call, 'fallback-deny', text, extras);
     return dispositionOf(settled);
+  }
+
+  /**
+   * Race the approval answer against the call's cancellation signal.
+   *
+   * Both are installed before either can fire: the abort listener is attached
+   * first, so a cancellation that happens before the answer resolves is seen as
+   * a cancellation even when the promise later resolves with a real answer. An
+   * answer that resolves first settles as that answer; a cancellation observed
+   * afterwards does not rewrite it. This is what makes the two orderings
+   * distinct instead of both being judged by one late `signal.aborted` read.
+   */
+  private async awaitAnswer(
+    call: CallContext,
+    approval: NonNullable<HostEnvironment['services']['approval']>,
+    reason: string,
+  ): Promise<
+    | { readonly kind: 'answer'; readonly outcome: keyof typeof HUMAN_OUTCOMES }
+    | { readonly kind: 'cancelled' }
+    | { readonly kind: 'error'; readonly message: string }
+  > {
+    return new Promise((resolve) => {
+      let settled = false;
+      // Set as soon as the host's promise resolves, before its continuation
+      // runs: a cancellation observed after that point answers a question that
+      // already had an answer, so it must not replace it.
+      let answered = false;
+      const finish = (
+        value:
+          | {
+              readonly kind: 'answer';
+              readonly outcome: keyof typeof HUMAN_OUTCOMES;
+            }
+          | { readonly kind: 'cancelled' }
+          | { readonly kind: 'error'; readonly message: string },
+      ): void => {
+        if (settled) return;
+        settled = true;
+        call.exec.signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      };
+      // Attached before the request is issued so an immediate abort is caught.
+      const onAbort = (): void => {
+        // A resolved request already produced its answer; the cancellation is
+        // then a later event and does not rewrite the outcome.
+        if (answered) return;
+        finish({ kind: 'cancelled' });
+      };
+      if (isAborted(call.exec.signal)) {
+        finish({ kind: 'cancelled' });
+        return;
+      }
+      call.exec.signal.addEventListener('abort', onAbort, { once: true });
+      // The answer callbacks run in the microtask queue, which is where a
+      // request that already resolved delivers its value. Deferring the abort
+      // *classification* by one microtask lets a same-turn answer claim first,
+      // while a cancellation from an earlier turn still wins because its
+      // listener fired before the promise settled.
+      const answer = approval.request({
+        agent: call.agent,
+        toolName: call.exec.name,
+        callId: call.exec.callId,
+        reason,
+        displayReason: {
+          en: 'Arbiter needs a human decision for this call. Approve it only if its action, target and scope are intended.',
+          zh: 'Arbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。',
+        },
+        signal: call.exec.signal,
+      });
+      answer.then(
+        (outcome) => {
+          answered = true;
+          finish({ kind: 'answer', outcome });
+        },
+        (error: unknown) => {
+          answered = true;
+          finish({
+            kind: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        },
+      );
+    });
   }
 
   /**
@@ -484,52 +588,30 @@ export class CallSettlement {
       ask.approvalOpen === true,
     );
     if (unavailable !== null)
-      return this.fallback(call, unavailable.code, unavailable.text, extras);
+      return this.fallback(call, unavailable.code, extras);
     // humanUnavailable checks the channel before this point.
     const approval = this.host.services.approval;
     if (approval === undefined)
-      return this.fallback(
-        call,
-        'approval_channel_unavailable',
-        'Not executed [fallback-deny]: no human approval channel is available.',
-        extras,
-      );
+      return this.fallback(call, 'approval_channel_unavailable', extras);
     // The request is opened under this configuration. It may stay pending while
     // the configuration changes, and the approval answers the question that was
     // asked, so the resulting stage keeps this identity — not whatever is
     // effective when the user finally answers.
     const requestIdentity = currentIdentity(this.host);
-    let outcome: keyof typeof HUMAN_OUTCOMES;
-    try {
-      outcome = await approval.request({
-        agent: call.agent,
-        toolName: call.exec.name,
-        callId: call.exec.callId,
-        reason,
-        displayReason: {
-          en: 'Arbiter needs a human decision for this call. Approve it only if its action, target and scope are intended.',
-          zh: 'Arbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。',
-        },
-        signal: call.exec.signal,
-      });
-    } catch (error) {
-      return this.fallback(
-        call,
-        `approval_error: ${error instanceof Error ? error.message : String(error)}`,
-        'Not executed [fallback-deny]: the human approval channel failed.',
-        extras,
-      );
-    }
-    // A close or cancel that definitively happened before the answer arrived
-    // wins: the approval ended without the user deciding, so it must not be
-    // upgraded to a grant. An answer that already arrived first keeps its
-    // outcome, which is why the claim decides rather than the check alone.
-    const cancelled =
-      outcome === 'allowed-once' && isAborted(call.exec.signal)
-        ? HUMAN_OUTCOMES.cancelled
-        : null;
-    const mapped = cancelled ?? HUMAN_OUTCOMES[outcome];
-    const claim = this.claim(call, mapped.result, mapped.text);
+    // The answer and the cancellation race for the same ending, so they are
+    // resolved as competing events: whichever is first *definitively* observed
+    // wins, instead of a later snapshot of `signal.aborted` overriding an answer
+    // that had already arrived.
+    const first = await this.awaitAnswer(call, approval, reason);
+    if (first.kind === 'error')
+      return this.fallback(call, `approval_error: ${first.message}`, extras);
+    const cancelled = first.kind === 'cancelled';
+    const mapped = cancelled
+      ? HUMAN_OUTCOMES.cancelled
+      : HUMAN_OUTCOMES[first.outcome];
+    const stageReason = cancelled ? 'approval_cancelled' : mapped.reason;
+    const text = humanText(extras, mapped.result, stageReason);
+    const claim = this.claim(call, mapped.result, text);
     if (!claim.won) return dispositionOf(claim.outcome);
     // The question was asked under the configuration captured when it opened,
     // so its stage keeps that identity even after a later switch.
@@ -537,10 +619,10 @@ export class CallSettlement {
       call.trace,
       mapped.stage,
       mapped.result,
-      cancelled === null ? mapped.reason : 'cancelled_after_answer',
+      stageReason,
       requestIdentity,
     );
-    const settled = this.finalize(call, mapped.result, mapped.text, extras);
+    const settled = this.finalize(call, mapped.result, text, extras);
     return dispositionOf(settled);
   }
 }

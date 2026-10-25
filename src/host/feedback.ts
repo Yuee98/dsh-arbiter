@@ -53,6 +53,8 @@ const RECOVERY_HINTS: Readonly<Record<string, string>> = {
 
 export interface FeedbackInput {
   readonly result: CallResult;
+  /** Why this stage ended the call, when the outcome is a fallback or abort. */
+  readonly outcomeReason?: string;
   /** The rule that matched, when a rule decided the call. */
   readonly ruleId: string | null;
   /** The review rules that decided the call, when the review did. */
@@ -105,6 +107,10 @@ export function decisionFeedback(input: FeedbackInput): string {
   );
   if (rule === null && input.reviewReason !== null)
     sections.push(`${input.reviewReason}.`);
+  // The stage's own cause (which channel was missing, that the question was
+  // cancelled) is part of the answer, not a detail to drop.
+  if (input.outcomeReason !== undefined && input.outcomeReason.length > 0)
+    sections.push(`Cause: ${input.outcomeReason}.`);
   sections.push(...contextParts(input.snapshot));
   const hint = RECOVERY_HINTS[input.result];
   if (hint !== undefined) sections.push(hint);

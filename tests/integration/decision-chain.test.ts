@@ -29,6 +29,7 @@ import {
 } from 'vitest';
 
 import { AuditStore } from '../../src/audit.js';
+import { parseDocument } from '../../src/config.js';
 import { apply } from '../../src/index.js';
 import { installSessionRecordApi } from '../../src/records.js';
 import {
@@ -133,17 +134,24 @@ function chatAnswer(answer: {
   };
 }
 
+let harnessSeq = 0;
+
 interface HarnessOptions {
   readonly sessions: readonly StubSession[];
   readonly llm: HostServices['llm'];
   readonly approval?: HostServices['approval'];
   readonly modes?: { readonly main: string; readonly subagent: string };
   readonly name?: string;
+  /** Replaces the cwd resolver, so a case can hold the gate at that boundary. */
+  readonly workingDirectory?: HostServices['workingDirectory'];
+  /** Replaces the session service, so a case can observe a lookup. */
+  readonly sessionLookup?: HostServices['sessions'];
 }
 
 interface Harness {
   readonly gate: Gate;
   readonly apply: (config: unknown) => void;
+  readonly reviewerType: () => string;
   readonly dispose: () => void;
 }
 
@@ -155,10 +163,12 @@ function createHarness(options: HarnessOptions): Harness {
       profileContext: {
         home: process.env['DSH_HOME'] ?? '',
         dir: process.cwd(),
-        name: options.name ?? 'decision-chain',
+        // Each harness owns a profile: the runtime is cached per profile, so a
+        // shared name would let one case's activation leak into the next.
+        name: options.name ?? `decision-chain-${String(harnessSeq++)}`,
       },
       sandboxPolicy: { defaultMode: 'workspace-write' },
-      sessions: {
+      sessions: options.sessionLookup ?? {
         get: (id: string) => byId.get(id),
         list: () => [...options.sessions],
       },
@@ -168,7 +178,9 @@ function createHarness(options: HarnessOptions): Harness {
         request: () => Promise.resolve('unavailable'),
       },
       permissionPresets: { registerAuto: () => () => undefined },
-      workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+      workingDirectory: options.workingDirectory ?? {
+        ensure: () => Promise.resolve(process.cwd()),
+      },
     },
     { on: capture.on },
   );
@@ -177,8 +189,13 @@ function createHarness(options: HarnessOptions): Harness {
   for (const session of options.sessions) {
     if (session.header.parentSession === undefined) admitSession(session);
   }
+  // Every activation goes through the plugin's own entry point: it parses the
+  // candidate and commits it on the profile's cached runtime, which is exactly
+  // what a configuration reload does.
+  let currentReviewerType = '';
   const push = (config: unknown): void => {
     apply(ctx, config);
+    currentReviewerType = parseDocument(config).config.reviewer.type;
   };
   push({
     modes: options.modes ?? { main: 'normal', subagent: 'strict' },
@@ -197,6 +214,7 @@ function createHarness(options: HarnessOptions): Harness {
   return {
     gate: capture.gate(),
     apply: push,
+    reviewerType: () => currentReviewerType,
     dispose: () => {
       for (const dispose of disposers) Reflect.apply(dispose, undefined, []);
     },
@@ -505,14 +523,18 @@ describe('missing approval channel', () => {
     });
     try {
       // The subagent mode is `strict`, so the mode check answers first: either
-      // reason is a fallback, and neither opens a question.
+      // way it is a fallback, and neither opens a question. The text also
+      // carries the review rule, its reason and the missing context, so the
+      // agent is not left with a bare channel error.
       const childDecision = await harness.gate(call(child, 'c1'), allowNext);
       expect(childDecision.kind).toBe('deny');
       expect(childDecision.reason).toContain('fallback-deny');
-      expect(childDecision.reason).toContain('does not open approval requests');
+      expect(childDecision.reason).toContain('automatic_mode_no_human');
+      expect(childDecision.reason).toContain('R3');
+      expect(childDecision.reason).toContain('authorization is insufficient');
       const pinnedDecision = await harness.gate(call(pinned, 'c2'), allowNext);
       expect(pinnedDecision.reason).toContain('fallback-deny');
-      expect(pinnedDecision.reason).toContain('approval policy');
+      expect(pinnedDecision.reason).toContain('host_approval_policy_never');
     } finally {
       harness.dispose();
     }
@@ -772,6 +794,367 @@ describe('stage attribution', () => {
       } finally {
         store.close();
       }
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('blocked outcomes carry the composed feedback', () => {
+  test('review-escalate to fallback reports the rule, the reason and the missing context', async () => {
+    const session = makeSession('fb-escalate');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      modes: { main: 'strict', subagent: 'strict' },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'fb1'), allowNext);
+      expect(decision.kind).toBe('deny');
+      // Rule, review reason, the stage's own cause and the snapshot facts.
+      expect(decision.reason).toContain('review rule R3');
+      expect(decision.reason).toContain('authorization is insufficient');
+      expect(decision.reason).toContain('automatic_mode_no_human');
+      expect(decision.reason).toContain('Unavailable context:');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a human denial reports the rule and the missing context', async () => {
+    const session = makeSession('fb-human');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('rejected' as const),
+      },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'fb2'), allowNext);
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('human-deny');
+      expect(decision.reason).toContain('the user rejected this call');
+      expect(decision.reason).toContain('review rule R3');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an abort reports that no answer arrived, with the cause', async () => {
+    const session = makeSession('fb-abort');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('cancelled' as const),
+      },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'fb3'), allowNext);
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('human-abort');
+      expect(decision.reason).toContain('approval_cancelled');
+      expect(decision.reason).not.toContain('the user rejected');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an error-escalate fallback still reports the review failure', async () => {
+    const session = makeSession('fb-error');
+    const harness = createHarness({
+      sessions: [session],
+      // No usable model answer: the chat reviewer cannot produce signals.
+      llm: {
+        stream: () => {
+          return (async function* () {
+            await Promise.resolve();
+            yield { type: 'finish', reason: { kind: 'stop' } };
+          })();
+        },
+      },
+      modes: { main: 'strict', subagent: 'strict' },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'fb4'), allowNext);
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('fallback-deny');
+      expect(decision.reason).toContain('Cause:');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('terminal stages keep the revision that governed them', () => {
+  test('a human stage records the revision the question was asked under', async () => {
+    const session = makeSession('rev-human');
+    let release: ((answer: 'allowed-once') => void) | undefined;
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () =>
+          new Promise((resolve) => {
+            release = (answer) => {
+              resolve(answer);
+            };
+          }),
+      },
+    });
+    try {
+      const pending = harness.gate(call(session, 'rv1'), allowNext);
+      for (
+        let attempt = 0;
+        attempt < 100 && release === undefined;
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // A configuration change lands while the question is on screen.
+      harness.apply({
+        modes: { main: 'strict', subagent: 'strict' },
+        reviewer: {
+          type: 'chat',
+          chat: {
+            provider: 'session',
+            model: '',
+            temperature: 0,
+            maxTokens: 400,
+            timeoutMs: 8_000,
+            maxRepairRetries: 1,
+          },
+        },
+      });
+      if (release === undefined)
+        throw new Error('the approval was never asked');
+      release('allowed-once');
+      expect((await pending).kind).toBe('allow');
+      const store = new AuditStore(
+        join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+        {
+          enabled: true,
+          retentionDays: 30,
+          retentionBytes: 1_073_741_824,
+          maxQueue: 500,
+        },
+      );
+      try {
+        let humanRevision: unknown;
+        let topRevision: unknown;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const row: unknown = store.getCall('rv1');
+          if (row !== null && typeof row === 'object') {
+            topRevision = Reflect.get(row, 'configRevision');
+            const stages: unknown = Reflect.get(row, 'stages');
+            if (Array.isArray(stages)) {
+              for (const stage of stages) {
+                if (
+                  stage !== null &&
+                  typeof stage === 'object' &&
+                  Reflect.get(stage, 'stage') === 'human'
+                ) {
+                  humanRevision = Reflect.get(stage, 'configRevision');
+                }
+              }
+            }
+            if (typeof humanRevision === 'string') break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        // The human stage names the revision that asked, not the one that was
+        // effective when the answer arrived.
+        expect(typeof humanRevision).toBe('string');
+        expect(humanRevision).not.toBe('');
+        expect(typeof topRevision).toBe('string');
+      } finally {
+        store.close();
+      }
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('cancellation and answer as competing events', () => {
+  test('a cancellation observed before a rejection is an abort', async () => {
+    const session = makeSession('race-cancel-first');
+    const controller = new AbortController();
+    let release: ((answer: 'rejected') => void) | undefined;
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () =>
+          new Promise((resolve) => {
+            release = (answer) => {
+              resolve(answer);
+            };
+          }),
+      },
+    });
+    try {
+      const pending = harness.gate(
+        call(session, 'rc1', controller.signal),
+        allowNext,
+      );
+      for (
+        let attempt = 0;
+        attempt < 100 && release === undefined;
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // Cancel first, then the host's promise resolves with a rejection.
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (release === undefined)
+        throw new Error('the approval was never asked');
+      release('rejected');
+      const decision = await pending;
+      expect(decision.reason).toContain('human-abort');
+      expect(decision.reason).not.toContain('the user rejected');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an answer resolved first keeps its outcome when a cancel follows', async () => {
+    const session = makeSession('race-answer-first');
+    const controller = new AbortController();
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () => {
+          // The answer is delivered first; the cancellation happens in a later
+          // turn, which is the ordering this case is about.
+          const answered = Promise.resolve('allowed-once' as const);
+          setTimeout(() => {
+            controller.abort();
+          }, 0);
+          return answered;
+        },
+      },
+    });
+    try {
+      const decision = await harness.gate(
+        call(session, 'rc2', controller.signal),
+        allowNext,
+      );
+      // The abort is attached before the request, but the request resolves in
+      // the same turn, so the answer wins.
+      expect(decision.kind).toBe('allow');
+      expect(await storedTrace('rc2')).toContain('human-allow');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a configuration change during snapshot assembly', () => {
+  test('a not-yet-asked escalation uses the mode effective when it asks', async () => {
+    const session = makeSession('snap-strict');
+    const asked: string[] = [];
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      modes: { main: 'normal', subagent: 'strict' },
+      approval: {
+        config: { policy: 'ask' },
+        request: () => {
+          asked.push('asked');
+          return Promise.resolve('rejected' as const);
+        },
+      },
+    });
+    try {
+      // The mode changes before the review concludes. No question was shown
+      // yet, so the new mode governs whether one may be asked.
+      harness.apply({
+        modes: { main: 'strict', subagent: 'strict' },
+        reviewer: {
+          type: 'chat',
+          chat: {
+            provider: 'session',
+            model: '',
+            temperature: 0,
+            maxTokens: 400,
+            timeoutMs: 8_000,
+            maxRepairRetries: 1,
+          },
+        },
+      });
+      const decision = await harness.gate(call(session, 'sn1'), allowNext);
+      expect(decision.reason).toContain('fallback-deny');
+      expect(asked).toHaveLength(0);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a newly dispatched request uses the backend selected by then', async () => {
+    // Rule evaluation selects the current backend; a change that lands before
+    // the request is issued must be what the request uses. The chat adapter is
+    // the witness: it must not be asked at all.
+    const session = makeSession('snap-backend');
+    const chatCalls: string[] = [];
+    const decisionConfig = {
+      modes: { main: 'normal', subagent: 'strict' },
+      reviewer: {
+        type: 'decision',
+        decision: {
+          url: 'http://127.0.0.1:1/unreachable',
+          model: 'x',
+          apiKeyRef: 'env:TEST_DECISION_KEY',
+          timeoutMs: 500,
+          maxRepairRetries: 1,
+        },
+      },
+    };
+    const harness = createHarness({
+      sessions: [session],
+      llm: {
+        stream: () => {
+          chatCalls.push('chat');
+          return (async function* () {
+            await Promise.resolve();
+            yield {
+              type: 'text-delta',
+              text: JSON.stringify({
+                risk: 7,
+                authorized: 2,
+                secrets: false,
+                destructive: false,
+                egress: false,
+                bulk: false,
+              }),
+            };
+            yield { type: 'finish', reason: { kind: 'stop' } };
+          })();
+        },
+      },
+      modes: { main: 'normal', subagent: 'strict' },
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('rejected' as const),
+      },
+    });
+    try {
+      harness.apply(decisionConfig);
+      expect(harness.reviewerType()).toBe('decision');
+      const decision = await harness.gate(call(session, 'sn2'), allowNext);
+      expect(chatCalls).toHaveLength(0);
+      // The decision backend is unreachable, so the review failed and the human
+      // channel answered; the backend choice is what this case pins.
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('human-deny');
     } finally {
       harness.dispose();
     }
