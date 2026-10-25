@@ -134,7 +134,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | 判定阈值（chat） | 风险点值上限、授权点值下限，按所选审查策略应用 | normal / strict 共用；数值待评测，不因后端不同改变所需授权类别 |
 | 判定策略调整 | progress 对部分常规 review-escalate 条件的调整 | 具体条件留待评测；不在普通设置页逐条暴露 |
 | chat 后端 | temperature（0）/ maxTokens（300）/ output（json\|tool） | 范围 |
-| 执行边界 | trusted / guarded；首次默认 guarded | 用户在本配置页选择并保存应用；决定已启用会话放行后的沙箱，不启用未接管会话 |
+| 执行边界 | `boundary`：trusted / guarded；首次默认 guarded | 用户在本配置页选择并保存应用；决定已启用会话放行后的沙箱，不启用未接管会话。保存后对当前已启用会话立即生效（先写记录再改旋钮），未启用会话不被改写 |
 | 审批模式 | 主会话 normal / strict / progress，默认 normal；所有子任务统一 strict / progress，默认 strict | 用户在本设置页选择；不提供单个子任务覆盖 |
 | 凭据 | 显示"已设置/未设置/来源"，可写入 | 见 [机密](configuration-and-audit.md#design-8-2) |
 
@@ -142,7 +142,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 
 主会话与子任务的审批模式在当前插件配置作用域内统一应用，不再使用子任务继承父模式或会话级 DND 覆盖。配置页显示当前生效值，已确认初始值与设置范围见[模式选择](approval-modes.md#mode-selection)，具体字段名留给实现。
 
-**会话启用不是另一个全局配置开关**：当前会话通过同位置的 arbiter 权限选择器切入／切出自动审查，后端保存可恢复的会话状态；配置页的 trusted / guarded 与审批模式只决定启用后的行为。普通 workspace-write 会话不能因这些设置而被自动接管。会话启用状态不写成需要审计 SQLite 才能恢复的配置快照，也不由浏览器本地状态决定；具体宿主持久化接入待[权限 UI 验证](permission-ui-validation.md)。正文见[选择器契约](architecture.md#permission-selector-contract)。
+**会话启用不是另一个全局配置开关**：当前会话通过同位置的 arbiter 权限选择器切入／切出自动审查，后端保存可恢复的会话状态；配置页的 `boundary` 与审批模式只决定启用后的行为。普通 workspace-write 会话不能因这些设置而被自动接管。会话启用状态不写成需要审计 SQLite 才能恢复的配置快照，也不由浏览器本地状态决定；持久化是会话日志里的 `plugin:arbiter/admission` 可忽略记录，冷恢复只折叠该记录。实现与已运行确认的边界见[选择器契约](architecture.md#permission-selector-contract)，客户端选择器由 #5 交付。
 
 <a id="ui-i18n"></a>
 

@@ -379,6 +379,7 @@ subagent 的简短说明草案：
 | auto 语义 | 原生 `/permission auto` 拒绝；自有选择器通过后端独立状态启用 trusted／guarded，不借助原生 auto 承载启用状态 | 拒绝**已实现并运行确认**；自有选择器的会话启停仍未接入正式客户端 |
 | auto 恢复 | `admit` 无参数，无法直接区分"用户切换"与"恢复已存 auto 身份的旧会话"。实现用公开的 `command/run` / `command/done` 生命周期区分：有进行中的 `/permission` 命令即视为用户切换并拒绝，否则视为恢复并放行 | 推断而非接口保证，已登记缺口 |
 | 卸载顺序 | `accepting = false` → **立即回退**仍受管且权限确实更宽的会话 → 再等待在途（≤30s）→ 释放。回退必须先于等待：停接管后到达的调用已不受门禁保护，只能靠宿主权限约束 | 已运行确认；顺序由集成用例与回归测试双重固定 |
+| 卸载范围 | 用公开的 `sessions.list()` 枚举存活会话并折叠其准入记录，不只处理"本进程门禁见过的会话"；回退写失败时该会话保持 fail-closed，teardown 期间到达的调用被拒绝而不是按旧权限放行 | 集成用例覆盖 `sessions.list` 与失败回退；真实宿主重启用例覆盖冷恢复后的回退 |
 | 卸载顺序的反例 | 先等待在途再回退时，drain 窗口内到达的调用会在旧 `danger-full-access` 下免审执行（2026-10-22 实测复现：写出 workspace 外文件，回退事件晚于该次执行） | 已修复，见[补测报告](../validation/permission-ui/2026-10-22-permission-lifecycle-02/REPORT.md) |
 | 记录写入 | 只能用 `appendPluginRecord`（`ignorable: true`）；该包在 profile 未声明时按"裸导入 → 运行中宿主安装根"解析 | 运行确认 |
 
@@ -397,6 +398,8 @@ subagent 的简短说明草案：
 | 宿主其他权限模式 | 停用 | 应用用户选择的宿主权限，不因该组合与 guarded 相同就继续接管 |
 
 启用状态由后端管理，并保留恢复所需的会话信息；前端只显示后端确认的状态。不能用 `current === auto` 或 `current ∈ {auto, workspace-write}` 代替启用状态，也不能从“没有审计记录”推断已停用。持久化依托宿主会话机制等独立运行状态，不依赖审计 SQLite；具体事件字段、写入与宿主权限切换的原子性待验证。新会话或缺少启用证据的会话不能仅因插件已安装、配置中选择 guarded 或宿主为 workspace-write 就被自动接管。
+
+**实现（#4，`src/host/admission.ts`、`src/host/session-admission.ts`）**：每次启用／停用写一条 `plugin:arbiter/admission` 可忽略记录（`version`、`sessionId`、`rootSessionId`、`enabled`、`boundary`、`at`），折叠时取最新有效记录；同一会话上较近的停用记录优先于祖先的启用记录。子任务沿 `header.parentSession` 向上解析，只有最近的带记录祖先启用时才受管；父链不可解析或成环一律不接管。启用顺序是**先写记录（门禁已覆盖），再放宽沙箱**；显式停用（API）先把仍被插件放宽的会话收窄回 `workspace-write + ask` 再写停用记录，而原生命令切出由用户自己选择权限、记录不覆盖。折叠同时接受"记录之后成功完成的 `/permission <preset>` 命令对"作为退出证据，因为同值切换不写任何权限事件，只有命令对能证明意图。`/api/arbiter/sessions` 返回后端确认的 `enabled`／`boundary`／`admissionRevision`／`seq`，不提供按会话覆盖边界。
 
 权限菜单选择及受支持的原生命令切换必须同步到同一个后端状态。尤其是 guarded 下再次执行 `/permission workspace-write`：即使实际沙箱／审批值已经相同，也必须能够表达用户退出 arbiter 的意图；不能只监听值变化事件。原生 `/permission auto` 按下节拒绝；其他命令失败也不得提前停用 arbiter。观察命令意图、更新内存状态与延后持久化的时序必须保持一致；公开接口若有限制应回填缺口，不能把“没有事件”记作同步成功。
 
