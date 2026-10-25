@@ -1,6 +1,6 @@
 import { fingerprintOf, type CallRecord } from '../audit.js';
 import { appendRecord } from '../records.js';
-import type { CallResult, PreToolDecision } from '../types.js';
+import type { CallResult, PreToolDecision, TraceStage } from '../types.js';
 import { deny, executionModeName, isAborted } from './common.js';
 import type { DecisionHistory } from './history.js';
 import type { AuditExtras, CallContext, HostEnvironment } from './types.js';
@@ -69,6 +69,72 @@ function humanUnavailable(
     : null;
 }
 
+/** How many session-record failures stay addressable for diagnostics. */
+const MAX_SESSION_RECORD_ERRORS = 200;
+
+/**
+ * How long an approved call may wait for a result before its entry is reaped.
+ *
+ * `tools/result` is expected for every allowed call, but a cancelled or
+ * abandoned call may never produce one. The entry is dropped after this window
+ * and the stored row keeps `pending` — the record must say "unknown outcome",
+ * not invent success or failure.
+ */
+const PENDING_TTL_MS = 30 * 60 * 1000;
+
+/** How many unresolved entries may accumulate before the oldest are reaped. */
+const MAX_PENDING = 512;
+
+/** Drop entries that are stale or beyond the cap; unknown outcomes stay unknown. */
+function reapPending(pending: HostEnvironment['runtime']['pending']): void {
+  const cutoff = Date.now() - PENDING_TTL_MS;
+  for (const [callId, entry] of pending) {
+    if (entry.ts < cutoff) pending.delete(callId);
+  }
+  while (pending.size > MAX_PENDING) {
+    const oldest = pending.keys().next().value;
+    if (oldest === undefined) break;
+    pending.delete(oldest);
+  }
+}
+
+/**
+ * Append a settlement stage with the configuration identity in force now.
+ *
+ * Human and fallback stages happen after the review stages, and a configuration
+ * switch can land in between; each stage therefore records its own revision and
+ * snapshot instead of inheriting the call's final values.
+ */
+interface StageIdentity {
+  readonly configRevision: string;
+  readonly configSnapshotId: string;
+}
+
+/** The configuration in force right now. */
+function currentIdentity(host: HostEnvironment): StageIdentity {
+  return {
+    configRevision: host.runtime.effectiveRevision,
+    configSnapshotId: host.runtime.configSnapshotId,
+  };
+}
+
+function pushStage(
+  trace: TraceStage[],
+  stage: 'human' | 'fallback',
+  result: string,
+  reason: string,
+  identity: StageIdentity,
+): void {
+  trace.push({
+    stage,
+    result,
+    reason,
+    configRevision: identity.configRevision,
+    configSnapshotId: identity.configSnapshotId,
+    at: Date.now(),
+  });
+}
+
 /** Settles decisions independently of best-effort audit persistence. */
 export class CallSettlement {
   private readonly host: HostEnvironment;
@@ -105,8 +171,16 @@ export class CallSettlement {
         ts: Date.now(),
       },
     );
-    if (sessionRecordState !== 'written')
+    if (sessionRecordState !== 'written') {
       runtime.sessionRecordErrors.set(exec.callId, sessionRecordState);
+      // The map is diagnostic state, not history: keep the newest entries so a
+      // session with a persistent write failure cannot grow it without bound.
+      while (runtime.sessionRecordErrors.size > MAX_SESSION_RECORD_ERRORS) {
+        const oldest = runtime.sessionRecordErrors.keys().next().value;
+        if (oldest === undefined) break;
+        runtime.sessionRecordErrors.delete(oldest);
+      }
+    }
     return {
       callId: exec.callId,
       ts: Date.now(),
@@ -117,6 +191,9 @@ export class CallSettlement {
       workspace: cwd,
       tool: exec.name,
       arguments: exec.arguments,
+      // The schema the host exposed for this call, kept as evidence; absent
+      // means the host declared none, which the reader reports as null.
+      ...(exec.schema === undefined ? {} : { argumentsSchema: exec.schema }),
       cwd,
       fingerprint,
       configRevision: runtime.effectiveRevision,
@@ -133,9 +210,14 @@ export class CallSettlement {
       signals: extras.signals,
       policyStrategy: extras.strategy,
       decisionRules: extras.decisionRules,
+      // A permission verdict is not an execution result: an approved call is
+      // `pending` until the host reports what happened, and a denied one never
+      // started. `executionStartedAt`/`FinishedAt` stay absent until then.
       executionStatus: ['allow', 'review-allow', 'human-allow'].includes(result)
         ? 'pending'
         : 'not-started',
+      executionStartedAt: null,
+      executionFinishedAt: null,
     };
   }
 
@@ -148,10 +230,13 @@ export class CallSettlement {
     const record = this.createRecord(call, result, reason, extras);
     this.host.currentAudit()?.enqueue(record);
     if (record.executionStatus === 'pending') {
-      this.host.runtime.pending.set(call.exec.callId, {
+      const pending = this.host.runtime.pending;
+      pending.set(call.exec.callId, {
         sessionId: record.sessionId,
         ts: record.ts,
       });
+      // Keep the map bounded even when results never arrive.
+      reapPending(pending);
     }
     if (
       [
@@ -186,12 +271,15 @@ export class CallSettlement {
     text: string,
     extras: AuditExtras,
   ): PreToolDecision {
-    call.trace.push({
-      stage: 'fallback',
-      result: 'fallback-deny',
+    // A fallback decided now is governed by the configuration now: it begins and
+    // ends inside this call, with no pending window in between.
+    pushStage(
+      call.trace,
+      'fallback',
+      'fallback-deny',
       reason,
-      at: Date.now(),
-    });
+      currentIdentity(this.host),
+    );
     this.finalize(call, 'fallback-deny', text, extras);
     return deny(text);
   }
@@ -214,6 +302,11 @@ export class CallSettlement {
         'Not executed [fallback-deny]: no human approval channel is available.',
         extras,
       );
+    // The request is opened under this configuration. It may stay pending while
+    // the configuration changes, and the approval answers the question that was
+    // asked, so the resulting stage keeps this identity — not whatever is
+    // effective when the user finally answers.
+    const requestIdentity = currentIdentity(this.host);
     let outcome: keyof typeof HUMAN_OUTCOMES;
     try {
       outcome = await approval.request({
@@ -236,12 +329,13 @@ export class CallSettlement {
       );
     }
     const mapped = HUMAN_OUTCOMES[outcome];
-    call.trace.push({
-      stage: mapped.stage,
-      result: mapped.result,
-      reason: mapped.reason,
-      at: Date.now(),
-    });
+    pushStage(
+      call.trace,
+      mapped.stage,
+      mapped.result,
+      mapped.reason,
+      requestIdentity,
+    );
     this.finalize(call, mapped.result, mapped.text, extras);
     return mapped.result === 'human-allow'
       ? { kind: 'allow' }

@@ -141,10 +141,11 @@ export class DecisionHistory {
     if (priorAudit !== null) {
       try {
         const seen = new Set(restored.map((item) => item.callId));
-        for (const row of priorAudit.priorVerdictsForSession(
-          sessionId,
-          limit,
-        )) {
+        // Minimal adaptation to the audit reader's new shape: it now also
+        // reports how many rows were excluded because this build cannot read
+        // their format, which the history-merge work (#16) consumes.
+        for (const row of priorAudit.priorVerdictsForSession(sessionId, limit)
+          .verdicts) {
           if (seen.has(row.callId)) continue;
           const result = asCallResult(row.result);
           if (result === null) continue;

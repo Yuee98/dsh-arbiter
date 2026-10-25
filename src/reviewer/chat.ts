@@ -1,3 +1,4 @@
+import { templateIdOf } from '../audit/metadata.js';
 import type {
   ChatReviewerConfig,
   ModelAttemptRecord,
@@ -179,6 +180,11 @@ function chatAttemptBase(
       system: request.system,
       messages,
     },
+    // The system message *is* the reusable template. Its content identity lets
+    // the audit record point at one immutable row instead of storing a copy per
+    // attempt, and a later policy edit creates a new row rather than rewriting
+    // what this decision was rendered from.
+    templateId: templateIdOf(request.system),
     startedAt,
     durationMs: Date.now() - startedAt,
     estimatedInputTokens: request.estimatedInputTokens,

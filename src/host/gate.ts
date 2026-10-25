@@ -17,6 +17,7 @@ import {
 } from '../snapshot.js';
 import type {
   AdmissionScopeReason,
+  CommandRule,
   PolicyThresholds,
   PreToolDecision,
   PriorVerdictItem,
@@ -36,6 +37,8 @@ import type {
 
 interface PreparedCall extends CallContext {
   readonly evaluation: ReturnType<typeof evaluateCall>;
+  /** The exact rule list the evaluation indexed into. */
+  readonly evaluatedRules: readonly CommandRule[];
   readonly prior: PriorVerdictItem[];
   readonly thresholds: PolicyThresholds;
   readonly extras: AuditExtras;
@@ -59,6 +62,11 @@ function modelReasonFor(decision: {
     reasons[decision.decisionRules[0] ?? ''] ??
     'the review did not approve this action'
   );
+}
+
+/** The trace field for a resolved historical rule name, or nothing. */
+function ruleNameStage(name: string | null): { readonly ruleName?: string } {
+  return name === null ? {} : { ruleName: name };
 }
 
 /** Gate admission, rule evaluation and reviewer hand-off. */
@@ -89,6 +97,8 @@ export class CallGate {
     this.host.ctx.on(
       'tools/result',
       (exec: ToolExecutionLike, result: ToolResultLike) => {
+        // The pending map only holds approved-but-unfinished calls; a result for
+        // a call that never entered it is not this map's business.
         if (!this.host.runtime.pending.has(exec.callId)) return;
         this.host.runtime.pending.delete(exec.callId);
         this.host
@@ -97,6 +107,9 @@ export class CallGate {
             exec.callId,
             result.isError === true ? 'failed' : 'success',
           );
+        // A terminal result ends a pending entry; unresolved entries are reaped
+        // by the bounded sweep so an observed-but-abandoned call cannot grow the
+        // map without limit.
       },
     );
   }
@@ -293,8 +306,13 @@ export class CallGate {
       /* Keep process cwd; the snapshot records the actual value. */
     }
     const prior = this.history.priorFor(session.id ?? 'unknown');
+    // The evaluated set is what the matcher indexes into, so it is also what the
+    // historical rule name must be resolved against.
+    const evaluatedRules = runtime.config.rules.filter(
+      (rule) => rule.enabled !== false,
+    );
     const evaluation = evaluateCall({
-      rules: runtime.config.rules.filter((rule) => rule.enabled !== false),
+      rules: evaluatedRules,
       tool: exec.name,
       arguments: exec.arguments,
       identity: sessionKind,
@@ -314,14 +332,25 @@ export class CallGate {
       cwd,
       prior,
       evaluation,
+      evaluatedRules,
       thresholds,
       trace: [
         {
           stage: 'rule',
           result: path.kind === 'rule' ? path.verdict : 'review(default)',
-          ...(path.kind === 'rule' ? { ruleId: path.ruleId } : {}),
+          ...(path.kind === 'rule'
+            ? {
+                ruleId: path.ruleId,
+                ...ruleNameStage(
+                  this.ruleNameOf(evaluatedRules, evaluation, path.ruleId),
+                ),
+              }
+            : {}),
           ...(path.kind === 'review-default' ? { reason: path.reason } : {}),
+          // The revision that decided this stage, captured now. A config
+          // switch later in the same call must not relabel it.
           configRevision: runtime.effectiveRevision,
+          configSnapshotId: runtime.configSnapshotId,
           at: Date.now(),
         },
       ],
@@ -335,6 +364,34 @@ export class CallGate {
         ruleId: path.kind === 'rule' ? path.ruleId : null,
       },
     };
+  }
+
+  /**
+   * The matched rule's display name at decision time.
+   *
+   * The match index refers to the *evaluated* list (disabled rules are filtered
+   * out before matching), so the name is resolved against that same list. Using
+   * the unfiltered configuration would point at the wrong rule whenever a
+   * disabled rule precedes the match. A rule without a comment is labelled by
+   * its id, the same way the rules table labels it.
+   */
+  private ruleNameOf(
+    rules: readonly CommandRule[],
+    evaluation: {
+      readonly matches: readonly {
+        readonly index: number;
+        readonly id: string;
+      }[];
+    },
+    ruleId: string,
+  ): string | null {
+    const match = evaluation.matches.find((entry) => entry.id === ruleId);
+    if (match === undefined) return null;
+    const rule = rules[match.index];
+    if (rule === undefined || rule.id !== ruleId) return null;
+    return rule.comment === undefined || rule.comment.length === 0
+      ? rule.id
+      : rule.comment;
   }
 
   private async applyRule(call: PreparedCall): Promise<PreToolDecision | null> {
@@ -401,6 +458,8 @@ export class CallGate {
         stage: 'review',
         result: 'error-escalate',
         reason: 'circuit_open',
+        configRevision: this.host.runtime.effectiveRevision,
+        configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
       return this.settlement.human(
@@ -419,6 +478,7 @@ export class CallGate {
         result: 'error-escalate',
         reason: `snapshot_error: ${message}`,
         configRevision: this.host.runtime.effectiveRevision,
+        configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
       return this.settlement.human(call, message, call.extras);
@@ -436,6 +496,7 @@ export class CallGate {
         result: 'error-escalate',
         reason: 'input_budget_exceeded',
         configRevision: this.host.runtime.effectiveRevision,
+        configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
       return this.settlement.human(call, message, {
@@ -534,6 +595,7 @@ export class CallGate {
         result: 'error-escalate',
         reason: result.error,
         configRevision: runtime.effectiveRevision,
+        configSnapshotId: runtime.configSnapshotId,
         at: Date.now(),
       });
       return this.settlement.human(
@@ -557,6 +619,7 @@ export class CallGate {
       reason: policy.reason,
       decisionRules: policy.decisionRules,
       configRevision: runtime.effectiveRevision,
+      configSnapshotId: runtime.configSnapshotId,
       at: Date.now(),
     });
     const reviewedExtras = {

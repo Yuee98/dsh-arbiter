@@ -362,3 +362,129 @@ describe('decision reviewer run', () => {
     expect(result.ok ? null : result.error).toContain('503');
   });
 });
+
+describe('reviewer transport credential boundary', () => {
+  // The agreed local-retention contract keeps the original review material but
+  // never the transport credential or an auth header. These assertions pin the
+  // boundary at the adapter, which is where the credential exists.
+  test('a decision request record carries no credential or auth header', async () => {
+    const sentinel = 'sk-decision-transport-sentinel';
+    let authorization: string | null = null;
+    const result = await runDecisionReviewer(
+      {
+        fetch: (_input, init) => {
+          authorization = new Headers(init?.headers).get('authorization');
+          return Promise.resolve(
+            new Response('{"response":{}}', { status: 200 }),
+          );
+        },
+        credentials: { resolve: () => Promise.resolve({ value: sentinel }) },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef-flash',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-cred',
+    );
+    // The header did carry the credential, so the assertion below is meaningful.
+    expect(authorization).toBe(`Bearer ${sentinel}`);
+    const stored = JSON.stringify(result.attempts);
+    expect(stored).not.toContain(sentinel);
+    // The word "authorization" appears legitimately in the review policy text,
+    // so the assertion targets a header *value*, not the vocabulary.
+    expect(stored).not.toMatch(/authorization\s*[:=]\s*\S/iu);
+    expect(stored).not.toMatch(/bearer\s+\S/iu);
+  });
+
+  test('a decision transport error does not echo the credential it sent', async () => {
+    const sentinel = 'sk-decision-error-sentinel';
+    const result = await runDecisionReviewer(
+      {
+        // A transport that quotes the header it failed with.
+        fetch: () =>
+          Promise.reject(
+            new Error(
+              `connect ECONNREFUSED (Authorization: Bearer ${sentinel})`,
+            ),
+          ),
+        credentials: { resolve: () => Promise.resolve({ value: sentinel }) },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef-flash',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-err',
+    );
+    const stored = JSON.stringify(result);
+    expect(stored).not.toContain(sentinel);
+    expect(result.ok).toBe(false);
+    // The stage is still diagnosable.
+    expect(result.ok ? '' : result.error).toContain('ECONNREFUSED');
+  });
+
+  test('a credential lookup failure names the reference, not the value', async () => {
+    const result = await runDecisionReviewer(
+      {
+        fetch: () => Promise.resolve(new Response('{}', { status: 200 })),
+        credentials: {
+          resolve: () => Promise.reject(new Error('vault says sk-leaky-value')),
+        },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef-flash',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-lookup',
+    );
+    const stored = JSON.stringify(result);
+    expect(stored).not.toContain('sk-leaky-value');
+    expect(stored).toContain('TEST_KEY');
+  });
+
+  test('an HTTP failure keeps the complete model-visible body', async () => {
+    // A long body proves the record is not clipped: the agreed contract keeps
+    // the visible response, and an audit size bound decides storage.
+    const body = `rejected:${'x'.repeat(20_000)}`;
+    const result = await runDecisionReviewer(
+      {
+        fetch: () => Promise.resolve(new Response(body, { status: 502 })),
+        credentials: { resolve: () => Promise.resolve({ value: 'k' }) },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef-flash',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-long',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.attempts[0]?.responseText).toBe(body);
+  });
+});

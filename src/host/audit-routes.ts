@@ -67,11 +67,24 @@ export function logRoute(host: HostEnvironment): FetchRouteLike {
           jsonResponse({ ok: false, code: 'audit-unavailable' }, 404),
         );
       }
-      const record = audit.getCall(callId);
+      const detail = audit.readCall(callId);
+      if (detail.unreadable) {
+        // A structure this build cannot read is not the same as a missing call.
+        return Promise.resolve(
+          jsonResponse(
+            {
+              ok: false,
+              code: 'audit-unavailable',
+              health: audit.health(),
+            },
+            503,
+          ),
+        );
+      }
       return Promise.resolve(
-        record === null
+        detail.record === null
           ? jsonResponse({ ok: false, code: 'not-found' }, 404)
-          : jsonResponse({ ok: true, record }),
+          : jsonResponse({ ok: true, record: detail.record }),
       );
     },
   };
@@ -89,8 +102,23 @@ export function clearRoute(host: HostEnvironment): FetchRouteLike {
           jsonResponse({ ok: false, code: 'audit-unavailable' }, 409),
         );
       }
+      const cleared = audit.clearCalls();
+      if (!cleared.ok) {
+        // A failed delete is not an empty database: report it so the UI does not
+        // tell the user the history is gone.
+        return Promise.resolve(
+          jsonResponse(
+            {
+              ok: false,
+              code: 'audit-unavailable',
+              health: audit.health(),
+            },
+            503,
+          ),
+        );
+      }
       return Promise.resolve(
-        jsonResponse({ ok: true, deleted: audit.clearCalls() }),
+        jsonResponse({ ok: true, deleted: cleared.deleted }),
       );
     },
   };

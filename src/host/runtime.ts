@@ -238,6 +238,43 @@ function sameContent(left: ArbiterConfig, right: ArbiterConfig): boolean {
  * of a profile records its activation even when it is the unchanged default.
  * Audit failures are reported and never block activation.
  */
+/** Record the applied content and its activation, or explain why it is missing. */
+function persistActivation(
+  host: HostEnvironment,
+  audit: AuditStore,
+  candidate: ArbiterConfig,
+  source: ConfigApplySource,
+  record: boolean,
+): { readonly snapshotId: string; readonly revision: string } | null {
+  const { runtime } = host;
+  const snapshot = audit.saveConfigSnapshot(candidate);
+  if (snapshot === null) {
+    runtime.historyIncomplete = true;
+    runtime.auditError = audit.health().lastError;
+    return null;
+  }
+  if (!record) return snapshot;
+  if (
+    !audit.recordActivation(
+      snapshot.snapshotId,
+      snapshot.revision,
+      source,
+      'profile',
+    )
+  ) {
+    runtime.historyIncomplete = true;
+    runtime.auditError = audit.health().lastError;
+    host.ctx.logger.error(
+      'arbiter: activation record failed: %s',
+      runtime.auditError,
+    );
+    return null;
+  }
+  // Counters move only after the row was actually inserted.
+  runtime.configActivations += 1;
+  return snapshot;
+}
+
 export function applyConfig(
   host: HostEnvironment,
   candidate: ArbiterConfig,
@@ -276,75 +313,14 @@ export function applyConfig(
       auditError: runtime.auditError,
     };
   }
-  try {
-    const snapshot = audit.saveConfigSnapshot(candidate);
-    // The snapshot becomes this content's identity only after it was persisted.
-    runtime.configSnapshotId = snapshot.snapshotId;
-    runtime.effectiveRevision = snapshot.revision;
-    runtime.auditError = null;
-    if (record) {
-      try {
-        // `entry` names the entry that applied the configuration; `scope` keeps
-        // describing the owning profile layer.
-        audit.recordActivation(
-          snapshot.snapshotId,
-          snapshot.revision,
-          source,
-          'profile',
-        );
-        // Counters move only after the row was actually inserted.
-        runtime.configActivations += 1;
-      } catch (error) {
-        runtime.auditError =
-          error instanceof Error ? error.message : String(error);
-        runtime.historyIncomplete = true;
-        ctx.logger.error(
-          'arbiter: activation record failed: %s',
-          runtime.auditError,
-        );
-        return {
-          changed,
-          revision: snapshot.revision,
-          snapshotId: snapshot.snapshotId,
-          recorded: false,
-          auditError: runtime.auditError,
-        };
-      }
-    }
-    // Retention is housekeeping after the metadata is committed: a cleanup
-    // failure must not revoke a snapshot and activation that were persisted.
-    try {
-      audit.runRetention();
-      return {
-        changed,
-        revision: snapshot.revision,
-        snapshotId: snapshot.snapshotId,
-        recorded: record,
-        auditError: null,
-      };
-    } catch (error) {
-      // Cleanup failed but the history itself is complete: log it as a cleanup
-      // problem instead of reporting the activation as unrecorded.
-      ctx.logger.warn(
-        'arbiter: audit retention failed after activation: %s',
-        error instanceof Error ? error.message : String(error),
-      );
-      return {
-        changed,
-        revision: snapshot.revision,
-        snapshotId: snapshot.snapshotId,
-        recorded: record,
-        auditError: null,
-      };
-    }
-  } catch (error) {
-    runtime.auditError = error instanceof Error ? error.message : String(error);
+  // The store contains its own failures, so a null result means "not
+  // persisted" rather than an exception escaping into configuration apply.
+  const snapshot = persistActivation(host, audit, candidate, source, record);
+  if (snapshot === null) {
     runtime.effectiveRevision = revision;
     // The retained id belongs to previous content, so it must not be reported
     // as the identity of what now runs.
     runtime.configSnapshotId = 'cfg-unavailable';
-    runtime.historyIncomplete = true;
-    ctx.logger.error('arbiter: audit snapshot failed: %s', runtime.auditError);
     return {
       changed,
       revision,
@@ -353,6 +329,29 @@ export function applyConfig(
       auditError: runtime.auditError,
     };
   }
+  // The snapshot becomes this content's identity only after it was persisted.
+  runtime.configSnapshotId = snapshot.snapshotId;
+  runtime.effectiveRevision = snapshot.revision;
+  runtime.auditError = null;
+  // Retention is housekeeping after the metadata is committed: a cleanup
+  // failure must not revoke a snapshot and activation that were persisted.
+  try {
+    audit.runRetention();
+  } catch (error) {
+    // Cleanup failed but the history itself is complete: log it as a cleanup
+    // problem instead of reporting the activation as unrecorded.
+    ctx.logger.warn(
+      'arbiter: audit retention failed after activation: %s',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return {
+    changed,
+    revision: snapshot.revision,
+    snapshotId: snapshot.snapshotId,
+    recorded: record,
+    auditError: null,
+  };
 }
 
 /** Parse and select the document in effect, keeping the current one when invalid. */
