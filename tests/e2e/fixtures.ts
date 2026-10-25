@@ -2,6 +2,7 @@ import { test as base, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { startDshHost, type DshHost } from './dsh/host.js';
+import type { SeededModelGroup } from './dsh/profile.js';
 import { dismissGettingStarted } from './dsh/ui.js';
 
 interface DshFixtures {
@@ -13,17 +14,31 @@ interface DshFixtures {
    * the existing smoke cases assume.
    */
   readonly firstInstall: boolean;
+  /**
+   * Hand-declared model routes for the host catalog.
+   *
+   * The holder is an object, not a list: Playwright reads a two-element array
+   * fixture value as a `[value, options]` tuple. The default declares none, so
+   * the existing smoke cases keep the credential-free composition they assert.
+   */
+  readonly modelCatalog: { readonly groups: readonly SeededModelGroup[] };
 }
 
 export const test = base.extend<DshFixtures>({
   firstInstall: [false, { option: true }],
-  dsh: async ({ browserName, firstInstall }, use, testInfo) => {
+  modelCatalog: [{ groups: [] }, { option: true }],
+  dsh: async ({ browserName, firstInstall, modelCatalog }, use, testInfo) => {
     const artifacts = testInfo.outputPath('dsh', browserName);
     try {
       const host = await startDshHost(
         fileURLToPath(new URL('../../', import.meta.url)),
         artifacts,
-        firstInstall ? { arbiterConfig: 'unset' } : {},
+        {
+          ...(firstInstall ? { arbiterConfig: 'unset' as const } : {}),
+          ...(modelCatalog.groups.length === 0
+            ? {}
+            : { modelGroups: modelCatalog.groups }),
+        },
       );
       try {
         await use(host);
@@ -43,7 +58,7 @@ export const test = base.extend<DshFixtures>({
       }
     }
   },
-  dshPage: async ({ page, dsh }, use) => {
+  dshPage: async ({ page, dsh, modelCatalog }, use) => {
     await page
       .context()
       .addCookies([{ ...dsh.cookie, url: dsh.origin, httpOnly: true }]);
@@ -57,7 +72,12 @@ export const test = base.extend<DshFixtures>({
     await previewNotice
       .getByRole('button', { name: /^(继续|Continue)$/ })
       .click();
-    await dismissGettingStarted(page);
+    // A profile that already offers a model route has nothing to set up, so the
+    // getting-started prompt is optional there and required elsewhere.
+    await dismissGettingStarted(
+      page,
+      modelCatalog.groups.length === 0 ? {} : { optional: true },
+    );
     await use(page);
   },
 });

@@ -5,7 +5,6 @@
   "decision": "decision（分布 + 四探针）",
   "failureDescription": "后端不可用、超时或输出非法时进入 error-escalate，不自动放行、不切换后端。decision 的 11 级 criteria 由插件内置。",
   "url": "URL",
-  "model": "model",
   "apiKeyRef": "凭据引用 (apiKeyRef)",
   "apiKeyHint": "这里只存引用名，不存密钥值。",
   "timeout": "超时 (ms)",
@@ -15,12 +14,30 @@
   "noCredentials": "当前 composition 没有 credentials 服务",
   "configured": "已设置{value}",
   "unset": "未设置",
-  "provider": "provider",
-  "providerHint": "填 \"session\" 复用当前会话模型（官方 session 变体）。",
-  "modelHint": "provider 为 session 时 model 可留空。",
+  "credentialUnavailable": "无法读取凭据状态",
+  "credentialSource": "（来源 {source}）",
   "temperature": "temperature",
   "maxTokens": "maxTokens",
   "repairRetries": "修复重试次数",
   "repairHint": "只对 JSON / schema / 矛盾错误重试，provider 错误不重试。",
-  "credentialSource": "（来源 {source}）"
+  "model": {
+    "label": "模型",
+    "hint": "选择「跟随会话模型」时使用发起本次调用的会话模型；具体模型仍保存为 provider / model。",
+    "session": "跟随会话模型",
+    "decisionLabel": "model",
+    "search": "搜索模型",
+    "searchPlaceholder": "按 provider 或模型名筛选",
+    "loading": "正在读取宿主模型目录…",
+    "failed": "模型目录读取失败，保留当前已保存的选择；保存不受影响。",
+    "unsupported": "当前 composition 没有 LLM 服务，无法列出宿主模型。",
+    "empty": "宿主尚未配置任何模型；可保留「跟随会话模型」。",
+    "noMatch": "没有匹配的模型。",
+    "notInCatalog": "当前选择不在宿主目录中，仍按已保存的 provider / model 使用。",
+    "providerFailed": "{provider} 的模型列表读取失败。",
+    "unlisted": "{provider} / {model}（不在当前目录）",
+    "filteredOut": "当前选择被搜索条件隐藏，仍保持原 provider / model 不变。"
+  },
+  "advanced": {
+    "title": "高级参数"
+  }
 }

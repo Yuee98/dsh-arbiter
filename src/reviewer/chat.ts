@@ -27,8 +27,31 @@ export interface StreamOptionsLike {
   readonly signal?: AbortSignal;
 }
 
+/** One provider route the host's LLM runtime currently serves. */
+export interface LlmProviderLike {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** One model an adapter advertises for its provider route. */
+export interface LlmModelLike {
+  readonly provider: string;
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+}
+
 export interface LlmLike {
   stream(options: StreamOptionsLike): AsyncIterable<Record<string, unknown>>;
+  /**
+   * The read-only directory used by host model selectors.
+   *
+   * Both members are optional because a reviewer only needs `stream`: the
+   * configuration page degrades to "no directory" instead of assuming every
+   * composition exposes a catalog.
+   */
+  listProviders?(): readonly LlmProviderLike[];
+  listModels?(provider: string): Promise<readonly LlmModelLike[]>;
 }
 
 interface SessionLike {

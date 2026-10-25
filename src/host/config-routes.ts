@@ -47,41 +47,114 @@ export function validateRoute(): FetchRouteLike {
   };
 }
 
+/** Longest credential reference the status query accepts; references are names. */
+const MAX_REFERENCE_LENGTH = 200;
+
+/**
+ * The reference the status query describes.
+ *
+ * The page asks about the draft's reference because a save may not have run
+ * yet. The value is used exactly as the running Reviewer uses it: the decision
+ * backend resolves `reviewer.decision.apiKeyRef` verbatim, so trimming here
+ * would report another reference's status. An omitted query value asks for the
+ * effective configuration; an explicit empty or oversized one is a reference
+ * this host cannot describe, which is not another reference's state.
+ */
+type AskedReference =
+  | { readonly kind: 'effective' }
+  | { readonly kind: 'exact'; readonly ref: string }
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'unusable' };
+
+function askedReference(request: Request): AskedReference {
+  const asked = new URL(request.url).searchParams.get('ref');
+  if (asked === null) return { kind: 'effective' };
+  if (asked.length === 0) return { kind: 'empty' };
+  if (asked.length > MAX_REFERENCE_LENGTH) return { kind: 'unusable' };
+  return { kind: 'exact', ref: asked };
+}
+
+/**
+ * Report whether one credential reference is configured.
+ *
+ * `state` is the answer the page renders, and it deliberately separates the
+ * cases a boolean would merge: `unsupported` means this composition cannot
+ * describe references at all, `unavailable` means this one could not be
+ * described. Neither may be shown as "unset". Only presence and its source
+ * leave the host: `describe` returns no value, and a thrown provider error
+ * becomes a stable code instead of its message.
+ */
 export function credentialsRoute(host: HostEnvironment): FetchRouteLike {
   const { runtime } = host;
   return {
     path: `/api/arbiter/credentials`,
     methods: ['GET'],
     requestBody: 'buffered',
-    fetch: async () => {
-      const credentials = host.services.credentials;
-      const ref = runtime.config.reviewer.decision.apiKeyRef;
-      if (credentials === undefined) {
+    fetch: async (request) => {
+      const asked = askedReference(request);
+      if (asked.kind === 'unusable') {
+        // Not a reference this host can describe, and reflecting arbitrary
+        // input back to the page serves nothing.
         return jsonResponse({
           ok: true,
+          state: 'unavailable',
+          code: 'credentials-unavailable',
+          ref: '',
+          configured: false,
+          source: null,
+          supported: true,
+        });
+      }
+      const ref =
+        asked.kind === 'effective'
+          ? runtime.config.reviewer.decision.apiKeyRef
+          : asked.kind === 'empty'
+            ? ''
+            : asked.ref;
+      const describe = host.services.credentials?.describe?.bind(
+        host.services.credentials,
+      );
+      if (describe === undefined) {
+        return jsonResponse({
+          ok: true,
+          state: 'unsupported',
           ref,
           configured: false,
           source: null,
           supported: false,
         });
       }
-      try {
-        const info = await credentials.describe?.(ref);
+      if (ref.length === 0) {
+        // The decision backend resolves nothing for an empty reference, so this
+        // is an unconfigured state rather than an unknown one.
         return jsonResponse({
           ok: true,
-          ref,
-          configured: info?.configured ?? false,
-          source: info?.source ?? null,
-          supported: true,
-        });
-      } catch (error) {
-        return jsonResponse({
-          ok: false,
+          state: 'unconfigured',
           ref,
           configured: false,
           source: null,
           supported: true,
-          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        const info = await describe(ref);
+        return jsonResponse({
+          ok: true,
+          state: info.configured ? 'configured' : 'unconfigured',
+          ref,
+          configured: info.configured,
+          source: info.source ?? null,
+          supported: true,
+        });
+      } catch {
+        return jsonResponse({
+          ok: false,
+          state: 'unavailable',
+          code: 'credentials-unavailable',
+          ref,
+          configured: false,
+          source: null,
+          supported: true,
         });
       }
     },
