@@ -15,7 +15,7 @@
  *     empty detail.
  */
 
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, test } from 'vitest';
 
@@ -457,6 +457,32 @@ describe('shared call detail', () => {
       screen.queryByRole('button', { name: '原始材料（默认折叠）' }),
     ).toBeNull();
     expect(screen.getByText(/记录格式高于当前插件版本/u)).toBeInTheDocument();
+  });
+});
+
+describe('call detail localization', () => {
+  test('missing English falls back to Chinese per key, with no bare keys', async () => {
+    mockDetail(auditDetailBody());
+    const { locale } = renderClient(<CallDetailPanel callId="call-1" />, {
+      locale: 'en',
+    });
+    await screen.findByRole('region', { name: '最终裁决' });
+    // English has no callDetail module yet, so every key falls back to Chinese
+    // rather than rendering the key itself.
+    expect(screen.getByText('判定依据')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '调用概览' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(
+      /callDetail\.[a-zA-Z]|undefined|\[object Object\]/u,
+    );
+
+    // Switching the host language rerenders the mounted view in place.
+    act(() => {
+      locale.setLocale('zh');
+    });
+    expect(
+      screen.getByRole('region', { name: '最终裁决' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('判定依据')).toBeInTheDocument();
   });
 });
 
