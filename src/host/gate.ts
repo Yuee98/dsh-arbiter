@@ -16,6 +16,7 @@ import {
   type BuiltSnapshot,
 } from '../snapshot.js';
 import type {
+  AdmissionScopeReason,
   PolicyThresholds,
   PreToolDecision,
   PriorVerdictItem,
@@ -111,6 +112,12 @@ export class CallGate {
     const refused = this.refuseUnconfirmed(exec);
     if (refused !== null) return refused;
     if (!runtime.config.enabled || !runtime.accepting) {
+      // A session can become live after teardown or a startup reconcile ran —
+      // for example a trusted session reopened later. This is the last moment
+      // this plugin sees it, so narrow it here before the gate steps aside;
+      // otherwise it would run ungated with the permission the plugin widened.
+      const skipped = this.releaseBeforeBypass(exec);
+      if (skipped !== null) return skipped;
       lifecycle('gate/skipped', {
         callId: exec.callId,
         tool: exec.name,
@@ -137,15 +144,7 @@ export class CallGate {
     // disabled record, an unenabled parent, or an unresolvable parent chain
     // means this call is not this plugin's to decide.
     const scope = this.permissions.admissions.scopeFor(agent.session);
-    if (!scope.managed) {
-      lifecycle('gate/skipped', {
-        callId: exec.callId,
-        tool: exec.name,
-        sessionId: agent.session.id ?? null,
-        reason: scope.reason,
-      });
-      return next();
-    }
+    if (!scope.managed) return this.skippedCall(exec, scope.reason, next);
     runtime.active += 1;
     try {
       const sessionId = agent.session.id ?? 'unknown';
@@ -162,6 +161,65 @@ export class CallGate {
       runtime.active -= 1;
       releaseRuntime(runtime);
     }
+  }
+
+  /**
+   * Answer a call that admission does not cover.
+   *
+   * Almost every reason means "not this plugin's to decide", so the call is
+   * handed back. The exception is a guarded session the host would not
+   * confine: approving it would execute outside the workspace under a boundary
+   * this plugin widened, so it is refused instead.
+   */
+  private skippedCall(
+    exec: ToolExecutionLike,
+    reason: AdmissionScopeReason,
+    next: () => Promise<PreToolDecision>,
+  ): Promise<PreToolDecision> | PreToolDecision {
+    if (reason === 'boundary-unconfirmed') {
+      this.host.lifecycle('gate/refused', {
+        callId: exec.callId,
+        tool: exec.name,
+        sessionId: exec.agent?.session.id ?? null,
+        reason,
+      });
+      return deny(
+        'Not executed [boundary-unconfirmed]: the guarded boundary could not be confirmed on this session, so this call is refused rather than approved under a wider host permission.',
+      );
+    }
+    this.host.lifecycle('gate/skipped', {
+      callId: exec.callId,
+      tool: exec.name,
+      sessionId: exec.agent?.session.id ?? null,
+      reason,
+    });
+    return next();
+  }
+
+  /**
+   * Narrow a late-arriving managed session before the gate stops deciding.
+   *
+   * The startup and configuration reconciles can only see sessions that are
+   * live at that moment. A restored session opened afterwards is still admitted
+   * by its log and may still hold a sandbox this plugin widened, so the first
+   * call it makes is the last chance to take that permission back. Returns a
+   * refusal when the boundary cannot be confirmed, otherwise `null` so the
+   * ordinary bypass proceeds.
+   */
+  private releaseBeforeBypass(exec: ToolExecutionLike): PreToolDecision | null {
+    const session = exec.agent?.session;
+    if (session === undefined) return null;
+    const narrowed = this.permissions.admissions.releaseOne(session);
+    if (narrowed !== 'unsafe') return null;
+    this.host.lifecycle('gate/refused', {
+      callId: exec.callId,
+      tool: exec.name,
+      sessionId: session.id ?? null,
+      reason: 'boundary-unconfirmed',
+    });
+    return deny(
+      'Not executed [boundary-unconfirmed]: the plugin is disabled but this session could not be returned to a safe host permission, so this call is refused rather than run ungated.',
+    );
   }
 
   /**

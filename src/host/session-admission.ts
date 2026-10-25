@@ -41,6 +41,7 @@ export interface AdmissionFailure {
     | 'plugin-disabled'
     | 'stopping'
     | 'boundary-not-applied'
+    | 'boundary-unconfirmed'
     | 'invalid-action';
   readonly message: string;
 }
@@ -177,7 +178,18 @@ export class SessionAdmissions {
     // boundary while the plugin was unloaded. Re-apply it here, lazily, so the
     // first gated call already runs under the configured boundary instead of
     // the one recorded when the session was enabled.
-    this.syncOne(id, session);
+    if (!this.syncOne(id, session)) {
+      // Guarded is configured but the host will not confine this session, so a
+      // review-allow would still execute outside the workspace. Refuse instead
+      // of admitting: no call is approved while the promise cannot be kept.
+      this.covered.delete(id);
+      return {
+        managed: false,
+        reason: 'boundary-unconfirmed',
+        admission: null,
+        unresolvedParent: null,
+      };
+    }
     return scope;
   }
 
@@ -192,27 +204,32 @@ export class SessionAdmissions {
    *     host captured its sandbox at delegation and this plugin never widened
    *     a child on purpose.
    */
-  private syncOne(id: string, session: SessionLike): void {
+  private syncOne(id: string, session: SessionLike): boolean {
     const boundary = configuredBoundary(this.host.runtime.config);
     const folded = this.admissionOf(id);
     if (folded === null) {
       if (boundary !== 'trusted') {
         this.writeKnobs(session, this.narrowWrites(session));
       }
-      return;
+      // A delegated child that cannot be narrowed must not run as an enabled
+      // scope under a guarded configuration.
+      return boundary !== 'guarded' || this.atSafeBoundary(session);
     }
-    if (!folded.enabled) return;
+    if (!folded.enabled) return true;
     // The record is not evidence that the host is confined: a guarded enable
     // can have committed its record and then failed to write the sandbox. Only
     // the live host value proves the boundary is in force.
     const narrow = boundary === 'guarded' && !this.confined(session);
-    if (folded.boundary === boundary && !narrow) return;
+    if (folded.boundary === boundary && !narrow) return true;
     this.writeKnobs(session, this.boundaryWrites(session, boundary));
-    if (this.writeRecord(session, true, boundary) === 'written') return;
-    this.host.ctx.logger.warn(
-      'arbiter: boundary sync for session %s could not be recorded',
-      id,
-    );
+    if (this.writeRecord(session, true, boundary) !== 'written') {
+      this.host.ctx.logger.warn(
+        'arbiter: boundary sync for session %s could not be recorded',
+        id,
+      );
+    }
+    // Report whether the promise now holds, not whether a record was written.
+    return boundary !== 'guarded' || this.atSafeBoundary(session);
   }
 
   /**
@@ -496,14 +513,68 @@ export class SessionAdmissions {
     const current = this.admissionOf(id);
     const boundary =
       current?.boundary ?? configuredBoundary(this.host.runtime.config);
-    if (trigger === 'api' && current !== null && current.enabled) {
+    // An API disable removes gate protection, so the host boundary must be
+    // confirmed FIRST. A narrowing the host refuses must not be papered over by
+    // a committed disable record: the next call would then run wide and
+    // ungated. The gate stays in place until the narrowing is real.
+    if (trigger === 'api' && this.needsNarrowing(id, current)) {
       this.narrowCovered(session);
+      if (!this.subtreeSafe(id, session)) {
+        return {
+          ok: false,
+          code: 'boundary-unconfirmed',
+          message:
+            'the host did not confirm the narrowed sandbox; the session stays admitted',
+        };
+      }
     }
     const state = this.writeRecord(session, false, boundary);
     if (state !== 'written')
       return { ok: false, code: 'record-failed', message: state };
     this.covered.delete(id);
     return this.result(id);
+  }
+
+  /**
+   * Whether an API disable has anything to narrow.
+   *
+   * An inherited child has no record of its own but still runs under the
+   * parent's captured sandbox, so disabling it must narrow it too — otherwise
+   * the new disabled record would remove gate protection and leave the child
+   * at full access, which is worse than before the request.
+   */
+  private needsNarrowing(id: string, current: FoldedAdmission | null): boolean {
+    if (current !== null) return current.enabled;
+    const session = this.sessionFor(id);
+    if (session === undefined) return false;
+    if (session.header?.parentSession === undefined) return false;
+    return this.covered.has(id) || this.narrowWrites(session).length > 0;
+  }
+
+  /**
+   * Whether the session being disabled and everything below it is safe.
+   *
+   * The subtree, not the whole branch: disabling a child must not demand that
+   * its still-admitted parent is already narrowed — the parent's own exit is
+   * what narrows it.
+   */
+  private subtreeSafe(rootId: string, root: SessionLike): boolean {
+    if (!this.atSafeBoundary(root)) return false;
+    for (const [id, session] of this.covered) {
+      if (id === rootId) continue;
+      if (!this.isDescendantOf(id, rootId)) continue;
+      if (!this.atSafeBoundary(session)) return false;
+    }
+    return true;
+  }
+
+  /** Whether `id` sits below `ancestor` in the bounded parent chain. */
+  private isDescendantOf(id: string, ancestor: string): boolean {
+    const chain = parentChain(
+      id,
+      (sessionId) => this.sessionFor(sessionId)?.header?.parentSession,
+    );
+    return chain.ids.slice(1).includes(ancestor);
   }
 
   /**
@@ -566,10 +637,19 @@ export class SessionAdmissions {
     // A live descendant may never have reached the gate, so pick up the whole
     // branch before narrowing instead of trusting only what has been observed.
     this.discover();
-    this.writeKnobs(root, this.boundaryWrites(root, 'guarded'));
+    const rootId = root.id ?? '';
+    // The root of a delegated branch keeps its pinned approval; only a main
+    // session returns to the full guarded bundle. Descendants always narrow to
+    // the sandbox alone.
+    this.writeKnobs(
+      root,
+      root.header?.parentSession === undefined
+        ? this.boundaryWrites(root, 'guarded')
+        : this.narrowWrites(root),
+    );
     for (const [id, session] of this.covered) {
-      if (id === root.id) continue;
-      if (this.rootOf(id) !== root.id) continue;
+      if (id === rootId) continue;
+      if (!this.isDescendantOf(id, rootId)) continue;
       this.writeKnobs(session, this.narrowWrites(session));
     }
   }
@@ -655,6 +735,30 @@ export class SessionAdmissions {
       this.covered.set(id, session);
     }
     return found;
+  }
+
+  /**
+   * Bring one session back to a safe boundary without writing an admission
+   * record. Used when the gate is already stepping aside: a session that
+   * becomes live after the reconcile ran still carries the permission this
+   * plugin widened, and there is no later moment to take it back.
+   *
+   * Returns `safe` when nothing was needed, `narrowed` when the host confirmed
+   * the write, and `unsafe` when a session is still wide — the caller must not
+   * let that call through.
+   */
+  releaseOne(session: SessionLike): 'safe' | 'narrowed' | 'unsafe' {
+    this.observe(session);
+    const id = session.id;
+    if (id === undefined) return 'safe';
+    const scope = resolveScope(id, this.lookup());
+    // Only a session that would be managed needs narrowing; ordinary
+    // unadmitted sessions are never subject to this plugin's permission.
+    if (!scope.managed && !this.covered.has(id)) return 'safe';
+    if (this.atSafeBoundary(session)) return 'safe';
+    const narrowed = this.narrowSession(session);
+    if (!this.atSafeBoundary(session)) return 'unsafe';
+    return narrowed ? 'narrowed' : 'safe';
   }
 
   /** Sessions covered by an enabled admission at this moment. */

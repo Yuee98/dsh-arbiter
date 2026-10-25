@@ -1089,6 +1089,86 @@ describe('failed activation and master switch', () => {
   });
 });
 
+describe('API disable must not leave an ungated wide session', () => {
+  test('a refused narrowing keeps the session admitted', async () => {
+    const session = makeSession('s-i08', {
+      refuseSandboxWrites: true,
+      initialSandbox: 'danger-full-access',
+    });
+    session.append('approval/policy', { policy: 'ask' });
+    // The admission record was committed by an earlier process; the host now
+    // refuses the narrowing write but keeps accepting records.
+    session.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-i08',
+      rootSessionId: 's-i08',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      const disabled = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-i08', action: 'disable' },
+      });
+      expect(disabled.status).toBe(409);
+      expect(disabled.body['code']).toBe('boundary-unconfirmed');
+      // No disable record was committed, so the session stays admitted.
+      expect(admissions(session).at(-1)?.['enabled']).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an inherited child disabled through the API is narrowed first', async () => {
+    const main = makeSession('s-i09-root');
+    main.append('sandbox/mode', { mode: 'workspace-write' });
+    main.append('approval/policy', { policy: 'ask' });
+    const child = makeSession('s-i09-child', { parentSession: 's-i09-root' });
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([main, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-i09-root', action: 'enable' },
+      });
+      // The child has no record of its own; disabling it must still narrow the
+      // sandbox before the new disabled record removes gate protection.
+      const disabled = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-i09-child', action: 'disable' },
+      });
+      expect(disabled.status).toBe(200);
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(approvalEvents(child).at(-1)).toEqual({
+        policy: 'never',
+        source: 'delegation',
+      });
+      const view = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-i09-child',
+      );
+      expect(viewOf(view.body)).toMatchObject({
+        enabled: false,
+        managed: false,
+        reason: 'session-disabled',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
 describe('API disable reaches unobserved descendants', () => {
   test('a live child that never called the gate is narrowed too', async () => {
     const main = makeSession('s-d-root');
@@ -1120,6 +1200,94 @@ describe('API disable reaches unobserved descendants', () => {
         policy: 'never',
         source: 'delegation',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a session opened after the master switch is off', () => {
+  test('its first call narrows it instead of running wide and ungated', async () => {
+    const late = makeSession('s-late', {
+      initialSandbox: 'danger-full-access',
+    });
+    late.append('approval/policy', { policy: 'ask' });
+    // The record is from an earlier run: the session is trusted and admitted,
+    // but it was closed when the plugin started with the master switch off.
+    late.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-late',
+      rootSessionId: 's-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([late], {
+      ...ALLOW_ECHO,
+      enabled: false,
+      boundary: 'trusted',
+    });
+    try {
+      const decision = await harness.gate(call(late, 'late-call'), allow);
+      // The gate steps aside (the plugin is disabled) but only after the
+      // sandbox the plugin widened was taken back.
+      expect(decision.kind).toBe('allow');
+      expect(modeEvents(late).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(
+        decisions(late).filter((entry) => entry['callId'] === 'late-call'),
+      ).toHaveLength(0);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an unadmitted session is untouched by the bypass', async () => {
+    const plain = makeSession('s-plain');
+    plain.append('sandbox/mode', { mode: 'read-only' });
+    const harness = createHarness([plain], {
+      ...ALLOW_ECHO,
+      enabled: false,
+    });
+    try {
+      expect((await harness.gate(call(plain, 'plain-call'), allow)).kind).toBe(
+        'allow',
+      );
+      // Its own permission is the user's, not this plugin's.
+      expect(modeEvents(plain)).toEqual([{ mode: 'read-only' }]);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('guarded confinement that cannot be re-established', () => {
+  test('the call is refused rather than approved under full access', async () => {
+    // Trusted admission from an earlier run, host-wide sandbox, and every
+    // further sandbox write refused: the guarded configuration cannot be made
+    // true, so no call may be approved for it.
+    const session = makeSession('s-i02-late', {
+      refuseSandboxWrites: true,
+      initialSandbox: 'danger-full-access',
+    });
+    session.append('approval/policy', { policy: 'ask' });
+    session.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-i02-late',
+      rootSessionId: 's-i02-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      const decision = await harness.gate(call(session, 'guarded-late'), allow);
+      expect(decision.kind).toBe('deny');
+      expect(JSON.stringify(decision)).toContain('boundary-unconfirmed');
+      expect(
+        decisions(session).filter(
+          (entry) => entry['callId'] === 'guarded-late',
+        ),
+      ).toHaveLength(0);
     } finally {
       harness.dispose();
     }

@@ -968,14 +968,22 @@ test.describe('plugin-manager disable with a call in flight', () => {
       expect(stopped?.event).toBe('unload/stop-admission');
       expect(drained?.event).toBe('unload/drained');
       expect(stopped?.at ?? 0).toBeLessThan(drained?.at ?? 0);
-      const arrivedAt = late.events.find(
+      // The first call was still occupying the host when admission stopped, so
+      // the window under test really contains in-flight work.
+      expect(stopped?.active ?? 0).toBeGreaterThan(0);
+      // The proof is the dispatch of that exact call — by call id, from
+      // `tool/call` — not the user message, which can be committed while the
+      // tool itself is still queued for after teardown.
+      const dispatchedAt = late.events.find(
         (event) =>
-          event.type === 'user/message' &&
-          JSON.stringify(event.data).includes('DRAIN-LATECALL'),
+          event.type === 'tool/call' &&
+          lateCalls.includes(
+            String(Reflect.get(asRecord(event.data) ?? {}, 'callId')),
+          ),
       )?.time;
-      expect(typeof arrivedAt).toBe('number');
-      expect(arrivedAt ?? 0).toBeGreaterThan(stopped?.at ?? 0);
-      expect(arrivedAt ?? 0).toBeLessThan(drained?.at ?? 0);
+      expect(typeof dispatchedAt).toBe('number');
+      expect(dispatchedAt ?? 0).toBeGreaterThan(stopped?.at ?? 0);
+      expect(dispatchedAt ?? 0).toBeLessThan(drained?.at ?? 0);
 
       // Rollback preceded the drain wait, as the required order demands.
       const rollbacks = events.filter(

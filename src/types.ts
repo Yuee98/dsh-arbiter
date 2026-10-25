@@ -573,6 +573,7 @@ export interface SessionAdmission {
 
 /** Why a session is or is not covered by the plugin's gate. */
 export type AdmissionScopeReason =
+  | 'boundary-unconfirmed'
   | 'session-enabled'
   | 'parent-session-enabled'
   | 'no-admission'
