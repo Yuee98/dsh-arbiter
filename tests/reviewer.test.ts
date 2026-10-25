@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
+  renderUser,
   extractJsonObject,
   parseChatText,
   parseDecisionResponse,
@@ -123,6 +124,24 @@ const snapshot: ReviewSnapshot = {
   facts: null,
   projectRules: null,
   customRules: '',
+  materials: [
+    {
+      id: 'project-rules',
+      enabled: true,
+      present: false,
+      chars: 0,
+      limit: 2_000,
+      truncated: false,
+    },
+    {
+      id: 'custom-rules',
+      enabled: true,
+      present: false,
+      chars: 0,
+      limit: 2_000,
+      truncated: false,
+    },
+  ],
   evidence: [],
   evidenceTruncated: false,
   parentAuthorizationPresent: null,
@@ -277,7 +296,12 @@ describe('decision reviewer run', () => {
         signal: new AbortController().signal,
       },
       { ...snapshot, customRules: 'SENTINEL_USER_RULE' },
-      { user: 'STATE', estimatedInputTokens: 10 },
+      // Production passes the rendered user payload; the decision state reuses
+      // it instead of building a second copy of the same materials.
+      {
+        user: `${renderUser({ ...snapshot, customRules: 'SENTINEL_USER_RULE' })}\n\nSTATE`,
+        estimatedInputTokens: 10,
+      },
       'call-1',
     );
     expect(result.ok).toBe(true);

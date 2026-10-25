@@ -223,10 +223,43 @@ export interface EvidenceItem {
   readonly source: { readonly kind: EvidenceKind; readonly sessionId: string };
   readonly role: EvidenceRole;
   readonly evidence: 'explicit' | 'implied' | null;
+  /** Conflict priority of the source layer; lower wins. Display order still uses ts. */
+  readonly sourcePriority?: 1 | 2 | 5;
   readonly text: string;
+  /** The question or operation a short answer answered, when it came from ask. */
+  readonly question?: string;
+  /** The ask call this human answer belongs to. */
+  readonly askCallId?: string;
   /** The message was longer than the per-item evidence cap. */
   readonly truncated?: boolean;
   readonly originalLength?: number;
+}
+
+/**
+ * One configured guidance source as actually submitted. `present` says whether
+ * its text was available; `enabled` distinguishes "switched off" from "on but
+ * missing". Absence is an input fact, never an authorization finding.
+ */
+export interface SnapshotMaterial {
+  readonly id: 'project-rules' | 'custom-rules';
+  readonly enabled: boolean;
+  readonly present: boolean;
+  readonly chars: number;
+  readonly limit: number;
+  readonly truncated: boolean;
+  /** Candidate file that supplied the text, or the first candidate tried. */
+  readonly path?: string;
+}
+
+/** Pending-action material trimmed to fit the input budget. */
+export interface ActionTruncation {
+  readonly originalChars: number;
+  readonly retainedChars: number;
+  /** Field that was trimmed, or `null` when the whole serialized action was cut. */
+  readonly field: string | null;
+  /** Inclusive character range omitted from the submitted text. */
+  readonly omittedFrom: number;
+  readonly omittedTo: number;
 }
 
 export interface ContextToolCall {
@@ -268,11 +301,14 @@ export interface ReviewSnapshot {
     readonly name: string;
     readonly arguments: unknown;
     readonly programText?: string;
+    /** Set when the input budget trimmed this action's own material. */
+    readonly truncated?: ActionTruncation;
   };
   readonly facts: DerivedFacts | null;
   readonly hint?: string;
   readonly projectRules: string | null;
   readonly customRules: string;
+  readonly materials: readonly SnapshotMaterial[];
   readonly evidence: readonly EvidenceItem[];
   readonly evidenceTruncated: boolean;
   readonly parentAuthorizationPresent: boolean | null;

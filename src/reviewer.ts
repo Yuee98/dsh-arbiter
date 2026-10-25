@@ -7,7 +7,13 @@
  * approval layer turns into an error escalation.
  */
 
-export { renderSystem, renderUser, renderRequest } from './reviewer/prompt.js';
+export {
+  buildQuestions,
+  renderSystem,
+  renderUser,
+  renderRequest,
+  renderDecisionState,
+} from './reviewer/prompt.js';
 export {
   extractJsonObject,
   parseChatText,
