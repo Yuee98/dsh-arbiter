@@ -224,9 +224,9 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 
 **短答复的上下文**：人类只说“同意”“可以”时，应保留它回答的具体问题或待执行操作，避免脱离范围解释。若授权来自 ask 工具，需关联宿主保存的真实答复与对应提问；普通工具结果仍不作为授权。本机源码已确认：前台答复进入 ask 的工具结果，timed 的迟到答复是 source.kind 为 `user-question-reply` 的用户消息，并自带 callId、questions 与 answers，详见[源码核对](../evidence.md#ask-timing)。实际采集与截断效果仍需验证。
 
-**已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``tests/e2e/context-sources.spec.ts`` 记录真实 Session 验证（隔离 profile、无模型请求）。
+**已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``tests/e2e/context-sources.spec.ts`` 记录真实 Session 验证（隔离 profile、无模型请求），并用宿主自身的 `ToolRuntime` 实际执行一次含 `tools.bash` 的 `run_code`：外层 `run_code` 与内层 `bash` 分别通过 `tools/pre-execute`（`dispatch-outer-1` 与 `dispatch-outer-1:ptc:1`），执行参数保持完整，不受送审截断影响。ask 答复与压缩摘要仍由真实 `Session` API 注入宿主合法事件，验证的是采集器对这些事件形状的处理，而非宿主交互流程本身。
 
-短答复只绑定**紧邻的上一条** assistant 回合：若该回合不是问句，或中间夹了另一条人类消息与压缩摘要，问题即视为陈旧，答案保留原文但不带 `question`。这样已被拒绝的操作不会经由后来的“继续／同意”重新变成明确授权。
+短答复只绑定**紧邻的上一条** assistant 回合：若该回合不是问句，或中间夹了另一条人类消息、压缩摘要，或任何 `tool/call`／`tool/result`（包括已经作答的 ask 结果），问题即视为陈旧，答案保留原文但不带 `question`。这样已被拒绝的操作不会经由后来的“继续／同意”重新变成明确授权。
 
 **排序与截断**：展示顺序按 `ts` 从新到旧，受 `evidence.maxItems`（20）与 token 预算约束，超出置 `evidence_truncated: true`。**选取顺序不是纯时间序**：先保留父人类保底，其余名额按来源层依次填充（本会话人类 → 父会话人类 → 父 agent 转述），同层内较新者优先；否则子会话说话多时会把父原话挤掉。
 
@@ -507,6 +507,8 @@ for (const item of candidates) {          // 已按 ts 降序
 截断是输入完整性信息，不直接决定权限结论，也不单独算审查故障。模型基于已知输入提供正常信号，判定引擎应用审查策略；首版不增加 truncated／输入充分性 noul 或独立硬闸门。真正的请求失败或后端错误仍按 error-escalate 处理。此约定不取消 shell 规则对完整 AST 覆盖的要求，也不把未知程序行为标成已检查。
 
 **实现（2026-10-25）**：裁剪顺序固定为 `CONTEXT` 工具调用 → checkpoint 摘要 → `PRIOR_VERDICTS` → `EVIDENCE`（保留至少 1 条）→ `PROJECT_RULES` → `DERIVED_FACTS` → `ACTION`，即可选上下文先让位、当前动作最后裁。每一步都必须真正减少送审内容，否则状态机会停在已经缩小的状态上（`DERIVED_FACTS` 第二次直接整体移除，不再反复返回同一对象）。动作裁剪对 `{code|program|command}` 字符串字段反复减半直到进入预算，其余形状退化为序列化头部；`action.programText` 与裁剪后的 `arguments` 同步，不允许保留未截断副本。结果写入 `action.truncated = { originalChars, retainedChars, field, omittedFrom, omittedTo }`，并在 `missing` 与 `budget.truncatedSegments` 标记 `ACTION`。
+
+`checkpointMaxItems = 0` 明确表示不选任何摘要（`slice(-0)` 等于 `slice(0)` 的边界按 0 处理）。预算是否达标以**最终稳定文本**为准而非估算前的候选：候选写回 `estimatedInputTokens` 后会改变渲染长度，若按候选判断会把本可继续裁剪的请求误报为无法组装。
 
 **预算按两个后端的真实负载估算**：Chat 用 `system + user`，Decision 用 `renderDecisionState(state) + questions`，取较大值写入 `budget.estimatedInputTokens`；写入后又重新渲染直到数字稳定，因此持久化快照与模型实际收到的内容一致。固定策略本身超过预算、无法合法组装请求时标 `OVER_BUDGET`，按真实请求准备错误处理，不假装成功。可合法构造的截断**不抛异常**，`gate` 因此不会因截断产生 `error-escalate` 阶段。
 
