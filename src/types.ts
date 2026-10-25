@@ -10,6 +10,13 @@ import type { ShellParse } from './shell/parse.js';
 export type ApprovalMode = 'normal' | 'strict' | 'progress';
 export type SubagentMode = 'strict' | 'progress';
 export type SessionKind = 'main' | 'subagent';
+/**
+ * The plugin's execution boundary, chosen on the configuration page.
+ *
+ * It decides whether an already-enabled session keeps the host workspace file
+ * sandbox after the plugin admits a call. It never enables a session.
+ */
+export type ExecutionBoundary = 'guarded' | 'trusted';
 
 export type RuleVerdict = 'allow' | 'deny' | 'force-ask' | 'force-review';
 export type RuleKind = 'exact' | 'regex' | 'glob';
@@ -171,6 +178,8 @@ export interface ArbiterConfig {
    */
   readonly format?: string;
   readonly enabled: boolean;
+  /** The boundary applied when a session is enabled; never enables one itself. */
+  readonly boundary: ExecutionBoundary;
   readonly modes: {
     readonly main: ApprovalMode;
     readonly subagent: SubagentMode;
@@ -541,4 +550,62 @@ export interface RuleEvaluation {
   readonly argv: readonly string[];
   readonly facts: DerivedFacts | null;
   readonly shadowed: readonly string[];
+}
+
+/**
+ * One session's durable admission, folded from the session log.
+ *
+ * `enabled` is the user's own switch for this session and is never derived from
+ * the global plugin flag, a host preset name, or the effective knob values.
+ */
+export interface SessionAdmission {
+  readonly sessionId: string;
+  /** The main session whose admission covers this one (itself for a main). */
+  readonly rootSessionId: string;
+  readonly enabled: boolean;
+  readonly boundary: ExecutionBoundary;
+  /** Sequence number of the record that decided this state. */
+  readonly seq: number;
+  readonly at: number;
+  /** Stable identity of this state's content, reported back to clients. */
+  readonly admissionRevision: string;
+}
+
+/** Why a session is or is not covered by the plugin's gate. */
+export type AdmissionScopeReason =
+  | 'session-enabled'
+  | 'parent-session-enabled'
+  | 'no-admission'
+  | 'session-disabled'
+  | 'parent-not-admitted'
+  | 'parent-unresolved'
+  | 'parent-cycle';
+
+export interface AdmissionScope {
+  readonly managed: boolean;
+  readonly reason: AdmissionScopeReason;
+  /** The enabled admission that covers the call, when managed. */
+  readonly admission: SessionAdmission | null;
+  /** Set when a subagent's parent chain could not be resolved. */
+  readonly unresolvedParent: string | null;
+}
+
+/**
+ * The backend-confirmed admission view returned to clients.
+ *
+ * `revision` is the effective configuration revision the answer was computed
+ * under; `admissionRevision` identifies the session state itself.
+ */
+export interface SessionAdmissionView {
+  readonly sessionId: string;
+  readonly rootSessionId: string;
+  readonly enabled: boolean;
+  readonly boundary: ExecutionBoundary;
+  readonly revision: string;
+  readonly admissionRevision: string | null;
+  readonly seq: number | null;
+  readonly at: number | null;
+  readonly reason: AdmissionScopeReason;
+  /** Whether this session's own calls would be gated right now. */
+  readonly managed: boolean;
 }

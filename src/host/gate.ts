@@ -105,23 +105,50 @@ export class CallGate {
     next: () => Promise<PreToolDecision>,
   ): Promise<PreToolDecision> {
     const { runtime, lifecycle } = this.host;
+    // A session whose teardown rollback could not be confirmed stays refused:
+    // its wide sandbox is still in force, so handing the call back would run
+    // it ungated under a boundary this plugin set.
+    const refused = this.refuseUnconfirmed(exec);
+    if (refused !== null) return refused;
     if (!runtime.config.enabled || !runtime.accepting) {
       lifecycle('gate/skipped', {
         callId: exec.callId,
         tool: exec.name,
         sessionId: exec.agent?.session.id ?? null,
         accepting: runtime.accepting,
+        reason: runtime.config.enabled ? 'not-accepting' : 'plugin-disabled',
       });
       return next();
     }
     if (isAborted(exec.signal)) return { kind: 'cancel' };
     const agent = exec.agent;
-    // Declared coverage gap: no agent means no session/evidence/approval channel.
-    if (agent === undefined) return next();
+    // Declared coverage gap: no agent means no session/evidence/approval
+    // channel, and no admission can be resolved for it.
+    if (agent === undefined) {
+      lifecycle('gate/skipped', {
+        callId: exec.callId,
+        tool: exec.name,
+        sessionId: null,
+        reason: 'no-agent',
+      });
+      return next();
+    }
+    // Admission is per session and comes from the session log. A missing or
+    // disabled record, an unenabled parent, or an unresolvable parent chain
+    // means this call is not this plugin's to decide.
+    const scope = this.permissions.admissions.scopeFor(agent.session);
+    if (!scope.managed) {
+      lifecycle('gate/skipped', {
+        callId: exec.callId,
+        tool: exec.name,
+        sessionId: agent.session.id ?? null,
+        reason: scope.reason,
+      });
+      return next();
+    }
     runtime.active += 1;
     try {
       const sessionId = agent.session.id ?? 'unknown';
-      this.permissions.managed.set(sessionId, agent.session);
       lifecycle('gate/entered', {
         callId: exec.callId,
         tool: exec.name,
@@ -135,6 +162,26 @@ export class CallGate {
       runtime.active -= 1;
       releaseRuntime(runtime);
     }
+  }
+
+  /**
+   * Refuse calls from a session whose rollback failed during teardown.
+   *
+   * This is deliberately the narrowest possible gate: it runs before any other
+   * admission decision, only matches sessions teardown marked, and never opens
+   * a review or a human request.
+   */
+  private refuseUnconfirmed(exec: ToolExecutionLike): PreToolDecision | null {
+    const sessionId = exec.agent?.session.id;
+    if (!this.permissions.admissions.isFailingClosed(sessionId)) return null;
+    const reason =
+      'Not executed [fallback-deny]: this session could not be rolled back to a safe permission during plugin teardown.';
+    this.host.lifecycle('gate/fail-closed', {
+      callId: exec.callId,
+      tool: exec.name,
+      sessionId: sessionId ?? null,
+    });
+    return deny(reason);
   }
 
   private async ensureCwd(

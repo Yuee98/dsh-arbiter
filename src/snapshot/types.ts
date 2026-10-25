@@ -11,6 +11,12 @@ export interface SessionEventLike {
   readonly type: string;
   readonly time?: number;
   readonly data?: unknown;
+  /**
+   * Set by the host on plugin records written through `appendPluginRecord`.
+   * A reader that does not know the type retains and skips the record instead
+   * of refusing the whole log, which is why plugin state must carry it.
+   */
+  readonly ignorable?: boolean;
 }
 
 export interface SessionLike {
@@ -30,4 +36,6 @@ export interface AgentLike {
 
 export interface SessionsLike {
   get?(id: string): SessionLike | undefined;
+  /** Every live session, in creation order (public `SessionStore.list`). */
+  list?(): readonly SessionLike[];
 }

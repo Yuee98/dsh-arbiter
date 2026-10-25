@@ -3,6 +3,7 @@ import type { HostEnvironment, TurnSessionLike } from './types.js';
 import type { DecisionHistory } from './history.js';
 import { isRecord } from './common.js';
 import { releaseRuntime } from './runtime.js';
+import type { SessionAdmissions } from './session-admission.js';
 
 export const UNLOAD_DRAIN_MS = 30_000;
 export const AUTO_REJECTION_HINT =
@@ -13,17 +14,40 @@ export class AutoEntryRejected extends Error {
     this.name = 'AutoEntryRejected';
   }
 }
-const permissionCommandsInFlight = new Map<string, string>();
 
-/** Tracks sessions this instance actually gates; user switches remove ownership. */
+/** One `/permission` command currently between `command/run` and `command/done`. */
+interface PermissionCommand {
+  readonly sessionId: string;
+  readonly args: string;
+}
+
+/**
+ * Session admission synchronisation and teardown.
+ *
+ * Two host constraints shape this module:
+ *   - `session/event` observers run inside the host's commit, so an admission
+ *     record cannot be written from the observer itself; every observer-path
+ *     write is deferred to the next microtask.
+ *   - `command/run` is committed before the `/permission` handler, so a
+ *     same-value switch is visible; only `command/done` proves the switch
+ *     happened, and a failed command leaves admission untouched.
+ */
 export class PermissionLifecycle {
-  readonly managed = new Map<string, SessionLike>();
+  readonly admissions: SessionAdmissions;
   private readonly host: HostEnvironment;
   private readonly history: DecisionHistory;
-  constructor(host: HostEnvironment, history: DecisionHistory) {
+  private readonly permissionCommands = new Map<string, PermissionCommand>();
+
+  constructor(
+    host: HostEnvironment,
+    history: DecisionHistory,
+    admissions: SessionAdmissions,
+  ) {
     this.host = host;
     this.history = history;
+    this.admissions = admissions;
   }
+
   register(): void {
     this.host.ctx.effect(() => () => this.unload(), 'arbiter runtime');
     this.host.ctx.on(
@@ -59,10 +83,20 @@ export class PermissionLifecycle {
     return { sandbox, approval };
   }
 
-  /** Roll one still-managed session back to workspace-write + ask. */
-  rollbackSession(session: SessionLike, reason: string): boolean {
+  /**
+   * Roll one still-managed session back to workspace-write + ask.
+   *
+   * Three outcomes, because teardown must distinguish them: `unchanged` (the
+   * session was never widened), `rolled` (the safe boundary is now committed)
+   * and `failed` (the write did not land — the caller must fail closed for this
+   * session instead of assuming the host will confine it).
+   */
+  rollbackSession(
+    session: SessionLike,
+    reason: string,
+  ): 'unchanged' | 'rolled' | 'failed' {
     try {
-      if (typeof session.append !== 'function') return false;
+      if (typeof session.append !== 'function') return 'failed';
       const current = this.sessionPermission(session);
       const needsSandbox =
         current.sandbox !== null && current.sandbox !== 'workspace-write';
@@ -70,7 +104,7 @@ export class PermissionLifecycle {
         current.approval !== null && current.approval !== 'ask';
       // Nothing this plugin widened: leave the log alone rather than writing a
       // no-op permission event into it.
-      if (!needsSandbox && !needsApproval) return false;
+      if (!needsSandbox && !needsApproval) return 'unchanged';
       if (needsSandbox)
         session.append('sandbox/mode', { mode: 'workspace-write' });
       if (needsApproval) session.append('approval/policy', { policy: 'ask' });
@@ -79,14 +113,14 @@ export class PermissionLifecycle {
         session.id ?? 'unknown',
         reason,
       );
-      return true;
+      return 'rolled';
     } catch (error) {
       this.host.ctx.logger.warn(
         'arbiter: session %s rollback failed: %s',
         session.id ?? 'unknown',
         error instanceof Error ? error.message : String(error),
       );
-      return false;
+      return 'failed';
     }
   }
 
@@ -100,51 +134,98 @@ export class PermissionLifecycle {
     if (event.type === 'turn/start') {
       const id = session.id;
       if (id !== undefined) this.history.resetBreaker(id);
+      return;
     }
-    if (
-      event.type === 'permission/preset' &&
-      isRecord(event.data) &&
-      typeof session.id === 'string'
-    ) {
-      // The user chose a host preset: this session is no longer managed, so
-      // an unload must leave the chosen permission alone.
-      this.managed.delete(session.id);
-    }
-    if (
-      event.type === 'command/run' &&
-      isRecord(event.data) &&
-      event.data['name'] === 'permission'
-    ) {
-      const commandId = event.data['commandId'];
-      if (typeof commandId === 'string') {
-        permissionCommandsInFlight.set(commandId, session.id ?? 'unknown');
-      }
+    if (event.type === 'command/run' && isRecord(event.data)) {
+      this.onCommandRun(session, event.data);
       return;
     }
     if (event.type === 'command/done' && isRecord(event.data)) {
       this.onCommandDone(event.data);
+      return;
     }
+    if (event.type === 'permission/preset' && typeof session.id === 'string') {
+      // A preset written without a `/permission` command means another surface
+      // (a picker calling `presets.set()`) chose a host permission for this
+      // session; that is the user leaving arbiter.
+      this.scheduleExit(session.id, 'permission/preset');
+    }
+  }
+
+  private onCommandRun(
+    session: TurnSessionLike,
+    data: Record<string, unknown>,
+  ): void {
+    const id = session.id;
+    if (id === undefined || data['name'] !== 'permission') return;
+    this.admissions.observe(session);
+    const commandId = data['commandId'];
+    if (typeof commandId !== 'string') return;
+    this.permissionCommands.set(commandId, {
+      sessionId: id,
+      args: typeof data['args'] === 'string' ? data['args'] : '',
+    });
   }
 
   private onCommandDone(data: Record<string, unknown>): void {
     const commandId = data['commandId'];
-    if (typeof commandId === 'string') {
-      const owner = permissionCommandsInFlight.get(commandId);
-      permissionCommandsInFlight.delete(commandId);
-      // A failed `/permission auto` never exited arbiter: report it and
-      // leave the session state exactly as it was.
-      if (
-        owner !== undefined &&
-        data['kind'] === 'error' &&
-        typeof data['text'] === 'string' &&
-        data['text'].includes(AUTO_REJECTION_HINT)
-      ) {
-        this.host.runtime.autoRejections.push({
-          at: Date.now(),
-          sessionId: owner,
-        });
-      }
+    if (typeof commandId !== 'string') return;
+    const owner = this.permissionCommands.get(commandId);
+    this.permissionCommands.delete(commandId);
+    if (owner === undefined) return;
+    if (
+      data['kind'] === 'error' &&
+      typeof data['text'] === 'string' &&
+      data['text'].includes(AUTO_REJECTION_HINT)
+    ) {
+      // The native auto entry was rejected before any permission write; the
+      // session keeps exactly the admission and knobs it had.
+      this.host.runtime.autoRejections.push({
+        at: Date.now(),
+        sessionId: owner.sessionId,
+      });
+      return;
     }
+    // A bare `/permission` only reports the current preset.
+    if (owner.args.trim().length === 0) return;
+    if (data['kind'] !== 'success') return;
+    this.scheduleExit(owner.sessionId, 'permission-command');
+  }
+
+  /**
+   * Defer one admission exit out of the host commit.
+   *
+   * The observer cannot append: the host rejects a reentrant append while it
+   * publishes this event. A microtask runs after the commit settled, and the
+   * exit is skipped when the session is not enabled anyway (an initial preset
+   * pin on a fresh session, a fork seed, a repeated command).
+   */
+  private scheduleExit(sessionId: string, reason: string): void {
+    queueMicrotask(() => {
+      try {
+        const admission = this.admissions.admission(sessionId);
+        if (admission === null || !admission.enabled) return;
+        const result = this.admissions.disable(sessionId, 'permission-command');
+        this.host.lifecycle('admission/exit', {
+          sessionId,
+          reason,
+          ok: result.ok,
+        });
+        if (!result.ok) {
+          this.host.ctx.logger.warn(
+            'arbiter: session %s exit failed: %s',
+            sessionId,
+            result.message,
+          );
+        }
+      } catch (error) {
+        this.host.ctx.logger.warn(
+          'arbiter: session %s exit failed: %s',
+          sessionId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    });
   }
 
   private registerAuto(): void {
@@ -158,7 +239,7 @@ export class PermissionLifecycle {
               if (!this.host.runtime.config.enabled) return;
               // A `/permission` command is being handled right now: this is a
               // user switch, so reject it before any preset or knob is written.
-              if (permissionCommandsInFlight.size > 0) {
+              if (this.permissionCommands.size > 0) {
                 throw new AutoEntryRejected();
               }
               // No command is open: the host is publishing a stored `auto`
@@ -180,19 +261,32 @@ export class PermissionLifecycle {
       }
     }
   }
+
   /** Roll back before draining: new ungated calls must see the narrowed sandbox. */
   private async unload(): Promise<void> {
     this.host.runtime.accepting = false;
+    // A restored session can be live and admitted without this process having
+    // gated a single call from it; teardown must still find it.
+    const discovered = this.admissions.discover();
+    const covered = this.admissions.coveredSessions();
     this.host.lifecycle('unload/stop-admission', {
       active: this.host.runtime.active,
-      managed: this.managed.size,
+      managed: covered.length,
+      discovered,
     });
-    for (const [sessionId, session] of this.managed) {
-      // Re-check: a permission switch may have landed before this point.
-      if (!this.managed.has(sessionId)) continue;
+    for (const [sessionId, session] of covered) {
+      // Re-read the folded admission: a switch may have landed since the call
+      // that covered this session, and a session that already left keeps its
+      // own permission.
+      const admission = this.admissions.admission(sessionId);
+      if (admission === null || !admission.enabled) continue;
       const rolled = this.rollbackSession(session, 'plugin-unload');
-      this.host.lifecycle('unload/rollback', { sessionId, changed: rolled });
-      this.managed.delete(sessionId);
+      if (rolled === 'failed') this.admissions.markFailingClosed(sessionId);
+      this.host.lifecycle('unload/rollback', {
+        sessionId,
+        outcome: rolled,
+        failingClosed: rolled === 'failed',
+      });
     }
     const rolledAt = Date.now();
     const started = Date.now();
@@ -213,7 +307,10 @@ export class PermissionLifecycle {
         String(this.host.runtime.active),
       );
     }
-    this.host.lifecycle('unload/release', { managed: this.managed.size });
+    this.host.lifecycle('unload/release', {
+      managed: this.admissions.coveredSessions().length,
+      failingClosed: this.admissions.failingClosedSessions(),
+    });
     this.host.runtime.instances -= 1;
     releaseRuntime(this.host.runtime);
   }

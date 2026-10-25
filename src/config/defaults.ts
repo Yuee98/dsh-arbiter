@@ -23,6 +23,9 @@ export const DEFAULT_PROGRESS: PolicyThresholds = {
 
 export const DEFAULT_CONFIG: ArbiterConfig = {
   enabled: true,
+  // The confirmed first-release boundary. It is applied only when a session is
+  // enabled, so installation still takes over nothing.
+  boundary: 'guarded',
   modes: { main: 'normal', subagent: 'strict' },
   rules: [],
   reviewer: {

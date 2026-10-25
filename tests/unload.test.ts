@@ -2,9 +2,11 @@ import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { apply } from '../src/index.js';
+import { installSessionRecordApi } from '../src/records.js';
+import { recordingSessionApi } from './helpers/session-records.js';
 import type {
   ContextLike,
   HostServices,
@@ -19,11 +21,17 @@ import type { SessionEventLike } from '../src/snapshot/types.js';
  * Unload semantics, exercised against a stub context.
  *
  * What is pinned here:
- *   - a session the plugin gated is rolled back to workspace-write + ask;
+ *   - a session the user enabled and the plugin widened is rolled back to
+ *     workspace-write + ask;
  *   - a session that already sits at workspace-write + ask gets no new event;
  *   - a session the user moved to another preset is left alone;
+ *   - a session whose rollback write fails is not silently handed back to an
+ *     ungated wide sandbox;
+ *   - an unmanaged session is never rewritten;
  *   - no new call is gated once unload has begun.
  *
+ * Admission is durable state in the session log, so the tests write the same
+ * ignorable record the API writes; teardown reads it, never an in-memory flag.
  * The stub records the two handlers the plugin registers, widened to their
  * public parameter types, so the test never needs a cast at a call site.
  */
@@ -36,9 +44,24 @@ interface StubEvent {
 interface StubSession {
   readonly id: string;
   readonly header: { readonly cwd: string };
+  /** Turns the session's own log writes into host failures. */
+  failAppend: boolean;
   readonly snapshotEvents: () => readonly SessionEventLike[];
   readonly append: (type: string, data: unknown) => void;
 }
+
+/**
+ * The plugin writes admission through the host's record writer; this file
+ * installs a test double with the same contract once, and production code
+ * still only calls `appendPluginRecord`.
+ */
+beforeAll(() => {
+  installSessionRecordApi(recordingSessionApi());
+});
+
+afterAll(() => {
+  installSessionRecordApi(null);
+});
 
 type Gate = (
   exec: ToolExecutionLike,
@@ -51,14 +74,54 @@ function makeSession(
   id: string,
   events: StubEvent[] = [],
 ): StubSession & { id: string } {
-  return {
+  const stub: StubSession & { id: string; failAppend: boolean } = {
     id,
+    failAppend: false,
     header: { cwd: process.cwd() },
-    snapshotEvents: () => events.map((event, seq) => ({ ...event, seq })),
+    snapshotEvents: () =>
+      // The host commits every plugin record with `ignorable: true`; the stub
+      // log reproduces that envelope so the production reader is exercised.
+      events.map((event, seq) => ({
+        ...event,
+        seq,
+        ignorable: event.type.startsWith('plugin:'),
+      })),
     append(type: string, data: unknown) {
+      if (stub.failAppend) throw new Error('host is shutting down');
       events.push({ type, data });
     },
   };
+  return stub;
+}
+
+/** Write the durable admission record the plugin's own writer would commit. */
+function admit(
+  events: StubEvent[],
+  sessionId: string,
+  options: { readonly enabled?: boolean; readonly boundary?: string } = {},
+): void {
+  events.push({
+    type: 'plugin:arbiter/admission',
+    data: {
+      version: 1,
+      sessionId,
+      rootSessionId: sessionId,
+      enabled: options.enabled ?? true,
+      boundary: options.boundary ?? 'trusted',
+      at: Date.now(),
+    },
+  });
+}
+
+/** A session the user enabled and the plugin widened to the trusted bundle. */
+function trustedSession(
+  id: string,
+  events: StubEvent[] = [],
+): StubSession & { id: string } {
+  admit(events, id, { boundary: 'trusted' });
+  events.push({ type: 'sandbox/mode', data: { mode: 'danger-full-access' } });
+  events.push({ type: 'approval/policy', data: { policy: 'ask' } });
+  return makeSession(id, events);
 }
 
 /** The registry is typed at construction and implements each public overload. */
@@ -175,6 +238,21 @@ function contextFor(
 
 const allow = (): Promise<{ kind: string }> =>
   Promise.resolve({ kind: 'allow' });
+
+/** One allow rule so a gated call settles without a model or a human. */
+const ALLOW_ECHO = {
+  rules: [
+    {
+      id: 'allow-echo',
+      match: {
+        node: 'command' as const,
+        kind: 'exact' as const,
+        pattern: 'echo hi',
+      },
+      verdict: 'allow' as const,
+    },
+  ],
+};
 const exec = (session: StubSession, callId: string) => ({
   callId,
   name: 'bash',
@@ -204,17 +282,21 @@ async function unload(disposers: (() => Promise<unknown>)[]): Promise<void> {
 }
 
 describe('unload rollback', () => {
-  test('a gated session is rolled back to workspace-write + ask', async () => {
+  test('an enabled session is rolled back to workspace-write + ask', async () => {
     const events: StubEvent[] = [];
-    const session = makeSession('s1', events);
+    const session = trustedSession('s1', events);
     const { ctx, stub, disposers } = contextFor(session);
-    apply(ctx, { modes: { main: 'normal' } });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
 
-    await stub.gate?.(exec(session, 'c1'), allow);
-
-    // Widen the permission as a trusted boundary would, then unload.
-    events.push({ type: 'sandbox/mode', data: { mode: 'danger-full-access' } });
-    events.push({ type: 'approval/policy', data: { policy: 'never' } });
+    // One gated call: coverage is recorded from an actual admission, not from
+    // a plugin flag.
+    expect(await stub.gate?.(exec(session, 'c1'), allow)).toEqual({
+      kind: 'allow',
+    });
 
     await unload(disposers);
 
@@ -233,34 +315,127 @@ describe('unload rollback', () => {
       { type: 'sandbox/mode', data: { mode: 'workspace-write' } },
       { type: 'approval/policy', data: { policy: 'ask' } },
     ];
+    admit(events, 's2', { boundary: 'guarded' });
     const session = makeSession('s2', events);
     const { ctx, stub, disposers } = contextFor(session);
-    apply(ctx, { modes: { main: 'normal' } });
+    // The configured boundary already matches the recorded one, so teardown
+    // has nothing to rewrite.
+    apply(ctx, { ...ALLOW_ECHO, modes: { main: 'normal' } });
     await stub.gate?.(exec(session, 'c2'), allow);
     const before = events.length;
     await unload(disposers);
-    expect(events.length).toBe(before);
+    expect(
+      events.slice(before).filter((event) => !event.type.startsWith('plugin:')),
+    ).toHaveLength(0);
   });
 
   test('a session the user moved to read-only is not rewritten', async () => {
     const events: StubEvent[] = [];
-    const session = makeSession('s3', events);
+    const session = trustedSession('s3', events);
     const { ctx, stub, disposers } = contextFor(session);
-    apply(ctx, { modes: { main: 'normal' } });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
     await stub.gate?.(exec(session, 'c3'), allow);
 
-    // The user switches away: the preset event is what releases management.
+    // The user switches away through the native command path: command/run
+    // lands before the handler and command/done proves it succeeded.
     events.push({ type: 'sandbox/mode', data: { mode: 'read-only' } });
     stub.sessionEvent?.(session, {
-      type: 'permission/preset',
-      data: { preset: 'read-only' },
+      type: 'command/run',
+      data: { commandId: 'cmd-1', name: 'permission', args: ' read-only' },
     });
+    stub.sessionEvent?.(session, {
+      type: 'command/done',
+      data: { commandId: 'cmd-1', kind: 'success', text: 'preset read-only' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     const before = events.length;
     await unload(disposers);
     expect(events.slice(before)).toHaveLength(0);
     const modes = events.filter((event) => event.type === 'sandbox/mode');
     expect(modes.at(-1)?.data).toEqual({ mode: 'read-only' });
+  });
+
+  test('an unmanaged session is never rewritten by teardown', async () => {
+    const events: StubEvent[] = [];
+    const session = makeSession('s6', events);
+    const { ctx, stub, disposers } = contextFor(session);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    // A plain workspace-write session: no admission record, no gated call.
+    events.push({ type: 'sandbox/mode', data: { mode: 'danger-full-access' } });
+    await stub.gate?.(exec(session, 'c6'), allow);
+    const before = events.length;
+    await unload(disposers);
+    expect(events.slice(before)).toHaveLength(0);
+  });
+
+  test('a disabled session keeps the host permission the user chose', async () => {
+    const events: StubEvent[] = [];
+    const session = trustedSession('s7', events);
+    const { ctx, stub, disposers } = contextFor(session);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await stub.gate?.(exec(session, 'c7'), allow);
+
+    // The user disables arbiter through the API: the record is the only new
+    // fact, and the permission they selected stays exactly as it is.
+    stub.sessionEvent?.(session, {
+      type: 'command/run',
+      data: {
+        commandId: 'cmd-2',
+        name: 'permission',
+        args: ' workspace-write',
+      },
+    });
+    stub.sessionEvent?.(session, {
+      type: 'command/done',
+      data: {
+        commandId: 'cmd-2',
+        kind: 'success',
+        text: 'preset workspace-write',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const before = events.length;
+    await unload(disposers);
+    // Nothing teardown writes: the session left, so it is not rolled back.
+    expect(
+      events
+        .slice(before)
+        .filter((event) => event.type === 'sandbox/mode')
+        .map((event) => event.data),
+    ).toEqual([]);
+  });
+
+  test('a failed rollback keeps the session refused instead of ungated', async () => {
+    const events: StubEvent[] = [];
+    const session = trustedSession('s8', events);
+    const { ctx, stub, disposers } = contextFor(session);
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    await stub.gate?.(exec(session, 'c8'), allow);
+    // Break the host write path: every append throws, so teardown cannot
+    // confirm the narrow boundary.
+    session.failAppend = true;
+    await unload(disposers);
+    // With admission stopped and the sandbox unconfirmed, the next call is
+    // refused rather than executed under the old trusted boundary.
+    const decision = await stub.gate?.(exec(session, 'c8-late'), allow);
+    expect(decision?.kind).toBe('deny');
   });
 
   test('permission is rolled back before the drain wait, not after', async () => {
@@ -278,12 +453,16 @@ describe('unload rollback', () => {
     process.env['ARBITER_TRACE_PATH'] = tracePath;
     try {
       const events: StubEvent[] = [];
-      const session = makeSession('s5', events);
+      // Only an enabled, widened session has anything to roll back, so the
+      // durable admission record and the wide knobs are planted first.
+      const session = trustedSession('s5', events);
       const { ctx, stub, disposers } = contextFor(session, () => {
         started.resolve(true);
         return answer.promise;
       });
-      apply(ctx, { modes: { main: 'normal' } });
+      // No allow rule on purpose: the call must reach the human stage so the
+      // test can hold a real approval while teardown runs.
+      apply(ctx, { boundary: 'trusted', modes: { main: 'normal' } });
       const gate = stub.gate;
       if (gate === undefined) throw new Error('Gate was not registered');
       pending = gate(exec(session, 'c5'), allow);
@@ -345,7 +524,11 @@ describe('unload rollback', () => {
     const events: StubEvent[] = [];
     const session = makeSession('s4', events);
     const { ctx, stub, disposers } = contextFor(session);
-    apply(ctx, { modes: { main: 'normal' } });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
     // Start unload; the async disposer flips `accepting` synchronously.
     const pending = disposers.map((dispose) => dispose());
     const result = await stub.gate?.(exec(session, 'c4'), allow);

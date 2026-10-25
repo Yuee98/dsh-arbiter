@@ -2,6 +2,7 @@ import { sessionRecordError, sessionRecordReady } from '../records.js';
 import { executionModeName } from './common.js';
 import type { HostEnvironment } from './types.js';
 import type { ConfigurationAccess } from './configuration.js';
+import type { SessionAdmissions } from './session-admission.js';
 
 interface AuditView {
   readonly history: readonly unknown[];
@@ -68,6 +69,7 @@ function auditView(host: HostEnvironment): AuditView {
 export function statePayload(
   host: HostEnvironment,
   configuration: ConfigurationAccess,
+  admissions?: SessionAdmissions,
 ): unknown {
   const { ctx, runtime } = host;
   const name = 'arbiter';
@@ -89,6 +91,10 @@ export function statePayload(
       failures: [...runtime.sessionRecordErrors.entries()],
     },
     config: runtime.config,
+    // Per-session admission lives in the session log, not this payload; the
+    // summary only reports what this runtime currently covers so a client can
+    // read the confirmed state without inferring it from a preset name.
+    admission: admissions?.summary() ?? null,
     sourceConfig: entry?.options.config ?? null,
     effectiveRevision: runtime.effectiveRevision,
     configSnapshotId: runtime.configSnapshotId,

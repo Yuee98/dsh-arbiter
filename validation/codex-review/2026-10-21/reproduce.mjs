@@ -91,9 +91,18 @@ try {
 
   const events = [], prompts = [];
   const session = { id: 's', header: { cwd: home }, snapshotEvents: () => events,
-    append(type, data) { events.push({ type, data, seq: events.length + 1, time: Date.now() }); },
+    // Plugin records are committed with `ignorable: true`; the plugin's reader
+    // keeps only those, so the fixture records the marker the host writes.
+    append(type, data) { events.push({ type, data, seq: events.length + 1, time: Date.now(),
+      ...(typeof type === 'string' && type.startsWith('plugin:') ? { ignorable: true } : {}) }); },
     requestHeader: () => ({ config: { provider: 'fixture', model: 'fixture' } }),
   };
+  // Since the first-release admission contract, a session is gated only after
+  // the user enabled it, and that switch is one ignorable plugin record. The
+  // R1-R9 assertions below are unchanged; this fixture states the prerequisite
+  // the prototype did not have (it gated every session unconditionally).
+  events.push({ type: 'plugin:arbiter/admission', seq: events.length + 1, time: Date.now(), ignorable: true,
+    data: { version: 1, sessionId: 's', rootSessionId: 's', enabled: true, boundary: 'guarded', at: Date.now() } });
   let release, started;
   const startedPromise = new Promise(resolve => { started = resolve; });
   const releasePromise = new Promise(resolve => { release = resolve; });

@@ -5,6 +5,8 @@
     "src/client/index.tsx",
     "scripts/repair-session.ts",
     "tests/e2e/**/*.spec.ts",
+    // Loaded by the isolated host as a plugin module, not imported by a test.
+    "tests/e2e/dsh/fixture-llm.ts",
   ],
   "ignoreExportsUsedInFile": true,
   "project": [

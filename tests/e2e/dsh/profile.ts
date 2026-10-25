@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   realpath,
+  rm,
   stat,
   symlink,
   writeFile,
@@ -55,6 +56,22 @@ export interface ProfileOptions {
    * models from configuration alone.
    */
   readonly modelGroups?: readonly SeededModelGroup[];
+  /**
+   * Reuse an existing profile directory and workspace instead of minting a new
+   * home. Used by the restart cases: the session log, the audit database and
+   * the profile patch must be the same ones the previous process wrote.
+   */
+  readonly reuse?: { readonly root: string; readonly home: string };
+  /**
+   * Extra rows appended to the profile patch (for example a deterministic
+   * model adapter for a lifecycle case). They are written on every create, so a
+   * restart keeps the same composition.
+   */
+  readonly extraRows?: readonly Record<string, unknown>[];
+  /** Deployment sandbox mode; `workspace-write` when omitted. */
+  readonly sandboxMode?: 'workspace-write' | 'danger-full-access';
+  /** Written into the arbiter row instead of `{}`. */
+  readonly arbiterRowConfig?: Record<string, unknown>;
 }
 
 /** Never inherit the user's selected profile, credentials or model settings. */
@@ -159,8 +176,9 @@ export async function createIsolatedProfile(
   repoRoot: string,
   options: ProfileOptions = {},
 ): Promise<IsolatedProfile> {
-  const root = await mkdtemp(join(tmpdir(), 'arbiter-e2e-'));
-  const home = join(root, 'home');
+  const root =
+    options.reuse?.root ?? (await mkdtemp(join(tmpdir(), 'arbiter-e2e-')));
+  const home = options.reuse?.home ?? join(root, 'home');
   const workspace = join(root, 'workspace');
   const profile = join(home, 'profiles', profileName);
   await mkdir(join(profile, 'node_modules'), { recursive: true });
@@ -186,6 +204,12 @@ export async function createIsolatedProfile(
       2,
     ),
   );
+  // A restart reuses the profile directory, so an existing link is replaced
+  // rather than reported as an install failure.
+  await rm(join(profile, 'node_modules', 'dsh-arbiter'), {
+    recursive: true,
+    force: true,
+  });
   await symlink(
     repoRoot,
     join(profile, 'node_modules', 'dsh-arbiter'),
@@ -197,12 +221,20 @@ export async function createIsolatedProfile(
     options.arbiterConfig === 'unset'
       ? { id: 'arbiter', name: 'dsh-arbiter' }
       : options.arbiterConfig === undefined || options.arbiterConfig === 'empty'
-        ? { id: 'arbiter', name: 'dsh-arbiter', config: {} }
+        ? {
+            id: 'arbiter',
+            name: 'dsh-arbiter',
+            config: options.arbiterRowConfig ?? {},
+          }
         : {
             id: 'arbiter',
             name: 'dsh-arbiter',
-            config: options.arbiterConfig,
+            config: {
+              ...(options.arbiterConfig as Record<string, unknown>),
+              ...options.arbiterRowConfig,
+            },
           };
+  const sandbox = options.sandboxMode ?? 'workspace-write';
   await writeFile(
     join(profile, 'cordis.patch.yml'),
     JSON.stringify([
@@ -211,13 +243,14 @@ export async function createIsolatedProfile(
       {
         id: 'sandbox-policy',
         name: '@deepseek-ai/dsh-sandbox-policy',
-        config: { mode: 'workspace-write', workspaceRoot: workspace },
+        config: { mode: sandbox, workspaceRoot: workspace },
       },
       {
         id: 'workspace-controller',
         name: '@deepseek-ai/dsh-api-workspace-controller',
         config: { documentsDirectory: workspace },
       },
+      ...(options.extraRows ?? []),
     ]),
   );
   return {

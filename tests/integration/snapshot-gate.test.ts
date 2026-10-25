@@ -14,10 +14,23 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest';
 
 import { AuditStore } from '../../src/audit.js';
 import { apply } from '../../src/index.js';
+import { installSessionRecordApi } from '../../src/records.js';
+import {
+  admitSession,
+  recordingSessionApi,
+} from '../helpers/session-records.js';
 import type {
   ConnectionLike,
   ContextLike,
@@ -55,17 +68,37 @@ interface StubSession {
     readonly parentSession?: string;
     readonly origin?: string;
   };
+  /** The session's committed log, as the host appends to it. */
+  readonly events: SessionEventLike[];
+  readonly append: (type: string, data: unknown) => void;
   readonly snapshotEvents: () => readonly SessionEventLike[];
   requestHeader(): {
     readonly config: { readonly provider: string; readonly model: string };
   };
 }
 
+/**
+ * The plugin writes admission through the host's record writer. These cases
+ * need an enabled session to reach the gate at all, so the tests install the
+ * same-contract double once and let the production writer path run.
+ */
+beforeAll(() => {
+  installSessionRecordApi(recordingSessionApi());
+});
+
+afterAll(() => {
+  installSessionRecordApi(null);
+});
+
 function makeSession(
   id: string,
-  events: readonly SessionEventLike[],
+  log: readonly SessionEventLike[],
   parentSession?: string,
 ): StubSession {
+  // This harness needs a session the plugin can admit itself through: a real
+  // host would carry the user's switch as an ignorable plugin record, so the
+  // stub log grows the same way and the plugin's own writer gets a target.
+  const events: SessionEventLike[] = [...log];
   return {
     id,
     header: {
@@ -74,6 +107,15 @@ function makeSession(
       ...(parentSession === undefined
         ? {}
         : { parentSession, origin: 'subagent' }),
+    },
+    events,
+    append(type: string, data: unknown) {
+      events.push({
+        type,
+        seq: events.length,
+        data,
+        ignorable: type.startsWith('plugin:'),
+      });
     },
     snapshotEvents: () => events,
     requestHeader: () => ({ config: { provider: 'stub', model: 'stub' } }),
@@ -326,6 +368,9 @@ async function reviewCall(options: RunOptions): Promise<{
     permissionPresets: { registerAuto: () => () => undefined },
     workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
   });
+  // The user enabled this session; without that the gate correctly steps
+  // aside and none of the review paths below would run.
+  admitSession(options.session);
   apply(ctx, {
     modes: { main: 'normal', subagent: 'strict' },
     reviewer: {

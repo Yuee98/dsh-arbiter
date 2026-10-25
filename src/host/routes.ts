@@ -1,14 +1,19 @@
+import { admissionsRoute } from './admission-routes.js';
 import { clearRoute, logRoute, logsRoute } from './audit-routes.js';
 import { credentialsRoute, testRoute, validateRoute } from './config-routes.js';
 import { ConfigurationAccess } from './configuration.js';
 import { jsonResponse } from './http.js';
 import { modelCatalogRoute } from './model-catalog-routes.js';
 import { reviewerTestRoute } from './reviewer-test-routes.js';
+import type { SessionAdmissions } from './session-admission.js';
 import { statePayload } from './state.js';
 import type { FetchRouteLike, HostEnvironment } from './types.js';
 
 /** Routes share one configuration accessor and retain optional-service injection. */
-export function registerRoutes(host: HostEnvironment): void {
+export function registerRoutes(
+  host: HostEnvironment,
+  admissions: SessionAdmissions,
+): void {
   const configuration = new ConfigurationAccess(host);
   host.ctx.inject(['connection'], (registrationContext) => {
     const connection = registrationContext.get('connection');
@@ -19,8 +24,11 @@ export function registerRoutes(host: HostEnvironment): void {
         methods: ['GET'],
         requestBody: 'buffered',
         fetch: () =>
-          Promise.resolve(jsonResponse(statePayload(host, configuration))),
+          Promise.resolve(
+            jsonResponse(statePayload(host, configuration, admissions)),
+          ),
       },
+      admissionsRoute(host, admissions),
       {
         path: '/api/arbiter/config/save',
         methods: ['POST'],

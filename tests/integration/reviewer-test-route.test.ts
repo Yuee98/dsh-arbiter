@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { initializeHost } from '../../src/host/runtime.js';
+import { SessionAdmissions } from '../../src/host/session-admission.js';
 import { registerRoutes } from '../../src/host/routes.js';
 import type {
   ConnectionLike,
@@ -117,7 +118,8 @@ async function startHost(
     inject: (_names, callback) => callback(createStubContext(registered).ctx),
   });
   const host = initializeHost(parts.ctx, {});
-  registerRoutes(host);
+  // The reviewer route is what this case inspects; admission state is empty.
+  registerRoutes(host, new SessionAdmissions(host));
   return { routes, host, edits: () => edits };
 }
 
