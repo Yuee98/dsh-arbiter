@@ -11,22 +11,41 @@ import {
 } from '../model-choice.js';
 import type { ModelChoice } from '../model-choice.js';
 import { inputStyle } from './controls.js';
-import type { ModelCatalogView } from '../view-types.js';
+import type { ModelCatalogView, ModelGroupView } from '../view-types.js';
 
 export type CatalogLoad = 'loading' | 'ready' | 'failed';
+
+/** Provider display names that appear more than once in the catalog. */
+function duplicateNames(
+  groups: readonly ModelGroupView[],
+): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  for (const group of groups)
+    counts.set(group.name, (counts.get(group.name) ?? 0) + 1);
+  return new Set(
+    [...counts].filter(([, count]) => count > 1).map(([name]) => name),
+  );
+}
 
 /**
  * One option label that stays unambiguous when two providers share a name.
  *
  * The route (`provider / model`) is what the host stores, so it leads; a
- * differing display name follows only to keep models distinguishable.
+ * differing display name follows only to keep models distinguishable. When two
+ * providers share a display name, the route id is added because the display
+ * name alone would render two different routes as identical text.
  */
 function optionLabel(
-  providerName: string,
+  group: ModelGroupView,
   model: string,
   modelName: string,
+  ambiguous: ReadonlySet<string>,
 ): string {
-  const route = `${providerName} / ${model}`;
+  const provider =
+    ambiguous.has(group.name) && group.id !== group.name
+      ? `${group.name}（${group.id}）`
+      : group.name;
+  const route = `${provider} / ${model}`;
   return modelName === model ? route : `${route}（${modelName}）`;
 }
 
@@ -37,10 +56,11 @@ function currentLabel(
   unlisted: (provider: string, model: string) => string,
 ): string {
   const groups = catalog?.groups ?? [];
+  const ambiguous = duplicateNames(groups);
   for (const group of groups) {
     const model = group.models.find((entry) => entry.id === choice.model);
     if (group.id === choice.provider && model !== undefined)
-      return optionLabel(group.name, model.id, model.name);
+      return optionLabel(group, model.id, model.name, ambiguous);
   }
   return unlisted(choice.provider, choice.model);
 }
@@ -67,6 +87,9 @@ export function ModelSelect(props: {
   const groups =
     catalog === null ? [] : filterModelGroups(catalog.groups, props.query);
   const options = catalogueOptions(groups);
+  // Ambiguity is a property of the whole catalog, not of the filtered view: a
+  // search must not make two same-named providers look distinct again.
+  const ambiguous = duplicateNames(catalog?.groups ?? []);
   const sessionChosen = choice.provider === SESSION_CHOICE.provider;
   const visible = options.some(
     (option) =>
@@ -91,8 +114,20 @@ export function ModelSelect(props: {
         aria-label={t('reviewer.model.label')}
         value={encodeChoice(choice)}
         onChange={(event) => {
+          const value = event.target.value;
+          // The session route is not a catalog entry, and the pinned current
+          // route is not in the filtered list when it is hidden or unlisted;
+          // both are real choices of this control and must not be dropped.
+          if (value === encodeChoice(SESSION_CHOICE)) {
+            props.onChoice(SESSION_CHOICE);
+            return;
+          }
+          if (value === encodeChoice(choice)) {
+            props.onChoice(choice);
+            return;
+          }
           const selected = options.find(
-            (option) => encodeChoice(option) === event.target.value,
+            (option) => encodeChoice(option) === value,
           );
           if (selected === undefined) return;
           props.onChoice({
@@ -111,13 +146,20 @@ export function ModelSelect(props: {
           </option>
         ) : null}
         {groups.map((group) => (
-          <optgroup key={group.id} label={group.name}>
+          <optgroup
+            key={group.id}
+            label={
+              ambiguous.has(group.name)
+                ? `${group.name}（${group.id}）`
+                : group.name
+            }
+          >
             {group.models.map((model) => (
               <option
                 key={`${group.id}\u0000${model.id}`}
                 value={encodeChoice({ provider: group.id, model: model.id })}
               >
-                {optionLabel(group.name, model.id, model.name)}
+                {optionLabel(group, model.id, model.name, ambiguous)}
               </option>
             ))}
           </optgroup>

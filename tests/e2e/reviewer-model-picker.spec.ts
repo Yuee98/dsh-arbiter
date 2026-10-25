@@ -3,17 +3,19 @@ import type { DshHost } from './dsh/host.js';
 import { openArbiterConfiguration } from './dsh/ui.js';
 
 /**
- * Two hand-declared provider routes that share one model id.
+ * Two hand-declared provider routes that share one model id and one display
+ * name.
  *
  * pi-ai resolves these models from the profile's own catalog, so the real host
  * directory is populated without a credential and without any model request.
- * The shared id is what a flat list would merge: the select must keep both
- * routes addressable.
+ * The shared id is what a flat list would merge, and the shared display name is
+ * what a label built from the display name alone would collapse: the select
+ * must keep both routes visibly and addressably distinct.
  */
 const MODEL_GROUPS = [
   {
     provider: 'alpha',
-    displayName: 'Alpha provider',
+    displayName: 'Shared provider',
     models: [
       { id: 'alpha-model', name: 'Alpha Model' },
       { id: 'shared-model', name: 'Shared Model' },
@@ -21,7 +23,7 @@ const MODEL_GROUPS = [
   },
   {
     provider: 'beta',
-    displayName: 'Beta provider',
+    displayName: 'Shared provider',
     models: [{ id: 'shared-model', name: 'Shared Model' }],
   },
 ] as const;
@@ -124,20 +126,21 @@ test.describe('reviewer model directory in the real host', () => {
       await expect(select).toHaveValue('session');
       await expect(
         select.getByRole('option', {
-          name: 'Alpha provider / alpha-model（Alpha Model）',
+          name: 'Shared provider（alpha） / alpha-model（Alpha Model）',
           exact: true,
         }),
       ).toBeAttached();
-      // The two providers that share one model id remain two options.
+      // The two providers share both a display name and a model id, so only
+      // the route id can tell them apart in the visible labels.
       await expect(
         select.getByRole('option', {
-          name: 'Alpha provider / shared-model（Shared Model）',
+          name: 'Shared provider（alpha） / shared-model（Shared Model）',
           exact: true,
         }),
       ).toBeAttached();
       await expect(
         select.getByRole('option', {
-          name: 'Beta provider / shared-model（Shared Model）',
+          name: 'Shared provider（beta） / shared-model（Shared Model）',
           exact: true,
         }),
       ).toBeAttached();
@@ -147,7 +150,12 @@ test.describe('reviewer model directory in the real host', () => {
           .evaluateAll((nodes) =>
             nodes.map((node) => node.getAttribute('label')),
           ),
-      ).toEqual(expect.arrayContaining(['Alpha provider', 'Beta provider']));
+      ).toEqual(
+        expect.arrayContaining([
+          'Shared provider（alpha）',
+          'Shared provider（beta）',
+        ]),
+      );
 
       // Search narrows the real list instead of a hardcoded copy.
       const search = plugin.getByRole('searchbox', {
@@ -157,13 +165,13 @@ test.describe('reviewer model directory in the real host', () => {
       await search.fill('beta');
       await expect(
         select.getByRole('option', {
-          name: 'Alpha provider / alpha-model（Alpha Model）',
+          name: 'Shared provider（alpha） / alpha-model（Alpha Model）',
           exact: true,
         }),
       ).toHaveCount(0);
       await expect(
         select.getByRole('option', {
-          name: 'Beta provider / shared-model（Shared Model）',
+          name: 'Shared provider（beta） / shared-model（Shared Model）',
           exact: true,
         }),
       ).toBeAttached();
@@ -171,7 +179,7 @@ test.describe('reviewer model directory in the real host', () => {
 
       // Choose the beta route (the second provider with the shared model id).
       await select.selectOption({
-        label: 'Beta provider / shared-model（Shared Model）',
+        label: 'Shared provider（beta） / shared-model（Shared Model）',
       });
       await expect(plugin.locator('[data-arbiter-save-status]')).toHaveText(
         '草稿未保存；当前生效配置未改变。',
@@ -215,10 +223,13 @@ test.describe('reviewer model directory in the real host', () => {
       );
       await expect(
         reloadedSelect.getByRole('option', {
-          name: 'Beta provider / shared-model（Shared Model）',
+          name: 'Shared provider（beta） / shared-model（Shared Model）',
           exact: true,
         }),
       ).toBeAttached();
+      // Switching back to the session route is a real choice, not a dead option.
+      await reloadedSelect.selectOption('session');
+      await expect(reloadedSelect).toHaveValue('session');
 
       // The saved document holds a route, never a credential value.
       const state = await readReviewerState(dsh);

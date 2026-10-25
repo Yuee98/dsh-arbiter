@@ -43,6 +43,13 @@ export function ReviewerPanel(props: {
     void getJson('/models', modelCatalogResponse)
       .then((value) => {
         if (cancelled) return;
+        if (!value.loaded) {
+          // A whole-directory failure is answered over HTTP 200; it must not
+          // render as an empty catalog.
+          setCatalog(null);
+          setCatalogStatus('failed');
+          return;
+        }
         setCatalog(value);
         setCatalogStatus('ready');
       })

@@ -54,9 +54,15 @@ async function groupOf(
     const models = await listModels(provider.id);
     if (models.length === 0) return null;
     return { ...provider, models: models.map(modelPayload) };
-  } catch (error) {
-    logger.warn('arbiter: model catalog failed for provider %s', provider.id);
-    logger.warn(error);
+  } catch {
+    // The provider error itself may quote endpoint or credential material, so
+    // diagnostics record the stable code and the route id only. The page and
+    // the log therefore share one non-sensitive vocabulary.
+    logger.warn(
+      'arbiter: model catalog failed for provider %s (%s)',
+      provider.id,
+      PROVIDER_FAILURE_CODE,
+    );
     return { ...provider, code: PROVIDER_FAILURE_CODE };
   }
 }
@@ -104,9 +110,11 @@ export async function modelCatalogPayload(
       groups: entries.filter(isGroup),
       failures: entries.filter(isFailure),
     };
-  } catch (error) {
-    host.ctx.logger.warn('arbiter: model catalog is unavailable');
-    host.ctx.logger.warn(error);
+  } catch {
+    host.ctx.logger.warn(
+      'arbiter: model catalog is unavailable (%s)',
+      DIRECTORY_FAILURE_CODE,
+    );
     return {
       ok: false,
       code: DIRECTORY_FAILURE_CODE,

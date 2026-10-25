@@ -340,6 +340,139 @@ describe('reviewer chat model selection', () => {
     ).toBeInTheDocument();
   });
 
+  test('switching from a concrete model back to the session route persists it', async () => {
+    const saved: unknown[] = [];
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json(effectiveState()),
+      ),
+      credentialsHandler(),
+      catalogHandler(),
+      http.post('*/api/arbiter/config/save', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({
+          ok: true,
+          saved: true,
+          changed: true,
+          effective: true,
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+          activationRecorded: true,
+          configFormat: 'arbiter-config-v1',
+          configFormatExplicit: false,
+          auditError: null,
+          warnings: [],
+        });
+      }),
+    );
+    const user = await openReviewer();
+    const select = modelSelect();
+    await within(select).findByRole('option', {
+      name: 'DeepSeek / deepseek-flash（DeepSeek-V4.1-Flash）',
+    });
+    await user.selectOptions(select, '["deepseek-official","deepseek-flash"]');
+    expect(select).toHaveValue('["deepseek-official","deepseek-flash"]');
+    // The session route is not a catalog entry; choosing it must still reach
+    // the draft instead of being silently ignored.
+    await user.selectOptions(select, 'session');
+    expect(select).toHaveValue('session');
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        reviewer: {
+          type: 'chat',
+          chat: { provider: 'session', model: '' },
+        },
+      },
+    });
+  });
+
+  test('two providers with the same display name are told apart by id', async () => {
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json(effectiveState()),
+      ),
+      credentialsHandler(),
+      catalogHandler([
+        {
+          id: 'alpha',
+          name: 'DeepSeek',
+          models: [{ id: 'shared-model', name: 'Shared Model' }],
+        },
+        {
+          id: 'beta',
+          name: 'DeepSeek',
+          models: [{ id: 'shared-model', name: 'Shared Model' }],
+        },
+      ]),
+    );
+    const user = await openReviewer();
+    const select = modelSelect();
+    const alpha = await within(select).findByRole('option', {
+      name: 'DeepSeek（alpha） / shared-model（Shared Model）',
+    });
+    const beta = within(select).getByRole('option', {
+      name: 'DeepSeek（beta） / shared-model（Shared Model）',
+    });
+    expect(alpha).not.toBe(beta);
+    expect(
+      within(select)
+        .getAllByRole('group')
+        .map((group) => group.getAttribute('label')),
+    ).toEqual(['DeepSeek（alpha）', 'DeepSeek（beta）']);
+    await user.selectOptions(select, '["beta","shared-model"]');
+    expect(select).toHaveValue('["beta","shared-model"]');
+  });
+
+  test('a whole-directory failure over HTTP 200 reads as a failed load', async () => {
+    const state = effectiveState();
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json({
+          ...state,
+          config: {
+            ...state.config,
+            reviewer: {
+              ...state.config.reviewer,
+              chat: {
+                ...state.config.reviewer.chat,
+                provider: 'gateway',
+                model: 'shared-model',
+              },
+            },
+          },
+        }),
+      ),
+      credentialsHandler(),
+      // The production shape for a whole-directory failure: HTTP 200, ok:false.
+      http.get('*/api/arbiter/models', () =>
+        HttpResponse.json({
+          ok: false,
+          code: 'catalog-unavailable',
+          supported: true,
+          groups: [],
+          failures: [],
+        }),
+      ),
+    );
+    await openReviewer();
+    expect(
+      await screen.findByText(
+        '模型目录读取失败，保留当前已保存的选择；保存不受影响。',
+      ),
+    ).toBeInTheDocument();
+    // A whole-directory failure must not read as "no models configured".
+    expect(
+      screen.queryByText('宿主尚未配置任何模型；可保留「跟随会话模型」。'),
+    ).toBeNull();
+    const select = modelSelect();
+    expect(select).toHaveValue('["gateway","shared-model"]');
+    expect(within(select).getAllByRole('option')).toHaveLength(2);
+  });
+
   test('a failed catalog keeps the configured route and fabricates no options', async () => {
     const state = effectiveState();
     server.use(

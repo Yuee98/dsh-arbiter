@@ -179,6 +179,14 @@ export interface ModelCatalogFailureView {
 
 /** The read-only Reviewer model directory. */
 export interface ModelCatalogView {
+  /**
+   * False when the whole directory could not be read.
+   *
+   * This is not the same as an empty directory: a composition with no models
+   * still answers `loaded: true` with no groups, so a failure must never render
+   * as "nothing is configured".
+   */
+  readonly loaded: boolean;
   /** False when this composition has no LLM service at all. */
   readonly supported: boolean;
   readonly groups: readonly ModelGroupView[];

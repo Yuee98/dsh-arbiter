@@ -52,7 +52,10 @@ function catalogFailure(value: unknown): ModelCatalogFailureView {
  */
 export function modelCatalogResponse(value: unknown): ModelCatalogView {
   const source = object(value);
+  // `ok` distinguishes a whole-directory failure from a successful empty
+  // directory; treating them alike would report "no models" for a real fault.
   return {
+    loaded: field(source, 'ok', boolean),
     supported: field(source, 'supported', boolean),
     groups: field(source, 'groups', array(modelGroup)),
     failures: field(source, 'failures', array(catalogFailure)),

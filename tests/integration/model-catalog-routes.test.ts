@@ -47,8 +47,13 @@ interface Started {
   readonly host: HostEnvironment;
 }
 
+interface Diagnostics {
+  readonly messages: unknown[][];
+}
+
 async function startHost(
   services: Partial<HostServices> = {},
+  diagnostics?: Diagnostics,
 ): Promise<Started> {
   const home = join(root, 'home');
   const profileDir = join(home, 'profiles', 'reviewer-routes');
@@ -87,6 +92,21 @@ async function startHost(
   // its callback with the same context, which is what this stub reproduces.
   const parts = createStubContext(registered, {
     inject: (_names, callback) => callback(createStubContext(registered).ctx),
+    ...(diagnostics === undefined
+      ? {}
+      : {
+          logger: {
+            info: (...args: unknown[]): void => {
+              diagnostics.messages.push(args);
+            },
+            warn: (...args: unknown[]): void => {
+              diagnostics.messages.push(args);
+            },
+            error: (...args: unknown[]): void => {
+              diagnostics.messages.push(args);
+            },
+          },
+        }),
   });
   const host = initializeHost(parts.ctx, {});
   registerRoutes(host);
@@ -179,25 +199,29 @@ describe('model catalog route', () => {
 
   test('one failing provider does not hide the others and leaks no message', async () => {
     const secret = 'sk-live-must-not-escape';
-    const { routes } = await startHost({
-      llm: llmOf(
-        [
-          { id: 'broken', name: 'Broken provider' },
-          { id: 'healthy', name: 'Healthy provider' },
-          { id: 'empty', name: 'Unconfigured provider' },
-        ],
-        (provider) => {
-          if (provider === 'broken')
-            return Promise.reject(
-              new Error(`GET https://gateway.test/models refused ${secret}`),
-            );
-          if (provider === 'empty') return Promise.resolve([]);
-          return Promise.resolve([
-            { provider, id: 'model-1', name: 'Model 1' },
-          ]);
-        },
-      ),
-    });
+    const diagnostics: Diagnostics = { messages: [] };
+    const { routes } = await startHost(
+      {
+        llm: llmOf(
+          [
+            { id: 'broken', name: 'Broken provider' },
+            { id: 'healthy', name: 'Healthy provider' },
+            { id: 'empty', name: 'Unconfigured provider' },
+          ],
+          (provider) => {
+            if (provider === 'broken')
+              return Promise.reject(
+                new Error(`GET https://gateway.test/models refused ${secret}`),
+              );
+            if (provider === 'empty') return Promise.resolve([]);
+            return Promise.resolve([
+              { provider, id: 'model-1', name: 'Model 1' },
+            ]);
+          },
+        ),
+      },
+      diagnostics,
+    );
     const body = await bodyOf(
       await route(routes, '/api/arbiter/models').fetch(
         new Request('http://fixture/api/arbiter/models'),
@@ -205,6 +229,12 @@ describe('model catalog route', () => {
     );
     expect(body).not.toContain(secret);
     expect(body).not.toContain('gateway.test');
+    // The diagnostic boundary is separate from the HTTP body: the raw provider
+    // exception must not reach plugin logs either.
+    const logged = JSON.stringify(diagnostics.messages);
+    expect(logged).not.toContain(secret);
+    expect(logged).not.toContain('gateway.test');
+    expect(logged).toContain('provider-catalog-failed');
     expect(JSON.parse(body)).toEqual({
       ok: true,
       supported: true,
@@ -236,6 +266,41 @@ describe('model catalog route', () => {
         ),
       ),
     ).toEqual({ ok: true, supported: false, groups: [], failures: [] });
+  });
+
+  test('a whole-directory failure is answered as not loaded, with no raw error logged', async () => {
+    const secret = 'sk-whole-directory-must-not-escape';
+    const diagnostics: Diagnostics = { messages: [] };
+    const { routes } = await startHost(
+      {
+        llm: {
+          stream: () => {
+            throw new Error('unreachable');
+          },
+          listProviders: () => {
+            throw new Error(`cannot enumerate providers: ${secret}`);
+          },
+          listModels: () => Promise.resolve([]),
+        },
+      },
+      diagnostics,
+    );
+    const body = await bodyOf(
+      await route(routes, '/api/arbiter/models').fetch(
+        new Request('http://fixture/api/arbiter/models'),
+      ),
+    );
+    expect(body).not.toContain(secret);
+    expect(JSON.parse(body)).toEqual({
+      ok: false,
+      code: 'catalog-unavailable',
+      supported: true,
+      groups: [],
+      failures: [],
+    });
+    const logged = JSON.stringify(diagnostics.messages);
+    expect(logged).not.toContain(secret);
+    expect(logged).toContain('catalog-unavailable');
   });
 
   test('the catalog read never streams a model request', async () => {
