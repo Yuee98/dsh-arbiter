@@ -79,6 +79,7 @@ export const inputStyle = {
 export function TextInput(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly onBlur?: () => void;
   readonly placeholder?: string;
   readonly monospace?: boolean;
   readonly ariaLabel?: string;
@@ -92,6 +93,7 @@ export function TextInput(props: {
       onChange={(event) => {
         props.onChange(event.target.value);
       }}
+      onBlur={props.onBlur}
       style={{
         ...inputStyle,
         fontFamily:
