@@ -8,3 +8,4 @@
 - 测试随功能交付。纯逻辑用 Node 单元测试，存储和生命周期用集成测试，UI 用 RTL，真实宿主行为用隔离 DSH E2E。空断言、占位通过及跳过不构成完成证据。
 - Coverage 只生成全量源码报告，不设置百分比门槛，也不维护 coverage 过渡名单；以行为契约和可观察结果验收测试，不为提高数字补低价值测试。
 - 修改后运行适用检查；交付前运行 `pnpm verify`。影响宿主加载、UI 接线或生命周期时运行 `pnpm test:e2e:dsh`，使用隔离 profile，不修改日常 DSH 环境。
+- PR 标题与最终 squash 消息使用英文 Conventional Commits，PR 正文与设计文档保持中文。合并使用 `pnpm pr:merge NUMBER`，复用标题校验器并锁定 head；默认空 commit body，不从中文 PR 正文生成。代码与文档分开提交，commit message 使用英文。格式和可选正文要求见开发基线。

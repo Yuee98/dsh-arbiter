@@ -113,6 +113,28 @@ fixture 给当前原型显式配置空对象以加载有效默认值。未提供
 
 axe 已对真实插件初始配置页的 `[data-arbiter-root]` 区域运行默认规则，宿主管理器外框不属于该扫描范围；未关闭或排除规则。报告附完整 JSON、页面截图及 `axe-incomplete` 注解。初次运行 0 violations、24 项规则通过，35 个节点的对比度无法自动判定，不能视为对比度通过。隐藏页签、展开区、弹窗、主题、键盘与阅读体验随对应功能分别验收。
 
+## PR 标题与 squash 消息
+
+PR 标题采用英文 Conventional Commits：`type(scope)!: summary`，scope 和 `!` 可选。type 固定为 `feat`、`fix`、`refactor`、`perf`、`docs`、`test`、`build`、`ci`、`chore`、`style`、`revert`；scope 使用小写字母／数字，可用 `.`、`/`、`_`、`-` 分段。冒号后一个空格，summary 非空，整行没有首尾空格。例如 `ci: validate PR titles`、`feat(rules)!: change the rule format`。不额外设置标题长度门槛。
+
+机械检查将英文约束为可打印 ASCII、单行和上述结构，拒绝中文、弯引号、控制字符与换行；它不判断语法或措辞质量。PR 正文、issue 和设计文档继续使用中文。开发提交使用英文，代码与文档分开提交；CI 不逐个约束 PR 内部的临时提交。
+
+`scripts/github/message-policy.ts` 是唯一的消息校验实现。`pnpm check:pr-title "ci: validate PR titles"` 可本地检查标题。独立的 `PR title` 工作流在 PR 创建、标题编辑、推送、重开和转为可评审时运行，不安装项目依赖；标题经环境变量传入 Node，不拼接到 shell。标题编辑只重跑这个独立工作流，不重跑普通 CI 或 DSH smoke。main ruleset 在原有 squash 限制与 `Verify` 之外，将 GitHub Actions 的 `PR title` 设为必需检查。
+
+仓库 squash 默认标题设为 `PR_TITLE`，正文设为 `BLANK`：无论 PR 有几个 commit，都使用 PR 标题，不从中间 commit 或中文 PR 正文生成消息。最终 subject 带 GitHub 的 `(#编号)` 后缀。可选 commit body 必须使用英文可打印 ASCII，允许换行和 tab；合并脚本会将 CRLF 规范成 LF。Dependabot 的根目录 npm、DSH 独立运行时和 Actions 三项配置均显式使用 `prefix: chore` 与 `include: scope`，生成 `chore(deps): ...` 或 `chore(deps-dev): ...`，不豁免机器人。
+
+获得合并授权后，在仓库内使用以下入口；预览不发送合并请求：
+
+```sh
+pnpm pr:merge 30 --dry-run
+pnpm pr:merge 30
+pnpm pr:merge 30 --body-file /path/to/english-body.txt
+```
+
+脚本要求 PR 已打开且非 draft，检查所有已报告的 CI（包含非必需 smoke），然后重新读取最新标题与 head。检查期间 head 改变则停止；合并前复用同一校验器检查最新标题、最终 subject 与正文，再显式传入 `--squash`、`--match-head-commit`、subject 和正文 stdin。检查失败或尚未结束时不合并；不使用 admin、auto-merge 或自动删除分支。GitHub 服务端仍执行现有 ruleset。合并过程中标题再次变化不会改变已经校验并明确提交的消息；head 再变化由服务端拒绝。
+
+GitHub 的 squash 默认值不能禁止人在页面或 API 中覆盖消息，因此统一通过上述入口合并，不能只依赖之前通过的标题检查。新增工作流随本 PR 验证；其他旧分支需要同步包含该工作流的 main，再通过 PR 更新触发必需检查。规则格式、消息来源与 Dependabot 设置分别参考 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)、[GitHub squash 配置](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/configuring-commit-squashing-for-pull-requests)与 [Dependabot commit-message](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#commit-message)。
+
 ## CI
 
 普通 PR／main CI 在 Ubuntu 24.04 上并行执行 `pnpm verify` 包含的检查，共 10 个独立入口：类型、源码 lint、Testing Library lint、格式、依赖边界、工作流／文案／peer 六组静态检查，unit／integration／UI 三层测试，以及构建／消费者／R1–R9 回归。各入口自行安装固定工具和冻结依赖，复用 mise 与 pnpm store 缓存，不经过共享的前置 setup job；同一组 matrix 的失败不取消其他入口。
