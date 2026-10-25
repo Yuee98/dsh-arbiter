@@ -23,7 +23,8 @@
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src/**/*.ts",

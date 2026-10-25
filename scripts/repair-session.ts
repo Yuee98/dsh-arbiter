@@ -8,10 +8,10 @@
  * Default mode inspects and asks for nothing; writing requires either
  * `--force` (unattended) or an interactive confirmation.
  *
- * It runs against the built `lib/` output, so `pnpm run build` must precede it.
+ * Node 24 runs the repair source directly; no prior build is required.
  */
 import { createInterface } from 'node:readline/promises';
-import { inspectSessionLog, repairSessionLog } from '../lib/repair.js';
+import { inspectSessionLog, repairSessionLog } from '../src/repair.ts';
 
 const args = process.argv.slice(2);
 const inspectOnly = args.includes('--inspect');
