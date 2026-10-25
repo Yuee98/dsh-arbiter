@@ -83,7 +83,7 @@
 ```
 dsh-arbiter/
 ├── package.json
-│   ├── "type": "module", main/exports → lib/index.js, lib/client.js
+│   ├── "type": "module", main/exports → lib/index.js, lib/client.cjs
 │   ├── "dsh": { "bundle": { "patch": "./cordis.patch.yml" },
 │   │            "client": { "platform": "web", "inject": [...] } }
 │   ├── dependencies: re2js ^2.8.8, picomatch ^4, tokenx ^2.2.0, web-tree-sitter
@@ -94,7 +94,7 @@ dsh-arbiter/
 ├── cordis.patch.yml          # insert 一行：id: arbiter
 ├── lib/
 │   ├── index.js              # 宿主半侧：apply(ctx, config)
-│   ├── client.js             # 浏览器半侧：配置页
+│   ├── client.cjs            # 浏览器半侧：配置页
 │   └── types/*.d.ts
 ├── locale/{zh,en}.json
 └── README.md

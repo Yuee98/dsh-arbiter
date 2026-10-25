@@ -31,6 +31,8 @@
 
 首轮报告里的"真实人工审批、真实模型质量、decision 后端网络、Web 点击"仍未验证，状态不变。
 
+工程约束、分层测试、i18n 和真实 DSH smoke 的使用方式见[开发基线](docs/development-baseline.md)。
+
 ## 从这里开始
 
 | 阅读目的                               | 文档                                                    |
@@ -114,18 +116,23 @@ mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm verify
 ```
 
-| 命令                     | 检查内容                                                          |
-| ------------------------ | ----------------------------------------------------------------- |
-| `pnpm typecheck`         | 严格检查源码、测试、脚本与 TSX 客户端                             |
-| `pnpm lint`              | 类型感知 ESLint，零警告，禁止行内禁用与 focused/disabled tests    |
-| `pnpm format:check`      | 检查格式；`pnpm format` 单独执行格式化                            |
-| `pnpm check:unused`      | Knip 检查未使用文件、导出与依赖                                   |
-| `pnpm check:workflows`   | actionlint 检查 GitHub Actions 工作流                             |
-| `pnpm test`              | 66 个单元测试（规则、策略、配置、reviewer、快照、审计、离线建议） |
-| `pnpm build`             | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
-| `pnpm check:build`       | 临时消费者验证导入、声明文件正反例和客户端 bundle 工厂            |
-| `pnpm check:regressions` | 运行评审提供的 R1–R9 复现脚本（生命周期夹具，不启动 DSH）         |
-| `pnpm verify`            | 顺序执行以上全部检查、测试、构建与 R1–R9 回归                     |
+| 命令                        | 检查内容                                                          |
+| --------------------------- | ----------------------------------------------------------------- |
+| `pnpm typecheck`            | 严格检查源码、测试、脚本与 TSX 客户端                             |
+| `pnpm lint`                 | 顺序运行工程与 Testing Library 两遍 ESLint，均要求零警告          |
+| `pnpm lint:code`            | 严格类型、React 与工程检查，禁止行内禁用与 focused/disabled tests |
+| `pnpm lint:testing-library` | 对 RTL 测试与 render helper 运行完整 React 推荐规则               |
+| `pnpm lint:fix`             | 两套配置分别自动修复，再运行完整 lint 复查                        |
+| `pnpm format:check`         | 检查格式；`pnpm format` 单独执行格式化                            |
+| `pnpm check:unused`         | Knip 检查未使用文件、导出与依赖                                   |
+| `pnpm check:workflows`      | actionlint 与 zizmor 离线检查 GitHub Actions／Dependabot          |
+| `pnpm check:dependencies`   | 检查源码运行时循环依赖，类型引用不计入                            |
+| `pnpm test`                 | 运行 unit、integration 与 UI 三个 Vitest 项目                     |
+| `pnpm test:coverage`        | 全量源码覆盖率报告，无百分比门槛和过渡名单                        |
+| `pnpm build`                | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
+| `pnpm check:build`          | publint 检查 tarball，并由离线消费者验证类型、工厂与打包资源      |
+| `pnpm check:regressions`    | 运行评审提供的 R1–R9 复现脚本（生命周期夹具，不启动 DSH）         |
+| `pnpm verify`               | 以上检查、peer 兼容性、i18n、构建与 R1–R9 回归                    |
 
 真实 DSH 集成证据：`validation/arbiter-integration/2026-10-21-arbiter-01/`（14 个用例，含真实 pre-execute、真实会话记录、真实 SQLite、模拟人工审批单独标注）。运行：
 
