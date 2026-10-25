@@ -1,7 +1,7 @@
 import { parseConfig } from '../config.js';
 import { testRules } from '../rules/match.js';
 import { isRecord } from './common.js';
-import { asRule, jsonResponse, readJsonBody } from './http.js';
+import { asRuleDraft, jsonResponse, readJsonBody } from './http.js';
 import type { HostEnvironment, FetchRouteLike } from './types.js';
 
 export function validateRoute(): FetchRouteLike {
@@ -187,18 +187,33 @@ export function testRoute(host: HostEnvironment): FetchRouteLike {
           400,
         );
       }
-      const rules = Array.isArray(body['rules'])
-        ? body['rules'].flatMap((value) => {
-            const rule = asRule(value);
-            return rule === null ? [] : [rule];
-          })
-        : runtime.config.rules;
+      const drafts = Array.isArray(body['rules'])
+        ? body['rules'].map((value) => asRuleDraft(value))
+        : null;
+      const draftErrors = (drafts ?? []).flatMap((draft) => draft.errors);
+      if (draftErrors.length > 0)
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'invalid-rule',
+            message: 'the submitted rules are not valid',
+            errors: draftErrors,
+          },
+          400,
+        );
+      const rules =
+        drafts === null
+          ? runtime.config.rules
+          : drafts.flatMap((draft) => draft.rules);
       const cwd = typeof body['cwd'] === 'string' ? body['cwd'] : process.cwd();
+      const identity = body['identity'];
+      const agentIdentity =
+        identity === 'subagent' || identity === 'main' ? identity : 'main';
       const results = body['inputs']
         .filter((input): input is string => typeof input === 'string')
         .map((input) =>
           testRules(input, rules, {
-            identity: 'main',
+            identity: agentIdentity,
             workspaceRoot: cwd,
             cwd,
           }),

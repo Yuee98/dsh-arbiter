@@ -108,7 +108,9 @@ interface StartedHost {
 
 const EXISTING_RULE = {
   id: 'keep-me',
-  match: { node: 'command', kind: 'regex', pattern: '^gh pr view\\b' },
+  conditions: [
+    { target: 'command', kind: 'regex', pattern: 'gh pr view(?: .*)?' },
+  ],
   verdict: 'allow',
 };
 
@@ -135,7 +137,11 @@ async function startHost(): Promise<StartedHost> {
       },
     },
   };
-  const configured = { rules: [EXISTING_RULE], audit: DEFAULT_CONFIG.audit };
+  const configured = {
+    format: 'arbiter-config-v2',
+    rules: [EXISTING_RULE],
+    audit: DEFAULT_CONFIG.audit,
+  };
   const entry = { options: { id: 'arbiter', config: configured } };
   apply(
     stubContext({

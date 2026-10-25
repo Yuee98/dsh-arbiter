@@ -1,19 +1,39 @@
+/**
+ * Canonical rule validation.
+ *
+ * A rule is a stable id, an optional custom name, a scope (tool and agent), one
+ * or more alternative conditions, and a verdict. Every supplied field is
+ * validated strictly: a wrong type is an error, never a permissive default that
+ * would widen what the rule allows. A disabled rule is still validated, because
+ * it can be enabled later without another check.
+ *
+ * Match semantics belong to `src/rules/compile.ts`; this module only decides
+ * which documents are valid and which fields apply to which target, so the
+ * configuration page, the host save path and external file replacement share one
+ * standard.
+ */
+
 import type {
   CommandRule,
   ConfigError,
   ConfigWarning,
+  RuleCondition,
   RuleKind,
-  RuleMatchSpec,
-  RuleNode,
+  RuleMultiMode,
+  RulePattern,
+  RuleScope,
+  RuleTarget,
   RuleVerdict,
 } from '../types.js';
-import { isRecord, asEnum } from './values.js';
+import { validateSelector } from '../rules/selector.js';
+import { isRecord } from './values.js';
 
-const RULE_NODES: readonly RuleNode[] = [
+const RULE_TARGETS: readonly RuleTarget[] = [
   'command',
   'file_redirect',
   'variable_assignment',
   'tool',
+  'argument',
 ];
 const RULE_KINDS: readonly RuleKind[] = ['exact', 'regex', 'glob'];
 const RULE_VERDICTS: readonly RuleVerdict[] = [
@@ -22,39 +42,36 @@ const RULE_VERDICTS: readonly RuleVerdict[] = [
   'force-ask',
   'force-review',
 ];
+const MULTI_MODES: readonly RuleMultiMode[] = ['any', 'all'];
 
 /**
- * `agents` narrows a rule to specific identities. A supplied value must be a
- * non-empty list of strings: silently dropping a malformed scope would widen
- * the rule beyond what the user wrote.
+ * Read a supplied enum value.
+ *
+ * Unlike the generic configuration helper this never substitutes a default for a
+ * supplied but unknown value: a typo in `verdict` must not silently become
+ * `allow`. The returned fallback is only used when the field is absent.
  */
-function parseAgents(
+function enumField<T extends string>(
   value: unknown,
+  allowed: readonly T[],
+  fallback: T,
   path: string,
   errors: ConfigError[],
-): readonly string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length === 0) {
-    errors.push({
-      path,
-      message: 'must be a non-empty array of strings',
-      code: 'type.agent-scope',
-    });
-    return undefined;
+): T {
+  if (value === undefined) return fallback;
+  if (typeof value === 'string') {
+    const match = allowed.find((entry) => entry === value);
+    if (match !== undefined) return match;
   }
-  const values: readonly unknown[] = value;
-  if (values.some((agent) => typeof agent !== 'string')) {
-    errors.push({
-      path,
-      message: 'must be a non-empty array of strings',
-      code: 'type.agent-scope',
-    });
-    return undefined;
-  }
-  return values.filter((agent): agent is string => typeof agent === 'string');
+  errors.push({
+    path,
+    message: `must be one of ${allowed.join(', ')}`,
+    code: 'enum.value',
+    params: { values: allowed.join(', ') },
+  });
+  return fallback;
 }
 
-/** A supplied string field; a present non-string is an error, absent is `undefined`. */
 function optionalString(
   value: unknown,
   path: string,
@@ -66,10 +83,6 @@ function optionalString(
   return undefined;
 }
 
-/**
- * A supplied `enabled` flag must be boolean: an invalid value must not silently
- * keep a rule enabled, which would widen what the configuration allows.
- */
 function boolField(
   value: unknown,
   path: string,
@@ -81,49 +94,227 @@ function boolField(
   return undefined;
 }
 
-function parseMatch(
+/** A non-empty list of non-empty strings, or `undefined` when absent. */
+function stringList(
   value: unknown,
   path: string,
   errors: ConfigError[],
-): RuleMatchSpec | null {
-  if (!isRecord(value)) {
+  code: string,
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
     errors.push({
-      path: `${path}.match`,
-      message: 'must be an object',
-      code: 'type.object',
+      path,
+      message: 'must be a non-empty array of strings',
+      code,
     });
+    return undefined;
+  }
+  const values: readonly unknown[] = value;
+  if (values.some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+    errors.push({
+      path,
+      message: 'must be a non-empty array of strings',
+      code,
+    });
+    return undefined;
+  }
+  return values.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function parseScope(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): RuleScope | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    errors.push({ path, message: 'must be an object', code: 'type.object' });
+    return undefined;
+  }
+  const tools = stringList(
+    value['tools'],
+    `${path}.tools`,
+    errors,
+    'rule.tools-empty',
+  );
+  const agents = stringList(
+    value['agents'],
+    `${path}.agents`,
+    errors,
+    'type.agent-scope',
+  );
+  for (const agent of agents ?? []) {
+    if (
+      agent !== 'main' &&
+      agent !== 'subagent' &&
+      !agent.startsWith('preset:')
+    )
+      errors.push({
+        path: `${path}.agents`,
+        message: `unknown agent identity "${agent}"`,
+        code: 'rule.agent-unknown',
+        params: { agent },
+      });
+  }
+  return {
+    ...(tools === undefined ? {} : { tools }),
+    ...(agents === undefined ? {} : { agents }),
+  };
+}
+
+/**
+ * A pattern is read as the JSON value the user wrote.
+ *
+ * `regex` and `glob` need text; `exact` may compare a string, number, boolean or
+ * null so a tool argument keeps its type. An absent pattern is an error rather
+ * than an empty string, because an empty expression is a much broader match.
+ */
+function parsePattern(
+  value: unknown,
+  kind: RuleKind,
+  path: string,
+  errors: ConfigError[],
+): RulePattern | undefined {
+  if (value === undefined) {
+    errors.push({
+      path,
+      message: 'a match expression is required',
+      code: 'rule.pattern-empty',
+    });
+    return undefined;
+  }
+  // `null` is a legal exact value and must survive parsing unchanged.
+  if (kind === 'exact') {
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value))
+    )
+      return value;
+    errors.push({
+      path,
+      message: 'must be a string, number, boolean or null',
+      code: 'rule.pattern-type',
+    });
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    errors.push({
+      path,
+      message: `a ${kind} pattern must be a string`,
+      code: 'rule.pattern-type',
+      params: { kind },
+    });
+    return undefined;
+  }
+  if (value.length === 0) {
+    errors.push({
+      path,
+      message: 'a match expression must not be empty',
+      code: 'rule.pattern-empty',
+    });
+    return undefined;
+  }
+  return value;
+}
+
+function parseCondition(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): RuleCondition | null {
+  if (!isRecord(value)) {
+    errors.push({ path, message: 'must be an object', code: 'type.object' });
     return null;
   }
-  const node = asEnum(
-    value['node'],
-    RULE_NODES,
+  const target = enumField(
+    value['target'],
+    RULE_TARGETS,
     'command',
-    `${path}.match.node`,
+    `${path}.target`,
     errors,
   );
-  const kind = asEnum(
+  const kind = enumField(
     value['kind'],
     RULE_KINDS,
     'exact',
-    `${path}.match.kind`,
+    `${path}.kind`,
     errors,
   );
-  const pattern =
-    optionalString(value['pattern'], `${path}.match.pattern`, errors) ?? '';
-  const tool = optionalString(value['tool'], `${path}.match.tool`, errors);
-  const selector = optionalString(
-    value['selector'],
-    `${path}.match.selector`,
-    errors,
-  );
-  const agents = parseAgents(value['agents'], `${path}.match.agents`, errors);
-  return {
-    node,
+  const pattern = parsePattern(
+    value['pattern'],
     kind,
-    pattern,
-    ...(tool === undefined ? {} : { tool }),
-    ...(selector === undefined ? {} : { selector }),
-    ...(agents === undefined ? {} : { agents }),
+    `${path}.pattern`,
+    errors,
+  );
+  const caseSensitive = boolField(
+    value['caseSensitive'],
+    `${path}.caseSensitive`,
+    errors,
+  );
+  const suppliedPath = optionalString(value['path'], `${path}.path`, errors);
+  const suppliedMulti = enumField(
+    value['multi'],
+    MULTI_MODES,
+    'any',
+    `${path}.multi`,
+    errors,
+  );
+  const multiSupplied = value['multi'] !== undefined;
+  const pathSupplied = value['path'] !== undefined;
+
+  if (target === 'argument') {
+    if (suppliedPath === undefined) {
+      if (!pathSupplied)
+        errors.push({
+          path: `${path}.path`,
+          message: 'an argument condition requires a JSONPath expression',
+          code: 'rule.path-required',
+        });
+    } else {
+      const problem = validateSelector(suppliedPath);
+      if (problem !== null)
+        errors.push({
+          path: `${path}.path`,
+          message: `invalid JSONPath: ${problem}`,
+          code: 'rule.path-invalid',
+          params: { path: suppliedPath },
+        });
+    }
+  } else {
+    // A scope/field that belongs to another target is an error: silently dropping
+    // it would change what the user asked the rule to do.
+    if (pathSupplied)
+      errors.push({
+        path: `${path}.path`,
+        message: 'path is only valid for the argument target',
+        code: 'rule.path-scope',
+        params: { target },
+      });
+    if (multiSupplied)
+      errors.push({
+        path: `${path}.multi`,
+        message: 'multi is only valid for the argument target',
+        code: 'rule.multi-scope',
+        params: { target },
+      });
+  }
+
+  // A missing or invalid pattern already produced an error, and the document is
+  // invalid, so the placeholder is never matched. `null` is a real exact value:
+  // `??` would erase it into an empty string, so only `undefined` is replaced.
+  const resolved: RulePattern = pattern === undefined ? '' : pattern;
+  return {
+    target,
+    ...(target === 'argument' && suppliedPath !== undefined
+      ? { path: suppliedPath }
+      : {}),
+    kind,
+    pattern: resolved,
+    ...(caseSensitive === undefined ? {} : { caseSensitive }),
+    ...(target === 'argument' ? { multi: suppliedMulti } : {}),
   };
 }
 
@@ -138,9 +329,39 @@ export function parseRule(
     return null;
   }
   const id = optionalString(value['id'], `${path}.id`, errors)?.trim() ?? '';
-  const match = parseMatch(value['match'], path, errors);
-  if (match === null) return null;
-  const verdict = asEnum(
+  if (id.length === 0)
+    errors.push({
+      path: `${path}.id`,
+      message: 'a rule id must not be empty',
+      code: 'rule.id-empty',
+    });
+  const name = optionalString(value['name'], `${path}.name`, errors);
+  if (name !== undefined && name.trim().length === 0)
+    errors.push({
+      path: `${path}.name`,
+      message: 'a custom name must not be blank',
+      code: 'rule.name-empty',
+    });
+  const scope = parseScope(value['scope'], `${path}.scope`, errors);
+  const rawConditions = value['conditions'];
+  if (!Array.isArray(rawConditions) || rawConditions.length === 0) {
+    errors.push({
+      path: `${path}.conditions`,
+      message: 'a rule requires at least one condition',
+      code: 'rule.conditions-empty',
+    });
+    return null;
+  }
+  const conditions: RuleCondition[] = [];
+  rawConditions.forEach((condition, conditionIndex) => {
+    const parsed = parseCondition(
+      condition,
+      `${path}.conditions[${String(conditionIndex)}]`,
+      errors,
+    );
+    if (parsed !== null) conditions.push(parsed);
+  });
+  const verdict = enumField(
     value['verdict'],
     RULE_VERDICTS,
     'allow',
@@ -152,11 +373,13 @@ export function parseRule(
   const hint = optionalString(value['hint'], `${path}.hint`, errors);
   return {
     id,
-    match,
+    conditions,
     verdict,
+    ...(name === undefined ? {} : { name }),
     ...(comment === undefined ? {} : { comment }),
     ...(hint === undefined ? {} : { hint }),
     ...(enabled === undefined ? {} : { enabled }),
+    ...(scope === undefined ? {} : { scope }),
   };
 }
 
@@ -182,6 +405,25 @@ function literalPrefix(pattern: string): string {
   return out;
 }
 
+/** The condition-level patterns a warning may compare. */
+function comparablePatterns(rule: CommandRule): readonly string[] {
+  return rule.conditions.flatMap((condition) =>
+    typeof condition.pattern === 'string' ? [condition.pattern] : [],
+  );
+}
+
+function sharesTargets(left: CommandRule, right: CommandRule): boolean {
+  const targets = new Set(left.conditions.map((condition) => condition.target));
+  return right.conditions.some((condition) => targets.has(condition.target));
+}
+
+/**
+ * Non-blocking warnings.
+ *
+ * A force-review rule that overlaps an allow rule can make the allow ineffective.
+ * The check only reports overlap it can actually justify from the expressions; it
+ * never claims to detect every conflict and never blocks saving.
+ */
 export function ruleWarnings(rules: readonly CommandRule[]): ConfigWarning[] {
   const warnings: ConfigWarning[] = [];
   const allowRules = rules.filter(
@@ -192,26 +434,27 @@ export function ruleWarnings(rules: readonly CommandRule[]): ConfigWarning[] {
   );
   for (const allow of allowRules) {
     for (const review of forceReviewRules) {
-      if (allow.match.node !== review.match.node) continue;
-      if (allow.match.tool !== review.match.tool) continue;
-      if (allow.match.selector !== review.match.selector) continue;
-      if (allow.match.agents !== undefined || review.match.agents !== undefined)
-        continue;
-      const reviewPrefix = literalPrefix(review.match.pattern);
-      const allowPrefix = literalPrefix(allow.match.pattern);
-      if (
-        review.match.pattern === allow.match.pattern ||
-        (reviewPrefix.length > 0 &&
-          (allowPrefix.startsWith(reviewPrefix) ||
-            reviewPrefix.startsWith(allowPrefix)))
-      ) {
+      if (!sharesTargets(allow, review)) continue;
+      if (allow.scope !== undefined || review.scope !== undefined) continue;
+      const overlaps = comparablePatterns(allow).some((allowPattern) => {
+        const allowPrefix = literalPrefix(allowPattern);
+        return comparablePatterns(review).some((reviewPattern) => {
+          const reviewPrefix = literalPrefix(reviewPattern);
+          return (
+            allowPattern === reviewPattern ||
+            (reviewPrefix.length > 0 &&
+              (allowPrefix.startsWith(reviewPrefix) ||
+                reviewPrefix.startsWith(allowPrefix)))
+          );
+        });
+      });
+      if (overlaps)
         warnings.push({
           path: `rules.${allow.id}`,
           message: `allow rule "${allow.id}" may be shadowed by force-review rule "${review.id}"`,
           code: 'rule.shadowed',
           params: { allow: allow.id, review: review.id },
         });
-      }
     }
   }
   return warnings;

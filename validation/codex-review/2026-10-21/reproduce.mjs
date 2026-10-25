@@ -20,8 +20,15 @@ const closers = [];
 function check(id, description, passes, actual) {
   results.push({ id, description, passes, actual });
 }
+// The harness exercises the current rule model directly. Legacy conversion is
+// covered by the unit and integration suites; here the fixture states the
+// canonical shape so the cases test gate behaviour rather than migration.
 function rule(id, node, kind, pattern, verdict = 'allow') {
-  return { id, match: { node, kind, pattern }, verdict };
+  return { id, conditions: [{ target: node, kind, pattern }], verdict };
+}
+// A document carrying canonical rules must declare the canonical format.
+function document(config) {
+  return { format: 'arbiter-config-v2', ...config };
 }
 function record(callId, overrides = {}) {
   return {
@@ -120,10 +127,10 @@ try {
   fresh.close();
 
   const deny = rule('profile-rule', 'command', 'regex', '^echo(?:\\s|$)', 'deny');
-  const a = context('A', session, stream); apply(a.ctx, { rules: [deny] }); a.close();
-  const b = context('B', session, stream); apply(b.ctx, { rules: [{ ...deny, verdict: 'allow' }] }); b.close();
+  const a = context('A', session, stream); apply(a.ctx, document({ rules: [deny] })); a.close();
+  const b = context('B', session, stream); apply(b.ctx, document({ rules: [{ ...deny, verdict: 'allow' }] })); b.close();
   const invalidA = context('A', session, stream);
-  apply(invalidA.ctx, { rules: [{ ...deny, match: { ...deny.match, pattern: 'echo' } }] });
+  apply(invalidA.ctx, document({ rules: [{ ...deny, conditions: [{ target: 'command', kind: 'regex', pattern: '(' }] }] }));
   const state = await (await invalidA.routes.get('/api/arbiter/state').fetch(new Request('http://fixture/state'))).json();
   check('R4', 'Invalid profile A must restore A rather than profile B',
     state.config.rules[0]?.verdict === 'deny', { restoredRule: state.config.rules[0], error: state.invalidConfigError });

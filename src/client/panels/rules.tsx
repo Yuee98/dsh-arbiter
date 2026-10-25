@@ -13,13 +13,26 @@ import {
 } from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { errorText } from '../view-helpers.js';
-import type { Draft, DraftRule } from '../view-types.js';
+import type { Draft, DraftRule, Mutable } from '../view-types.js';
 import type {
+  RuleCondition,
   RuleKind,
-  RuleNode,
+  RuleScope,
+  RuleTarget,
   RuleVerdict,
   RuleTestResult,
 } from '../../types.js';
+
+type MutableRuleCondition = Mutable<RuleCondition>;
+type MutableRuleScope = Mutable<RuleScope>;
+
+/**
+ * The declaration a canonical rule needs.
+ *
+ * The page only knows the format identifier as data it sends back; it must not
+ * import the backend configuration module, so the constant is repeated here.
+ */
+const CANONICAL_FORMAT = 'arbiter-config-v2';
 
 const VERDICTS: readonly RuleVerdict[] = [
   'allow',
@@ -27,13 +40,80 @@ const VERDICTS: readonly RuleVerdict[] = [
   'force-ask',
   'force-review',
 ];
-const NODES: readonly RuleNode[] = [
+const TARGETS: readonly RuleTarget[] = [
   'command',
   'file_redirect',
   'variable_assignment',
   'tool',
+  'argument',
 ];
 const KINDS: readonly RuleKind[] = ['exact', 'regex', 'glob'];
+
+/** A new rule starts on the structural target the old editor defaulted to. */
+function defaultCondition(): MutableRuleCondition {
+  return { target: 'command', kind: 'regex', pattern: '' };
+}
+
+/** The pattern as editable text; a typed pattern keeps its JSON spelling. */
+function patternText(condition: RuleCondition): string {
+  return typeof condition.pattern === 'string'
+    ? condition.pattern
+    : JSON.stringify(condition.pattern);
+}
+
+function splitList(value: string): readonly string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/**
+ * Replace one scope dimension and drop the scope object when nothing remains.
+ *
+ * The draft type mirrors a readonly rule, so a scope is rebuilt rather than
+ * mutated in place; `exactOptionalPropertyTypes` forbids assigning `undefined`.
+ */
+function withScope(
+  current: MutableRuleScope | undefined,
+  change: {
+    readonly tools?: readonly string[];
+    readonly agents?: readonly string[];
+  },
+): MutableRuleScope | undefined {
+  const tools =
+    change.tools === undefined
+      ? current?.tools
+      : change.tools.length === 0
+        ? undefined
+        : change.tools;
+  const agents =
+    change.agents === undefined
+      ? current?.agents
+      : change.agents.length === 0
+        ? undefined
+        : change.agents;
+  if (tools === undefined && agents === undefined) return undefined;
+  return {
+    ...(tools === undefined ? {} : { tools: [...tools] }),
+    ...(agents === undefined ? {} : { agents: [...agents] }),
+  };
+}
+
+/** The first condition, which the compact table row edits. */
+function primaryCondition(rule: DraftRule): MutableRuleCondition {
+  return rule.conditions[0] ?? defaultCondition();
+}
+
+/** Edit the first condition, leaving any additional conditions untouched. */
+function updatePrimaryCondition(
+  rule: DraftRule,
+  mutator: (condition: MutableRuleCondition) => void,
+): void {
+  if (rule.conditions.length === 0) rule.conditions.push(defaultCondition());
+  const first = rule.conditions[0];
+  if (first !== undefined) mutator(first);
+}
 
 export function RulesPanel(props: {
   readonly draft: Draft;
@@ -63,7 +143,6 @@ export function RulesPanel(props: {
                 <th style={{ padding: 6 }}>{t('rules.toolSelector')}</th>
                 <th style={{ padding: 6 }}>{t('rules.verdict')}</th>
                 <th style={{ padding: 6 }}>{t('rules.scope')}</th>
-                <th style={{ padding: 6 }}>{t('rules.comment')}</th>
                 <th style={{ padding: 6 }}>{t('rules.actions')}</th>
               </tr>
             </thead>
@@ -85,10 +164,13 @@ export function RulesPanel(props: {
               onDraft((next) => {
                 next.rules.push({
                   id: `rule-${String(next.rules.length + 1)}`,
-                  match: { node: 'command', kind: 'regex', pattern: '^' },
+                  conditions: [defaultCondition()],
                   verdict: 'allow',
                   comment: '',
                 });
+                // A canonical rule needs the canonical declaration; without it
+                // the document would still be read as the legacy format.
+                next.format = CANONICAL_FORMAT;
               });
             }}
           >
@@ -164,68 +246,83 @@ function RuleRow({
       <td style={{ padding: 6 }}>
         <Select
           ariaLabel={t('rules.node')}
-          value={rule.match.node}
-          options={NODES}
+          value={primaryCondition(rule).target}
+          options={TARGETS}
           onChange={(value) => {
             updateRule(index, (next) => {
-              next.match.node = value;
+              updatePrimaryCondition(next, (condition) => {
+                condition.target = value;
+                // `path` and `multi` belong to the argument target only, so a
+                // target change drops them instead of leaving an invalid rule.
+                if (value === 'argument') return;
+                delete condition.path;
+                delete condition.multi;
+              });
             });
           }}
         />
       </td>
-      <td style={{ padding: 6, minWidth: 220 }}>
+      <td style={{ padding: 6, minWidth: 260 }}>
         <div style={{ display: 'flex', gap: 4 }}>
           <div style={{ width: 86 }}>
             <Select
               ariaLabel={t('rules.kind')}
-              value={rule.match.kind}
+              value={primaryCondition(rule).kind}
               options={KINDS}
               onChange={(value) => {
                 updateRule(index, (next) => {
-                  next.match.kind = value;
+                  updatePrimaryCondition(next, (condition) => {
+                    condition.kind = value;
+                  });
                 });
               }}
             />
           </div>
           <TextInput
             ariaLabel={t('rules.pattern')}
-            value={rule.match.pattern}
+            value={patternText(primaryCondition(rule))}
             onChange={(value) => {
               updateRule(index, (next) => {
-                next.match.pattern = value;
+                updatePrimaryCondition(next, (condition) => {
+                  condition.pattern = value;
+                  if (condition.kind !== 'exact') condition.pattern = value;
+                });
               });
             }}
             monospace
           />
         </div>
+        {primaryCondition(rule).target === 'argument' ? (
+          <TextInput
+            ariaLabel={t('rules.path')}
+            value={primaryCondition(rule).path ?? ''}
+            placeholder={t('rules.pathPlaceholder')}
+            onChange={(value) => {
+              updateRule(index, (next) => {
+                updatePrimaryCondition(next, (condition) => {
+                  if (value.length === 0) delete condition.path;
+                  else condition.path = value;
+                });
+              });
+            }}
+            monospace
+          />
+        ) : null}
       </td>
       <td style={{ padding: 6, minWidth: 150 }}>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <TextInput
-            ariaLabel={t('rules.tool')}
-            value={rule.match.tool ?? ''}
-            placeholder={t('rules.tool')}
-            onChange={(value) => {
-              updateRule(index, (next) => {
-                if (value.length === 0) delete next.match.tool;
-                else next.match.tool = value;
-              });
-            }}
-            monospace
-          />
-          <TextInput
-            ariaLabel={t('rules.selector')}
-            value={rule.match.selector ?? ''}
-            placeholder={t('rules.selector')}
-            onChange={(value) => {
-              updateRule(index, (next) => {
-                if (value.length === 0) delete next.match.selector;
-                else next.match.selector = value;
-              });
-            }}
-            monospace
-          />
-        </div>
+        <TextInput
+          ariaLabel={t('rules.tool')}
+          value={(rule.scope?.tools ?? []).join(', ')}
+          placeholder={t('rules.tool')}
+          onChange={(value) => {
+            updateRule(index, (next) => {
+              const scope = withScope(next.scope, { tools: splitList(value) });
+              if (scope === undefined) delete next.scope;
+              else next.scope = scope;
+            });
+          }}
+          monospace
+        />
       </td>
       <td style={{ padding: 6, minWidth: 110 }}>
         <Select
@@ -248,16 +345,13 @@ function RuleRow({
       <td style={{ padding: 6, minWidth: 150 }}>
         <TextInput
           ariaLabel={t('rules.scope')}
-          value={(rule.match.agents ?? []).join(', ')}
+          value={(rule.scope?.agents ?? []).join(', ')}
           placeholder={t('rules.agents')}
           onChange={(value) => {
             updateRule(index, (next) => {
-              const agents = value
-                .split(',')
-                .map((item) => item.trim())
-                .filter((item) => item.length > 0);
-              if (agents.length === 0) delete next.match.agents;
-              else next.match.agents = agents;
+              const scope = withScope(next.scope, { agents: splitList(value) });
+              if (scope === undefined) delete next.scope;
+              else next.scope = scope;
             });
           }}
         />

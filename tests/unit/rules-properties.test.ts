@@ -2,7 +2,11 @@ import fc from 'fast-check';
 import { describe, expect, test } from 'vitest';
 
 import { evaluateCall } from '../../src/rules/match.js';
-import type { CommandRule, RuleVerdict } from '../../src/types.js';
+import type {
+  CommandRule,
+  RuleCondition,
+  RuleVerdict,
+} from '../../src/types.js';
 
 const toolName = fc.constantFrom('read', 'bash', 'run_code', 'mcp.fs.read');
 const otherRule = fc.record({
@@ -26,7 +30,7 @@ function toolRule(
     id,
     enabled,
     verdict,
-    match: { node: 'tool', kind: 'exact', pattern: tool, tool },
+    conditions: [{ target: 'tool', kind: 'exact', pattern: tool }],
   };
 }
 
@@ -43,6 +47,27 @@ function evaluate(rules: readonly CommandRule[], tool: string) {
     overlapsDeniedEffect: false,
   });
 }
+
+/** Two arbitrary alternatives over the same structural target. */
+const conditionPair = fc.tuple(
+  fc.record({
+    kind: fc.constantFrom('exact' as const, 'regex' as const, 'glob' as const),
+    pattern: fc.constantFrom('echo hello', 'echo(?: .*)?', 'echo*', 'rm -rf /'),
+  }),
+  fc.record({
+    kind: fc.constantFrom('exact' as const, 'regex' as const, 'glob' as const),
+    pattern: fc.constantFrom('echo hello', 'echo(?: .*)?', 'echo*', 'rm -rf /'),
+  }),
+);
+
+const asCondition = (entry: {
+  readonly kind: 'exact' | 'regex' | 'glob';
+  readonly pattern: string;
+}): RuleCondition => ({
+  target: 'command',
+  kind: entry.kind,
+  pattern: entry.pattern,
+});
 
 describe('rule priority properties', () => {
   test('a matching enabled deny dominates other verdicts regardless of rule order', () => {
@@ -116,5 +141,122 @@ describe('rule priority properties', () => {
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+describe('condition properties', () => {
+  test('alternatives are commutative: the rule matches in either order', () => {
+    fc.assert(
+      fc.property(conditionPair, ([left, right]) => {
+        const ruleIn = (conditions: readonly RuleCondition[]): CommandRule => ({
+          id: 'or',
+          verdict: 'deny',
+          conditions,
+        });
+        const forward = evaluateCall({
+          rules: [ruleIn([asCondition(left), asCondition(right)])],
+          tool: 'bash',
+          arguments: { command: 'echo hello' },
+          identity: 'main',
+          workspaceRoot: '/w',
+          cwd: '/w',
+          parentAuthorizationPresent: null,
+          historyTruncated: false,
+          overlapsDeniedEffect: false,
+        });
+        const reverse = evaluateCall({
+          rules: [ruleIn([asCondition(right), asCondition(left)])],
+          tool: 'bash',
+          arguments: { command: 'echo hello' },
+          identity: 'main',
+          workspaceRoot: '/w',
+          cwd: '/w',
+          parentAuthorizationPresent: null,
+          historyTruncated: false,
+          overlapsDeniedEffect: false,
+        });
+        expect(forward.rules[0]?.outcome).toBe(reverse.rules[0]?.outcome);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  test('all implies any for the same selection and pattern', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom('a', 'b', '/etc'), { maxLength: 4 }),
+        (values) => {
+          const make = (multi: 'any' | 'all'): CommandRule => ({
+            id: `multi-${multi}`,
+            verdict: 'deny',
+            conditions: [
+              {
+                target: 'argument',
+                path: '$[*]',
+                kind: 'exact',
+                pattern: 'a',
+                multi,
+              },
+            ],
+          });
+          const run = (multi: 'any' | 'all') =>
+            evaluateCall({
+              rules: [make(multi)],
+              tool: 'probe',
+              arguments: values,
+              identity: 'main',
+              workspaceRoot: '/w',
+              cwd: '/w',
+              parentAuthorizationPresent: null,
+              historyTruncated: false,
+              overlapsDeniedEffect: false,
+            }).rules[0]?.outcome;
+          const any = run('any');
+          const all = run('all');
+          // Express the implication without a conditional assertion: `all`
+          // matching must imply `any` matching, and `any` failing must imply
+          // `all` failing.
+          const implies = (left: boolean, right: boolean): boolean =>
+            !left || right;
+          expect(implies(all === 'match', any === 'match')).toBe(true);
+          expect(implies(any === 'no-match', all === 'no-match')).toBe(true);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  test('an empty selection never matches, in either mode', () => {
+    for (const multi of ['any', 'all'] as const) {
+      const evaluation = evaluateCall({
+        rules: [
+          {
+            id: 'empty',
+            verdict: 'deny',
+            conditions: [
+              {
+                target: 'argument',
+                path: '$.missing[*]',
+                kind: 'exact',
+                pattern: 'x',
+                multi,
+              },
+            ],
+          },
+        ],
+        tool: 'probe',
+        arguments: { present: ['x'] },
+        identity: 'main',
+        workspaceRoot: '/w',
+        cwd: '/w',
+        parentAuthorizationPresent: null,
+        historyTruncated: false,
+        overlapsDeniedEffect: false,
+      });
+      expect(evaluation.rules[0]?.outcome).toBe('no-match');
+      expect(evaluation.rules[0]?.conditions[0]?.reason).toBe(
+        'empty-selection',
+      );
+    }
   });
 });

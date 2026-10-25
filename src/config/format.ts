@@ -30,8 +30,18 @@ export interface ConfigFormatIdentification {
 
 export const CONFIG_FORMAT_FIELD = 'format';
 
-/** The format of a document that does not declare one: the current rule model. */
-export const DEFAULT_CONFIG_FORMAT = 'arbiter-config-v1';
+/** The current rule format: scope, OR conditions and whole-value matching. */
+export const CONFIG_FORMAT_V2 = 'arbiter-config-v2';
+
+/**
+ * The legacy format, kept for documents that were written before v2.
+ *
+ * This is also the format of a document that does not declare one: identification
+ * never guesses a newer meaning from the content, so an existing file keeps the
+ * prefix semantics it was written for and is not silently reinterpreted as
+ * whole-value matching.
+ */
+export const CONFIG_FORMAT_V1 = 'arbiter-config-v1';
 
 const handlers = new Map<string, ConfigFormatHandler>();
 
@@ -63,7 +73,8 @@ export function registeredConfigFormats(): readonly string[] {
 export function identifyConfigFormat(raw: unknown): ConfigFormatIdentification {
   const declared = isRecord(raw) ? raw[CONFIG_FORMAT_FIELD] : undefined;
   const explicit = declared !== undefined;
-  const id = declared === undefined ? DEFAULT_CONFIG_FORMAT : declared;
+  // An undeclared document keeps the legacy format rather than the newest one.
+  const id = declared === undefined ? CONFIG_FORMAT_V1 : declared;
   if (typeof id !== 'string' || id.length === 0) {
     return {
       id: null,

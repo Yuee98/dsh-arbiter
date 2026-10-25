@@ -30,10 +30,12 @@ export interface SeededModelGroup {
 
 export interface ProfileOptions {
   /**
-   * `empty` writes an explicit empty object, while `unset` omits the user
-   * config entirely so the plugin must apply the first-install defaults.
+   * `empty` writes an explicit empty object, while `unset` omits the user config
+   * entirely so the plugin must apply the first-install defaults. A value object
+   * is written verbatim, so a case can seed the canonical rule format.
    */
-  readonly arbiterConfig?: 'empty' | 'unset';
+  readonly arbiterConfig?:
+    'empty' | 'unset' | Readonly<Record<string, unknown>>;
   /**
    * Hand-declared `llm-pi-ai` routes, so the real host model directory is not
    * empty without a credential or any network call: pi-ai resolves these
@@ -180,7 +182,13 @@ export async function createIsolatedProfile(
   const arbiterRow =
     options.arbiterConfig === 'unset'
       ? { id: 'arbiter', name: 'dsh-arbiter' }
-      : { id: 'arbiter', name: 'dsh-arbiter', config: {} };
+      : options.arbiterConfig === undefined || options.arbiterConfig === 'empty'
+        ? { id: 'arbiter', name: 'dsh-arbiter', config: {} }
+        : {
+            id: 'arbiter',
+            name: 'dsh-arbiter',
+            config: options.arbiterConfig,
+          };
   await writeFile(
     join(profile, 'cordis.patch.yml'),
     JSON.stringify([

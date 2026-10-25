@@ -14,6 +14,8 @@ import {
   parseDocument,
   stableHash,
 } from '../config.js';
+import { CONFIG_FORMAT_V2 } from '../config/format.js';
+import { isRecord } from '../config/values.js';
 import { loadSessionRecordApi, sessionRecordError } from '../records.js';
 import type { ArbiterConfig } from '../types.js';
 import type {
@@ -122,20 +124,59 @@ export function lastGoodPath(
   return join(home, 'arbiter', 'last-good', `${scope.key}.json`);
 }
 
+/**
+ * The recovery copy's wrapper.
+ *
+ * The effective configuration always holds canonical rules, even when the profile
+ * document used the legacy format, so the copy is validated as the canonical
+ * format. The wrapper also remembers the declaration the running configuration
+ * actually had — absent, `arbiter-config-v1`, or `arbiter-config-v2` — because
+ * that declaration is part of the configuration's content identity: dropping it
+ * or forcing v2 would change the hash, the reported format and whether the format
+ * counts as explicit.
+ */
+interface LastGoodDocument {
+  readonly format: typeof CONFIG_FORMAT_V2;
+  /** `true` when the running configuration declared a format at all. */
+  readonly sourceFormatExplicit: boolean;
+  readonly sourceFormat: string | null;
+  readonly config: ArbiterConfig;
+}
+
 function readLastGood(path: string): ArbiterConfig | null {
   try {
     const text = readFileSync(path, 'utf8');
-    const parsed = parseConfig(JSON.parse(text));
-    return parsed.errors.length === 0 ? parsed.config : null;
+    const stored: unknown = JSON.parse(text);
+    if (!isRecord(stored) || !isRecord(stored['config'])) return null;
+    const parsed = parseConfig({
+      ...stored['config'],
+      format: CONFIG_FORMAT_V2,
+    });
+    if (parsed.errors.length > 0) return null;
+    const sourceFormat = stored['sourceFormat'];
+    const sourceFormatExplicit = stored['sourceFormatExplicit'] === true;
+    const { format: _canonical, ...effective } = parsed.config;
+    // Restore exactly the declaration the configuration ran with.
+    if (!sourceFormatExplicit) return effective;
+    return typeof sourceFormat === 'string'
+      ? { ...effective, format: sourceFormat }
+      : effective;
   } catch {
     return null;
   }
 }
 
+/** Persist the recovery copy with its original format identity preserved. */
 function writeLastGood(path: string, config: ArbiterConfig): void {
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
+    const document: LastGoodDocument = {
+      format: CONFIG_FORMAT_V2,
+      sourceFormatExplicit: config.format !== undefined,
+      sourceFormat: config.format ?? null,
+      config,
+    };
+    writeFileSync(path, JSON.stringify(document, null, 2), 'utf8');
   } catch {
     // Best-effort continuity aid; the configuration file remains authoritative.
   }

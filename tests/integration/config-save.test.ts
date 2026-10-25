@@ -526,8 +526,11 @@ describe('recovery data follows the committed configuration', () => {
         join(lastGood, entries[0] ?? ''),
         'utf8',
       );
+      // The copy keeps the original content plus the format identity it ran
+      // with, so a cold start replays the same revision.
       expect(JSON.parse(appliedText) as unknown).toMatchObject({
-        enabled: true,
+        config: { enabled: true },
+        sourceFormatExplicit: false,
       });
 
       // B is validated but never applied: the copy must stay at A.
@@ -538,7 +541,7 @@ describe('recovery data follows the committed configuration', () => {
       expect(harness.host.runtime.config.enabled).toBe(true);
       expect(
         JSON.parse(await readFile(join(lastGood, entries[0] ?? ''), 'utf8')),
-      ).toMatchObject({ enabled: true });
+      ).toMatchObject({ config: { enabled: true } });
     } finally {
       harness.dispose();
     }
@@ -638,7 +641,7 @@ describe('cold restart recovery', () => {
       expect(entries).toHaveLength(1);
       expect(
         JSON.parse(await readFile(join(lastGood, entries[0] ?? ''), 'utf8')),
-      ).toMatchObject({ enabled: false });
+      ).toMatchObject({ config: { enabled: false } });
       expect(String(snapshotBefore)).toMatch(/^cfg-/);
     } finally {
       first.dispose();

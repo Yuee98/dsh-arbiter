@@ -71,6 +71,24 @@ describe('prototype page after panel extraction', () => {
               path: 'review(default)',
               rule: null,
               matches: [],
+              rules: [
+                {
+                  index: 0,
+                  id: 'rule-1',
+                  verdict: 'allow',
+                  outcome: 'no-match',
+                  conditions: [
+                    {
+                      index: 0,
+                      target: 'command',
+                      kind: 'regex',
+                      pattern: '',
+                      outcome: 'no-match',
+                      reason: 'value-mismatch',
+                    },
+                  ],
+                },
+              ],
               parse: {
                 status: 'ok',
                 statements: 1,
@@ -357,6 +375,57 @@ test('an explicitly declared format survives decode, draft and the actual save r
   }
 });
 
+test('editing a legacy document saves canonical rules instead of failing', async () => {
+  const bodies: unknown[] = [];
+  const legacyRule = {
+    id: 'keep-me',
+    conditions: [
+      { target: 'command', kind: 'regex', pattern: 'gh pr view(?: .*)?' },
+    ],
+    verdict: 'allow',
+  };
+  server.use(
+    http.get('*/api/arbiter/state', () =>
+      HttpResponse.json({
+        ...effectiveState(),
+        config: { ...effectiveState().config, rules: [legacyRule] },
+        // The profile still holds a legacy document with no format declared.
+        configFormat: 'arbiter-config-v1',
+        configFormatExplicit: false,
+      }),
+    ),
+    http.post('*/api/arbiter/config/save', async ({ request }) => {
+      bodies.push(await request.json());
+      return HttpResponse.json({
+        ok: true,
+        saved: true,
+        changed: true,
+        effective: true,
+        effectiveRevision: 'effective-2',
+        configSnapshotId: 'snapshot-2',
+        activationRecorded: true,
+        configFormat: 'arbiter-config-v2',
+        configFormatExplicit: true,
+        auditError: null,
+        warnings: [],
+      });
+    }),
+  );
+  const { user } = renderClient(<ArbiterPage />);
+  // Change an unrelated setting; the rule itself is untouched.
+  const mode = await screen.findByLabelText('主会话审批模式', { exact: false });
+  await user.selectOptions(mode, 'strict');
+  await user.click(screen.getByRole('button', { name: '保存并应用' }));
+  await waitFor(() => {
+    expect(bodies).toHaveLength(1);
+  });
+  // Saving canonical rules requires the canonical declaration, otherwise the
+  // document would be re-read as legacy and rejected.
+  expect(bodies[0]).toMatchObject({
+    config: { format: 'arbiter-config-v2', modes: { main: 'strict' } },
+  });
+});
+
 test('a known rule compile failure is localized while its id stays data', async () => {
   server.use(
     http.get('*/api/arbiter/state', () => HttpResponse.json(effectiveState())),
@@ -368,10 +437,9 @@ test('a known rule compile failure is localized while its id stays data', async 
           errors: [
             {
               path: 'rules[0]',
-              message:
-                'regex patterns must be anchored with "^" or "(?:^" (rule "gh")',
-              code: 'rule.regex-anchor',
-              params: { id: 'gh' },
+              message: 'invalid regex: missing closing ) (rule "gh")',
+              code: 'rule.regex-syntax',
+              params: { id: 'gh', message: 'missing closing )' },
             },
           ],
           warnings: [],
@@ -385,7 +453,7 @@ test('a known rule compile failure is localized while its id stays data', async 
   await user.click(screen.getByRole('button', { name: '保存并应用' }));
   const alert = await screen.findByText(/配置校验失败，未保存/);
   expect(alert).toHaveTextContent(
-    'rules[0]: 正则表达式必须以 "^" 或 "(?:^" 开头。',
+    'rules[0]: 正则表达式无效：missing closing )',
   );
-  expect(alert).not.toHaveTextContent('regex patterns must be anchored');
+  expect(alert).not.toHaveTextContent('invalid regex');
 });

@@ -15,6 +15,11 @@ interface DshFixtures {
    */
   readonly firstInstall: boolean;
   /**
+   * A profile configuration written verbatim, for cases that need a specific
+   * document (for example a declared canonical format) in the real host.
+   */
+  readonly arbiterConfig: Readonly<Record<string, unknown>> | null;
+  /**
    * Hand-declared model routes for the host catalog.
    *
    * The holder is an object, not a list: Playwright reads a two-element array
@@ -26,15 +31,26 @@ interface DshFixtures {
 
 export const test = base.extend<DshFixtures>({
   firstInstall: [false, { option: true }],
+  arbiterConfig: [null, { option: true }],
   modelCatalog: [{ groups: [] }, { option: true }],
-  dsh: async ({ browserName, firstInstall, modelCatalog }, use, testInfo) => {
+  dsh: async (
+    { browserName, firstInstall, arbiterConfig, modelCatalog },
+    use,
+    testInfo,
+  ) => {
     const artifacts = testInfo.outputPath('dsh', browserName);
+    const seed =
+      arbiterConfig !== null
+        ? { arbiterConfig }
+        : firstInstall
+          ? { arbiterConfig: 'unset' as const }
+          : {};
     try {
       const host = await startDshHost(
         fileURLToPath(new URL('../../', import.meta.url)),
         artifacts,
         {
-          ...(firstInstall ? { arbiterConfig: 'unset' as const } : {}),
+          ...seed,
           ...(modelCatalog.groups.length === 0
             ? {}
             : { modelGroups: modelCatalog.groups }),

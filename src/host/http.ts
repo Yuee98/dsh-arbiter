@@ -1,5 +1,6 @@
 import { parseConfig } from '../config.js';
-import type { CommandRule } from '../types.js';
+import { CONFIG_FORMAT_V2 } from '../config/format.js';
+import type { CommandRule, ConfigError } from '../types.js';
 
 export function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -19,8 +20,28 @@ export function readJsonBody(request: Request): Promise<unknown> {
     );
 }
 
-export function asRule(value: unknown): CommandRule | null {
-  const parsed = parseConfig({ rules: [value] });
-  if (parsed.errors.length > 0) return null;
-  return parsed.config.rules[0] ?? null;
+export interface RuleDraftResult {
+  readonly rules: readonly CommandRule[];
+  readonly errors: readonly ConfigError[];
+}
+
+/**
+ * Validate draft rules submitted to the rule tester.
+ *
+ * A draft is canonical by definition, so it is declared as the canonical format
+ * instead of being parsed as an undeclared (legacy) document. Parsing it as
+ * legacy would silently drop every draft rule that uses the new model and let the
+ * tester fall back to the effective configuration — exactly the disagreement
+ * between the tester and the real gate this issue has to remove.
+ *
+ * An invalid draft is reported with its concrete errors rather than filtered:
+ * silently testing fewer rules than the user asked for would be worse than a
+ * visible failure.
+ */
+export function asRuleDraft(value: unknown): RuleDraftResult {
+  const parsed = parseConfig({ format: CONFIG_FORMAT_V2, rules: [value] });
+  return {
+    rules: parsed.errors.length > 0 ? [] : parsed.config.rules,
+    errors: parsed.errors,
+  };
 }

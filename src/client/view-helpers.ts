@@ -45,18 +45,38 @@ export function formatTime(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
+/**
+ * The canonical rule format id.
+ *
+ * A draft holds the canonical rule structure. Saving rules therefore has to
+ * declare that format: without it the document would be read as the legacy
+ * format and its `conditions` rules rejected — including when the user only
+ * changed an unrelated setting on a document that still used the old rules.
+ * A draft without rules keeps whatever the document declared, so an explicit
+ * declaration still round-trips unchanged.
+ */
+const CANONICAL_FORMAT = 'arbiter-config-v2';
+
 export function cloneDraft(config: ArbiterConfig): Draft {
   const copy = structuredClone(config);
   return {
     ...copy,
+    ...(copy.rules.length === 0 ? {} : { format: CANONICAL_FORMAT }),
     rules: copy.rules.map((rule) => ({
       ...rule,
-      match: {
-        ...rule.match,
-        ...(rule.match.agents === undefined
-          ? {}
-          : { agents: [...rule.match.agents] }),
-      },
+      conditions: rule.conditions.map((condition) => ({ ...condition })),
+      ...(rule.scope === undefined
+        ? {}
+        : {
+            scope: {
+              ...(rule.scope.tools === undefined
+                ? {}
+                : { tools: [...rule.scope.tools] }),
+              ...(rule.scope.agents === undefined
+                ? {}
+                : { agents: [...rule.scope.agents] }),
+            },
+          }),
     })),
     context: {
       ...copy.context,
