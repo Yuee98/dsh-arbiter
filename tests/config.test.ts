@@ -320,12 +320,29 @@ describe('strict validation of supplied fields', () => {
     );
   });
 
-  test('an explicitly empty project file list stays empty instead of reverting', () => {
-    const parsed = parseConfig({
-      context: { projectRules: { files: [] } },
+  test('the PROJECT_RULES owner keeps its documented file fallback', () => {
+    // #32 owns this whitelist: an empty selection still reads the two
+    // documented workspace-root files, and only those may supply guidance.
+    const empty = parseConfig({ context: { projectRules: { files: [] } } });
+    expect(empty.errors).toEqual([]);
+    expect(empty.config.context.projectRules.files).toEqual([
+      '.dsh/arbiter.md',
+      '.arbiter.md',
+    ]);
+
+    const outside = parseConfig({
+      context: { projectRules: { files: ['../outside.md'] } },
     });
-    expect(parsed.errors).toEqual([]);
-    expect(parsed.config.context.projectRules.files).toEqual([]);
+    expect(outside.errors).toEqual([
+      expect.objectContaining({
+        path: 'context.projectRules.files',
+        code: 'context.project-files',
+      }),
+    ]);
+    expect(outside.config.context.projectRules.files).toEqual([
+      '.dsh/arbiter.md',
+      '.arbiter.md',
+    ]);
   });
 
   test('a non-array project file list is reported, not replaced silently', () => {
