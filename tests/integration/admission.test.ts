@@ -1357,3 +1357,218 @@ describe('an absent sandbox override is not proof of confinement', () => {
     }
   });
 });
+
+describe('native exit with a live delegated child', () => {
+  test('the parent keeps its own choice and the child is narrowed', async () => {
+    const parent = makeSession('n-parent');
+    parent.append('sandbox/mode', { mode: 'workspace-write' });
+    parent.append('approval/policy', { policy: 'ask' });
+    const child = makeSession('n-child', { parentSession: 'n-parent' });
+    // The host captured the parent's trusted sandbox at delegation.
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([parent, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 'n-parent', action: 'enable' },
+      });
+      // The child is covered through the parent and really is wide.
+      await harness.gate(call(child, 'n-first'), allow);
+      expect(modeEvents(child).at(-1)).toEqual({
+        mode: 'danger-full-access',
+        source: 'delegation',
+      });
+
+      // The user leaves through the native command: the host writes the parent
+      // sandbox itself, then the command settles.
+      parent.append('permission/preset', { preset: 'workspace-write' });
+      parent.append('sandbox/mode', { mode: 'workspace-write' });
+      harness.emit(parent, {
+        type: 'command/run',
+        data: {
+          commandId: 'cmd-n1',
+          name: 'permission',
+          args: ' workspace-write',
+        },
+      });
+      harness.emit(parent, {
+        type: 'permission/preset',
+        data: { preset: 'workspace-write' },
+      });
+      harness.emit(parent, {
+        type: 'command/done',
+        data: { commandId: 'cmd-n1', kind: 'success' },
+      });
+      await settle();
+
+      // The child must no longer run with the parent's old privilege.
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+      // Its host-pinned approval is untouched.
+      const approvals = child.events.filter(
+        (event) => event.type === 'approval/policy',
+      );
+      expect(approvals).toHaveLength(1);
+      // The parent's own chosen permission is not overwritten by us.
+      expect(approvals).toHaveLength(1);
+      expect(modeEvents(parent).at(-1)).toEqual({ mode: 'workspace-write' });
+      // The exit is durable through the command pair, so the effective view is
+      // disabled even though no extra record had to be written.
+      const view = await harness.request(
+        '/api/arbiter/sessions?sessionId=n-parent',
+      );
+      expect(viewOf(view.body)).toMatchObject({
+        enabled: false,
+        managed: false,
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('re-enabling cannot withdraw protection', () => {
+  test('a failed guarded re-enable leaves the session protected', async () => {
+    const session = makeSession('re-late', {
+      refuseSandboxWrites: true,
+      initialSandbox: 'danger-full-access',
+    });
+    session.append('approval/policy', { policy: 'ask' });
+    // An earlier process admitted it as trusted; the plugin now runs guarded,
+    // and the host refuses every sandbox write.
+    session.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 're-late',
+      rootSessionId: 're-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      const again = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 're-late', action: 'enable' },
+      });
+      expect(again.status).toBe(409);
+      // The previously managed session must not become an ungated wide one.
+      const view = await harness.request(
+        '/api/arbiter/sessions?sessionId=re-late',
+      );
+      expect(viewOf(view.body)['managed']).toBe(true);
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+      const decision = await harness.gate(call(session, 're-call'), allow);
+      expect(decision.kind).toBe('deny');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('fail-closed is released once recovery is confirmed', () => {
+  test('a master-off reconcile that failed can be repaired on a later call', async () => {
+    const refusal = { active: true };
+    const base = makeSession('fc-late', {
+      initialSandbox: 'danger-full-access',
+    });
+    base.append('approval/policy', { policy: 'ask' });
+    base.append('plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 'fc-late',
+      rootSessionId: 'fc-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    // A host that refuses permission writes while `refusal.active` is set.
+    const session: StubSession = {
+      ...base,
+      append(type, data) {
+        if (
+          refusal.active &&
+          (type === 'sandbox/mode' || type === 'approval/policy')
+        ) {
+          throw new Error('append refused while the host is publishing');
+        }
+        base.append(type, data);
+      },
+    };
+    // Startup reconcile with the master switch off cannot narrow: the session
+    // must stay refused rather than run wide and ungated.
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      enabled: false,
+      boundary: 'trusted',
+    });
+    try {
+      expect((await harness.gate(call(session, 'fc-denied'), allow)).kind).toBe(
+        'deny',
+      );
+      // The host recovers. The marker must not be sticky: the next call has to
+      // re-check and, once the boundary is confirmed, be released.
+      refusal.active = false;
+      expect(
+        (await harness.gate(call(session, 'fc-allowed'), allow)).kind,
+      ).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'ask' });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('dropping coverage never leaves a widened sandbox', () => {
+  test('a session that stops being admitted is narrowed first', async () => {
+    const parent = makeSession('drop-parent');
+    parent.append('sandbox/mode', { mode: 'workspace-write' });
+    parent.append('approval/policy', { policy: 'ask' });
+    const child = makeSession('drop-child', { parentSession: 'drop-parent' });
+    child.append('sandbox/mode', {
+      mode: 'danger-full-access',
+      source: 'delegation',
+    });
+    child.append('approval/policy', { policy: 'never', source: 'delegation' });
+    const harness = createHarness([parent, child], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 'drop-parent', action: 'enable' },
+      });
+      // The child is covered while the parent is admitted.
+      await harness.gate(call(child, 'drop-first'), allow);
+      // The parent's exit is already durable — a cold restore sees it this way
+      // — with no live command for this process to observe. Discovery is then
+      // the only thing that reclassifies the child, and it must not leave the
+      // captured full-access sandbox behind.
+      parent.append('plugin:arbiter/admission', {
+        version: 1,
+        sessionId: 'drop-parent',
+        rootSessionId: 'drop-parent',
+        enabled: false,
+        boundary: 'trusted',
+        at: Date.now(),
+      });
+      const decision = await harness.gate(call(child, 'drop-after'), allow);
+      expect(decision.kind).toBe('allow');
+      expect(modeEvents(child).at(-1)).toEqual({ mode: 'workspace-write' });
+      // Its host-pinned approval is never rewritten.
+      expect(
+        child.events.filter((event) => event.type === 'approval/policy'),
+      ).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+});

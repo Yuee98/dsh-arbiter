@@ -129,6 +129,22 @@ export class PermissionLifecycle {
     }
   }
 
+  /**
+   * Retry the rollback for a session currently marked fail-closed.
+   *
+   * Returns true when the complete safe boundary is now confirmed; the mark is
+   * cleared only then. A `null` session (a call without an agent) cannot be
+   * recovered and keeps the refusal.
+   */
+  retryRollback(session: SessionLike | undefined): boolean {
+    if (session === undefined) return false;
+    if (!this.admissions.narrowSession(session)) return false;
+    if (!this.admissions.atSafeBoundary(session)) return false;
+    if (session.id !== undefined)
+      this.admissions.clearFailingClosed(session.id);
+    return true;
+  }
+
   onSessionEvent(
     session: TurnSessionLike,
     event: {
@@ -220,12 +236,27 @@ export class PermissionLifecycle {
     queueMicrotask(() => {
       try {
         const admission = this.admissions.admission(sessionId);
-        if (admission === null || !admission.enabled) return;
+        // The fold can already show the exit (this microtask runs after the
+        // commit), but descendants still hold the parent's captured sandbox
+        // and must be settled even then.
+        const settled = this.admissions.settleDescendants(sessionId);
+        if (admission === null || !admission.enabled) {
+          if (settled > 0) {
+            this.host.lifecycle('admission/exit', {
+              sessionId,
+              reason,
+              ok: true,
+              settled,
+            });
+          }
+          return;
+        }
         const result = this.admissions.disable(sessionId, 'permission-command');
         this.host.lifecycle('admission/exit', {
           sessionId,
           reason,
           ok: result.ok,
+          settled,
         });
         if (!result.ok) {
           this.host.ctx.logger.warn(

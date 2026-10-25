@@ -223,21 +223,38 @@ export class CallGate {
   }
 
   /**
-   * Refuse calls from a session whose rollback failed during teardown.
+   * Refuse calls from a session whose rollback could not be confirmed.
    *
    * This is deliberately the narrowest possible gate: it runs before any other
-   * admission decision, only matches sessions teardown marked, and never opens
-   * a review or a human request.
+   * admission decision, only matches sessions a failed rollback marked, and
+   * never opens a review or a human request.
+   *
+   * The mark is a recheck trigger, not a permanent verdict. A host that refused
+   * a write once (mid-publish, at startup) may accept it a moment later, and
+   * the user may also have re-selected a safe permission by hand. So each call
+   * retries the rollback: a confirmed boundary clears the mark and the call
+   * continues, and only a still-unconfirmed session is refused. Keeping the
+   * mark sticky would turn a transient failure into a session that nothing can
+   * ever use again.
    */
   private refuseUnconfirmed(exec: ToolExecutionLike): PreToolDecision | null {
     const sessionId = exec.agent?.session.id;
+    if (sessionId === undefined) return null;
     if (!this.permissions.admissions.isFailingClosed(sessionId)) return null;
+    if (this.permissions.retryRollback(exec.agent?.session)) {
+      this.host.lifecycle('gate/fail-closed-cleared', {
+        callId: exec.callId,
+        tool: exec.name,
+        sessionId,
+      });
+      return null;
+    }
     const reason =
-      'Not executed [fallback-deny]: this session could not be rolled back to a safe permission during plugin teardown.';
+      'Not executed [fallback-deny]: this session could not be rolled back to a safe permission during plugin teardown, and the host has not accepted the narrowing yet.';
     this.host.lifecycle('gate/fail-closed', {
       callId: exec.callId,
       tool: exec.name,
-      sessionId: sessionId ?? null,
+      sessionId,
     });
     return deny(reason);
   }

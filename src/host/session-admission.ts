@@ -170,7 +170,9 @@ export class SessionAdmissions {
     }
     const scope = resolveScope(id, this.lookup());
     if (!scope.managed) {
-      this.covered.delete(id);
+      // Leaving managed scope ends gate protection, so any sandbox this plugin
+      // widened is taken back here, not just dropped from the coverage set.
+      this.releaseOnDrop(id, session);
       return scope;
     }
     this.covered.set(id, session);
@@ -182,6 +184,7 @@ export class SessionAdmissions {
       // Guarded is configured but the host will not confine this session, so a
       // review-allow would still execute outside the workspace. Refuse instead
       // of admitting: no call is approved while the promise cannot be kept.
+      this.markFailingClosed(id);
       this.covered.delete(id);
       return {
         managed: false,
@@ -458,6 +461,12 @@ export class SessionAdmissions {
       return { ok: false, code: 'session-unknown', message: `unknown ${id}` };
     this.observe(session);
     const boundary = configuredBoundary(this.host.runtime.config);
+    // Whether this session was already managed before this request. It decides
+    // what a failed guarded activation may undo: a fresh enable can be
+    // withdrawn, but a session that was already admitted must not lose gate
+    // protection while it still holds a permission this plugin widened.
+    const previously = this.admissionOf(id);
+    const wasManaged = previously !== null && previously.enabled;
     const state = this.writeRecord(session, true, boundary);
     if (state !== 'written')
       return { ok: false, code: 'record-failed', message: state };
@@ -480,6 +489,23 @@ export class SessionAdmissions {
     // Compensate in the log so a cold reader cannot believe an effective
     // guarded admission exists when the fence does not.
     if (boundary === 'guarded' && !this.confined(session)) {
+      // Keep protecting a session that was already managed: withdrawing its
+      // record would hand over an ungated session that is still wide. It stays
+      // fail-closed (see refuseUnconfirmed) until a later attempt confirms the
+      // narrowing, which also keeps the recovery direction open.
+      if (wasManaged) {
+        this.markFailingClosed(id);
+        this.host.ctx.logger.warn(
+          'arbiter: guarded re-activation for session %s could not be confirmed; keeping it fail-closed',
+          id,
+        );
+        return {
+          ok: false,
+          code: 'boundary-not-applied',
+          message:
+            'the host does not report workspace confinement; the session stays admitted but refused',
+        };
+      }
       this.covered.delete(id);
       const crossed = this.writeRecord(session, false, boundary);
       this.host.ctx.logger.warn(
@@ -554,6 +580,68 @@ export class SessionAdmissions {
     if (session === undefined) return false;
     if (session.header?.parentSession === undefined) return false;
     return this.covered.has(id) || this.narrowWrites(session).length > 0;
+  }
+
+  /**
+   * Stop protecting a session, taking back any permission this plugin widened.
+   *
+   * Dropping coverage is an admission exit in effect: the gate will no longer
+   * review this session's calls, so a sandbox the plugin widened must not stay
+   * behind. Only a session this plugin actually covered is touched — an
+   * ordinary session that was never admitted keeps whatever its user chose.
+   */
+  private releaseOnDrop(id: string, session: SessionLike): void {
+    const covered = this.covered.has(id);
+    this.covered.delete(id);
+    // Narrow when this session was covered and is still wide, or when it is a
+    // delegated child carrying a sandbox wider than full access — the captured
+    // privilege a parent's exit can leave behind without ever covering it here.
+    const delegated = session.header?.parentSession !== undefined;
+    if (!covered && !delegated) return;
+    if (this.atSafeBoundary(session)) return;
+    if (!this.narrowSession(session)) this.markFailingClosed(id);
+  }
+
+  /**
+   * Narrow every still-managed descendant of a session that just left.
+   *
+   * A parent's exit — native or API — only changes the parent's own host
+   * sandbox. Children captured the parent's sandbox at delegation and have no
+   * record to fold, so once the parent is disabled they would resolve as
+   * `parent-not-admitted` and run ungated with the parent's old privilege. This
+   * closes that gap for every descendant still known to the plugin, including
+   * ones discovered from the live session list.
+   *
+   * The parent's own permission is never touched here: a native exit already
+   * applied the user's choice, and an API disable narrows before this runs.
+   */
+  settleDescendants(rootId: string): number {
+    // Do not call discover() here: it prunes by the *current* scope, and by the
+    // time this runs the parent already folds as disabled, so every descendant
+    // would be classified unmanaged and dropped before it could be narrowed.
+    // Candidates come from the live list plus whatever is already covered, and
+    // the parent chain alone decides who belongs to this branch.
+    const candidates = new Map<string, SessionLike>();
+    for (const [id, session] of this.covered) candidates.set(id, session);
+    const sessions = this.host.services.sessions;
+    if (sessions?.list !== undefined) {
+      for (const session of sessions.list()) {
+        const id = session.id;
+        if (id === undefined) continue;
+        this.observe(session);
+        candidates.set(id, session);
+      }
+    }
+    let narrowed = 0;
+    for (const [id, session] of candidates) {
+      if (id === rootId) continue;
+      if (!this.isDescendantOf(id, rootId)) continue;
+      if (this.atSafeBoundary(session)) continue;
+      if (this.narrowSession(session)) narrowed += 1;
+      else this.markFailingClosed(id);
+      this.covered.delete(id);
+    }
+    return narrowed;
   }
 
   /**
@@ -753,7 +841,7 @@ export class SessionAdmissions {
       if (id === undefined) continue;
       const scope = resolveScope(id, this.lookup());
       if (!scope.managed) {
-        this.covered.delete(id);
+        this.releaseOnDrop(id, session);
         continue;
       }
       if (!this.covered.has(id)) found += 1;

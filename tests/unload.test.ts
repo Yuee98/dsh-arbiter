@@ -738,3 +738,40 @@ describe('absent sandbox override at teardown', () => {
     ).toEqual({ mode: 'workspace-write' });
   });
 });
+
+describe('discovery also narrows before it forgets', () => {
+  test('a listed session whose parent exited is narrowed, not dropped', async () => {
+    // Cold restore: the parent's disabled record is already durable and no
+    // command is live in this process, so only discovery reclassifies the
+    // child. It must not leave the captured full-access sandbox behind.
+    const parentEvents: StubEvent[] = [];
+    admit(parentEvents, 's16-parent', { enabled: false, boundary: 'trusted' });
+    const parent = makeSession('s16-parent', parentEvents);
+    const childEvents: StubEvent[] = [
+      { type: 'sandbox/mode', data: { mode: 'danger-full-access' } },
+      { type: 'approval/policy', data: { policy: 'never' } },
+    ];
+    const child = subagentSession('s16-child', 's16-parent', childEvents);
+    const { ctx, stub, disposers } = contextFor(parent, undefined, {
+      sessions: {
+        get: (id: string) =>
+          [parent, child].find((session) => session.id === id),
+        list: () => [parent, child],
+      },
+    });
+    apply(ctx, {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+      modes: { main: 'normal' },
+    });
+    // The child was covered while the parent was still admitted.
+    await stub.gate?.(exec(child, 's16-first'), allow);
+    await unload(disposers);
+    expect(
+      childEvents.filter((event) => event.type === 'sandbox/mode').at(-1)?.data,
+    ).toEqual({ mode: 'workspace-write' });
+    expect(
+      childEvents.filter((event) => event.type === 'approval/policy'),
+    ).toHaveLength(1);
+  });
+});
