@@ -92,10 +92,12 @@ export function reviewStateOf(
   stages: readonly TraceStageFacts[] | null,
   attemptCount: number,
 ): CallDetailReviewState {
-  if (trace.length === 0) return 'unknown';
-  // Positive evidence: the policy answered a response, or an attempt was stored.
-  if (trace.some(definitiveReview)) return 'reviewed';
+  // Positive evidence first, even when the trace is empty: a stored attempt is
+  // the record of a request that was issued, and no chain needs to corroborate
+  // it. An old row can carry attempts while its result list was never written.
   if (attemptCount > 0) return 'reviewed';
+  if (trace.length === 0) return 'unknown';
+  if (trace.some(definitiveReview)) return 'reviewed';
   if (trace.includes('error-escalate')) return escalationState(stages);
   // No review answer and no escalation. Routing alone cannot be attributed.
   if (trace.some(routingResult)) return 'unknown';

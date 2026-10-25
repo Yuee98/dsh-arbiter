@@ -654,6 +654,67 @@ describe('conflicting and partial evidence', () => {
     expect(missing).toContain('model-attempts-missing');
   });
 
+  test('a stored attempt is positive evidence even with an empty trace', async () => {
+    const harness = startHarness();
+    const audit = harness.host.currentAudit();
+    if (audit === null) throw new Error('the audit store did not start');
+    // A readable v1-style row whose result list was never written but whose
+    // attempt rows exist: the attempt is the record that a request went out.
+    audit.enqueue({
+      callId: 'attempt-no-trace',
+      ts: Date.now(),
+      sessionId: harness.session.id,
+      sessionKind: 'main',
+      parentSession: null,
+      profile: 'detail',
+      workspace: process.cwd(),
+      tool: 'bash',
+      arguments: { command: 'echo hi' },
+      cwd: process.cwd(),
+      fingerprint: 'bash:empty-trace',
+      configRevision: 'rev-1',
+      configSnapshotId: 'cfg-1',
+      approvalMode: 'normal',
+      executionMode: 'guarded',
+      result: 'fallback-deny',
+      reason: 'the review failed',
+      trace: [],
+      effect: null,
+      sessionRecordState: 'written',
+      snapshot: null,
+      modelAttempts: [
+        {
+          requestId: 'attempt-no-trace:model:1',
+          callId: 'attempt-no-trace',
+          attempt: 1,
+          backend: 'decision',
+          protocol: 'arbiter-decision-v1',
+          request: { model: 'clef-flash' },
+          responseText: null,
+          parsed: null,
+          error: 'backend unreachable',
+          startedAt: 1,
+          durationMs: 2,
+          estimatedInputTokens: 3,
+          usage: null,
+        },
+      ],
+      signals: null,
+      policyStrategy: 'normal',
+      decisionRules: [],
+      executionStatus: 'not-started',
+    });
+    await persisted(harness.host, 'attempt-no-trace');
+
+    const detail = await detailOf(harness.host, 'attempt-no-trace');
+    const basis = fieldOf(detail, 'basis');
+    expect(listField(basis, 'trace')).toEqual([]);
+    // The stored attempt proves a request, so the state is not "unknown".
+    expect(fieldOf(basis, 'reviewState')).toBe('reviewed');
+    expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toHaveLength(1);
+    expect(missingOf(detail)).toContain('snapshot-missing');
+  });
+
   test('a referenced template with no row is reported missing', async () => {
     const harness = startHarness();
     const audit = harness.host.currentAudit();
