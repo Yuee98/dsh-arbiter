@@ -1,8 +1,4 @@
 import type {
-  NormalizationCommand,
-  NormalizationDetail,
-  NormalizationIssue,
-  NormalizationWord,
   RuleConditionResult,
   RuleMatchDetail,
   RuleResult,
@@ -15,6 +11,7 @@ import {
   choice,
   field,
   nullable,
+  normalizationDetail,
   number,
   object,
   optional,
@@ -112,50 +109,6 @@ function ruleMatch(value: unknown): RuleMatchDetail {
   };
 }
 
-function normalizationWord(value: unknown): NormalizationWord {
-  const source = object(value);
-  const wordValue = field(source, 'value', optional(text));
-  return {
-    raw: field(source, 'raw', text),
-    text: field(source, 'text', text),
-    status: field(source, 'status', choice('static', 'dynamic')),
-    reasons: field(source, 'reasons', strings),
-    ...(wordValue === undefined ? {} : { value: wordValue }),
-  };
-}
-
-function normalizationCommand(value: unknown): NormalizationCommand {
-  const source = object(value);
-  return {
-    text: field(source, 'text', text),
-    raw: field(source, 'raw', text),
-    words: field(source, 'words', array(normalizationWord)),
-  };
-}
-
-function normalizationIssue(value: unknown): NormalizationIssue {
-  const source = object(value);
-  return {
-    kind: field(source, 'kind', text),
-    message: field(source, 'message', text),
-    pos: field(source, 'pos', number),
-  };
-}
-
-function normalization(value: unknown): NormalizationDetail {
-  const source = object(value);
-  return {
-    raw: field(source, 'raw', text),
-    completeness: field(
-      source,
-      'completeness',
-      choice('complete', 'partial', 'none'),
-    ),
-    issues: field(source, 'issues', array(normalizationIssue)),
-    commands: field(source, 'commands', array(normalizationCommand)),
-  };
-}
-
 function ruleTest(value: unknown): RuleTestResult {
   const source = object(value);
   const parse = field(source, 'parse', object);
@@ -163,7 +116,7 @@ function ruleTest(value: unknown): RuleTestResult {
   const detail = field(
     source,
     'normalization',
-    optional(nullable(normalization)),
+    optional(nullable(normalizationDetail)),
   );
   return {
     input: field(source, 'input', text),

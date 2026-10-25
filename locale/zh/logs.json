@@ -18,6 +18,7 @@
   "chain": "判定链",
   "snapshot": "送审材料（ReviewSnapshot）",
   "signals": "信号与配置",
+  "normalization": "命令规范化（匹配所用文本与词级原因）",
   "modelCalls": "模型调用（{count}）",
   "time": "时间",
   "tool": "工具",

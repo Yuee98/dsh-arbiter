@@ -1262,6 +1262,122 @@ describe('rule priority and coverage', () => {
     });
   });
 
+  test('a dynamic redirect target is never a confirmed path', () => {
+    // `/workspace/$REL` looks absolute but can expand anywhere, so a deny that
+    // names the expanded path must stay uncertain rather than becoming no-match.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-passwd',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+        rule({
+          id: 'bash-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'echo hi > /workspace/$REL',
+    );
+    expect(evaluation.rules.map((entry) => [entry.id, entry.outcome])).toEqual([
+      ['deny-passwd', 'unknown'],
+      ['bash-allow', 'match'],
+    ]);
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a static redirect is still decided exactly', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-passwd',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > /etc/passwd',
+    );
+    expect(verdictOf(evaluation)).toBe('deny');
+  });
+
+  test('a dynamic assignment is matchable by the text that was written', () => {
+    // The value is unknown, but the assignment's own text is not, so a rule that
+    // names it can match it. Its inner command still has to be covered separately.
+    const assignmentOnly = evaluate(
+      [
+        rule({
+          id: 'array',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'variable_assignment',
+              kind: 'exact',
+              pattern: 'x=($(rm y))',
+            }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(assignmentOnly.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+    const both = evaluate(
+      [
+        rule({
+          id: 'both',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'variable_assignment',
+              kind: 'exact',
+              pattern: 'x=($(rm y))',
+            }),
+            condition({ target: 'command', kind: 'exact', pattern: 'rm y' }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(verdictOf(both)).toBe('allow');
+    // Covering only the inner command is not enough either.
+    const commandOnly = evaluate(
+      [
+        rule({
+          id: 'inner',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'rm y' }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(commandOnly.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
   test('a dynamic word keeps its raw expression as matchable text', () => {
     const rules = (pattern: string): CommandRule[] => [
       rule({

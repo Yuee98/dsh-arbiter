@@ -153,20 +153,28 @@ class FactCollector {
     if (interpreter !== null) this.pipelineExec.push([name, interpreter]);
   }
 
-  /** The interpreter a downloader's output is piped into, when one is visible. */
+  /**
+   * The interpreter a downloader's output is piped into.
+   *
+   * Only a real pipe edge in the AST counts. Two commands on separate lines run
+   * sequentially, so reporting `curl\nbash` as `curl | bash` would invent a
+   * dangerous fact nobody observed.
+   */
   private pipedInterpreter(
     command: ShellCommand,
     args: readonly string[],
   ): string | null {
+    // `curl ... | sh` names the interpreter as an argument of the downloader.
     const shellPipe = args.find((argument) =>
       ['sh', 'bash', 'zsh'].includes(argument),
     );
     if (shellPipe !== undefined) return shellPipe;
-    const next = this.parse.commands.find(
-      (other) => other.index === command.index + 1,
+    if (command.pipeTarget === null) return null;
+    const receiver = this.parse.commands.find(
+      (other) => other.index === command.pipeTarget,
     );
-    const nextName = next?.words[0]?.value ?? '';
-    return INTERPRETERS.has(nextName) ? nextName : null;
+    const name = receiver?.words[0]?.value ?? '';
+    return INTERPRETERS.has(name) ? name : null;
   }
 
   private writeTarget({ target, dynamic, cwd }: WriteTarget): void {
@@ -178,14 +186,15 @@ class FactCollector {
       this.writes.push(target);
       return;
     }
-    if (cwd === null) {
+    // An absolute path does not depend on the working directory, so an unknown
+    // directory only stops relative targets from being classified.
+    if (!target.startsWith('/') && cwd === null) {
       this.expansionRisk = 'working directory is not statically known';
       this.writes.push(target);
       return;
     }
-    const resolved = target.startsWith('/')
-      ? normalizePath(target)
-      : resolvePath(target, cwd);
+    const resolved =
+      cwd === null ? normalizePath(target) : resolvePath(target, cwd);
     this.writes.push(resolved);
     const root = this.options.workspaceRoot;
     if (root === null) return;
@@ -206,22 +215,7 @@ class FactCollector {
         this.credentialPaths.push(argument);
       }
     }
-    const writeTargets = directWriteTargets(command);
-    for (const redirect of command.redirects) {
-      // Only a redirect that names a file is a write target. Descriptor
-      // duplication (`2>&1`, `>&-`), heredocs and here-strings carry data or
-      // descriptors, not paths, so they never invent a file observation.
-      if (redirect.kind !== 'file') continue;
-      if (!redirect.op.includes('>')) continue;
-      writeTargets.push({
-        target: redirect.target,
-        // Only a dynamic word is an unresolved expansion; an unknown directory
-        // is a different gap and is reported as such in `writeTarget`.
-        dynamic: redirect.dynamic,
-        cwd: redirect.cwd,
-      });
-    }
-    for (const target of writeTargets) this.writeTarget(target);
+    for (const target of directWriteTargets(command)) this.writeTarget(target);
     if (['rm', 'mv', 'dd', 'shred', 'find'].includes(name)) {
       const dynamic = command.words
         .slice(1)
@@ -233,8 +227,30 @@ class FactCollector {
     }
   }
 
+  /**
+   * File redirects, wherever they appeared.
+   *
+   * A redirect can belong to a command, to a compound construct, or to nothing at
+   * all (`> out`); reading them from the global list means none of those writes is
+   * missed. Descriptor duplication, heredocs and here-strings were already excluded
+   * from that list.
+   */
+  private redirectEffects(): void {
+    for (const redirect of this.parse.redirects) {
+      if (!redirect.op.includes('>')) continue;
+      this.writeTarget({
+        target: redirect.target,
+        // Only a dynamic word is an unresolved expansion; an unknown directory is
+        // a different gap and is reported as such in `writeTarget`.
+        dynamic: redirect.dynamic,
+        cwd: redirect.cwd,
+      });
+    }
+  }
+
   collect(): void {
     for (const command of this.parse.commands) this.commandEffects(command);
+    this.redirectEffects();
     for (const word of this.parse.words) {
       if (word.status === 'dynamic') this.wordGap = true;
     }

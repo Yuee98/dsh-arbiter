@@ -19,7 +19,7 @@ import { INTERPRETERS, SCRIPT_SUFFIXES } from './constants.js';
 import { unconsumed } from './source.js';
 import { walkScript } from './visitor.js';
 import type { WalkResult } from './visitor.js';
-import type { ShellParse, ShellStructureIssue } from './types.js';
+import type { ShellCommand, ShellParse, ShellStructureIssue } from './types.js';
 
 /** Longest source the adapter will walk, in UTF-16 code units. */
 const SOURCE_BUDGET = 1_000_000;
@@ -112,6 +112,17 @@ export function adaptShell(source: string, initialCwd?: string): ShellParse {
   return finish(result, issues);
 }
 
+/** Attach the AST's own pipe edges to the commands they connect. */
+function withPipeTargets(
+  commands: readonly ShellCommand[],
+  links: ReadonlyMap<number, number>,
+): ShellCommand[] {
+  return commands.map((command) => {
+    const target = links.get(command.index);
+    return target === undefined ? command : { ...command, pipeTarget: target };
+  });
+}
+
 function finish(
   result: WalkResult,
   issues: readonly ShellStructureIssue[],
@@ -126,7 +137,7 @@ function finish(
   return {
     status: issues.length > 0 && result.commands.length === 0 ? 'error' : 'ok',
     statements: result.statements,
-    commands: result.commands,
+    commands: withPipeTargets(result.commands, result.pipeLinks),
     // Only a redirect that names a file is a path subject; descriptor
     // duplication and heredocs are not.
     redirects: result.redirects.filter((redirect) => redirect.kind === 'file'),

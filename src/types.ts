@@ -6,6 +6,7 @@
  */
 
 import type { ShellParse } from './shell/parse.js';
+import type { NormalizationDetail } from './shell/types.js';
 
 export type ApprovalMode = 'normal' | 'strict' | 'progress';
 export type SubagentMode = 'strict' | 'progress';
@@ -672,40 +673,12 @@ export interface RuleTestResult {
   readonly error?: string;
 }
 
-/**
- * How one command text was normalized for matching.
- *
- * `raw` is what the user wrote; each command's `text` is the canonical matching
- * text; each word records whether its value was statically known and, if not, why.
- * This travels with the tester result and the call explanation so both can show
- * the same evidence the matcher used.
- */
-export interface NormalizationWord {
-  readonly raw: string;
-  readonly text: string;
-  readonly status: 'static' | 'dynamic';
-  readonly reasons: readonly string[];
-  readonly value?: string;
-}
-
-export interface NormalizationCommand {
-  readonly text: string;
-  readonly raw: string;
-  readonly words: readonly NormalizationWord[];
-}
-
-export interface NormalizationIssue {
-  readonly kind: string;
-  readonly message: string;
-  readonly pos: number;
-}
-
-export interface NormalizationDetail {
-  readonly raw: string;
-  readonly completeness: 'complete' | 'partial' | 'none';
-  readonly issues: readonly NormalizationIssue[];
-  readonly commands: readonly NormalizationCommand[];
-}
+export type {
+  NormalizationCommand,
+  NormalizationDetail,
+  NormalizationIssue,
+  NormalizationWord,
+} from './shell/types.js';
 
 export interface RuleEvaluation {
   readonly path: RulePath;

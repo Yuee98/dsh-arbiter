@@ -260,6 +260,14 @@ function CallDetails({ detail }: { readonly detail: LogDetail }): ReactNode {
           }}
         />
       </details>
+      {detail.normalization === null ? null : (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 13 }}>
+            {t('logs.normalization')}
+          </summary>
+          <JsonBlock value={detail.normalization} />
+        </details>
+      )}
       <details>
         <summary style={{ cursor: 'pointer', fontSize: 13 }}>
           {t('logs.modelCalls', { count: detail.modelCalls.length })}

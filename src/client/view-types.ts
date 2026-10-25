@@ -1,5 +1,9 @@
 import type { ComponentType } from 'react';
-import type { ArbiterConfig, CommandRule } from '../types.js';
+import type {
+  ArbiterConfig,
+  CommandRule,
+  NormalizationDetail,
+} from '../types.js';
 import type { LocaleService } from './i18n.js';
 import type { ConfigIssueView } from './view-issues.js';
 
@@ -118,6 +122,8 @@ export interface LogDetail {
   readonly reason: string;
   readonly trace: readonly unknown[];
   readonly effect: unknown;
+  /** Command normalization the decision used, when the record carries it. */
+  readonly normalization: NormalizationDetail | null;
   readonly sessionRecordState: string;
   readonly signals: unknown;
   readonly policyStrategy: string | null;

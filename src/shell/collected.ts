@@ -33,6 +33,8 @@ export interface WalkResult {
   readonly errors: string[];
   readonly issues: ShellStructureIssue[];
   readonly covered: CoveredRange[];
+  /** Command indices linked by a real pipe operator: sender -> receiver. */
+  readonly pipeLinks: ReadonlyMap<number, number>;
   readonly subshells: number;
   readonly substitutions: number;
   readonly heredocs: number;
@@ -95,6 +97,8 @@ export class Collected {
   readonly errors: string[] = [];
   readonly issues: ShellStructureIssue[] = [];
   readonly covered: CoveredRange[] = [];
+  /** Command indices linked by a real pipe: sender -> receiver. */
+  readonly pipeLinks = new Map<number, number>();
   subshells = 0;
   substitutions = 0;
   heredocs = 0;
@@ -137,6 +141,7 @@ export class Collected {
       errors: [...new Set(this.errors)],
       issues: this.issues,
       covered: this.covered,
+      pipeLinks: this.pipeLinks,
       subshells: this.subshells,
       substitutions: this.substitutions,
       heredocs: this.heredocs,

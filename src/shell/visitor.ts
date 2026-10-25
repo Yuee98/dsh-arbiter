@@ -281,10 +281,13 @@ class AstVisitor implements ExpansionSink {
       for (const element of node.value.elements) {
         this.recordWord(element, frame);
       }
+      // The array's own text is known even though its elements are not: keeping
+      // the original `name=(...)` form lets a rule match the assignment the user
+      // wrote, while the elements stay separate subjects.
       const assignment: ShellAssignment = {
         index: this.collected.assignments.length,
         name: node.name,
-        value: node.value.elements.map((element) => element.text).join(' '),
+        value: node.text.slice(node.name.length + 1),
         dynamic: true,
         raw: node.text,
         commandIndex,
@@ -309,25 +312,30 @@ class AstVisitor implements ExpansionSink {
     if (this.spent()) return;
     const commandIndex = this.collected.commands.length;
     const assignments: ShellAssignment[] = [];
+    // Every redirect on this command — prefix and suffix — belongs to it, so the
+    // facts layer can attribute the write without re-walking the global list.
+    const redirects: ShellRedirect[] = [];
+    const record = (redirection: Redirection): void => {
+      const before = this.collected.redirects.length;
+      this.redirect(redirection, commandIndex, frame);
+      redirects.push(...this.collected.redirects.slice(before));
+    };
     for (const prefix of node.prefix) {
       if (prefix.type === 'Assignment') {
         assignments.push(this.assignment(prefix, commandIndex, frame));
       } else {
-        this.redirect(prefix, commandIndex, frame);
+        record(prefix);
       }
     }
     const words: ShellWord[] = [];
     if (node.name !== undefined) words.push(this.reading(node.name, frame));
-    const redirects: ShellRedirect[] = [];
     for (const entry of node.suffix) {
       if (entry.type === 'Word') {
         words.push(this.reading(entry, frame));
       } else if (entry.type === 'Assignment') {
         assignments.push(this.assignment(entry, commandIndex, frame));
       } else {
-        const before = this.collected.redirects.length;
-        this.redirect(entry, commandIndex, frame);
-        redirects.push(...this.collected.redirects.slice(before));
+        record(entry);
       }
     }
     this.cover(node.pos, node.end);
@@ -347,6 +355,7 @@ class AstVisitor implements ExpansionSink {
         redirects,
         incomplete: false,
         pipelineIndex: frame.pipeline,
+        pipeTarget: null,
         cwd: frame.cwd,
       };
       this.collected.commands.push(command);
@@ -424,11 +433,26 @@ class AstVisitor implements ExpansionSink {
     node: Extract<PipelineNode, { readonly type: 'Pipeline' }>,
     frame: Frame,
   ): void {
-    const inner: Frame = { cwd: frame.cwd, pipeline: frame.pipeline + 1 };
-    for (const command of node.commands) this.node(command, inner);
-    // Each pipeline element runs in its own subshell, so a `cd` inside one never
-    // moves the caller; the caller keeps its own directory.
-    frame.pipeline = inner.pipeline;
+    // Each element runs in its own subshell with its own copy of the caller's
+    // state. Sharing one mutable frame would let `cd X | echo hi > out` resolve the
+    // redirect from X, even though the `cd` never moved the second element.
+    const starts: number[] = [];
+    for (const element of node.commands) {
+      const first = this.collected.commands.length;
+      starts.push(first);
+      this.node(element, { cwd: frame.cwd, pipeline: frame.pipeline + 1 });
+      starts.push(this.collected.commands.length - 1);
+    }
+    // A pipe edge exists only where the AST has an operator. Adjacent statements in
+    // a script are sequential, not piped, so they get no link.
+    for (const [index] of node.operators.entries()) {
+      const sender = starts[index * 2 + 1];
+      const receiver = starts[(index + 1) * 2];
+      if (sender === undefined || receiver === undefined) continue;
+      this.collected.pipeLinks.set(sender, receiver);
+    }
+    // Elements cannot move the caller, so its directory is unchanged.
+    frame.pipeline = frame.pipeline + 1;
     this.cover(node.pos, node.end);
   }
 
@@ -437,12 +461,21 @@ class AstVisitor implements ExpansionSink {
     operators: readonly ('&&' | '||')[],
     frame: Frame,
   ): void {
+    // The right side may or may not run, so the caller's directory afterwards is
+    // the join of "left side ran" and "left side did not". Only a directory both
+    // outcomes agree on survives; everything else is unknown.
     for (const [index, command] of nodes.entries()) {
-      // The right side of `&&` runs after success, so a `cd` there applies. The
-      // right side of `||` may run after a failure, so the directory the left side
-      // would have left behind is not the one it runs in.
-      if (operators[index - 1] === '||') frame.cwd = null;
+      const before = frame.cwd;
+      if (operators[index - 1] === '||') {
+        // A failure before `||` means the `cd` that would have run did not.
+        frame.cwd = null;
+      }
       this.node(command, frame);
+      if (operators[index - 1] === '&&') {
+        // After `&&`, the caller can only be sure the directory if the command
+        // provably did not change it.
+        frame.cwd = frame.cwd === before ? before : null;
+      }
     }
   }
 
@@ -451,6 +484,9 @@ class AstVisitor implements ExpansionSink {
     frame: Frame,
   ): void {
     this.node(node.command, frame);
+    // The compound's own redirects are recorded on the global list; they target
+    // the construct rather than the last command inside it, so no command claims
+    // to write them and no subject is lost.
     for (const redirect of node.redirects) {
       this.redirect(redirect, this.collected.commands.length - 1, frame);
     }
@@ -458,7 +494,13 @@ class AstVisitor implements ExpansionSink {
     this.cover(node.pos, node.end);
   }
 
-  /** Function and coproc definitions hold a body the call still contains. */
+  /**
+   * Function and coproc definitions.
+   *
+   * The body is walked because its text is part of the call, but a definition does
+   * not run it: it must not change the caller's directory, so the body gets its own
+   * frame and the caller keeps the frame it had.
+   */
   private definition(
     node: Extract<PipelineNode, { readonly type: 'Function' | 'Coproc' }>,
     frame: Frame,
@@ -467,7 +509,7 @@ class AstVisitor implements ExpansionSink {
       this.recordWord(node.name, frame);
       this.collected.subshells += 1;
     }
-    this.nodeOrList(node.body, frame);
+    this.nodeOrList(node.body, { cwd: frame.cwd, pipeline: frame.pipeline });
     this.flushPending();
     this.cover(node.pos, node.end);
   }

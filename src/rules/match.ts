@@ -138,9 +138,11 @@ function structuralSubjects(inputs: SubjectInputs): Subject[] {
     });
   }
   for (const redirect of parse.redirects) {
-    const absolute = redirect.target.startsWith('/');
-    const cwdKnown = redirect.cwd !== null;
-    const unresolved = !absolute && (redirect.unresolved || !cwdKnown);
+    // A dynamic target is never a confirmed path, even when it looks absolute:
+    // `/workspace/$REL` can expand to `../../etc/passwd`. Only a static target can
+    // be resolved, and only a relative one depends on the directory being known.
+    const absolute = !redirect.dynamic && redirect.target.startsWith('/');
+    const unresolved = redirect.dynamic || (!absolute && redirect.cwd === null);
     subjects.push({
       target: 'file_redirect',
       text:
@@ -152,11 +154,15 @@ function structuralSubjects(inputs: SubjectInputs): Subject[] {
     });
   }
   for (const assignment of parse.assignments) {
+    // The assignment's text is what the user wrote, so a rule can match it even
+    // when the value is dynamic. Only a value the adapter could not even attribute
+    // to the word would be unresolved here; expansions are covered by the command
+    // subjects they run.
     subjects.push({
       target: 'variable_assignment',
       text: `${assignment.name}=${assignment.value}`,
       nodeIndex: subjects.length,
-      unresolved: assignment.dynamic,
+      unresolved: false,
     });
   }
   return subjects;

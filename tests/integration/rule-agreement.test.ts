@@ -71,6 +71,8 @@ interface Harness {
   ) => Promise<{ readonly kind: string; readonly reason?: string }>;
   readonly documentPath: string;
   readonly session: StubSession;
+  /** The stored audit row, read back through the same route the UI uses. */
+  readonly callDetail: (callId: string) => Promise<Record<string, unknown>>;
 }
 
 interface StubSession {
@@ -197,6 +199,28 @@ async function createHarness(config: unknown): Promise<Harness> {
     routes,
     documentPath,
     session,
+    callDetail: async (callId) => {
+      const route = routes.get('/api/arbiter/log');
+      if (route === undefined) throw new Error('log route was not registered');
+      // The store writes through an asynchronous queue, so the row appears once
+      // that write drains. Waiting for it is a bounded wait on a real condition,
+      // not a fixed delay.
+      const deadline = Date.now() + 5_000;
+      for (;;) {
+        const response = await route.fetch(
+          new Request(`http://fixture/api/arbiter/log?callId=${callId}`),
+        );
+        const body: unknown = await response.json();
+        if (body !== null && typeof body === 'object') {
+          const record: unknown = Reflect.get(body, 'record');
+          if (record !== null && typeof record === 'object')
+            return { ...record };
+        }
+        if (Date.now() > deadline)
+          throw new Error(`call ${callId} was not written to the audit store`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
     gate: (execution) => {
       if (gate === undefined) throw new Error('gate was not registered');
       return gate(execution);
@@ -411,6 +435,43 @@ describe('shell normalization agreement', () => {
     if (parse === null || typeof parse !== 'object')
       throw new TypeError('parse must be an object');
     expect(Reflect.get(parse, 'completeness')).toBe('partial');
+  });
+
+  test('the call detail carries the normalization the decision used', async () => {
+    // The audit row must keep the evidence, not only the verdict: a later reader
+    // has to be able to see which text was matched and why a word was dynamic.
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      audit: {
+        enabled: true,
+        retentionDays: 30,
+        retentionBytes: 1024 * 1024,
+      },
+      rules: [
+        {
+          id: 'quoted',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: "echo 'a b'" },
+          ],
+          verdict: 'allow',
+        },
+      ],
+    });
+    const decision = await harness.gate(
+      shellExecution(harness.session, 'echo "a b"', 'call-detail'),
+    );
+    expect(gateVerdict(decision)).toBe('allow');
+    const record = await harness.callDetail('call-detail');
+    const effect = record['effect'];
+    if (effect === null || typeof effect !== 'object')
+      throw new TypeError('the record must carry effect evidence');
+    const normalization: unknown = Reflect.get(effect, 'normalization');
+    if (normalization === null || typeof normalization !== 'object')
+      throw new TypeError('the effect evidence must carry normalization');
+    expect(Reflect.get(normalization, 'raw')).toBe('echo "a b"');
+    expect(Reflect.get(normalization, 'commands')).toEqual([
+      expect.objectContaining({ text: "echo 'a b'" }),
+    ]);
   });
 
   test('a dynamic word keeps its expression and stays matchable', async () => {

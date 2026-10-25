@@ -303,6 +303,43 @@ describe('redirects, assignments and cwd', () => {
     ).toBe('/workspace');
   });
 
+  test('pipeline elements do not share a directory', () => {
+    // A `cd` in one element runs in that element's subshell. Resolving the second
+    // element's redirect from the first one's target would report a write to a
+    // path the call never writes.
+    expect(
+      parseShell('cd /workspace | echo hi > out.txt', '/outside').redirects[0]
+        ?.cwd,
+    ).toBe('/outside');
+  });
+
+  test('a conditional branch does not commit its directory', () => {
+    // `false && cd X` may never run the `cd`, so the caller's directory afterwards
+    // is not X.
+    expect(
+      parseShell('false && cd /workspace\necho hi > out.txt', '/outside')
+        .redirects[0]?.cwd,
+    ).toBeNull();
+    // An unconditional `cd` still applies.
+    expect(
+      parseShell('cd /workspace\necho hi > out.txt', '/outside').redirects[0]
+        ?.cwd,
+    ).toBe('/workspace');
+  });
+
+  test('a function definition does not move the caller', () => {
+    expect(
+      parseShell('f() { cd /workspace; }\necho hi > out.txt', '/outside')
+        .redirects[0]?.cwd,
+    ).toBe('/outside');
+  });
+
+  test('an absolute redirect is classified even when the cwd is unknown', () => {
+    const result = factsOf('cd "$TARGET"\necho hi > /tmp/abs');
+    expect(result.facts.observed.writes).toEqual(['/tmp/abs']);
+    expect(result.writesOutsideWorkspace).toEqual(['/tmp/abs']);
+  });
+
   test('a cd inside a pipeline or subshell does not move the caller', () => {
     expect(
       parseShell('cd /tmp | cat && echo hi > out.txt', '/workspace/app')
@@ -361,6 +398,20 @@ describe('nested and compound structure', () => {
   test('a function body is part of the call', () => {
     expect(commandTexts('f() { echo hi; }')).toEqual(['echo hi']);
     expect(commandTexts('f() { rm -rf x; }')).toContain('rm -rf x');
+  });
+
+  test('reliable redirect observations are not lost to where they sit', () => {
+    // A prefix redirect, a compound's own redirect, and a redirect with no command
+    // at all are all file writes the call performs.
+    expect(factsOf('> /tmp/output echo hi').facts.observed.writes).toEqual([
+      '/tmp/output',
+    ]);
+    expect(
+      factsOf('if true; then echo hi; fi > /tmp/output').facts.observed.writes,
+    ).toEqual(['/tmp/output']);
+    expect(factsOf('> /tmp/output').facts.observed.writes).toEqual([
+      '/tmp/output',
+    ]);
   });
 
   test('a compound redirect stays attached to the call', () => {
@@ -451,6 +502,22 @@ describe('effect facts', () => {
     const result = factsOf("touch '/tmp/$X'");
     expect(result.facts.observed.writes).toEqual(['/tmp/$X']);
     expect(result.facts.expansionRisk).toBeNull();
+  });
+
+  test('pipeline execution requires a real pipe edge', () => {
+    // Two commands on separate lines run sequentially; only `|` makes the second
+    // one consume the first one's output.
+    expect(
+      factsOf('curl https://example.test\nbash deploy.sh').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+    expect(
+      factsOf('curl https://example.test | bash').facts.observed.pipelineExec,
+    ).toEqual([['curl', 'bash']]);
+    expect(
+      factsOf('curl https://example.test > out.txt').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
   });
 
   test('an opaque interpreter is a fact, not a structural gap', () => {

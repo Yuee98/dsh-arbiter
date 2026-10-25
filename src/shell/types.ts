@@ -81,6 +81,14 @@ export interface ShellCommand {
   readonly redirects: readonly ShellRedirect[];
   readonly incomplete: boolean;
   readonly pipelineIndex: number;
+  /**
+   * Index of the command that receives this command's stdout through a real
+   * `|`/`|&` in the same pipeline, or null when nothing is piped into.
+   *
+   * Adjacency in the source is not a pipe: two commands on separate lines run
+   * sequentially, and only the AST's own operator proves an edge.
+   */
+  readonly pipeTarget: number | null;
   /** Effective working directory when this command runs, or null when unknown. */
   readonly cwd: string | null;
 }
@@ -122,4 +130,43 @@ export interface ShellParse {
   readonly nodes: readonly string[];
   readonly argv: readonly string[];
   readonly error?: string;
+}
+
+/** One word's normalization, as shown by the tester and the call detail. */
+export interface NormalizationWord {
+  /** Exactly what the user wrote. */
+  readonly raw: string;
+  /** The canonical matching text, or the raw expression when dynamic. */
+  readonly text: string;
+  readonly status: ShellWordStatus;
+  /** Why the word is dynamic; empty when static. */
+  readonly reasons: readonly string[];
+  /** The decoded value, only when the word is static. */
+  readonly value?: string;
+}
+
+export interface NormalizationCommand {
+  /** Canonical matching text for the whole command. */
+  readonly text: string;
+  readonly raw: string;
+  readonly words: readonly NormalizationWord[];
+}
+
+export interface NormalizationIssue {
+  readonly kind: string;
+  readonly message: string;
+  readonly pos: number;
+}
+
+/**
+ * Everything needed to explain how one command text became its matching text.
+ *
+ * Produced from the same parse the matcher used, so the explanation cannot
+ * describe a different normalization than the one that decided the verdict.
+ */
+export interface NormalizationDetail {
+  readonly raw: string;
+  readonly completeness: ShellCompleteness;
+  readonly issues: readonly NormalizationIssue[];
+  readonly commands: readonly NormalizationCommand[];
 }

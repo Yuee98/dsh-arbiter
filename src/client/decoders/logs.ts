@@ -1,3 +1,4 @@
+import type { NormalizationDetail } from '../../types.js';
 import type { LogDetail, LogRow } from '../view-types.js';
 import {
   array,
@@ -6,6 +7,7 @@ import {
   nullable,
   number,
   object,
+  normalizationDetail,
   optional,
   strings,
   text,
@@ -71,6 +73,23 @@ function stage(value: unknown): LogDetail['stages'][number] {
   };
 }
 
+/**
+ * Normalization evidence carried inside the audit `effect` payload.
+ *
+ * It is optional: rows written before this evidence existed simply have none, and
+ * that is not an error.
+ */
+function normalizationOfEffect(effect: unknown): NormalizationDetail | null {
+  if (effect === null || typeof effect !== 'object') return null;
+  const value: unknown = Reflect.get(effect, 'normalization');
+  if (value === undefined) return null;
+  try {
+    return normalizationDetail(value);
+  } catch {
+    return null;
+  }
+}
+
 function logDetail(value: unknown): LogDetail {
   const source = object(value);
   return {
@@ -90,6 +109,7 @@ function logDetail(value: unknown): LogDetail {
     reason: field(source, 'reason', text),
     trace: field(source, 'trace', array(unknownValue)),
     effect: field(source, 'effect', unknownValue),
+    normalization: normalizationOfEffect(field(source, 'effect', unknownValue)),
     sessionRecordState: field(source, 'sessionRecordState', text),
     signals: field(source, 'signals', unknownValue),
     policyStrategy: field(source, 'policyStrategy', nullable(text)),
