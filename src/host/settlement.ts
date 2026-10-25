@@ -518,20 +518,12 @@ export class CallSettlement {
       };
       // Attached before the request is issued so an immediate abort is caught.
       const onAbort = (): void => {
-        // A resolved request already produced its answer; the cancellation is
-        // then a later event and does not rewrite the outcome.
         if (answered) return;
-        // A request that already resolved delivers its answer on the microtask
-        // queue; the abort listener runs synchronously. Waiting two microtask
-        // turns lets that queued continuation run first, so an answer that was
-        // already delivered wins, while a cancellation from an earlier turn has
-        // no pending continuation and still settles as cancelled.
-        queueMicrotask(() => {
-          queueMicrotask(() => {
-            if (answered) return;
-            finish({ kind: 'cancelled' });
-          });
-        });
+        // Cancellation claims the ending immediately. A later answer must not
+        // overtake it, because an approval that was withdrawn while the user
+        // was still deciding cannot authorize anything — and a bare promise
+        // cannot prove that it settled before this synchronous abort.
+        finish({ kind: 'cancelled' });
       };
       if (isAborted(call.exec.signal)) {
         finish({ kind: 'cancelled' });

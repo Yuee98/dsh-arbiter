@@ -1030,33 +1030,76 @@ describe('cancellation and answer as competing events', () => {
     }
   });
 
-  test('an answer resolved first keeps its outcome when a cancel follows', async () => {
+  test('an answer delivered before the cancellation keeps its outcome', async () => {
     const session = makeSession('race-answer-first');
     const controller = new AbortController();
+    const asked: ((answer: 'allowed-once') => void)[] = [];
     const harness = createHarness({
       sessions: [session],
       llm: chatAnswer({ risk: 7, authorized: 2 }),
       approval: {
         config: { policy: 'ask' },
-        request: () => {
-          // Resolve and cancel in the same turn: the answer is delivered first,
-          // so it must win even though the abort is observed before the
-          // promise continuation runs.
-          const answered = Promise.resolve('allowed-once' as const);
-          controller.abort();
-          return answered;
-        },
+        request: () =>
+          new Promise((resolve) => {
+            asked.push((answer) => {
+              resolve(answer);
+            });
+          }),
       },
     });
     try {
-      const decision = await harness.gate(
+      const pending = harness.gate(
         call(session, 'rc2', controller.signal),
         allowNext,
       );
-      // The abort is attached before the request, but the request resolves in
-      // the same turn, so the answer wins.
+      for (let attempt = 0; attempt < 100 && asked.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // The answer is delivered and observed first; only then is the prompt
+      // closed, so the cancellation is a later event.
+      asked[0]?.('allowed-once');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      controller.abort();
+      const decision = await pending;
       expect(decision.kind).toBe('allow');
       expect(await storedTrace('rc2')).toContain('human-allow');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a cancellation then an answer in one turn stays an abort', async () => {
+    const session = makeSession('race-cancel-same-turn');
+    const controller = new AbortController();
+    const asked: ((answer: 'allowed-once' | 'rejected') => void)[] = [];
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () =>
+          new Promise((resolve) => {
+            asked.push((answer) => {
+              resolve(answer);
+            });
+          }),
+      },
+    });
+    try {
+      const pending = harness.gate(
+        call(session, 'rc3', controller.signal),
+        allowNext,
+      );
+      for (let attempt = 0; attempt < 100 && asked.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // Cancellation and a rejection in the same synchronous turn: the
+      // withdrawal came first, so this is an abort, not a human denial.
+      controller.abort();
+      asked[0]?.('rejected');
+      const decision = await pending;
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('human-abort');
     } finally {
       harness.dispose();
     }
