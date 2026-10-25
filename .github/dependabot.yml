@@ -2,6 +2,9 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    commit-message:
+      prefix: chore
+      include: scope
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -13,6 +16,9 @@ updates:
         update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /tests/e2e/runtime
+    commit-message:
+      prefix: chore
+      include: scope
     schedule:
       interval: weekly
     open-pull-requests-limit: 1
@@ -21,6 +27,9 @@ updates:
     versioning-strategy: increase
   - package-ecosystem: github-actions
     directory: /
+    commit-message:
+      prefix: chore
+      include: scope
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
