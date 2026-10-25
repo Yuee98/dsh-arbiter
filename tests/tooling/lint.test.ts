@@ -1,11 +1,17 @@
 import { ESLint } from 'eslint';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { forbiddenImport } from '../../tooling/lint/boundaries.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const eslint = new ESLint({ cwd: root });
 const tsx = 'src/client/i18n-provider.tsx';
+
+// Construct the typed project outside individual assertions. Cold CI runners
+// need a larger initialization budget; behavior tests keep the default timeout.
+beforeAll(async () => {
+  await eslint.lintText('export {};', { filePath: tsx });
+}, 30_000);
 
 async function rules(
   source: string,

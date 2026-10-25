@@ -1,9 +1,15 @@
 import { ESLint } from 'eslint';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const eslint = new ESLint({ cwd: root });
+
+beforeAll(async () => {
+  await eslint.lintText('export {};', {
+    filePath: 'src/client/i18n-provider.tsx',
+  });
+}, 30_000);
 
 async function rules(
   source: string,

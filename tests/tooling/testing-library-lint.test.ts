@@ -1,6 +1,6 @@
 import { ESLint } from 'eslint';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const filePath = 'tests/client/config-actions.test.tsx';
@@ -10,6 +10,10 @@ const libraryOptions = {
   overrideConfigFile: 'eslint.testing-library.config.mjs',
 };
 const library = new ESLint(libraryOptions);
+
+beforeAll(async () => {
+  await typed.lintText('export {};', { filePath });
+}, 30_000);
 
 async function rules(
   linter: ESLint,
