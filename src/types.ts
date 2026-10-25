@@ -144,12 +144,24 @@ export interface ArbiterConfig {
   readonly reviewBudget: number | null;
 }
 
-export interface ConfigError {
+/**
+ * A machine-stable issue code plus its interpolation parameters.
+ *
+ * `code` lets the UI resolve a localized sentence through the host locale
+ * instead of rendering a backend English phrase; `message` remains the
+ * developer-facing fallback and keeps protocol/log output unchanged.
+ */
+export interface ConfigIssueDetail {
+  readonly code?: string;
+  readonly params?: Readonly<Record<string, string | number>>;
+}
+
+export interface ConfigError extends ConfigIssueDetail {
   readonly path: string;
   readonly message: string;
 }
 
-export interface ConfigWarning {
+export interface ConfigWarning extends ConfigIssueDetail {
   readonly path: string;
   readonly message: string;
 }

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   DEFAULT_CONFIG,
   parseConfig,
+  parseDocument,
   registerConfigFormat,
   registeredConfigFormats,
 } from '../src/config.js';
@@ -120,7 +121,7 @@ describe('configuration', () => {
 describe('first install defaults', () => {
   test('a missing document yields the confirmed first-release defaults', () => {
     for (const raw of [undefined, null]) {
-      const parsed = parseConfig(raw);
+      const parsed = parseDocument(raw);
       expect(parsed.errors).toEqual([]);
       expect(parsed.warnings).toEqual([]);
       expect(parsed.config).toMatchObject({
@@ -161,12 +162,18 @@ describe('first install defaults', () => {
     expect(parsed.config.reviewer.type).toBe('decision');
   });
 
-  test('a non-object document is still a configuration error', () => {
-    const parsed = parseConfig('[]');
-    expect(parsed.errors).toEqual([
-      { path: '', message: 'configuration must be an object' },
-    ]);
-    expect(parsed.config).toBe(DEFAULT_CONFIG);
+  test('a save or malformed body without an object config is an error', () => {
+    for (const raw of ['[]', null, undefined, 7]) {
+      const parsed = parseConfig(raw);
+      expect(parsed.errors).toEqual([
+        {
+          path: '',
+          message: 'configuration must be an object',
+          code: 'config.not-object',
+        },
+      ]);
+      expect(parsed.config).toBe(DEFAULT_CONFIG);
+    }
   });
 });
 
@@ -211,6 +218,7 @@ describe('configuration format identification', () => {
         path: 'format',
         message:
           'unknown configuration format "arbiter-config-v2"; supported: arbiter-config-v1',
+        code: 'config.format-unknown',
       },
     ]);
     expect(unknown.config).toBe(DEFAULT_CONFIG);
@@ -279,5 +287,103 @@ describe('configuration format identification', () => {
       overlapsDeniedEffect: false,
     });
     expect(evaluated.path).toMatchObject({ kind: 'rule', verdict: 'allow' });
+  });
+});
+
+describe('strict validation of supplied fields', () => {
+  test('a wrong-typed security field is an error, never a permissive default', () => {
+    const parsed = parseConfig({
+      enabled: 'false',
+      rules: [
+        {
+          id: 'narrow',
+          enabled: 'false',
+          match: {
+            node: 'command',
+            kind: 'regex',
+            pattern: '^gh pr view',
+            agents: 'main',
+          },
+          verdict: 'allow',
+        },
+      ],
+    });
+    expect(parsed.errors.map((error) => error.path)).toEqual(
+      expect.arrayContaining([
+        'enabled',
+        'rules[0].enabled',
+        'rules[0].match.agents',
+      ]),
+    );
+    expect(parsed.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(['type.boolean', 'type.agent-scope']),
+    );
+  });
+
+  test('an explicitly empty project file list stays empty instead of reverting', () => {
+    const parsed = parseConfig({
+      context: { projectRules: { files: [] } },
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.context.projectRules.files).toEqual([]);
+  });
+
+  test('a non-array project file list is reported, not replaced silently', () => {
+    const parsed = parseConfig({
+      context: { projectRules: { files: '.arbiter.md' } },
+    });
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({ path: 'context.projectRules.files' }),
+    ]);
+  });
+
+  test('a malformed rule cannot turn into an active or broader allow', () => {
+    const parsed = parseConfig({
+      rules: [
+        {
+          id: 'bad-scope',
+          match: {
+            node: 'command',
+            kind: 'regex',
+            pattern: '^rm',
+            agents: ['main', 7],
+          },
+          verdict: 'allow',
+        },
+      ],
+    });
+    expect(
+      parsed.errors.some((error) => error.path === 'rules[0].match.agents'),
+    ).toBe(true);
+    // The rule is retained for editing but nothing about it may be applied.
+    expect(parsed.errors.length).toBeGreaterThan(0);
+  });
+
+  test('supplied issue codes localize without changing the developer message', () => {
+    const parsed = parseConfig({ enabled: 'yes' });
+    const issue = parsed.errors[0];
+    expect(issue?.code).toBe('type.boolean');
+    expect(issue?.message).toBe('must be a boolean');
+    expect(issue?.path).toBe('enabled');
+  });
+});
+
+describe('format round-trip through a save payload', () => {
+  test('an explicit format survives normalization and content identity', () => {
+    const declared = parseConfig({
+      format: 'arbiter-config-v1',
+      enabled: false,
+    });
+    const implicit = parseConfig({ enabled: false });
+    expect(declared.config.format).toBe('arbiter-config-v1');
+    expect(implicit.config.format).toBeUndefined();
+    // The declaration is part of the content, so the two documents differ.
+    expect(JSON.stringify(declared.config)).not.toBe(
+      JSON.stringify(implicit.config),
+    );
+    // Re-parsing the saved normalized content keeps the declaration.
+    const roundTripped = parseConfig(declared.config);
+    expect(roundTripped.config.format).toBe('arbiter-config-v1');
+    expect(roundTripped.errors).toEqual([]);
   });
 });

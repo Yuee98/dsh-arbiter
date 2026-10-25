@@ -11,6 +11,7 @@ import {
   configHash,
   DEFAULT_CONFIG,
   parseConfig,
+  parseDocument,
   stableHash,
 } from '../config.js';
 import { loadSessionRecordApi, sessionRecordError } from '../records.js';
@@ -165,19 +166,27 @@ export function applyConfig(
   source: ConfigApplySource,
 ): ConfigActivation {
   const { runtime, ctx } = host;
-  const changed = !sameContent(runtime.config, candidate);
+  const previous = runtime.config;
+  const changed = !sameContent(previous, candidate);
   const firstActivation = runtime.configSnapshotId === 'cfg-unavailable';
   runtime.configApplications += 1;
   const revision = configHash(candidate);
-  if (changed) {
-    runtime.config = candidate;
+  // The effective configuration commits only here, after validation succeeded
+  // and after the host accepted the document.
+  runtime.config = candidate;
+  // Continuity data follows the committed configuration, never the candidate
+  // that was merely parsed: a later application failure must not leave a
+  // recovery copy the runtime never actually ran.
+  if (changed)
     writeLastGood(lastGoodPath(profileHome(ctx), profileScope(ctx)), candidate);
-  }
   runtime.configFormat = candidate.format ?? 'arbiter-config-v1';
   runtime.configFormatExplicit = candidate.format !== undefined;
   const audit = ensureAudit(runtime, profileHome(ctx), ctx);
   if (audit === null) {
     runtime.effectiveRevision = revision;
+    // Without audit storage there is no verifiable snapshot: report the
+    // unavailable identity rather than the previous document's snapshot.
+    if (changed) runtime.configSnapshotId = 'cfg-unavailable';
     return {
       changed,
       revision,
@@ -233,7 +242,7 @@ function selectConfig(
 ) {
   const home = profileHome(ctx);
   const scope = profileScope(ctx);
-  const parsed = parseConfig(rawConfig);
+  const parsed = parseDocument(rawConfig);
   let config = parsed.config;
   let invalidConfigError: string | null = null;
   if (parsed.errors.length > 0) {

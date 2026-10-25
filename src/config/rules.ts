@@ -23,6 +23,110 @@ const RULE_VERDICTS: readonly RuleVerdict[] = [
   'force-review',
 ];
 
+/**
+ * `agents` narrows a rule to specific identities. A supplied value must be a
+ * non-empty list of strings: silently dropping a malformed scope would widen
+ * the rule beyond what the user wrote.
+ */
+function parseAgents(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push({
+      path,
+      message: 'must be a non-empty array of strings',
+      code: 'type.agent-scope',
+    });
+    return undefined;
+  }
+  const values: readonly unknown[] = value;
+  if (values.some((agent) => typeof agent !== 'string')) {
+    errors.push({
+      path,
+      message: 'must be a non-empty array of strings',
+      code: 'type.agent-scope',
+    });
+    return undefined;
+  }
+  return values.filter((agent): agent is string => typeof agent === 'string');
+}
+
+/** A supplied string field; a present non-string is an error, absent is `undefined`. */
+function optionalString(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') return value;
+  errors.push({ path, message: 'must be a string', code: 'type.string' });
+  return undefined;
+}
+
+/**
+ * A supplied `enabled` flag must be boolean: an invalid value must not silently
+ * keep a rule enabled, which would widen what the configuration allows.
+ */
+function boolField(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'boolean') return value;
+  errors.push({ path, message: 'must be a boolean', code: 'type.boolean' });
+  return undefined;
+}
+
+function parseMatch(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): RuleMatchSpec | null {
+  if (!isRecord(value)) {
+    errors.push({
+      path: `${path}.match`,
+      message: 'must be an object',
+      code: 'type.object',
+    });
+    return null;
+  }
+  const node = asEnum(
+    value['node'],
+    RULE_NODES,
+    'command',
+    `${path}.match.node`,
+    errors,
+  );
+  const kind = asEnum(
+    value['kind'],
+    RULE_KINDS,
+    'exact',
+    `${path}.match.kind`,
+    errors,
+  );
+  const pattern =
+    optionalString(value['pattern'], `${path}.match.pattern`, errors) ?? '';
+  const tool = optionalString(value['tool'], `${path}.match.tool`, errors);
+  const selector = optionalString(
+    value['selector'],
+    `${path}.match.selector`,
+    errors,
+  );
+  const agents = parseAgents(value['agents'], `${path}.match.agents`, errors);
+  return {
+    node,
+    kind,
+    pattern,
+    ...(tool === undefined ? {} : { tool }),
+    ...(selector === undefined ? {} : { selector }),
+    ...(agents === undefined ? {} : { agents }),
+  };
+}
+
 export function parseRule(
   value: unknown,
   index: number,
@@ -30,57 +134,12 @@ export function parseRule(
 ): CommandRule | null {
   const path = `rules[${String(index)}]`;
   if (!isRecord(value)) {
-    errors.push({ path, message: 'must be an object' });
+    errors.push({ path, message: 'must be an object', code: 'type.object' });
     return null;
   }
-  const id = typeof value['id'] === 'string' ? value['id'].trim() : '';
-  if (id.length === 0)
-    errors.push({ path: `${path}.id`, message: 'must be a non-empty string' });
-  const matchValue = value['match'];
-  if (!isRecord(matchValue)) {
-    errors.push({ path: `${path}.match`, message: 'must be an object' });
-    return null;
-  }
-  const node = asEnum(
-    matchValue['node'],
-    RULE_NODES,
-    'command',
-    `${path}.match.node`,
-    errors,
-  );
-  const kind = asEnum(
-    matchValue['kind'],
-    RULE_KINDS,
-    'exact',
-    `${path}.match.kind`,
-    errors,
-  );
-  const pattern =
-    typeof matchValue['pattern'] === 'string' ? matchValue['pattern'] : '';
-  if (pattern.length === 0) {
-    errors.push({
-      path: `${path}.match.pattern`,
-      message: 'must be a non-empty string',
-    });
-  }
-  const match: RuleMatchSpec = {
-    node,
-    kind,
-    pattern,
-    ...(typeof matchValue['tool'] === 'string'
-      ? { tool: matchValue['tool'] }
-      : {}),
-    ...(typeof matchValue['selector'] === 'string'
-      ? { selector: matchValue['selector'] }
-      : {}),
-    ...(Array.isArray(matchValue['agents'])
-      ? {
-          agents: matchValue['agents'].filter(
-            (agent): agent is string => typeof agent === 'string',
-          ),
-        }
-      : {}),
-  };
+  const id = optionalString(value['id'], `${path}.id`, errors)?.trim() ?? '';
+  const match = parseMatch(value['match'], path, errors);
+  if (match === null) return null;
   const verdict = asEnum(
     value['verdict'],
     RULE_VERDICTS,
@@ -88,19 +147,17 @@ export function parseRule(
     `${path}.verdict`,
     errors,
   );
-  const rule: CommandRule = {
+  const enabled = boolField(value['enabled'], `${path}.enabled`, errors);
+  const comment = optionalString(value['comment'], `${path}.comment`, errors);
+  const hint = optionalString(value['hint'], `${path}.hint`, errors);
+  return {
     id,
     match,
     verdict,
-    ...(typeof value['comment'] === 'string'
-      ? { comment: value['comment'] }
-      : {}),
-    ...(typeof value['hint'] === 'string' ? { hint: value['hint'] } : {}),
-    ...(typeof value['enabled'] === 'boolean'
-      ? { enabled: value['enabled'] }
-      : {}),
+    ...(comment === undefined ? {} : { comment }),
+    ...(hint === undefined ? {} : { hint }),
+    ...(enabled === undefined ? {} : { enabled }),
   };
-  return rule;
 }
 
 function literalPrefix(pattern: string): string {

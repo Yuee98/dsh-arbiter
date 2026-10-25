@@ -26,5 +26,31 @@
   },
   "conflict": "配置文件已被外部修改。请重新读取后合并草稿；草稿与当前生效配置均未被覆盖。",
   "invalid": "配置校验失败，未保存：{errors}",
-  "rejected": "配置应用失败，未生效：{error}"
+  "rejected": "配置应用失败，未生效：{error}",
+  "issue": {
+    "configNotObject": "配置必须是对象。",
+    "configFormat": "配置格式无效：{error}",
+    "configFormatUnknown": "未知的配置格式，未加载该文件。",
+    "configFormatDeclaration": "format 必须是非空字符串。",
+    "configFormatImplicit": "未声明 format，规则沿用 {format} 的旧前缀语义。",
+    "typeString": "必须是字符串。",
+    "typeBoolean": "必须是布尔值。",
+    "typeNumber": "必须是有限数字。",
+    "typeInteger": "必须是整数。",
+    "typeObject": "必须是对象。",
+    "typeArray": "必须是数组。",
+    "typeStringArray": "必须是字符串数组。",
+    "typeAgentScope": "必须是非空的字符串数组。",
+    "rangeNumber": "必须在 {min} 与 {max} 之间。",
+    "enumValue": "必须是以下之一：{values}。",
+    "lengthCustomRules": "不得超过 {max} 个字符。",
+    "relationWindowDenials": "不得超过 breaker.windowSize。",
+    "relationParentEvidenceFloor": "不得超过 context.parentHumanItems。",
+    "ruleDuplicateId": "规则 ID 重复。",
+    "ruleInvalid": "规则无效：{message}",
+    "reviewerUrlRequired": "decision 后端必须填写 URL。",
+    "reviewerUrlScheme": "必须是 http(s) URL。",
+    "reviewerCredentialRequired": "decision 后端必须填写凭据引用。",
+    "configUnknown": "配置无效。"
+  }
 }

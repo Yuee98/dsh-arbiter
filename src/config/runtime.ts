@@ -40,7 +40,7 @@ export function parseAudit(
 ): AuditConfig {
   const auditValue = isRecord(raw['audit']) ? raw['audit'] : {};
   const audit: AuditConfig = {
-    enabled: asBoolean(auditValue['enabled'], true),
+    enabled: asBoolean(auditValue['enabled'], true, 'audit.enabled', errors),
     retentionDays: asInteger(
       auditValue['retentionDays'],
       30,

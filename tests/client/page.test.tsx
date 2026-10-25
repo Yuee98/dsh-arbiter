@@ -248,3 +248,61 @@ describe('prototype page after panel extraction', () => {
     );
   });
 });
+
+test('renders a localized validation sentence from a stable issue code', async () => {
+  server.use(
+    http.get('*/api/arbiter/state', () => HttpResponse.json(effectiveState())),
+    http.post('*/api/arbiter/config/save', () =>
+      HttpResponse.json(
+        {
+          ok: false,
+          code: 'config-invalid',
+          errors: [
+            {
+              path: 'reviewer.decision.url',
+              message: 'must be an http(s) URL',
+              code: 'reviewer.url-scheme',
+            },
+            {
+              path: 'context.customRules',
+              message: 'must be at most 2000 characters',
+              code: 'length.customRules',
+              params: { max: 2000 },
+            },
+          ],
+          warnings: [],
+        },
+        { status: 422 },
+      ),
+    ),
+  );
+  const { user } = renderClient(<ArbiterPage />);
+  await screen.findByLabelText('主会话审批模式', { exact: false });
+  await user.click(screen.getByRole('button', { name: '保存并应用' }));
+  const alert = await screen.findByText(/配置校验失败，未保存/);
+  expect(alert).toHaveTextContent('reviewer.decision.url: 必须是 http(s) URL');
+  // Interpolated parameters are rendered from the translation, not the backend.
+  expect(alert).toHaveTextContent('不得超过 2000 个字符');
+  expect(alert).not.toHaveTextContent('must be an http(s) URL');
+});
+
+test('a warning without a known code keeps its backend sentence', async () => {
+  server.use(
+    http.get('*/api/arbiter/state', () =>
+      HttpResponse.json({
+        ...effectiveState(),
+        warnings: [
+          {
+            path: 'rules.legacy',
+            message: 'legacy backend phrasing',
+            code: 'config.unmapped-code',
+          },
+        ],
+      }),
+    ),
+  );
+  renderClient(<ArbiterPage />);
+  expect(await screen.findByText(/legacy backend phrasing/)).toHaveTextContent(
+    'rules.legacy: legacy backend phrasing',
+  );
+});

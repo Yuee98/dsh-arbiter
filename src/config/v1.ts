@@ -28,7 +28,11 @@ export function parseConfigV1(raw: Record<string, unknown>): ConfigParseResult {
   const modes = parseModes(raw, errors);
   const rulesRaw = Array.isArray(raw['rules']) ? raw['rules'] : [];
   if (raw['rules'] !== undefined && !Array.isArray(raw['rules'])) {
-    errors.push({ path: 'rules', message: 'must be an array' });
+    errors.push({
+      path: 'rules',
+      message: 'must be an array',
+      code: 'type.array',
+    });
   }
   const rules: CommandRule[] = [];
   rulesRaw.forEach((value, index) => {
@@ -47,7 +51,7 @@ export function parseConfigV1(raw: Record<string, unknown>): ConfigParseResult {
       : asInteger(raw['reviewBudget'], 0, 1, 1_000_000, 'reviewBudget', errors);
 
   const config: ArbiterConfig = {
-    enabled: asBoolean(raw['enabled'], true),
+    enabled: asBoolean(raw['enabled'], true, 'enabled', errors),
     modes,
     rules,
     reviewer,
@@ -62,12 +66,15 @@ export function parseConfigV1(raw: Record<string, unknown>): ConfigParseResult {
     errors.push({
       path: error.path,
       message: `${error.message} (rule "${error.id}")`,
+      code: error.code ?? 'rule.invalid',
+      ...(error.params === undefined ? {} : { params: error.params }),
     });
   }
   if (config.breaker.windowDenials > config.breaker.windowSize) {
     errors.push({
       path: 'breaker.windowDenials',
       message: 'must not exceed breaker.windowSize',
+      code: 'relation.windowDenials',
     });
   }
   warnings.push(...ruleWarnings(rules));

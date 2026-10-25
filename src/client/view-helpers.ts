@@ -1,8 +1,10 @@
 import { ApiError } from './api.js';
-import type { ArbiterConfig, ConfigError } from '../types.js';
+import type { ArbiterConfig } from '../types.js';
 import type { Draft } from './view-types.js';
+import type { ConfigIssueView } from './view-issues.js';
 
-export function configErrors(payload: unknown): readonly ConfigError[] {
+/** Decode only the documented issue shape; unknown entries are dropped. */
+export function configErrors(payload: unknown): readonly ConfigIssueView[] {
   if (
     payload === null ||
     typeof payload !== 'object' ||
@@ -12,7 +14,7 @@ export function configErrors(payload: unknown): readonly ConfigError[] {
     return [];
   const errors: readonly unknown[] = payload.errors;
   return errors.filter(
-    (item): item is ConfigError =>
+    (item): item is ConfigIssueView =>
       item !== null &&
       typeof item === 'object' &&
       'path' in item &&
@@ -22,12 +24,17 @@ export function configErrors(payload: unknown): readonly ConfigError[] {
   );
 }
 
+/**
+ * A request failure's developer text.
+ *
+ * Issue sentences are localized where they are rendered, so this keeps the
+ * transport message and the machine paths only.
+ */
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) {
     const errors = configErrors(error.payload);
-    if (errors.length > 0) {
-      return `${error.message}: ${errors.map((item) => `${item.path} ${item.message}`).join('; ')}`;
-    }
+    if (errors.length > 0)
+      return `${error.message}: ${errors.map((item) => item.path).join('; ')}`;
     return error.message;
   }
   return error instanceof Error ? error.message : String(error);

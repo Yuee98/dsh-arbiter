@@ -18,6 +18,7 @@ export function effectiveState(): StateResponse {
     warnings: [],
     autoPresetError: null,
     configHistory: [],
+    configHistoryComplete: true,
     audit: {
       health: { state: 'ok', lastError: null, dropped: 0, pending: 0 },
       path: '/isolated/audit.sqlite',

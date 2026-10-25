@@ -19,9 +19,25 @@ export function validateRoute(): FetchRouteLike {
           400,
         );
       }
-      const candidate = parseConfig(
-        isRecord(body) ? body['config'] : undefined,
-      );
+      if (!isRecord(body) || !isRecord(body['config'])) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'bad-request',
+            message: 'config must be an object',
+            errors: [
+              {
+                path: '',
+                message: 'config must be an object',
+                code: 'config.not-object',
+              },
+            ],
+            warnings: [],
+          },
+          400,
+        );
+      }
+      const candidate = parseConfig(body['config']);
       return jsonResponse({
         ok: candidate.errors.length === 0,
         errors: candidate.errors,

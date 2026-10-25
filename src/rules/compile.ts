@@ -7,6 +7,8 @@ export interface RuleCompileError {
   readonly id: string;
   readonly path: string;
   readonly message: string;
+  readonly code?: string;
+  readonly params?: Readonly<Record<string, string | number>>;
 }
 
 export interface CompiledRule {
@@ -162,6 +164,7 @@ export function compileRules(rules: readonly CommandRule[]): {
         id: rule.id,
         path: `rules[${String(index)}].id`,
         message: 'duplicate rule id',
+        code: 'rule.duplicate-id',
       });
       return;
     }

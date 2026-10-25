@@ -8,6 +8,21 @@ import { jsonResponse, readJsonBody } from './http.js';
 import type { ConfigEditorEntryLike, HostEnvironment } from './types.js';
 
 /**
+ * The revision a save was prepared against is no longer current.
+ *
+ * Raised inside the editor's serialized `change` callback, so it is the write
+ * lock — not a check before the lock — that decides whether the save may land.
+ */
+export class ConfigConflict extends Error {
+  readonly fileRevision: string | null;
+  constructor(fileRevision: string | null) {
+    super('the profile patch changed after this draft was read');
+    this.name = 'ConfigConflict';
+    this.fileRevision = fileRevision;
+  }
+}
+
+/**
  * The save endpoint.
  *
  * UI save and external file replacement share one validation and one
@@ -39,9 +54,13 @@ export class ConfigurationAccess {
     }
   }
 
-  private async candidate(
-    request: Request,
-  ): Promise<ConfigParseResult | Response> {
+  private async candidate(request: Request): Promise<
+    | {
+        readonly expected: string;
+        readonly parsed: ConfigParseResult;
+      }
+    | Response
+  > {
     let body: unknown;
     try {
       body = await readJsonBody(request);
@@ -57,35 +76,62 @@ export class ConfigurationAccess {
         400,
       );
     }
-    const revision = this.fileRevision();
-    if (revision !== null && body['revision'] !== revision) {
+    // A save must carry an explicit document. Absence is only legal for the
+    // host's first-install load, never for an HTTP write.
+    if (!isRecord(body['config'])) {
+      return jsonResponse(
+        {
+          ok: false,
+          code: 'bad-request',
+          message: 'config must be an object',
+          errors: [
+            {
+              path: '',
+              message: 'config must be an object',
+              code: 'config.not-object',
+            },
+          ],
+          warnings: [],
+        },
+        400,
+      );
+    }
+    const expected = body['revision'];
+    const current = this.fileRevision();
+    if (current !== null && expected !== current) {
       return jsonResponse(
         {
           ok: false,
           code: 'config-conflict',
           message: 'the profile patch changed after this draft was read',
-          fileRevision: revision,
+          fileRevision: current,
         },
         409,
       );
     }
-    const candidate = parseConfig(body['config']);
-    if (candidate.errors.length > 0) {
+    const parsed = parseConfig(body['config']);
+    if (parsed.errors.length > 0) {
       return jsonResponse(
         {
           ok: false,
           code: 'config-invalid',
-          errors: candidate.errors,
-          warnings: candidate.warnings,
+          errors: parsed.errors,
+          warnings: parsed.warnings,
         },
         422,
       );
     }
-    return candidate;
+    return { expected, parsed };
   }
 
   async save(request: Request): Promise<Response> {
-    if (this.host.services.configEditor === undefined)
+    const prepared = await this.candidate(request);
+    if (prepared instanceof Response) return prepared;
+    // Resolve the live services after the body is read: a configuration editor
+    // injected during that await must serve this request, and the same instance
+    // must own both the write lock and its revision check.
+    const editor = this.host.services.configEditor;
+    if (editor === undefined)
       return jsonResponse(
         {
           ok: false,
@@ -104,8 +150,6 @@ export class ConfigurationAccess {
         },
         409,
       );
-    const candidate = await this.candidate(request);
-    if (candidate instanceof Response) return candidate;
     // The comparison baseline is what was in effect when the request arrived:
     // the Loader reload that `edit()` performs can re-apply this content before
     // the call returns, which must not turn a real change into "unchanged".
@@ -114,9 +158,27 @@ export class ConfigurationAccess {
     const activationsBefore = runtime.configActivations;
     markUiApply(runtime);
     try {
-      await this.host.services.configEditor.edit(entry, () => candidate.config);
+      await editor.edit(entry, () => {
+        // Re-check under the editor's write lock: a competing save can win
+        // between request parsing and this callback.
+        const current = this.fileRevision();
+        if (current !== null && current !== prepared.expected)
+          throw new ConfigConflict(current);
+        return prepared.parsed.config;
+      });
     } catch (error) {
       clearUiApply(runtime);
+      if (error instanceof ConfigConflict) {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'config-conflict',
+            message: error.message,
+            fileRevision: error.fileRevision,
+          },
+          409,
+        );
+      }
       return jsonResponse(
         {
           ok: false,
@@ -129,15 +191,15 @@ export class ConfigurationAccess {
     // The editor reconciled the Loader, which may already have re-initialized
     // this plugin. Applying the same normalized content records nothing twice.
     clearUiApply(runtime);
-    const activation = applyConfig(this.host, candidate.config, 'ui');
-    const changed = before !== JSON.stringify(candidate.config);
+    const activation = applyConfig(this.host, prepared.parsed.config, 'ui');
+    const changed = before !== JSON.stringify(prepared.parsed.config);
     return jsonResponse({
       ok: true,
       ...saveResult(this.host, activation, {
         changed,
         recorded: runtime.configActivations > activationsBefore,
       }),
-      warnings: candidate.warnings,
+      warnings: prepared.parsed.warnings,
     });
   }
 }

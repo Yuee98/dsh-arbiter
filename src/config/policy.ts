@@ -66,6 +66,8 @@ function parseThresholds(
     allowBulkEgress: asBoolean(
       value['allowBulkEgress'],
       fallback.allowBulkEgress,
+      `${path}.allowBulkEgress`,
+      errors,
     ),
   };
 }

@@ -13,13 +13,14 @@ import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
 import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
+import { issuesText } from './view-issues.js';
+import type { ConfigIssueView } from './view-issues.js';
 import type {
   Draft,
   SaveResponse,
   StateResponse,
   SlotProps,
 } from './view-types.js';
-import type { ConfigError, ConfigWarning } from '../types.js';
 import { StatusPanel } from './panels/status.js';
 import { RulesPanel } from './panels/rules.js';
 import { ReviewerPanel } from './panels/reviewer.js';
@@ -33,7 +34,7 @@ interface SaveFailure {
   readonly message: string;
 }
 
-function draftErrors(payload: unknown): readonly ConfigError[] {
+function draftErrors(payload: unknown): readonly ConfigIssueView[] {
   return configErrors(payload);
 }
 
@@ -59,8 +60,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
   const [validation, setValidation] = useState<{
-    readonly errors: readonly ConfigError[];
-    readonly warnings: readonly ConfigWarning[];
+    readonly errors: readonly ConfigIssueView[];
+    readonly warnings: readonly ConfigIssueView[];
   }>({ errors: [], warnings: [] });
   const generation = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
@@ -153,13 +154,7 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
           errorValue instanceof ApiError ? errorValue.payload : null,
         );
         setValidation((current) => ({ ...current, errors }));
-        setError(
-          t('config.invalid', {
-            errors: errors
-              .map((item) => `${item.path}: ${item.message}`)
-              .join('; '),
-          }),
-        );
+        setError(t('config.invalid', { errors: issuesText(errors, t) }));
         return;
       }
       setError(t('config.rejected', { error: failure.message }));
@@ -217,20 +212,10 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       {error === null ? null : <Notice kind="error" text={error} />}
       {notice === null ? null : <Notice kind="ok" text={notice} />}
       {validation.errors.length === 0 ? null : (
-        <Notice
-          kind="error"
-          text={validation.errors
-            .map((item) => `${item.path}: ${item.message}`)
-            .join('\n')}
-        />
+        <Notice kind="error" text={issuesText(validation.errors, t)} />
       )}
       {validation.warnings.length === 0 ? null : (
-        <Notice
-          kind="info"
-          text={validation.warnings
-            .map((item) => `${item.path}: ${item.message}`)
-            .join('\n')}
-        />
+        <Notice kind="info" text={issuesText(validation.warnings, t)} />
       )}
 
       {tab === 'status' ? (

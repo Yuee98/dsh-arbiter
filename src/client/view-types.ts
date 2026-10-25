@@ -1,11 +1,7 @@
 import type { ComponentType } from 'react';
-import type {
-  ArbiterConfig,
-  CommandRule,
-  ConfigError,
-  ConfigWarning,
-} from '../types.js';
+import type { ArbiterConfig, CommandRule } from '../types.js';
 import type { LocaleService } from './i18n.js';
+import type { ConfigIssueView } from './view-issues.js';
 
 export type Mutable<T> = {
   -readonly [K in keyof T]: T[K] extends readonly (infer U)[]
@@ -47,8 +43,9 @@ export interface StateResponse {
   readonly fileRevision: string | null;
   readonly documentPath: string | null;
   readonly invalidConfigError: string | null;
-  readonly loadErrors: readonly ConfigError[];
-  readonly warnings: readonly ConfigWarning[];
+  readonly loadErrors: readonly ConfigIssueView[];
+  readonly warnings: readonly ConfigIssueView[];
+  readonly configHistoryComplete: boolean;
   readonly autoPresetError: string | null;
   readonly configHistory: readonly {
     readonly id: string;
@@ -87,7 +84,7 @@ export interface SaveResponse {
   readonly configFormat: string;
   readonly configFormatExplicit: boolean;
   readonly auditError: string | null;
-  readonly warnings: readonly ConfigWarning[];
+  readonly warnings: readonly ConfigIssueView[];
 }
 
 export interface LogRow {

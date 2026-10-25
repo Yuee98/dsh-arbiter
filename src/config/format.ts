@@ -25,6 +25,7 @@ export interface ConfigFormatIdentification {
   readonly explicit: boolean;
   readonly handler: ConfigFormatHandler | null;
   readonly error: string | null;
+  readonly code?: string;
 }
 
 export const CONFIG_FORMAT_FIELD = 'format';
@@ -69,6 +70,7 @@ export function identifyConfigFormat(raw: unknown): ConfigFormatIdentification {
       explicit,
       handler: null,
       error: `"${CONFIG_FORMAT_FIELD}" must be a non-empty string`,
+      code: 'config.format-declaration',
     };
   }
   const handler = handlers.get(id) ?? null;
@@ -78,6 +80,7 @@ export function identifyConfigFormat(raw: unknown): ConfigFormatIdentification {
       explicit,
       handler: null,
       error: `unknown configuration format "${id}"; supported: ${registeredConfigFormats().join(', ')}`,
+      code: 'config.format-unknown',
     };
   }
   return { id, explicit, handler, error: null };

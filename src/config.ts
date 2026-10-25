@@ -37,29 +37,43 @@ registerConfigFormat({
   parse: parseConfigV1,
 });
 
-function firstInstall(raw: unknown): boolean {
-  return raw === undefined || raw === null;
-}
-
 /**
- * Validate and normalize an arbitrary configuration value.
+ * Validate a configuration document that must exist.
  *
- * A missing document means a first install and yields the confirmed defaults.
- * Invalid fields keep their default value and are reported; the caller decides
- * whether to apply the candidate. Invalid individual rules are dropped only
- * after being reported, so a typo never silently becomes an allow.
+ * A missing or non-object value is an error here: only the host's first-install
+ * boundary may turn absence into defaults. That keeps a malformed HTTP body or
+ * an unreadable document from being accepted as "the default configuration".
  */
 export function parseConfig(raw: unknown): ConfigParseResult {
-  if (firstInstall(raw))
-    return { config: DEFAULT_CONFIG, errors: [], warnings: [] };
   if (!isRecord(raw)) {
     return {
       config: DEFAULT_CONFIG,
-      errors: [{ path: '', message: 'configuration must be an object' }],
+      errors: [
+        {
+          path: '',
+          message: 'configuration must be an object',
+          code: 'config.not-object',
+        },
+      ],
       warnings: [],
     };
   }
+  return parseDocumentRecord(raw);
+}
 
+/**
+ * Validate the profile document, where absence means first install.
+ *
+ * The confirmed defaults are the first-release behavior for a profile that has
+ * no user configuration yet; an existing document is never overwritten by them.
+ */
+export function parseDocument(raw: unknown): ConfigParseResult {
+  if (raw === undefined || raw === null)
+    return { config: DEFAULT_CONFIG, errors: [], warnings: [] };
+  return parseConfig(raw);
+}
+
+function parseDocumentRecord(raw: Record<string, unknown>): ConfigParseResult {
   const format = identifyConfigFormat(raw);
   if (format.handler === null) {
     return {
@@ -68,6 +82,7 @@ export function parseConfig(raw: unknown): ConfigParseResult {
         {
           path: CONFIG_FORMAT_FIELD,
           message: format.error ?? 'configuration format is invalid',
+          code: format.code ?? 'config.format',
         },
       ],
       warnings: [],
@@ -76,8 +91,9 @@ export function parseConfig(raw: unknown): ConfigParseResult {
 
   const parsed = format.handler.parse(raw);
   // Keep an explicit declaration in the normalized content so content identity
-  // distinguishes a declared format from the implicit legacy one.
-  const config =
+  // distinguishes a declared format from the implicit legacy document, and a
+  // UI save round-trips the same declaration instead of dropping it.
+  const config: ArbiterConfig =
     format.explicit && format.id !== null
       ? { ...parsed.config, format: format.id }
       : parsed.config;
@@ -86,6 +102,8 @@ export function parseConfig(raw: unknown): ConfigParseResult {
     warnings.push({
       path: CONFIG_FORMAT_FIELD,
       message: `no "${CONFIG_FORMAT_FIELD}" is declared; rules use the legacy prefix semantics of "${format.handler.id}"`,
+      code: 'config.format-implicit',
+      params: { format: format.handler.id },
     });
   }
   return {

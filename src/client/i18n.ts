@@ -5,8 +5,11 @@ import { localeResources } from './i18n/resources.js';
 export const ARBITER_LOCALE_NAMESPACE = 'dsh-arbiter';
 export type TranslationKey = ResourceKey<typeof localeResources.zh>;
 export type TranslationParams = Readonly<Record<string, string | number>>;
+/** A literal key is type-checked; `string` covers codes the host computes. */
+export type TranslationKeyInput = TranslationKey | (string & {});
+
 export type Translate = (
-  key: TranslationKey,
+  key: TranslationKeyInput,
   params?: TranslationParams,
 ) => string;
 

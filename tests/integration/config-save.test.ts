@@ -1,5 +1,12 @@
 import { writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -433,6 +440,106 @@ describe('shared save path', () => {
       );
     } finally {
       reloaded?.dispose();
+      harness.dispose();
+    }
+  });
+});
+
+describe('write-lock revision check', () => {
+  test('a revision that changes between parsing and the serialized write is rejected', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const access = new ConfigurationAccess(harness.host);
+      const stale = access.fileRevision();
+      const before = harness.state();
+      // A competing writer lands after the request was validated but before the
+      // editor's `change` callback runs under its own lock.
+      const editor = harness.host.services.configEditor;
+      if (editor === undefined) throw new Error('missing editor');
+      const originalEdit = editor.edit.bind(editor);
+      editor.edit = (entry, change) => {
+        writeFileSync(harness.documentPath, 'competing write\n', 'utf8');
+        return originalEdit(entry, change);
+      };
+      const response = await access.save(
+        new Request('http://localhost/api/arbiter/config/save', {
+          method: 'POST',
+          body: JSON.stringify({ revision: stale, config: { enabled: true } }),
+        }),
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: 'config-conflict',
+        message: 'the profile patch changed after this draft was read',
+      });
+      expect(harness.editCalls).toEqual([]);
+      expect(harness.host.runtime.config.enabled).toBe(false);
+      expect(harness.state()['effectiveRevision']).toBe(
+        before['effectiveRevision'],
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a body without an object config is a bad request, not a default save', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const access = new ConfigurationAccess(harness.host);
+      const revision = access.fileRevision();
+      for (const body of [
+        { revision },
+        { revision, config: null },
+        { revision, config: 'modules: []' },
+      ]) {
+        const response = await access.save(
+          new Request('http://localhost/api/arbiter/config/save', {
+            method: 'POST',
+            body: JSON.stringify(body),
+          }),
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          code: 'bad-request',
+          errors: [expect.objectContaining({ code: 'config.not-object' })],
+        });
+      }
+      expect(harness.editCalls).toEqual([]);
+      expect(harness.host.runtime.config.enabled).toBe(false);
+      expect(harness.history()).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('recovery data follows the committed configuration', () => {
+  test('a rejected application leaves the previous last-good document intact', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      // A first successful save establishes the continuity copy for A.
+      expect((await save(harness, { enabled: true })).status).toBe(200);
+      const lastGood = join(harness.home, 'arbiter', 'last-good');
+      const entries = await readdir(lastGood);
+      expect(entries).toHaveLength(1);
+      const appliedText = await readFile(
+        join(lastGood, entries[0] ?? ''),
+        'utf8',
+      );
+      expect(JSON.parse(appliedText) as unknown).toMatchObject({
+        enabled: true,
+      });
+
+      // B is validated but never applied: the copy must stay at A.
+      const editor = harness.host.services.configEditor;
+      if (editor === undefined) throw new Error('missing editor');
+      editor.edit = () => Promise.reject(new Error('loader rejected the row'));
+      expect((await save(harness, { enabled: false })).status).toBe(422);
+      expect(harness.host.runtime.config.enabled).toBe(true);
+      expect(
+        JSON.parse(await readFile(join(lastGood, entries[0] ?? ''), 'utf8')),
+      ).toMatchObject({ enabled: true });
+    } finally {
       harness.dispose();
     }
   });
