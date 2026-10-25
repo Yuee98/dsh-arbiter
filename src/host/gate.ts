@@ -10,7 +10,7 @@ import {
 } from '../reviewer.js';
 import { modeForSession } from '../config.js';
 import { stageView, type StageView } from './stage.js';
-import { decisionFeedback } from './feedback.js';
+import { decisionFeedback, modelReasonFor } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
 import type { HistoryStatus } from '../types.js';
 import {
@@ -52,24 +52,6 @@ interface PreparedCall extends CallContext {
 }
 
 type ModelResult = Awaited<ReturnType<typeof runChatReviewer>>;
-
-function modelReasonFor(decision: {
-  readonly decisionRules: readonly string[];
-}): string {
-  const reasons: Record<string, string> = {
-    R1: 'sensitive material would leave the machine',
-    R2: 'critical risk of irreversible damage',
-    R3: 'no sufficient authorization was found',
-    R4: 'bulk irreversible destruction requires a human decision',
-    R5: 'the risk exceeds the selected policy ceiling',
-    R6: 'bulk external sending exceeds the selected policy ceiling',
-    R8: 'the available signals are insufficient',
-  };
-  return (
-    reasons[decision.decisionRules[0] ?? ''] ??
-    'the review did not approve this action'
-  );
-}
 
 /** The trace field for a resolved historical rule name, or nothing. */
 function ruleNameStage(name: string | null): { readonly ruleName?: string } {
