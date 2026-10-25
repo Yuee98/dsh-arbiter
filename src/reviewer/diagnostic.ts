@@ -198,25 +198,32 @@ function redact(text: string, secrets: readonly string[]): string {
 /**
  * Mask an authentication header wherever it appears in free text.
  *
- * A provider that echoes `Authorization: Bearer …` — or the same field inside a
- * JSON body, quoted — would otherwise publish a credential it received. For
- * chat the probe has no value to match, because the host's LLM service owns the
- * credential, so masking the field shape covers that path without guessing what
- * the secret is. Every auth scheme is masked, not only `Bearer`: `Basic` carries
- * base64 credentials just as directly.
+ * A provider that echoes `Authorization: Bearer …` — in plain text, in a JSON
+ * body, or in a JavaScript object-inspection dump — would otherwise publish a
+ * credential it received. For chat the probe has no value to match, because the
+ * host's LLM service owns the credential, so masking the field shape covers
+ * that path without guessing what the secret is.
+ *
+ * The value is matched as a whole token rather than up to the first space: with
+ * a `Bearer`/`Basic`/… scheme, the scheme is part of the value, so stopping at
+ * the space would leave the credential itself behind.
  */
+const AUTH_FIELD =
+  'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
+
 function redactAuthHeaders(text: string): string {
-  // Plain `name: value` / `name=value`, optionally with an auth scheme.
-  const plain = text.replace(
-    /\b(authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token)(\s*[:=]\s*)(?:(bearer|basic|digest|token|negotiate)\s+)?[^\s",\]}]+/giu,
-    (_match, name: string, separator: string, scheme: string | undefined) =>
-      `${name}${separator}${scheme === undefined ? '' : `${scheme} `}[redacted]`,
+  // One pass over the field name and separator, then the whole value: a quoted
+  // value (JSON double quotes, a JS object dump with single quotes, backticks)
+  // or everything up to a structural terminator. The unquoted branch must
+  // consume spaces too, because an auth scheme is only the prefix — stopping at
+  // the first space would leave the credential itself in place.
+  const pattern = new RegExp(
+    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
+    'giu',
   );
-  // Quoted JSON members: `"authorization": "Bearer …"`.
-  return plain.replace(
-    /("(?:authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token)"\s*:\s*")((?:(?:bearer|basic|digest|token|negotiate)\s+)?)([^"]*)(")/giu,
-    (_match, prefix: string, _scheme: string, _value: string, suffix: string) =>
-      `${prefix}[redacted]${suffix}`,
+  return text.replace(
+    pattern,
+    (_match, prefix: string) => `${prefix}[redacted]`,
   );
 }
 

@@ -612,6 +612,72 @@ describe('diagnostic material boundary', () => {
     expect(material).toContain('[redacted]');
   });
 
+  test.each([
+    // A provider may echo the header in any of the shapes an error message
+    // commonly carries: plain, JSON, or a JS object-inspection dump.
+    [
+      "request failed: { authorization: 'Bearer sk-object-secret' }",
+      'sk-object-secret',
+    ],
+    ['{"authorization":"Bearer sk-json-secret"}', 'sk-json-secret'],
+    ['Authorization: Bearer sk-plain-secret', 'sk-plain-secret'],
+    ['Authorization: Basic c2stYmFzaWM=', 'c2stYmFzaWM='],
+    ['{"x-api-key":"sk-other-secret"}', 'sk-other-secret'],
+    ['apiKey=sk-equals-secret', 'sk-equals-secret'],
+  ])('a chat provider echo %s is masked', async (message, secret) => {
+    const result = await runReviewerProbe({
+      config: chatConfig(),
+      llm: {
+        stream: () =>
+          streamOf([
+            {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: { code: 'AUTH', message },
+              },
+            },
+          ]),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    const material = JSON.stringify(result);
+    expect(material).not.toContain(secret);
+    expect(material).toContain('[redacted]');
+  });
+
+  test('masking an auth header keeps the surrounding failure text readable', async () => {
+    const result = await runReviewerProbe({
+      config: chatConfig(),
+      llm: {
+        stream: () =>
+          streamOf([
+            {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: {
+                  code: 'AUTH',
+                  message:
+                    'request failed: Authorization: Bearer sk-one, retry later',
+                },
+              },
+            },
+          ]),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    const material = JSON.stringify(result);
+    expect(material).not.toContain('sk-one');
+    // The diagnosis stays useful: the outcome and the trailing advice survive.
+    expect(material).toContain('request failed');
+    expect(material).toContain('retry later');
+  });
+
   test('a resolved credential never appears in the submitted request material', async () => {
     const secret = 'sk-live-request-material';
     const result = await runReviewerProbe({
