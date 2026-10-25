@@ -1,0 +1,250 @@
+import { fingerprintOf, type CallRecord } from '../audit.js';
+import { appendRecord } from '../records.js';
+import type { CallResult, PreToolDecision } from '../types.js';
+import { deny, executionModeName, isAborted } from './common.js';
+import type { DecisionHistory } from './history.js';
+import type { AuditExtras, CallContext, HostEnvironment } from './types.js';
+
+interface HumanOutcome {
+  readonly result: CallResult;
+  readonly stage: 'human' | 'fallback';
+  readonly reason: string;
+  readonly text: string;
+}
+
+const HUMAN_OUTCOMES = {
+  'allowed-once': {
+    result: 'human-allow',
+    stage: 'human',
+    reason: 'human_approved',
+    text: 'Arbiter: the user approved this call.',
+  },
+  rejected: {
+    result: 'human-deny',
+    stage: 'human',
+    reason: 'human_rejected',
+    text: 'Not executed [human-deny]: the user rejected this call.',
+  },
+  cancelled: {
+    result: 'human-abort',
+    stage: 'human',
+    reason: 'approval_cancelled',
+    text: 'Not executed [human-abort]: the approval ended without a grant or denial.',
+  },
+  unavailable: {
+    result: 'fallback-deny',
+    stage: 'fallback',
+    reason: 'approval_unavailable',
+    text: 'Not executed [fallback-deny]: no approval answerer was available.',
+  },
+} satisfies Record<string, HumanOutcome>;
+
+function humanUnavailable(
+  call: CallContext,
+  host: HostEnvironment,
+): { code: string; text: string } | null {
+  if (call.mode !== 'normal')
+    return {
+      code: 'automatic_mode_no_human',
+      text: 'Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.',
+    };
+  if (call.sessionKind !== 'main')
+    return {
+      code: 'subagent_no_human_channel',
+      text: 'Not executed [fallback-deny]: this subagent has no human approval channel.',
+    };
+  const approval = host.services.approval;
+  if (approval === undefined)
+    return {
+      code: 'approval_channel_unavailable',
+      text: 'Not executed [fallback-deny]: no human approval channel is available.',
+    };
+  const policy =
+    approval.overrideOf?.(call.session) ?? approval.config?.policy ?? 'ask';
+  return policy === 'never'
+    ? {
+        code: 'host_approval_policy_never',
+        text: 'Not executed [fallback-deny]: the host approval policy rejects prompts in this session.',
+      }
+    : null;
+}
+
+/** Settles decisions independently of best-effort audit persistence. */
+export class CallSettlement {
+  private readonly host: HostEnvironment;
+  private readonly history: DecisionHistory;
+  constructor(host: HostEnvironment, history: DecisionHistory) {
+    this.host = host;
+    this.history = history;
+  }
+
+  private createRecord(
+    call: CallContext,
+    result: CallResult,
+    reason: string,
+    extras: AuditExtras,
+  ): CallRecord {
+    const { runtime, ctx } = this.host;
+    const { exec, session, cwd } = call;
+    const fingerprint = fingerprintOf(exec.name, exec.arguments);
+    const sessionRecordState = appendRecord(
+      session,
+      'plugin:arbiter/decision',
+      {
+        version: 1,
+        callId: exec.callId,
+        tool: exec.name,
+        fingerprint,
+        trace: call.trace.map((stage) => stage.result),
+        result,
+        reason,
+        ruleId: extras.ruleId,
+        decisionRules: extras.decisionRules,
+        configRevision: runtime.effectiveRevision,
+        effect: extras.effect,
+        ts: Date.now(),
+      },
+    );
+    if (sessionRecordState !== 'written')
+      runtime.sessionRecordErrors.set(exec.callId, sessionRecordState);
+    return {
+      callId: exec.callId,
+      ts: Date.now(),
+      sessionId: session.id ?? 'unknown',
+      sessionKind: call.sessionKind,
+      parentSession: session.header?.parentSession ?? null,
+      profile: ctx.get('profileContext')?.name ?? null,
+      workspace: cwd,
+      tool: exec.name,
+      arguments: exec.arguments,
+      cwd,
+      fingerprint,
+      configRevision: runtime.effectiveRevision,
+      configSnapshotId: runtime.configSnapshotId,
+      approvalMode: call.mode,
+      executionMode: executionModeName(ctx),
+      result,
+      reason,
+      trace: call.trace,
+      effect: extras.effect,
+      sessionRecordState,
+      snapshot: extras.snapshot,
+      modelAttempts: extras.modelAttempts,
+      signals: extras.signals,
+      policyStrategy: extras.strategy,
+      decisionRules: extras.decisionRules,
+      executionStatus: ['allow', 'review-allow', 'human-allow'].includes(result)
+        ? 'pending'
+        : 'not-started',
+    };
+  }
+
+  finalize(
+    call: CallContext,
+    result: CallResult,
+    reason: string,
+    extras: AuditExtras,
+  ): void {
+    const record = this.createRecord(call, result, reason, extras);
+    this.host.currentAudit()?.enqueue(record);
+    if (record.executionStatus === 'pending') {
+      this.host.runtime.pending.set(call.exec.callId, {
+        sessionId: record.sessionId,
+        ts: record.ts,
+      });
+    }
+    if (
+      [
+        'deny',
+        'review-deny',
+        'human-deny',
+        'human-abort',
+        'fallback-deny',
+      ].includes(result)
+    ) {
+      this.history.noteDenial(record.sessionId);
+      this.history.rememberPrior(record.sessionId, {
+        ts: record.ts,
+        callId: record.callId,
+        configRevision: record.configRevision,
+        tool: record.tool,
+        fingerprint: record.fingerprint,
+        trace: call.trace.map((stage) => stage.result),
+        result,
+        reason,
+        ...(extras.ruleId === null ? {} : { ruleId: extras.ruleId }),
+        decisionRules: extras.decisionRules,
+      });
+    } else if (result === 'review-allow' || result === 'human-allow') {
+      this.history.resetBreaker(record.sessionId);
+    }
+  }
+
+  private fallback(
+    call: CallContext,
+    reason: string,
+    text: string,
+    extras: AuditExtras,
+  ): PreToolDecision {
+    call.trace.push({
+      stage: 'fallback',
+      result: 'fallback-deny',
+      reason,
+      at: Date.now(),
+    });
+    this.finalize(call, 'fallback-deny', text, extras);
+    return deny(text);
+  }
+
+  async human(
+    call: CallContext,
+    reason: string,
+    extras: AuditExtras,
+  ): Promise<PreToolDecision> {
+    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
+    const unavailable = humanUnavailable(call, this.host);
+    if (unavailable !== null)
+      return this.fallback(call, unavailable.code, unavailable.text, extras);
+    // humanUnavailable checks the channel before this point.
+    const approval = this.host.services.approval;
+    if (approval === undefined)
+      return this.fallback(
+        call,
+        'approval_channel_unavailable',
+        'Not executed [fallback-deny]: no human approval channel is available.',
+        extras,
+      );
+    let outcome: keyof typeof HUMAN_OUTCOMES;
+    try {
+      outcome = await approval.request({
+        agent: call.agent,
+        toolName: call.exec.name,
+        callId: call.exec.callId,
+        reason,
+        displayReason: {
+          en: 'Arbiter needs a human decision for this call. Approve it only if its action, target and scope are intended.',
+          zh: 'Arbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。',
+        },
+        signal: call.exec.signal,
+      });
+    } catch (error) {
+      return this.fallback(
+        call,
+        `approval_error: ${error instanceof Error ? error.message : String(error)}`,
+        'Not executed [fallback-deny]: the human approval channel failed.',
+        extras,
+      );
+    }
+    const mapped = HUMAN_OUTCOMES[outcome];
+    call.trace.push({
+      stage: mapped.stage,
+      result: mapped.result,
+      reason: mapped.reason,
+      at: Date.now(),
+    });
+    this.finalize(call, mapped.result, mapped.text, extras);
+    return mapped.result === 'human-allow'
+      ? { kind: 'allow' }
+      : deny(mapped.text);
+  }
+}

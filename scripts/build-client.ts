@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const outfile = `${root}lib/client.js`;
+const outfile = `${root}lib/client.cjs`;
 
 const result = await build({
   entryPoints: [`${root}src/client/index.tsx`],

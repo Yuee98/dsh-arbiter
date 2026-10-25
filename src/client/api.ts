@@ -5,6 +5,8 @@
  * the page never talks to SQLite or the profile file directly.
  */
 
+import type { Decoder } from './decoders/values.js';
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -33,7 +35,7 @@ function messageOf(payload: unknown): string | null {
   return typeof payload['message'] === 'string' ? payload['message'] : null;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request(path: string, init?: RequestInit): Promise<unknown> {
   const headers = new Headers(init?.headers);
   headers.set('accept', 'application/json');
   if (init?.body !== undefined) headers.set('content-type', 'application/json');
@@ -58,14 +60,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       `Arbiter request failed (${String(response.status)})`;
     throw new ApiError(response.status, payload, message);
   }
-  const value: T = JSON.parse(text.trim().length === 0 ? 'null' : text);
+  const value: unknown = JSON.parse(text.trim().length === 0 ? 'null' : text);
   return value;
 }
 
-export function getJson<T>(path: string): Promise<T> {
-  return request<T>(path);
+/** A typed result requires a real decoder; ignored/raw payloads stay unknown. */
+export function getJson(path: string): Promise<unknown>;
+export function getJson<T>(path: string, decode: Decoder<T>): Promise<T>;
+export async function getJson(
+  path: string,
+  decode?: Decoder<unknown>,
+): Promise<unknown> {
+  const value = await request(path);
+  return decode === undefined ? value : decode(value);
 }
 
-export function postJson<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: 'POST', body: JSON.stringify(body) });
+export function postJson(path: string, body: unknown): Promise<unknown>;
+export function postJson<T>(
+  path: string,
+  body: unknown,
+  decode: Decoder<T>,
+): Promise<T>;
+export async function postJson(
+  path: string,
+  body: unknown,
+  decode?: Decoder<unknown>,
+): Promise<unknown> {
+  const value = await request(path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return decode === undefined ? value : decode(value);
 }

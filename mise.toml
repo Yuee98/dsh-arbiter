@@ -2,3 +2,4 @@
 node = "24.21.0"
 "npm:pnpm" = "11.7.0"
 "github:rhysd/actionlint" = "1.7.12"
+"github:zizmorcore/zizmor" = "1.31.1"
