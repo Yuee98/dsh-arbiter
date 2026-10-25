@@ -1068,42 +1068,50 @@ describe('cancellation and answer as competing events', () => {
     }
   });
 
-  test('a cancellation then an answer in one turn stays an abort', async () => {
-    const session = makeSession('race-cancel-same-turn');
-    const controller = new AbortController();
-    const asked: ((answer: 'allowed-once' | 'rejected') => void)[] = [];
-    const harness = createHarness({
-      sessions: [session],
-      llm: chatAnswer({ risk: 7, authorized: 2 }),
-      approval: {
-        config: { policy: 'ask' },
-        request: () =>
-          new Promise((resolve) => {
-            asked.push((answer) => {
-              resolve(answer);
-            });
-          }),
-      },
-    });
-    try {
-      const pending = harness.gate(
-        call(session, 'rc3', controller.signal),
-        allowNext,
-      );
-      for (let attempt = 0; attempt < 100 && asked.length === 0; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+  test.each(['allowed-once', 'rejected'] as const)(
+    'a cancellation then %s in one turn stays an abort',
+    async (answer) => {
+      const session = makeSession('race-cancel-same-turn');
+      const controller = new AbortController();
+      const asked: ((answer: 'allowed-once' | 'rejected') => void)[] = [];
+      const harness = createHarness({
+        sessions: [session],
+        llm: chatAnswer({ risk: 7, authorized: 2 }),
+        approval: {
+          config: { policy: 'ask' },
+          request: () =>
+            new Promise((resolve) => {
+              asked.push((answer) => {
+                resolve(answer);
+              });
+            }),
+        },
+      });
+      try {
+        const pending = harness.gate(
+          call(session, 'rc3', controller.signal),
+          allowNext,
+        );
+        for (
+          let attempt = 0;
+          attempt < 100 && asked.length === 0;
+          attempt += 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        // Cancellation and an answer in the same synchronous turn: the
+        // withdrawal came first, so this is an abort, never an authorization and
+        // never a human denial.
+        controller.abort();
+        asked[0]?.(answer);
+        const decision = await pending;
+        expect(decision.kind).toBe('deny');
+        expect(decision.reason).toContain('human-abort');
+      } finally {
+        harness.dispose();
       }
-      // Cancellation and a rejection in the same synchronous turn: the
-      // withdrawal came first, so this is an abort, not a human denial.
-      controller.abort();
-      asked[0]?.('rejected');
-      const decision = await pending;
-      expect(decision.kind).toBe('deny');
-      expect(decision.reason).toContain('human-abort');
-    } finally {
-      harness.dispose();
-    }
-  });
+    },
+  );
 });
 
 describe('a configuration change during snapshot assembly', () => {

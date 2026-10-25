@@ -530,11 +530,8 @@ export class CallSettlement {
         return;
       }
       call.exec.signal.addEventListener('abort', onAbort, { once: true });
-      // The answer callbacks run in the microtask queue, which is where a
-      // request that already resolved delivers its value. Deferring the abort
-      // *classification* by one microtask lets a same-turn answer claim first,
-      // while a cancellation from an earlier turn still wins because its
-      // listener fired before the promise settled.
+      // Issue the request only after the abort listener is installed, so a
+      // cancellation that happens while it is being asked is still observed.
       let answer: Promise<keyof typeof HUMAN_OUTCOMES>;
       try {
         answer = approval.request({
