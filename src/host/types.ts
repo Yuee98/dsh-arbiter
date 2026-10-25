@@ -88,6 +88,39 @@ export interface WorkingDirectoryLike {
   ensure(agent: AgentLike, signal?: AbortSignal): Promise<string>;
 }
 
+/**
+ * The host's public per-assembly context.
+ *
+ * `agent` is present for a real model request and absent on a diagnostic
+ * assembly; `scope` is the host's own opaque identity and is not read here.
+ */
+export interface AssembleContextLike {
+  readonly agent?: AgentLike;
+}
+
+/** One system-prompt section, as the host registry accepts it. */
+export interface PromptSectionRegistrationLike {
+  readonly name: string;
+  readonly order: number;
+  readonly text: string | ((context: AssembleContextLike) => string);
+  readonly interpolate?: boolean;
+}
+
+/** The centrally ordered placements this plugin reads. */
+export type PromptSectionOrderNameLike = 'DEPLOYMENT_PERSONA_PREFIX';
+
+/**
+ * The slice of the host `systemPrompt` service this plugin uses.
+ *
+ * Only section registration and the central order lookup are read: assembly,
+ * runtime contexts, tools and variables belong to the host and to other
+ * plugins.
+ */
+export interface SystemPromptLike {
+  section(registration: PromptSectionRegistrationLike): () => void;
+  getSectionOrder(name: PromptSectionOrderNameLike): number;
+}
+
 export interface CredentialsLike {
   resolve(ref: string): Promise<{ readonly value: string } | undefined>;
   describe?(

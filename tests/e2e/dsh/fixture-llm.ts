@@ -67,6 +67,8 @@ interface RequestedTurn {
   readonly command: string | null;
   /** The `DELEGATE <task>` marker of this turn, when present. */
   readonly delegate: string | null;
+  /** The `ASK <question>` marker of this turn, when present. */
+  readonly ask: string | null;
 }
 
 function markerValue(text: string, marker: string): string | null {
@@ -84,10 +86,11 @@ function requestedTurn(messages: readonly ChatMessage[]): RequestedTurn {
     const text = textOfBlocks(message.content);
     const command = markerValue(text, 'RUN ');
     const delegate = markerValue(text, 'DELEGATE ');
-    if (command === null && delegate === null) continue;
-    return { text, command, delegate };
+    const ask = markerValue(text, 'ASK ');
+    if (command === null && delegate === null && ask === null) continue;
+    return { text, command, delegate, ask };
   }
-  return { text: '', command: null, delegate: null };
+  return { text: '', command: null, delegate: null, ask: null };
 }
 
 /** Whether the user turn carrying `text` already produced a tool call. */
@@ -163,6 +166,16 @@ class FixtureAdapter {
   providerRetryPolicy(): undefined {
     return undefined;
   }
+  /**
+   * The base adapter contract declares no request-image pricing.
+   *
+   * This fixture is a plain object on the real `llm` service rather than an
+   * `LlmAdapter` subclass, so it states the same default explicitly: the token
+   * meter calls this hook when it prices a compaction request.
+   */
+  imageRequestPricing(): undefined {
+    return undefined;
+  }
   async prepareCall(provider: string, model: string) {
     return {
       model: await this.resolveModel(provider, model),
@@ -214,8 +227,46 @@ class FixtureAdapter {
       return;
     }
     const messages = options.messages ?? [];
-    const { text, command, delegate } = requestedTurn(messages);
-    if (delegate !== null && !alreadyCalled(messages, text)) {
+    const { text, command, delegate, ask } = requestedTurn(messages);
+    if (ask !== null && !alreadyCalled(messages, text)) {
+      // A real `ask_user_question` call: the answer card, the answerer
+      // waterfall and the recorded reply are all the host's own path.
+      const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;
+      const args = JSON.stringify({
+        questions: [
+          {
+            id: 'authorization',
+            question: ask,
+            options: [{ label: '允许' }, { label: '不允许' }],
+          },
+        ],
+      });
+      yield { type: 'block-start', index: 0, blockType: 'text' };
+      yield { type: 'text-delta', index: 0, text: 'Asking the user.' };
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'text', text: 'Asking the user.' },
+      };
+      yield { type: 'block-start', index: 1, blockType: 'tool-call' };
+      yield {
+        type: 'tool-call-delta',
+        index: 1,
+        id,
+        name: 'ask_user_question',
+        argumentsDelta: args,
+      };
+      yield {
+        type: 'block-end',
+        index: 1,
+        block: {
+          type: 'tool-call',
+          id,
+          name: 'ask_user_question',
+          arguments: args,
+        },
+      };
+    } else if (delegate !== null && !alreadyCalled(messages, text)) {
       // A real delegation: the child is a host-managed subagent session whose
       // own turns run the same fixture.
       const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;
