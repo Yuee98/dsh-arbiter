@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   COMMON_GUIDANCE,
-  GUIDANCE_SECTION,
+  GUIDANCE_CONTEXT,
   PARENT_GUIDANCE,
   SUBAGENT_GUIDANCE,
   guidanceText,
@@ -195,6 +195,6 @@ describe('managed-scope selection', () => {
 });
 
 test('the contribution name is namespaced to this plugin', () => {
-  expect(GUIDANCE_SECTION).toMatch(/^arbiter:/u);
-  expect(GUIDANCE_SECTION).not.toBe('approval:policy');
+  expect(GUIDANCE_CONTEXT).toMatch(/^arbiter:/u);
+  expect(GUIDANCE_CONTEXT).not.toBe('approval:policy');
 });

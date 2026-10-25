@@ -38,7 +38,7 @@ import type {
 } from './types.js';
 
 /** The unique name this contribution registers under. */
-export const GUIDANCE_SECTION = 'arbiter:agent-guidance';
+export const GUIDANCE_CONTEXT = 'arbiter:agent-guidance';
 
 /**
  * The part every managed agent needs, regardless of role.
@@ -132,7 +132,7 @@ export function guidanceRegistration(
   textFor: (agent: AgentLike | undefined) => string,
 ): PromptContextRegistrationLike {
   return {
-    name: GUIDANCE_SECTION,
+    name: GUIDANCE_CONTEXT,
     order,
     // Literal prose, never a template: no current mode, failure, or evidence.
     interpolate: false,
