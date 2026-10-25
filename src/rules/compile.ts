@@ -348,17 +348,26 @@ function evaluateStructural(
         })
       : noMatch(index, condition, 'missing');
   }
-  if (subjects.every((subject) => subject.unresolved))
-    return conditionResult(index, condition, 'unknown', {
-      reason: 'unresolved-structure',
-    });
-  const matched = subjects.find(
+  // A certain match decides, even when other subjects are unresolved: the rule
+  // did match, and an unknown sibling cannot take that back.
+  const matched = subjects.filter(
     (subject) => !subject.unresolved && compiled.matches(subject.text),
   );
-  if (matched !== undefined)
+  if (matched.length > 0)
     return conditionResult(index, condition, 'match', {
       reason: 'resolved',
-      matchedValue: matched.text,
+      // Every matching text, not only the first: coverage compares each subject
+      // against what actually matched, so keeping one value would report an
+      // uncovered node that the condition did cover.
+      matchedValues: matched.map((subject) => subject.text),
+      matchedValue: matched[0]?.text ?? '',
+    });
+  // No certain match. An unresolved sibling could still match, so the honest
+  // answer is unknown rather than a mismatch — otherwise adding one known-safe
+  // redirect would turn an undetermined call into a confident one.
+  if (subjects.some((subject) => subject.unresolved))
+    return conditionResult(index, condition, 'unknown', {
+      reason: 'unresolved-structure',
     });
   return noMatch(index, condition, 'value-mismatch');
 }

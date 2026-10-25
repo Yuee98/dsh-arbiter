@@ -882,6 +882,159 @@ describe('rule priority and coverage', () => {
     ).toBe('allow');
   });
 
+  test('a tool alternative must itself match to cover the whole call', () => {
+    // The rule matched through the command alternative; that must not extend
+    // coverage to the unrelated tool alternative.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'mixed',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'echo safe',
+            }),
+            condition({ target: 'tool', kind: 'exact', pattern: 'other-tool' }),
+          ],
+        }),
+      ],
+      'echo safe; rm -rf /tmp/victim',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+    // The second command is still reported as uncovered.
+    expect(evaluation.matches.map((match) => match.id)).toEqual(['mixed']);
+  });
+
+  test('one condition matching several commands still covers them all', () => {
+    // A case-insensitive exact value matches two distinct command texts; both
+    // are covered rather than only the first.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'nocase',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'echo hi',
+              caseSensitive: false,
+            }),
+          ],
+        }),
+      ],
+      'echo hi; ECHO HI',
+    );
+    expect(verdictOf(evaluation)).toBe('allow');
+    expect(evaluation.rules[0]?.conditions[0]?.matchedValues).toEqual([
+      'echo hi',
+      'ECHO HI',
+    ]);
+  });
+
+  test('a regex allow covers every command it matched', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'multi',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: '(?:echo hi|ls)',
+            }),
+          ],
+        }),
+      ],
+      'echo hi; ls',
+    );
+    expect(verdictOf(evaluation)).toBe('allow');
+  });
+
+  test('a resolved match survives an unresolved sibling', () => {
+    // The deny did match the resolved redirect; an unresolved sibling cannot
+    // weaken a certain match.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/tmp/safe',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > /tmp/safe > $TARGET',
+    );
+    expect(verdictOf(evaluation)).toBe('deny');
+  });
+
+  test('an unresolved sibling prevents a mismatch from becoming certain', () => {
+    // No redirect matched, but one target is unresolved, so the rule cannot be
+    // declared a mismatch: the unresolved target could have matched.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > /tmp/safe > $TARGET',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('unknown');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a known-safe redirect cannot launder an unresolved one into an allow', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-passwd',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+        rule({
+          id: 'bash-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'echo hi > /tmp/safe > $TARGET',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
   test('an explicit whole-tool allow covers a shell call', () => {
     const evaluation = evaluate(
       [

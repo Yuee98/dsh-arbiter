@@ -267,8 +267,15 @@ function allowCoverage(
   const allows = results.filter(
     (result) => result.verdict === 'allow' && result.outcome === 'match',
   );
+  // The rule matched because some alternative matched. A tool target only
+  // covers the whole call when that alternative is the one that matched;
+  // otherwise a matching command alternative would silently extend its coverage
+  // to an unrelated tool alternative.
   const wholeTool = allows.some((result) =>
-    result.conditions.some((condition) => condition.target === 'tool'),
+    result.conditions.some(
+      (condition) =>
+        condition.target === 'tool' && condition.outcome === 'match',
+    ),
   );
   // A non-shell call has no AST to cover; its arguments are the entire judged
   // input, so a matching argument condition covers it.
@@ -280,13 +287,17 @@ function allowCoverage(
           condition.target === 'argument' && condition.outcome === 'match',
       ),
     );
+  // Compare against every text the condition actually matched: one condition can
+  // match several distinct subjects (a case-insensitive exact value, or a regex
+  // over several commands), and keeping only the first would mark the rest as
+  // uncovered.
   const covers = (subject: Subject): boolean =>
     allows.some((result) =>
       result.conditions.some(
         (condition) =>
           condition.outcome === 'match' &&
           condition.target === subject.target &&
-          condition.matchedValue === subject.text,
+          (condition.matchedValues ?? []).includes(subject.text),
       ),
     );
   // An argument condition covers no structural node, and a partial parse hides
