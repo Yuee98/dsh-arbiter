@@ -1,11 +1,7 @@
 import type { ComponentType } from 'react';
-import type {
-  ArbiterConfig,
-  CommandRule,
-  ConfigError,
-  ConfigWarning,
-} from '../types.js';
+import type { ArbiterConfig, CommandRule } from '../types.js';
 import type { LocaleService } from './i18n.js';
+import type { ConfigIssueView } from './view-issues.js';
 
 export type Mutable<T> = {
   -readonly [K in keyof T]: T[K] extends readonly (infer U)[]
@@ -42,11 +38,14 @@ export interface StateResponse {
   readonly sourceConfig: unknown;
   readonly effectiveRevision: string;
   readonly configSnapshotId: string;
+  readonly configFormat: string;
+  readonly configFormatExplicit: boolean;
   readonly fileRevision: string | null;
   readonly documentPath: string | null;
   readonly invalidConfigError: string | null;
-  readonly loadErrors: readonly ConfigError[];
-  readonly warnings: readonly ConfigWarning[];
+  readonly loadErrors: readonly ConfigIssueView[];
+  readonly warnings: readonly ConfigIssueView[];
+  readonly configHistoryComplete: boolean;
   readonly autoPresetError: string | null;
   readonly configHistory: readonly {
     readonly id: string;
@@ -71,6 +70,21 @@ export interface StateResponse {
   readonly executionMode: string;
   readonly reviewerType: string;
   readonly sessionRecordErrors: readonly (readonly [string, string])[];
+}
+
+/** The API result of one save; `saved` and effective identity are separate. */
+export interface SaveResponse {
+  readonly ok: boolean;
+  readonly saved: boolean;
+  readonly changed: boolean;
+  readonly effective: boolean;
+  readonly effectiveRevision: string;
+  readonly configSnapshotId: string;
+  readonly activationRecorded: boolean;
+  readonly configFormat: string;
+  readonly configFormatExplicit: boolean;
+  readonly auditError: string | null;
+  readonly warnings: readonly ConfigIssueView[];
 }
 
 export interface LogRow {

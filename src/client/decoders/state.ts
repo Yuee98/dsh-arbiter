@@ -1,7 +1,8 @@
-import type { ConfigError } from '../../types.js';
+import type { ConfigIssueView } from '../view-issues.js';
 import type {
   AuditHealthView,
   AuditStats,
+  SaveResponse,
   StateResponse,
 } from '../view-types.js';
 import { configuration } from './config.js';
@@ -13,16 +14,35 @@ import {
   nullable,
   number,
   object,
+  optional,
   strings,
   text,
   unknownValue,
 } from './values.js';
 
-export function configIssue(value: unknown): ConfigError {
+const issueParams = (
+  value: unknown,
+): Readonly<Record<string, string | number>> => {
+  if (value === undefined) return {};
+  const source = object(value);
+  return Object.fromEntries(
+    Object.entries(source).flatMap(([key, entry]) => {
+      if (typeof entry === 'string' || typeof entry === 'number')
+        return [[key, entry] as const];
+      if (typeof entry === 'boolean') return [[key, String(entry)] as const];
+      return [];
+    }),
+  );
+};
+
+/** A localized sentence is selected by `code`; `message` stays the fallback. */
+export function configIssue(value: unknown): ConfigIssueView {
   const source = object(value);
   return {
     path: field(source, 'path', text),
     message: field(source, 'message', text),
+    code: field(source, 'code', optional(text)) ?? 'config.unknown',
+    params: field(source, 'params', optional(issueParams)) ?? {},
   };
 }
 
@@ -31,6 +51,23 @@ export function validationResponse(value: unknown) {
   return {
     ok: field(source, 'ok', boolean),
     errors: field(source, 'errors', array(configIssue)),
+    warnings: field(source, 'warnings', array(configIssue)),
+  };
+}
+
+export function saveResponse(value: unknown): SaveResponse {
+  const source = object(value);
+  return {
+    ok: field(source, 'ok', boolean),
+    saved: field(source, 'saved', boolean),
+    changed: field(source, 'changed', boolean),
+    effective: field(source, 'effective', boolean),
+    effectiveRevision: field(source, 'effectiveRevision', text),
+    configSnapshotId: field(source, 'configSnapshotId', text),
+    activationRecorded: field(source, 'activationRecorded', boolean),
+    configFormat: field(source, 'configFormat', text),
+    configFormatExplicit: field(source, 'configFormatExplicit', boolean),
+    auditError: field(source, 'auditError', nullable(text)),
     warnings: field(source, 'warnings', array(configIssue)),
   };
 }
@@ -88,12 +125,15 @@ export function stateResponse(value: unknown): StateResponse {
     sourceConfig: field(source, 'sourceConfig', unknownValue),
     effectiveRevision: field(source, 'effectiveRevision', text),
     configSnapshotId: field(source, 'configSnapshotId', text),
+    configFormat: field(source, 'configFormat', text),
+    configFormatExplicit: field(source, 'configFormatExplicit', boolean),
     fileRevision: field(source, 'fileRevision', nullable(text)),
     documentPath: field(source, 'documentPath', nullable(text)),
     invalidConfigError: field(source, 'invalidConfigError', nullable(text)),
     loadErrors: field(source, 'loadErrors', array(configIssue)),
     warnings: field(source, 'warnings', array(configIssue)),
     autoPresetError: field(source, 'autoPresetError', nullable(text)),
+    configHistoryComplete: field(source, 'configHistoryComplete', boolean),
     configHistory: field(
       source,
       'configHistory',

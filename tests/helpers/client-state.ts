@@ -9,6 +9,8 @@ export function effectiveState(): StateResponse {
     sourceConfig: null,
     effectiveRevision: 'effective-1',
     configSnapshotId: 'snapshot-1',
+    configFormat: 'arbiter-config-v1',
+    configFormatExplicit: false,
     fileRevision: 'file-1',
     documentPath: '/isolated/profile/cordis.patch.yml',
     invalidConfigError: null,
@@ -16,6 +18,7 @@ export function effectiveState(): StateResponse {
     warnings: [],
     autoPresetError: null,
     configHistory: [],
+    configHistoryComplete: true,
     audit: {
       health: { state: 'ok', lastError: null, dropped: 0, pending: 0 },
       path: '/isolated/audit.sqlite',

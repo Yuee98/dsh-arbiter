@@ -7,13 +7,13 @@ import type {
   BreakerPreset,
   ConfigError,
 } from '../types.js';
-import { isRecord, asEnum, asBoolean, asInteger } from './values.js';
+import { asObject, asEnum, asBoolean, asInteger } from './values.js';
 
 export function parseModes(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): ArbiterConfig['modes'] {
-  const modesValue = isRecord(raw['modes']) ? raw['modes'] : {};
+  const modesValue = asObject(raw['modes'], 'modes', errors);
   const modes = {
     main: asEnum<ApprovalMode>(
       modesValue['main'],
@@ -38,9 +38,9 @@ export function parseAudit(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): AuditConfig {
-  const auditValue = isRecord(raw['audit']) ? raw['audit'] : {};
+  const auditValue = asObject(raw['audit'], 'audit', errors);
   const audit: AuditConfig = {
-    enabled: asBoolean(auditValue['enabled'], true),
+    enabled: asBoolean(auditValue['enabled'], true, 'audit.enabled', errors),
     retentionDays: asInteger(
       auditValue['retentionDays'],
       30,
@@ -74,7 +74,7 @@ export function parseBreaker(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): BreakerConfig {
-  const breakerValue = isRecord(raw['breaker']) ? raw['breaker'] : {};
+  const breakerValue = asObject(raw['breaker'], 'breaker', errors);
   const breaker: BreakerConfig = {
     mode: asEnum<'off' | 'preset' | 'custom'>(
       breakerValue['mode'],

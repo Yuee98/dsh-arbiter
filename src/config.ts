@@ -4,88 +4,113 @@
  * The profile patch is the single editable source of truth. This module only
  * projects it into a complete effective configuration and reports errors; the
  * host keeps the last effective configuration when a candidate is invalid.
+ *
+ * Documents may declare `format`. Identification is explicit and shared by the
+ * UI save path and external file replacement; an unknown format is an error
+ * rather than a silent reinterpretation with newer matching semantics.
  */
 
-import { validateRules } from './rules/match.js';
 import type {
   ArbiterConfig,
   ApprovalMode,
-  CommandRule,
-  ConfigError,
   ConfigParseResult,
   ConfigWarning,
 } from './types.js';
 import { DEFAULT_CONFIG } from './config/defaults.js';
-import { isRecord, asBoolean, asInteger } from './config/values.js';
-import { parseRule, ruleWarnings } from './config/rules.js';
-import { parseModes, parseAudit, parseBreaker } from './config/runtime.js';
-import { parseReviewer } from './config/reviewer.js';
-import { parsePolicy } from './config/policy.js';
-import { parseContext } from './config/context.js';
+import { isRecord } from './config/values.js';
+import { parseConfigV1 } from './config/v1.js';
+import {
+  CONFIG_FORMAT_FIELD,
+  DEFAULT_CONFIG_FORMAT,
+  identifyConfigFormat,
+  registerConfigFormat,
+} from './config/format.js';
 export { DEFAULT_CONFIG } from './config/defaults.js';
+export {
+  registerConfigFormat,
+  registeredConfigFormats,
+} from './config/format.js';
+
+registerConfigFormat({
+  id: DEFAULT_CONFIG_FORMAT,
+  legacy: true,
+  parse: parseConfigV1,
+});
 
 /**
- * Validate and normalize an arbitrary configuration value.
+ * Validate a configuration document that must exist.
  *
- * Invalid fields keep their default value and are reported; the caller decides
- * whether to apply the candidate. Invalid individual rules are dropped only
- * after being reported, so a typo never silently becomes an allow.
+ * A missing or non-object value is an error here: only the host's first-install
+ * boundary may turn absence into defaults. That keeps a malformed HTTP body or
+ * an unreadable document from being accepted as "the default configuration".
  */
 export function parseConfig(raw: unknown): ConfigParseResult {
-  const errors: ConfigError[] = [];
-  const warnings: ConfigWarning[] = [];
   if (!isRecord(raw)) {
-    errors.push({ path: '', message: 'configuration must be an object' });
-    return { config: DEFAULT_CONFIG, errors, warnings };
+    return {
+      config: DEFAULT_CONFIG,
+      errors: [
+        {
+          path: '',
+          message: 'configuration must be an object',
+          code: 'config.not-object',
+        },
+      ],
+      warnings: [],
+    };
+  }
+  return parseDocumentRecord(raw);
+}
+
+/**
+ * Validate the profile document, where absence means first install.
+ *
+ * The confirmed defaults are the first-release behavior for a profile that has
+ * no user configuration yet; an existing document is never overwritten by them.
+ */
+export function parseDocument(raw: unknown): ConfigParseResult {
+  if (raw === undefined || raw === null)
+    return { config: DEFAULT_CONFIG, errors: [], warnings: [] };
+  return parseConfig(raw);
+}
+
+function parseDocumentRecord(raw: Record<string, unknown>): ConfigParseResult {
+  const format = identifyConfigFormat(raw);
+  if (format.handler === null) {
+    return {
+      config: DEFAULT_CONFIG,
+      errors: [
+        {
+          path: CONFIG_FORMAT_FIELD,
+          message: format.error ?? 'configuration format is invalid',
+          code: format.code ?? 'config.format',
+        },
+      ],
+      warnings: [],
+    };
   }
 
-  const modes = parseModes(raw, errors);
-  const rulesRaw = Array.isArray(raw['rules']) ? raw['rules'] : [];
-  if (raw['rules'] !== undefined && !Array.isArray(raw['rules'])) {
-    errors.push({ path: 'rules', message: 'must be an array' });
+  const parsed = format.handler.parse(raw);
+  // Keep an explicit declaration in the normalized content so content identity
+  // distinguishes a declared format from the implicit legacy document, and a
+  // UI save round-trips the same declaration instead of dropping it.
+  const config: ArbiterConfig =
+    format.explicit && format.id !== null
+      ? { ...parsed.config, format: format.id }
+      : parsed.config;
+  const warnings: ConfigWarning[] = [...parsed.warnings];
+  if (!format.explicit && config.rules.length > 0) {
+    warnings.push({
+      path: CONFIG_FORMAT_FIELD,
+      message: `no "${CONFIG_FORMAT_FIELD}" is declared; rules use the legacy prefix semantics of "${format.handler.id}"`,
+      code: 'config.format-implicit',
+      params: { format: format.handler.id },
+    });
   }
-  const rules: CommandRule[] = [];
-  rulesRaw.forEach((value, index) => {
-    const rule = parseRule(value, index, errors);
-    if (rule !== null) rules.push(rule);
-  });
-
-  const reviewer = parseReviewer(raw, errors);
-  const policy = parsePolicy(raw, errors);
-  const context = parseContext(raw, errors);
-  const audit = parseAudit(raw, errors);
-  const breaker = parseBreaker(raw, errors);
-  const reviewBudget =
-    raw['reviewBudget'] === null || raw['reviewBudget'] === undefined
-      ? null
-      : asInteger(raw['reviewBudget'], 0, 1, 1_000_000, 'reviewBudget', errors);
-
-  const config: ArbiterConfig = {
-    enabled: asBoolean(raw['enabled'], true),
-    modes,
-    rules,
-    reviewer,
-    policy,
-    context,
-    audit,
-    breaker,
-    reviewBudget,
+  return {
+    config,
+    errors: parsed.errors,
+    warnings,
   };
-
-  for (const error of validateRules(rules)) {
-    errors.push({
-      path: error.path,
-      message: `${error.message} (rule "${error.id}")`,
-    });
-  }
-  if (config.breaker.windowDenials > config.breaker.windowSize) {
-    errors.push({
-      path: 'breaker.windowDenials',
-      message: 'must not exceed breaker.windowSize',
-    });
-  }
-  warnings.push(...ruleWarnings(rules));
-  return { config, errors, warnings };
 }
 
 /** A stable content identity for the effective configuration. */

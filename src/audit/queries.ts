@@ -28,7 +28,8 @@ export function configHistory(
     db
       .prepare(
         `SELECT id, activated_at, revision, entry, scope, snapshot_id
-           FROM config_activations ORDER BY activated_at DESC LIMIT ?`,
+           FROM config_activations
+          ORDER BY activated_at DESC, rowid DESC LIMIT ?`,
       )
       .all(limit),
   );

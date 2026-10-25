@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Field, Notice, Section, Select } from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { formatTime } from '../view-helpers.js';
+import { issuesText } from '../view-issues.js';
 import type { Draft, StateResponse } from '../view-types.js';
 
 function modeHelp(t: Translate): Record<string, string> {
@@ -90,7 +91,11 @@ export function StatusPanel(props: {
           <Notice
             kind="error"
             text={t('status.invalidConfig', {
-              error: state.invalidConfigError,
+              // Localized issue sentences; the raw summary stays a fallback.
+              error:
+                state.loadErrors.length > 0
+                  ? issuesText(state.loadErrors, t)
+                  : state.invalidConfigError,
             })}
           />
         )}
