@@ -106,7 +106,8 @@ export class SessionAdmissions {
     if (cached !== undefined && cached.lastSeq === lastSeq)
       return cached.folded;
     // The committed envelope is structurally what the record reader validates.
-    const folded = foldAdmission(events);
+    // The owner guard keeps a fork seed's copied parent record out of it.
+    const folded = foldAdmission(events, id);
     this.cache.set(id, { lastSeq, folded });
     return folded;
   }

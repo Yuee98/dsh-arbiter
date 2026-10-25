@@ -59,6 +59,7 @@ describe('admission records', () => {
       boundary: 'guarded',
       seq: 1,
       at: 1_001,
+      sessionId: 's1',
     });
     // A different plugin's record is not this plugin's state.
     expect(
@@ -104,6 +105,29 @@ describe('admission records', () => {
 
   test('no record means no admission at all', () => {
     expect(foldAdmission([event(1, 'user/message', {})])).toBeNull();
+  });
+});
+
+describe('fork seeds and ownership', () => {
+  test("a copied parent record is not the child session's switch", () => {
+    // A fork seed copies the parent's log prefix verbatim; the record still
+    // names the parent, so the child must not inherit its admission.
+    const inherited = [
+      record(1, { sessionId: 'parent', rootSessionId: 'parent' }),
+    ];
+    expect(foldAdmission(inherited, 'parent')).toMatchObject({ enabled: true });
+    expect(foldAdmission(inherited, 'child')).toBeNull();
+    // A record without an owner (written before the field existed) counts for
+    // the session reading its own log.
+    const anonymous: SessionEventLike = {
+      seq: 2,
+      type: ADMISSION_RECORD_TYPE,
+      ignorable: true,
+      data: { version: 1, enabled: true, boundary: 'guarded', at: 1 },
+    };
+    expect(foldAdmission([anonymous], 'child')).toMatchObject({
+      enabled: true,
+    });
   });
 });
 
@@ -197,6 +221,7 @@ describe('boundary mapping', () => {
       boundary: 'guarded',
       seq: 4,
       at: 1_004,
+      sessionId: 's1',
     };
     const first = admissionRevision('s1', folded);
     expect(admissionRevision('s1', folded)).toBe(first);
@@ -256,6 +281,7 @@ describe('scope resolution', () => {
     boundary: 'guarded',
     seq: 1,
     at: 1,
+    sessionId: 'main',
   };
 
   test('an enabled main session is managed by its own record', () => {

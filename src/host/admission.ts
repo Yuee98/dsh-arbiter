@@ -41,6 +41,8 @@ export interface FoldedAdmission {
   readonly boundary: ExecutionBoundary;
   readonly seq: number;
   readonly at: number;
+  /** The session the record was written for, when the payload names one. */
+  readonly sessionId: string | null;
 }
 
 export function isExecutionBoundary(
@@ -77,6 +79,7 @@ export function admissionRecordOf(
     boundary: data['boundary'],
     seq: record.seq,
     at: data['at'],
+    sessionId: typeof data['sessionId'] === 'string' ? data['sessionId'] : null,
   };
 }
 
@@ -133,15 +136,25 @@ function nativeExitOf(
  * event at all, so the command pair is the only durable proof that the user
  * left; relying only on the plugin's deferred record would re-admit the
  * session after a successful exit if that write never landed.
+ *
+ * `owner` is the session this log belongs to. A fork seed copies the parent's
+ * log prefix, including the parent's admission record, so a record naming a
+ * different session is not this session's switch. A record written before the
+ * payload carried an owner still counts for the session reading its own log.
  */
 export function foldAdmission(
   events: readonly SessionEventLike[],
+  owner?: string,
 ): FoldedAdmission | null {
+  const owned = (folded: FoldedAdmission): FoldedAdmission | null => {
+    if (owner === undefined || folded.sessionId === null) return folded;
+    return folded.sessionId === owner ? folded : null;
+  };
   let latest: FoldedAdmission | null = null;
   const runs = new Map<string, CommandRun>();
   for (const event of events) {
     const folded = admissionRecordOf(event);
-    if (folded !== null) latest = folded;
+    if (folded !== null) latest = owned(folded);
     const command = commandRunOf(event);
     if (command !== null) {
       runs.set(command.commandId, command.run);
@@ -152,6 +165,9 @@ export function foldAdmission(
     const time: unknown = event.time;
     latest = {
       enabled: false,
+      // The record names the session it was written for; a native exit in this
+      // log belongs to this session by construction.
+      sessionId: latest?.sessionId ?? owner ?? null,
       boundary: latest?.boundary ?? 'guarded',
       seq: event.seq,
       at: typeof time === 'number' && Number.isFinite(time) ? time : Date.now(),
