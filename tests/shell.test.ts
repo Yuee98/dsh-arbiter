@@ -336,14 +336,23 @@ describe('redirects, assignments and cwd', () => {
       'if true; then cd /tmp; fi\necho hi > out.txt',
       'case x in x) cd /tmp;; esac\necho hi > out.txt',
     ]) {
+      // Unknown, not the entry directory: the `cd` may have run, so neither
+      // "unchanged" nor the new directory is confirmed.
       expect({
         source,
         cwd: parseShell(source, '/outside').redirects[0]?.cwd,
       }).toEqual({
         source,
-        cwd: '/outside',
+        cwd: null,
       });
     }
+    // When every path through the construct agrees, the directory survives.
+    expect(
+      parseShell(
+        'if x; then cd /tmp; else cd /tmp; fi\necho hi > out.txt',
+        '/outside',
+      ).redirects[0]?.cwd,
+    ).toBe('/tmp');
     // A brace group always runs its body in order, so its `cd` does apply.
     expect(
       parseShell('{ cd /tmp; }\necho hi > out.txt', '/outside').redirects[0]
@@ -355,6 +364,14 @@ describe('redirects, assignments and cwd', () => {
       parseShell('cd /tmp && true\necho hi > out.txt', '/outside').redirects[0]
         ?.cwd,
     ).toBeNull();
+    // A branch that redirects must resolve from the state before the branch, not
+    // from a sibling arm's `cd`.
+    expect(
+      parseShell(
+        'if false; then cd /tmp; else echo hi > out.txt; fi',
+        '/workspace',
+      ).redirects[0]?.cwd,
+    ).toBe('/workspace');
   });
 
   test('a compound redirect resolves from the directory on entry', () => {
@@ -551,6 +568,24 @@ describe('effect facts', () => {
     expect(
       factsOf('curl --output sh https://example.test').facts.observed
         .pipelineExec,
+    ).toEqual([]);
+  });
+
+  test('a stage that is only an assignment does not pipe', () => {
+    // The substitution inside `x=$(…)` captures curl's output for the variable; it
+    // does not feed the outer pipe, so reporting `curl | sh` would be an invented
+    // execution relationship.
+    const parse = parseShell('x=$(curl https://example.test) | sh');
+    expect(parse.commands.map((command) => command.pipeTarget)).toEqual([
+      null,
+      null,
+    ]);
+    expect(
+      factsOf('x=$(curl https://example.test) | sh').facts.observed.pipelineExec,
+    ).toEqual([]);
+    // The same source without the surrounding pipeline still reports no pipe.
+    expect(
+      factsOf('x=$(curl https://example.test)').facts.observed.pipelineExec,
     ).toEqual([]);
   });
 

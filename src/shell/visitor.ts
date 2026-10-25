@@ -68,6 +68,26 @@ function parseErrors(script: Script): { message: string; pos: number }[] {
   return parsed;
 }
 
+/** Constructs whose body may not run at all, so zero passes is a real path. */
+const REPEATED = new Set<CompoundCommand['type']>([
+  'For',
+  'Select',
+  'While',
+  'ArithmeticFor',
+]);
+
+/**
+ * The one directory every path out of a construct agrees on, or null.
+ *
+ * An empty path list cannot confirm anything, and a single unknown path is enough
+ * to make the answer unknown.
+ */
+function joinOutcomes(outcomes: readonly (string | null)[]): string | null {
+  const first = outcomes[0];
+  if (first === undefined || first === null) return null;
+  return outcomes.every((outcome) => outcome === first) ? first : null;
+}
+
 function redirectKind(redirection: Redirect): 'file' | 'descriptor' {
   return redirectNamesFile(redirection.operator, redirection.target?.text)
     ? 'file'
@@ -359,6 +379,7 @@ class AstVisitor implements ExpansionSink {
         cwd: frame.cwd,
       };
       this.collected.commands.push(command);
+      this.ownCommand = commandIndex;
       this.changeDirectory(command, frame);
     }
     this.flushPending();
@@ -436,15 +457,13 @@ class AstVisitor implements ExpansionSink {
     // Each element runs in its own subshell with its own copy of the caller's
     // state. Sharing one mutable frame would let `cd X | echo hi > out` resolve the
     // redirect from X, even though the `cd` never moved the second element.
-    // The command that *is* the stage is the first one the element produces: a
-    // command is pushed before its nested expansions are visited, so the outer
-    // `curl` comes before the `date` inside `$(date)`. Linking the last command
-    // instead would report `date | sh` for `curl "$(date)" | sh`.
+    // A pipe edge has to name the command that *is* the stage. A stage that is only
+    // an assignment has no such command: in `x=$(curl …) | sh` the `curl` inside the
+    // substitution runs, but its output is captured by the assignment, not piped to
+    // `sh`. Recording the first extracted command would report that false edge.
     const stages: number[] = [];
     for (const element of node.commands) {
-      const before = this.collected.commands.length;
-      this.node(element, { cwd: frame.cwd, pipeline: frame.pipeline + 1 });
-      stages.push(before < this.collected.commands.length ? before : -1);
+      stages.push(this.stageCommand(element, frame));
     }
     // A pipe edge exists only where the AST has an operator. Adjacent statements in
     // a script are sequential, not piped, so they get no link.
@@ -458,6 +477,35 @@ class AstVisitor implements ExpansionSink {
     // Elements cannot move the caller, so its directory is unchanged.
     frame.pipeline = frame.pipeline + 1;
     this.cover(node.pos, node.end);
+  }
+
+  /**
+   * The command index that represents one pipeline stage, or -1 when none does.
+   *
+   * A stage whose own node is a command contributes that command. A compound stage
+   * (`{ …; } | sh`) has no single command of its own, so it contributes nothing: the
+   * pipe relationship is not confirmed and is not reported.
+   */
+  private stageCommand(element: PipelineNode, frame: Frame): number {
+    const previous = this.ownCommand;
+    this.ownCommand = null;
+    this.node(element, { cwd: frame.cwd, pipeline: frame.pipeline + 1 });
+    const own = this.takeOwnCommand(previous);
+    // A stage that produced no command of its own (an assignment, a compound, a
+    // construct whose own command never materialised) does not confirm a pipe.
+    return own === null ? -1 : own;
+  }
+
+  /**
+   * Restore the enclosing node's own command and report this stage's.
+   *
+   * A separate method keeps the answer opaque to the compiler's narrowing, which
+   * would otherwise assume the field is still the null it was just assigned.
+   */
+  private takeOwnCommand(previous: number | null): number | null {
+    const own = this.ownCommand;
+    this.ownCommand = previous;
+    return own;
   }
 
   private andOr(
@@ -521,13 +569,23 @@ class AstVisitor implements ExpansionSink {
   private compound(node: CompoundCommand, frame: Frame): void {
     const entry = frame.cwd;
     this.compoundBody(node, frame);
-    // A loop may run zero times, an `if` may take another branch, and a `case` may
-    // match no arm, so a `cd` inside one is not a directory the rest of the call is
-    // known to be in. Only a brace group always runs its body in order.
-    if (node.type !== 'BraceGroup') frame.cwd = entry;
+    // Each construct decides its own join, because it alone knows which paths
+    // through it exist. `if` and `case` compare their arms inside; a loop may run
+    // zero times, so its body's exit has to agree with the entry state; a subshell
+    // cannot move the caller at all.
+    if (REPEATED.has(node.type) && frame.cwd !== entry) frame.cwd = null;
     this.flushPending();
     this.cover(node.pos, node.end);
   }
+
+  /**
+   * The command the node currently being visited produced for itself.
+   *
+   * Nested commands are pushed by the deferred expansion walk, so a caller cannot
+   * tell "the stage's own command" from "a command found inside it" by counting.
+   * This records the distinction at the one place that knows it.
+   */
+  private ownCommand: number | null = null;
 
   private compoundBody(node: CompoundCommand, frame: Frame): void {
     if (node.type === 'Subshell') {
@@ -572,23 +630,49 @@ class AstVisitor implements ExpansionSink {
     frame: Frame,
   ): void {
     this.recordWord(node.word, frame);
+    const entry = frame.cwd;
+    const outcomes: (string | null)[] = [];
     for (const item of node.items) {
       for (const pattern of item.pattern) this.recordWord(pattern, frame);
-      this.statementList(item.body, frame);
+      const arm: Frame = { cwd: entry, pipeline: frame.pipeline };
+      this.statementList(item.body, arm);
+      outcomes.push(arm.cwd);
     }
+    // Matching no arm is a real path: the directory then stays as it was.
+    outcomes.push(entry);
+    frame.cwd = joinOutcomes(outcomes);
   }
 
   private ifNode(
     node: Extract<CompoundCommand, { readonly type: 'If' }>,
     frame: Frame,
   ): void {
+    // The condition runs first and is the only part every path shares.
     this.statementList(node.clause, frame);
-    this.statementList(node.then, frame);
-    for (const branch of node.elif) {
-      this.statementList(branch.clause, frame);
-      this.statementList(branch.then, frame);
+    const afterCondition = frame.cwd;
+    const outcomes: (string | null)[] = [];
+    // Each arm starts from the directory the condition left, so a `cd` in one arm
+    // cannot contaminate another arm's redirects.
+    const branch = (list: CompoundList): void => {
+      const inner: Frame = { cwd: afterCondition, pipeline: frame.pipeline };
+      this.statementList(list, inner);
+      outcomes.push(inner.cwd);
+    };
+    branch(node.then);
+    for (const arm of node.elif) {
+      this.statementList(arm.clause, {
+        cwd: afterCondition,
+        pipeline: frame.pipeline,
+      });
+      branch(arm.then);
     }
-    if (node.else !== undefined) this.statementList(node.else, frame);
+    if (node.else !== undefined) {
+      branch(node.else);
+    } else {
+      // No `else` means "nothing happens", which leaves the directory as it was.
+      outcomes.push(afterCondition);
+    }
+    frame.cwd = joinOutcomes(outcomes);
   }
 
   private nodeOrList(
