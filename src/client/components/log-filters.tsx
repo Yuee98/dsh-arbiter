@@ -3,6 +3,21 @@ import { Button, Field, Select, TextInput } from './controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { RESULT_OPTIONS, verdictLabel } from '../log-list.js';
 import type { LogQuery } from '../log-list.js';
+import type { Translate } from '../i18n.js';
+
+/** The session classifications the list offers, in display order. */
+const SESSION_KIND_OPTIONS = ['', 'main', 'subagent'] as const;
+
+/** The classification labels; an unrecognized value is never selectable. */
+function sessionKindLabels(
+  translate: Translate,
+): Readonly<Record<string, string>> {
+  return {
+    '': translate('logs.sessionKinds.all'),
+    main: translate('logs.sessionKinds.main'),
+    subagent: translate('logs.sessionKinds.subagent'),
+  };
+}
 
 /** One labelled control in the filter row. */
 function FilterField(props: {
@@ -125,6 +140,17 @@ export function LogFilters({
           placeholder={t('logs.filters.sessionPlaceholder')}
           ariaLabel={t('logs.filters.session')}
           monospace
+        />
+      </FilterField>
+      <FilterField label={t('logs.filters.sessionKind')} width={130}>
+        <Select
+          value={draft.sessionKind}
+          options={SESSION_KIND_OPTIONS}
+          labels={sessionKindLabels(t)}
+          ariaLabel={t('logs.filters.sessionKind')}
+          onChange={(value) => {
+            edit({ sessionKind: value });
+          }}
         />
       </FilterField>
       <FilterField label={t('logs.filters.rule')} width={140}>

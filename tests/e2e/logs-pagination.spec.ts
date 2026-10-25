@@ -192,6 +192,16 @@ test(
     await plugin.getByRole('button', { name: '清除筛选', exact: true }).click();
     await expect(plugin.getByText('共 61 条', { exact: true })).toBeVisible();
 
+    // The session classification is a first-class axis, not a session id: every
+    // fifth seeded call is a subagent call, so 12 of the 60 match.
+    await plugin
+      .getByRole('combobox', { name: '会话类型', exact: true })
+      .selectOption('subagent');
+    await plugin.getByRole('button', { name: '应用筛选', exact: true }).click();
+    await expect(plugin.getByText('共 12 条', { exact: true })).toBeVisible();
+    await plugin.getByRole('button', { name: '清除筛选', exact: true }).click();
+    await expect(plugin.getByText('共 61 条', { exact: true })).toBeVisible();
+
     // Cleanup removes the tail while the reader is on it; the panel lands on the
     // last page that still exists instead of showing an empty table.
     await plugin.getByRole('button', { name: '下一页', exact: true }).click();

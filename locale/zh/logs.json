@@ -46,7 +46,8 @@
     "clear": "清除筛选",
     "apply": "应用筛选",
     "search": "搜索",
-    "datePlaceholder": "YYYY-MM-DD"
+    "datePlaceholder": "YYYY-MM-DD",
+    "sessionKind": "会话类型"
   },
   "verdicts": {
     "allow": "规则放行",
@@ -68,5 +69,10 @@
     "empty": "没有可浏览的页"
   },
   "newRecords": "有 {count} 条新记录；当前仍停留在原来的位置。",
-  "backToLatest": "回到最新一页"
+  "backToLatest": "回到最新一页",
+  "sessionKinds": {
+    "all": "全部会话",
+    "main": "主会话",
+    "subagent": "子任务"
+  }
 }

@@ -30,6 +30,8 @@ export interface LogQuery {
   readonly result: string;
   readonly tool: string;
   readonly session: string;
+  /** `main` or `subagent`; empty means both. */
+  readonly sessionKind: string;
   readonly rule: string;
   /** Inclusive local date (`YYYY-MM-DD`); blank means unbounded. */
   readonly from: string;
@@ -99,6 +101,7 @@ export function initialQuery(): LogQuery {
     result: '',
     tool: '',
     session: '',
+    sessionKind: '',
     rule: '',
     from: '',
     to: '',
@@ -195,6 +198,8 @@ export function paramsOf(
   if (query.tool.trim().length > 0) params.set('tool', query.tool.trim());
   if (query.session.trim().length > 0)
     params.set('session', query.session.trim());
+  if (query.sessionKind.length > 0)
+    params.set('sessionKind', query.sessionKind);
   if (query.rule.trim().length > 0) params.set('rule', query.rule.trim());
   if (query.query.trim().length > 0) params.set('q', query.query.trim());
   const from = epochOfDate(query.from, 'start');
@@ -212,6 +217,7 @@ export function hasFilters(query: LogQuery): boolean {
     query.result.length > 0 ||
     query.tool.trim().length > 0 ||
     query.session.trim().length > 0 ||
+    query.sessionKind.length > 0 ||
     query.rule.trim().length > 0 ||
     query.query.trim().length > 0 ||
     epochOfDate(query.from, 'start') !== undefined ||

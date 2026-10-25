@@ -74,6 +74,7 @@ function pageOf(
   const rows = ordered.slice(start, start + limit);
   const first = rows[0];
   const last = rows[rows.length - 1];
+  const hasMore = start + rows.length < ordered.length;
   return {
     ok: true,
     rows: rows.map(row),
@@ -88,6 +89,7 @@ function pageOf(
         ? null
         : { ts: ordered[0]?.ts ?? 0, callId: ordered[0]?.callId ?? '' },
     newer: 0,
+    hasMore,
   };
 }
 
@@ -266,6 +268,7 @@ describe('log list paging', () => {
             prevCursor: null,
             anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
             newer: 0,
+            hasMore: false,
           });
         }
         requests.push(tail ? 'tail' : 'page');
@@ -289,6 +292,60 @@ describe('log list paging', () => {
     expect(requests).toEqual(['stale', 'tail']);
     expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
     expect(rowButtonFor('echo 0')).toBeInTheDocument();
+  });
+
+  test('an insertion inside the read region never opens a page of already-seen rows', async () => {
+    // Four rows, page size 25 is not enough to expose the arithmetic, so the
+    // sample uses a page that ends exactly at the fourth row.
+    const four: readonly RowSpec[] = [
+      { callId: 'A', ts: 100 },
+      { callId: 'B', ts: 90 },
+      { callId: 'C', ts: 80 },
+      { callId: 'D', ts: 70 },
+    ];
+    let extra: readonly RowSpec[] = [];
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        // The set grows from four to five after the reader has paged through it.
+        const page = pageOf([...four, ...extra], url);
+        return HttpResponse.json({
+          ...page,
+          limit: 5,
+          hasMore: false,
+        });
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('共 4 条');
+    extra = [{ callId: 'X', ts: 95 }];
+    // The reported total is now five, but the traversal had no further page and
+    // must not offer one: doing so would show an already-read row.
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => {
+      expect(screen.getByText('共 5 条')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  });
+
+  test('the list offers main and subagent classification and sends it', async () => {
+    let requested: string | null = null;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        requested = url.searchParams.get('sessionKind');
+        return HttpResponse.json(pageOf(SEEDED, url));
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('共 60 条');
+    const kind = screen.getByRole('combobox', { name: '会话类型' });
+    expect(screen.getByRole('option', { name: '主会话' })).toBeInTheDocument();
+    await user.selectOptions(kind, 'subagent');
+    await user.click(screen.getByRole('button', { name: '应用筛选' }));
+    await waitFor(() => {
+      expect(requested).toBe('subagent');
+    });
   });
 
   test('a filter that matches nothing explains the filter, not an empty audit', async () => {
@@ -444,6 +501,7 @@ describe('log list stale responses', () => {
             prevCursor: { ts: 1, callId: 'stale' },
             anchor: { ts: 1, callId: 'stale' },
             newer: 0,
+            hasMore: false,
           });
         }
         return HttpResponse.json({
@@ -455,6 +513,7 @@ describe('log list stale responses', () => {
           prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
+          hasMore: false,
         });
       }),
     );
@@ -503,6 +562,7 @@ describe('log list stale responses', () => {
           prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
+          hasMore: false,
         });
       }),
     );

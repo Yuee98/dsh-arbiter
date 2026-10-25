@@ -110,6 +110,15 @@ export interface CallPage {
   /** The traversal head, echoed so the arrival count stays comparable. */
   readonly anchor: CallAnchor | null;
   readonly newer: number;
+  /**
+   * Whether another page exists after this one.
+   *
+   * Decided by probing for the next row, not by `index + limit < total`: a call
+   * arriving inside the already-read region raises the total without creating a
+   * page, and arithmetic would offer an empty page whose "correction" shows a
+   * row the reader had already seen.
+   */
+  readonly hasMore: boolean;
 }
 
 export interface CallFilter {

@@ -49,9 +49,10 @@ function anchor(value: unknown): LogAnchor | null {
 
 export function logsResponse(value: unknown): LogPage {
   const source = object(value);
+  const rows = field(source, 'rows', array(logRow));
   return {
     ok: field(source, 'ok', boolean),
-    rows: field(source, 'rows', array(logRow)),
+    rows,
     total: field(source, 'total', number),
     limit: field(source, 'limit', optional(number)) ?? LOG_PAGE_SIZE,
     // A page with no row has no cursor to continue from, so absence and null
@@ -60,6 +61,11 @@ export function logsResponse(value: unknown): LogPage {
     prevCursor: field(source, 'prevCursor', optional(anchor)) ?? null,
     anchor: field(source, 'anchor', optional(anchor)) ?? null,
     newer: field(source, 'newer', optional(number)) ?? 0,
+    // An older host that does not report continuation: fall back to the page
+    // being full, which is what its window implies.
+    hasMore:
+      field(source, 'hasMore', optional(boolean)) ??
+      rows.length === LOG_PAGE_SIZE,
     code: field(source, 'code', optional(text)),
   };
 }

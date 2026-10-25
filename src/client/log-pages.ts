@@ -9,7 +9,8 @@
  *   rows while the controls still show the new filter.
  * - **A page continues from the last row read.** That is what keeps a reader on
  *   a historical page when a call arrives, even one whose timestamp sorts inside
- *   the window already read.
+ *   the window already read. Continuation is "a row follows", never arithmetic on
+ *   the total.
  * - **Arrivals are counted, not inferred.** Only an explicit refresh asks how
  *   many matching calls sit above the traversal head; a total delta would also
  *   fire on a filter change, when nothing arrived.
@@ -39,6 +40,7 @@ export interface LoadedPage {
   readonly total: number;
   readonly nextCursor: LogAnchor | null;
   readonly prevCursor: LogAnchor | null;
+  readonly hasMore: boolean;
   readonly index: number;
 }
 
@@ -73,11 +75,6 @@ export interface LogPages {
   readonly next: () => void;
   readonly previous: () => void;
   readonly backToLatest: () => void;
-}
-
-/** Whether another page exists after this one; `total` is the whole set. */
-function pageHasNext(page: LoadedPage): boolean {
-  return page.nextCursor !== null && page.index + page.rows.length < page.total;
 }
 
 /**
@@ -203,6 +200,7 @@ async function fetchPage(input: FetchInput): Promise<void> {
       total: response.total,
       nextCursor: response.nextCursor,
       prevCursor: response.prevCursor,
+      hasMore: response.hasMore,
       index,
     });
     input.setAnchor(response.anchor);
@@ -336,7 +334,7 @@ function composePages(input: {
     busy: input.busy,
     index: input.index,
     emptyText: emptyTextFor(page, query, t),
-    hasNext: page !== null && pageHasNext(page),
+    hasNext: page !== null && page.hasMore,
     hasPrevious: page !== null && page.index > 0,
     setDraft: input.setDraft,
     applyFilters: () => {

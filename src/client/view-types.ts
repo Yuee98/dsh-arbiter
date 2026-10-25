@@ -132,6 +132,8 @@ export interface LogPage {
   readonly prevCursor: LogAnchor | null;
   readonly anchor: LogAnchor | null;
   readonly newer: number;
+  /** Whether a further page exists, decided by the row after this page. */
+  readonly hasMore: boolean;
   readonly code: string | undefined;
 }
 

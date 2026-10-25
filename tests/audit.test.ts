@@ -2889,3 +2889,132 @@ describe('tail reads for last-page recovery', () => {
     store.close();
   });
 });
+
+/**
+ * The exact sequences the plan review used to reject the earlier windows.
+ *
+ * Each keeps four records A, B, C, D and inserts X at a different sort position.
+ * The anchored traversal must neither admit X into a page already being read nor
+ * offer a page that contains a row the reader has already seen.
+ */
+describe('anchored traversal against insertions in every position', () => {
+  async function seedFour(store: AuditStore, shared = false): Promise<void> {
+    const order = [
+      ['A', 100],
+      ['B', 90],
+      ['C', 80],
+      ['D', 70],
+    ] as const;
+    for (const [id, ts] of order) {
+      store.enqueue(
+        record({ callId: id, result: 'allow', ts: shared ? 100 : ts }),
+      );
+    }
+    await store.flush();
+  }
+
+  test('a call above the head never enters an anchored page on refresh', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(first.anchor).toEqual({ ts: 100, callId: 'A' });
+    if (first.anchor === null)
+      throw new Error('the first page must be anchored');
+    // X sorts above the traversal head.
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 110 }));
+    await store.flush();
+    // Re-reading page one with the anchor kept must return A and B again: X is
+    // an arrival, reported by `newer`, not a row of this traversal.
+    const refreshed = store.listCalls({ limit: 2, anchor: first.anchor });
+    expect(refreshed.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(refreshed.total).toBe(4);
+    expect(refreshed.newer).toBe(1);
+    // The next page still starts after B.
+    const cursor = refreshed.nextCursor;
+    if (cursor === null) throw new Error('the page must continue');
+    const second = store.listCalls({
+      limit: 2,
+      after: cursor,
+      anchor: first.anchor,
+    });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    expect(second.hasMore).toBe(false);
+    store.close();
+  });
+
+  test('an insertion inside the read region does not create a third page', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    if (first.anchor === null)
+      throw new Error('the first page must be anchored');
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({
+      limit: 2,
+      after: firstCursor,
+      anchor: first.anchor,
+    });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    // The traversal is exhausted: no further row follows D.
+    expect(second.hasMore).toBe(false);
+    // X lands between B and C, inside the region the reader already traversed.
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 95 }));
+    await store.flush();
+    // The total rose, but the traversal has no third page: continuation is a row
+    // probe, not arithmetic on the total.
+    const reread = store.listCalls({
+      limit: 2,
+      after: second.nextCursor ?? firstCursor,
+      anchor: first.anchor,
+    });
+    expect(reread.hasMore).toBe(false);
+    expect(reread.rows).toEqual([]);
+    // `total` counts every matching record below the traversal head, so the
+    // insertion is included: it is a real matching record, and hiding it would
+    // make the denominator lie. It is *not* an arrival, because it sits below the
+    // head, so `newer` stays zero — the jump-back action only offers records the
+    // reader has not passed.
+    expect(reread.total).toBe(5);
+    expect(reread.newer).toBe(0);
+    store.close();
+  });
+
+  test('a shared timestamp still yields a total order with an insertion', async () => {
+    const { store } = await makeStore();
+    await seedFour(store, true);
+    // All four share ts; `call_id DESC` orders them D, C, B, A.
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['D', 'C']);
+    const cursor = first.nextCursor;
+    if (cursor === null) throw new Error('the first page must continue');
+    store.enqueue(record({ callId: 'B5', result: 'allow', ts: 100 }));
+    await store.flush();
+    const second = store.listCalls({
+      limit: 2,
+      after: cursor,
+      ...(first.anchor === null ? {} : { anchor: first.anchor }),
+    });
+    // B5 sorts after C and before B, so it belongs to the unread remainder and
+    // does not disturb the rows already returned.
+    expect(second.rows.map((row) => row.callId)).toEqual(['B5', 'B']);
+    expect(second.rows.map((row) => row.callId)).not.toContain('C');
+    store.close();
+  });
+
+  test('backward navigation returns the page that was actually read', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({ limit: 2, after: firstCursor });
+    const back = second.prevCursor;
+    if (back === null) throw new Error('the second page must have a cursor');
+    const previous = store.listCalls({ limit: 2, before: back });
+    expect(previous.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(previous.hasMore).toBe(true);
+    store.close();
+  });
+});

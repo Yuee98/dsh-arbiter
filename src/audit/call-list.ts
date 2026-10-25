@@ -82,6 +82,19 @@ function bound(
  * one sharing this timestamp and sorting above it all land on one side or the
  * other without shifting the rows already returned.
  */
+function scopeAll(
+  first: Predicate | null,
+  second: Predicate | null,
+): Predicate | null {
+  if (first === null) return second;
+  if (second === null) return first;
+  return {
+    sql: `(${first.sql}) AND (${second.sql})`,
+    values: [...first.values, ...second.values],
+  };
+}
+
+/** The row's position in the newest-first order is strictly after `cursor`. */
 function afterCursor(cursor: CallAnchor): Predicate {
   return {
     sql: '(ts < ? OR (ts = ? AND call_id < ?))',
@@ -344,6 +357,25 @@ function windowOf(filter: CallFilter): {
   };
 }
 
+/** Whether one more row follows `cursor` inside this traversal. */
+function responseHasRow(
+  db: DatabaseSync,
+  filter: CallFilter,
+  cursor: Predicate,
+  anchor: CallAnchor | null,
+): boolean {
+  const { where, values } = whereOf(
+    filter,
+    scopeAll(cursor, anchor === null ? null : headBound(anchor)),
+  );
+  const row = asRow(
+    db
+      .prepare(`SELECT 1 AS present FROM calls ${where} LIMIT 1`)
+      .get(...values),
+  );
+  return row['present'] === 1;
+}
+
 /**
  * One page of calls, newest first, read from a keyset cursor.
  *
@@ -361,7 +393,13 @@ export function callPage(db: DatabaseSync, filter: CallFilter = {}): CallPage {
   // describe the same traversal even if a write lands between the two queries.
   const anchor = filter.anchor ?? newestAnchor(db, filter);
   const window = windowOf(filter);
-  const { where, values } = whereOf(filter, window.extra);
+  // The row query is bounded by the traversal head *and* the cursor. Applying the
+  // head only to the count would let a refresh admit a call that arrived above
+  // the head, replacing a row the reader had already been shown.
+  const { where, values } = whereOf(
+    filter,
+    scopeAll(window.extra, anchor === null ? null : headBound(anchor)),
+  );
   // The total is counted against the traversal, not the remaining window: the
   // pager needs a stable denominator, and a reader on page two must still see
   // the size of the set they started with.
@@ -394,14 +432,27 @@ export function callPage(db: DatabaseSync, filter: CallFilter = {}): CallPage {
       .all(...values, readCount),
   );
   const rows = (window.backward ? [...read].reverse() : read).map(summaryOf);
+  // Continuation is decided by whether a row exists, not by arithmetic on a total
+  // that insertions and cleanup can change: `index + limit < total` can open a
+  // page that has no rows, and the correction then shows an already-read one.
+  const continuation = rows[rows.length - 1];
+  const hasMore =
+    continuation !== undefined &&
+    responseHasRow(
+      db,
+      filter,
+      afterCursor({ ts: continuation.ts, callId: continuation.callId }),
+      anchor,
+    );
   const first = rows[0];
   const last = rows[rows.length - 1];
   return {
     total,
     limit,
     rows,
-    // A cursor exists only when the page has a row to continue from; the
-    // presence of further rows is what the pager checks against `total`.
+    hasMore,
+    // A cursor exists only when the page has a row to continue from; whether
+    // another page follows is reported by `hasMore`, not inferred from `total`.
     nextCursor:
       last === undefined ? null : { ts: last.ts, callId: last.callId },
     prevCursor:

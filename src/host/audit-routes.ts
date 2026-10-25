@@ -127,6 +127,7 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
             prevCursor: null,
             anchor: null,
             newer: 0,
+            hasMore: false,
             health: {
               state: 'unavailable',
               lastError: runtime.auditError,
@@ -153,6 +154,7 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
               prevCursor: null,
               anchor: listed.anchor,
               newer: 0,
+              hasMore: false,
               health: audit.health(),
             },
             503,
@@ -169,6 +171,7 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
           prevCursor: listed.prevCursor,
           anchor: listed.anchor,
           newer: listed.newer,
+          hasMore: listed.hasMore,
         }),
       );
     },
