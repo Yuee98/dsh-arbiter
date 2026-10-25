@@ -36,7 +36,7 @@ export function LogPager({
   readonly onPrevious: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const info = pageInfo(index, query.limit, total);
+  const info = pageInfo(index, query.limit, total, hasNext);
   return (
     <nav
       aria-label={t('logs.pager.label')}

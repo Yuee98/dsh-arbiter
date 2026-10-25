@@ -114,15 +114,17 @@ export function initialQuery(): LogQuery {
 /**
  * Page numbers for a pager that reads by cursor.
  *
- * `index` is how many rows the reader has passed, derived from the rows actually
- * read rather than from a server-reported offset: with keyset paging there is no
- * offset, and a position computed from a total that cleanup can change would
- * claim a page the reader never saw.
+ * `index` is how many rows the reader has passed, and `hasMore` is the host's
+ * probe for a row after this page. The page *count* is therefore only claimed
+ * when it is provable: a set that has no further row ends at this page, so the
+ * total cannot advertise one more page than the reader can actually reach.
+ * `total` remains the size of the matching set and is shown separately.
  */
 export function pageInfo(
   index: number,
   limit: number,
   total: number,
+  hasMore: boolean,
 ): {
   readonly page: number;
   readonly pages: number;
@@ -130,8 +132,11 @@ export function pageInfo(
   readonly last: number;
 } {
   if (total <= 0 || limit <= 0) return { page: 0, pages: 0, first: 0, last: 0 };
-  const pages = Math.ceil(total / limit);
-  const page = Math.min(Math.floor(Math.max(index, 0) / limit) + 1, pages);
+  const page = Math.floor(Math.max(index, 0) / limit) + 1;
+  // Without a following row the traversal ends here, whatever the live total
+  // says: an insertion below the reader's position can raise the total without
+  // creating a page they can reach.
+  const pages = hasMore ? Math.max(page + 1, Math.ceil(total / limit)) : page;
   return {
     page,
     pages,

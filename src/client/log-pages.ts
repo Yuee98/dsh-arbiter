@@ -56,6 +56,13 @@ export interface LoadOptions {
   readonly refresh?: boolean;
 }
 
+/** One page the reader has already seen, kept so "previous" is a restore. */
+interface VisitedPage {
+  readonly page: LoadedPage;
+  readonly cursor: LogCursor;
+  readonly anchor: LogAnchor | null;
+}
+
 export interface LogPages {
   readonly query: LogQuery;
   readonly draft: LogQuery;
@@ -239,6 +246,46 @@ export function useLogPages(): LogPages {
   const passed = useRef(0);
   /** The cursor the committed page was read with, so a refresh re-reads it. */
   const openedWith = useRef<LogCursor>(FIRST_PAGE);
+  /**
+   * Pages the reader has already seen, newest last.
+   *
+   * "Previous" restores this instead of re-querying. A backward query would
+   * select whatever rows now precede the cursor, so a call inserted above the
+   * reader would displace a row they had already read — the page would silently
+   * change under them. Restoring keeps the boundary they actually observed.
+   */
+  const history = useRef<VisitedPage[]>([]);
+
+  /** Record the current page before moving off it, bounded so it cannot grow. */
+  const remember = useCallback(
+    (
+      page: LoadedPage | null,
+      where: LogCursor,
+      head: LogAnchor | null,
+    ): void => {
+      if (page === null) return;
+      history.current = [
+        ...history.current.slice(-(HISTORY_LIMIT - 1)),
+        { page, cursor: where, anchor: head },
+      ];
+    },
+    [],
+  );
+
+  /** Re-display a remembered page without reading it again. */
+  const restore = useCallback((visited: VisitedPage): void => {
+    passed.current = visited.page.index;
+    openedWith.current = visited.cursor;
+    setLoaded(visited.page);
+    setAnchor(visited.anchor);
+    setNotice(null);
+    setError(null);
+  }, []);
+
+  /** A new result set or an explicit jump invalidates the remembered pages. */
+  const forget = useCallback((): void => {
+    history.current = [];
+  }, []);
 
   const read = useCallback(
     (next: LogQuery, where: LogCursor, options: LoadOptions): Promise<void> =>
@@ -298,11 +345,18 @@ export function useLogPages(): LogPages {
     busy,
     index: passed.current,
     openedWith: openedWith.current,
+    visited: history.current,
     setDraft,
     startOver,
     run,
+    remember,
+    restore,
+    forget,
   });
 }
+
+/** How many already-seen pages stay reachable in one traversal. */
+const HISTORY_LIMIT = 50;
 
 /** Everything the panel needs, assembled from the hook's state and callbacks. */
 function composePages(input: {
@@ -316,6 +370,7 @@ function composePages(input: {
   readonly busy: boolean;
   readonly index: number;
   readonly openedWith: LogCursor;
+  readonly visited: readonly VisitedPage[];
   readonly setDraft: (draft: LogQuery) => void;
   readonly startOver: (next: LogQuery) => void;
   readonly run: (
@@ -323,8 +378,16 @@ function composePages(input: {
     where: LogCursor,
     options: LoadOptions,
   ) => void;
+  readonly remember: (
+    page: LoadedPage | null,
+    where: LogCursor,
+    head: LogAnchor | null,
+  ) => void;
+  readonly restore: (visited: VisitedPage) => void;
+  readonly forget: () => void;
 }): LogPages {
   const { page, query, anchor, t } = input;
+  const previousPage = input.visited.at(-1);
   return {
     query,
     draft: input.draft,
@@ -335,18 +398,22 @@ function composePages(input: {
     index: input.index,
     emptyText: emptyTextFor(page, query, t),
     hasNext: page !== null && page.hasMore,
-    hasPrevious: page !== null && page.index > 0,
+    hasPrevious:
+      page !== null && (previousPage !== undefined || page.index > 0),
     setDraft: input.setDraft,
     applyFilters: () => {
       // The confirmed filters replace the current query, and the cursor is
       // dropped because a position in the old result set says nothing about the
-      // new one.
+      // new one; the remembered pages belong to that old set.
+      input.forget();
       input.startOver(input.draft);
     },
     clearFilters: () => {
+      input.forget();
       input.startOver(initialQuery());
     },
     backToLatest: () => {
+      input.forget();
       input.startOver(query);
     },
     refresh: () => {
@@ -360,10 +427,18 @@ function composePages(input: {
       if (page === null) return;
       const move = forwardMove(page);
       if (move === null) return;
+      input.remember(page, input.openedWith, anchor);
       input.run(query, move.cursor, { keepAnchor: anchor, index: move.index });
     },
     previous: () => {
       if (page === null) return;
+      // A page the reader has already seen is restored, not re-queried: a
+      // backward query would return whatever now precedes the cursor, and a call
+      // inserted above them would push a row they already read off the page.
+      if (previousPage !== undefined) {
+        input.restore(previousPage);
+        return;
+      }
       const move = backwardMove(page, query.limit);
       if (move === null) return;
       input.run(query, move.cursor, { keepAnchor: anchor, index: move.index });

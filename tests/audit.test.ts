@@ -3018,3 +3018,46 @@ describe('anchored traversal against insertions in every position', () => {
     store.close();
   });
 });
+
+describe('backward reads against an insertion', () => {
+  test('the visited page is restored from its own boundary, not re-queried', async () => {
+    const { store } = await makeStore();
+    for (const [callId, ts] of [
+      ['A', 100],
+      ['B', 90],
+      ['C', 80],
+      ['D', 70],
+    ] as const) {
+      store.enqueue(record({ callId, result: 'allow', ts }));
+    }
+    await store.flush();
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({ limit: 2, after: firstCursor });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 95 }));
+    await store.flush();
+    // A backward read from C returns the rows that now precede it, which is
+    // X and B — not the page the reader saw. That is exactly why the client
+    // restores the visited page instead of asking for it again.
+    const backwards = store.listCalls({
+      limit: 2,
+      before: second.prevCursor ?? firstCursor,
+    });
+    expect(backwards.rows.map((row) => row.callId)).toEqual(['X', 'B']);
+    // X is below the traversal head, so it is a legitimate member of the set —
+    // not an arrival. An anchored re-read therefore legitimately returns it:
+    // [A, X]. That is precisely why the client restores the page it displayed
+    // instead of asking for the same window again, and why the restored page and
+    // the re-read page can differ without either being wrong.
+    const head = first.anchor;
+    if (head === null) throw new Error('the first page must be anchored');
+    const reread = store.listCalls({ limit: 2, anchor: head });
+    expect(reread.rows.map((row) => row.callId)).toEqual(['A', 'X']);
+    expect(reread.total).toBe(5);
+    expect(reread.newer).toBe(0);
+    store.close();
+  });
+});
