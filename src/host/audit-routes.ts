@@ -1,4 +1,5 @@
 import type { CallAnchor, CallFilter } from '../audit/types.js';
+import { readCallDetail } from './call-detail.js';
 import { jsonResponse } from './http.js';
 import type { HostEnvironment, FetchRouteLike } from './types.js';
 
@@ -178,37 +179,46 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
   };
 }
 
+/**
+ * One call's detail, located by `callId` alone.
+ *
+ * The audit store is preferred but not required: the route answers from the
+ * runtime's memory or the session log when the audit row is gone, and only says
+ * "unavailable" when no source holds the call at all. A structure this build
+ * cannot read stays distinguishable from a record that does not exist.
+ */
 export function logRoute(host: HostEnvironment): FetchRouteLike {
-  const { audit } = host;
   return {
     path: `/api/arbiter/log`,
     methods: ['GET'],
     requestBody: 'buffered',
     fetch: (request) => {
       const callId = new URL(request.url).searchParams.get('callId') ?? '';
-      if (audit === null) {
+      if (callId.length === 0) {
         return Promise.resolve(
-          jsonResponse({ ok: false, code: 'audit-unavailable' }, 404),
+          jsonResponse({ ok: false, code: 'record-unavailable' }, 404),
         );
       }
-      const detail = audit.readCall(callId);
-      if (detail.unreadable) {
-        // A structure this build cannot read is not the same as a missing call.
+      const read = readCallDetail(host, callId);
+      if (read.kind === 'found') {
+        return Promise.resolve(jsonResponse({ ok: true, detail: read.detail }));
+      }
+      if (read.unreadableStructure) {
+        // A stored structure this build cannot interpret is not a missing call.
         return Promise.resolve(
           jsonResponse(
             {
               ok: false,
               code: 'audit-unavailable',
-              health: audit.health(),
+              health: host.currentAudit()?.health() ?? null,
             },
             503,
           ),
         );
       }
+      // Every available source answered, and none of them holds this call.
       return Promise.resolve(
-        detail.record === null
-          ? jsonResponse({ ok: false, code: 'not-found' }, 404)
-          : jsonResponse({ ok: true, record: detail.record }),
+        jsonResponse({ ok: false, code: 'record-unavailable' }, 404),
       );
     },
   };

@@ -1,0 +1,699 @@
+/**
+ * The unified call detail against real SQLite and real session records.
+ *
+ * What is pinned here, all through the plugin's own gate, settlement, audit store
+ * and session-record writer:
+ *
+ *   - a full audit row is projected with its stored chain, historical rule name,
+ *     snapshot and every model attempt;
+ *   - the final permission verdict and the host execution result stay separate
+ *     facts, and an unobserved execution is reported as such;
+ *   - when the audit row is gone, the same call id still resolves from the
+ *     runtime window or the committed session log, with the gap named;
+ *   - a cleared record, an old row missing columns, a record format newer than
+ *     this build and a call no source holds all have distinct outcomes;
+ *   - a cancelled approval is reported as cancelled rather than as a denial;
+ *   - stored request material is returned without authentication headers.
+ *
+ * No case uses today's configuration to fill in a past decision: the only rule
+ * name shown is the one the row recorded.
+ */
+
+import { mkdtemp, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest';
+
+import type { CallRecord } from '../../src/audit.js';
+import { apply } from '../../src/index.js';
+import { logRoute } from '../../src/host/audit-routes.js';
+import { installSessionRecordApi } from '../../src/records.js';
+import type { HostEnvironment } from '../../src/host/types.js';
+import type { SessionEventLike } from '../../src/snapshot.js';
+import { capturingGate, createStubContext } from '../helpers/host-stub.js';
+import type { Gate } from '../helpers/host-stub.js';
+import {
+  admitSession,
+  recordingSessionApi,
+} from '../helpers/session-records.js';
+
+const homes: string[] = [];
+let previousHome: string | undefined;
+let seq = 0;
+
+beforeAll(() => {
+  installSessionRecordApi(recordingSessionApi());
+});
+
+afterAll(() => {
+  installSessionRecordApi(null);
+});
+
+beforeEach(async () => {
+  previousHome = process.env['DSH_HOME'];
+  const home = await mkdtemp(join(tmpdir(), 'arbiter-detail-'));
+  homes.push(home);
+  process.env['DSH_HOME'] = home;
+  seq += 1;
+});
+
+afterEach(async () => {
+  if (previousHome === undefined) delete process.env['DSH_HOME'];
+  else process.env['DSH_HOME'] = previousHome;
+  for (const home of homes.splice(0))
+    await rm(home, { recursive: true, force: true });
+});
+
+interface StubSession {
+  readonly id: string;
+  readonly header: { readonly id: string; readonly cwd: string };
+  readonly events: SessionEventLike[];
+  readonly snapshotEvents: () => readonly SessionEventLike[];
+  readonly append: (type: string, data: unknown) => void;
+  requestHeader(): {
+    readonly config: { readonly provider: string; readonly model: string };
+  };
+}
+
+function makeSession(id: string): StubSession {
+  const events: SessionEventLike[] = [];
+  return {
+    id,
+    header: { id, cwd: process.cwd() },
+    events,
+    append(type, data) {
+      events.push({
+        type,
+        seq: events.length,
+        data,
+        ignorable: type.startsWith('plugin:'),
+        time: Date.now(),
+      });
+    },
+    snapshotEvents: () => events,
+    requestHeader: () => ({ config: { provider: 'stub', model: 'stub' } }),
+  };
+}
+
+/** A chat reviewer answer that keeps the call on the normal review path. */
+function chatAnswer(risk: number, authorized: number) {
+  const text = JSON.stringify({
+    risk,
+    authorized,
+    secrets: false,
+    destructive: false,
+    egress: false,
+    bulk: false,
+  });
+  return {
+    stream: () => {
+      return (async function* () {
+        await Promise.resolve();
+        yield { type: 'text-delta', text };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+      })();
+    },
+  };
+}
+
+interface Harness {
+  readonly host: HostEnvironment;
+  readonly gate: Gate;
+  readonly session: StubSession;
+  readonly applyConfig: (config: unknown) => void;
+}
+
+function startHarness(
+  options: {
+    readonly approval?: (
+      request: unknown,
+    ) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>;
+    readonly session?: StubSession;
+  } = {},
+): Harness {
+  const session = options.session ?? makeSession(`session-${String(seq)}`);
+  const capture = capturingGate();
+  const { ctx } = createStubContext(
+    {
+      profileContext: {
+        home: process.env['DSH_HOME'] ?? '',
+        dir: process.cwd(),
+        name: `detail-${String(seq)}-${String(Date.now())}`,
+      },
+      sandboxPolicy: { defaultMode: 'workspace-write' },
+      sessions: {
+        get: (id: string) => (id === session.id ? session : undefined),
+        list: () => [session],
+      },
+      llm: chatAnswer(2, 9),
+      approval: {
+        config: { policy: 'ask' },
+        request: options.approval ?? (() => Promise.resolve('unavailable')),
+      },
+      permissionPresets: { registerAuto: () => () => undefined },
+      workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+    },
+    { on: capture.on },
+  );
+  admitSession(session);
+  const started = apply(ctx, baseConfig());
+  const push = (config: unknown): void => {
+    apply(ctx, config);
+  };
+  return {
+    host: started,
+    gate: capture.gate(),
+    session,
+    applyConfig: push,
+  };
+}
+
+function baseConfig(): Record<string, unknown> {
+  return {
+    format: 'arbiter-config-v2',
+    rules: [
+      {
+        id: 'no-rm',
+        comment: 'Block recursive delete',
+        conditions: [{ target: 'command', kind: 'regex', pattern: '^rm .*' }],
+        verdict: 'deny',
+      },
+      {
+        id: 'ask-sudo',
+        comment: 'Ask before sudo',
+        conditions: [{ target: 'command', kind: 'regex', pattern: '^sudo .*' }],
+        verdict: 'force-ask',
+      },
+    ],
+    modes: { main: 'normal', subagent: 'strict' },
+    reviewer: {
+      type: 'chat',
+      chat: {
+        provider: 'session',
+        model: '',
+        temperature: 0,
+        maxTokens: 400,
+        timeoutMs: 8_000,
+        maxRepairRetries: 1,
+      },
+    },
+    audit: { enabled: true, retentionDays: 30 },
+  };
+}
+
+function call(
+  session: StubSession,
+  callId: string,
+  command: string,
+): Parameters<Gate>[0] {
+  return {
+    callId,
+    name: 'bash',
+    arguments: { command },
+    signal: new AbortController().signal,
+    agent: { session },
+  };
+}
+
+const allowNext = (): Promise<{ kind: string }> =>
+  Promise.resolve({ kind: 'allow' });
+
+/** Run one call through the registered gate. */
+async function run(
+  harness: Harness,
+  callId: string,
+  command: string,
+): Promise<string> {
+  const decision = await harness.gate(
+    call(harness.session, callId, command),
+    allowNext,
+  );
+  return decision.kind;
+}
+
+function fieldsOf(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new TypeError('expected an object');
+  return { ...value };
+}
+
+function fieldOf(value: unknown, name: string): unknown {
+  return Reflect.get(fieldsOf(value), name);
+}
+
+function stringField(value: unknown, name: string): string {
+  const field = fieldOf(value, name);
+  if (typeof field !== 'string')
+    throw new TypeError(`${name} must be a string`);
+  return field;
+}
+
+function boolField(value: unknown, name: string): boolean {
+  const field = fieldOf(value, name);
+  if (typeof field !== 'boolean')
+    throw new TypeError(`${name} must be a boolean`);
+  return field;
+}
+
+function listField(value: unknown, name: string): readonly unknown[] {
+  const field = fieldOf(value, name);
+  if (!Array.isArray(field)) throw new TypeError(`${name} must be a list`);
+  return field as readonly unknown[];
+}
+
+/** The decoded JSON body of a detail request. */
+async function detailBody(
+  host: HostEnvironment,
+  callId: string,
+): Promise<{
+  readonly status: number;
+  readonly body: unknown;
+}> {
+  const response = await logRoute(host).fetch(
+    new Request(
+      `http://fixture/api/arbiter/log?callId=${encodeURIComponent(callId)}`,
+    ),
+  );
+  const body: unknown = JSON.parse(await response.text());
+  return { status: response.status, body };
+}
+
+/** The detail payload, asserting the read succeeded. */
+async function detailOf(
+  host: HostEnvironment,
+  callId: string,
+): Promise<unknown> {
+  const read = await detailBody(host, callId);
+  if (read.status !== 200)
+    throw new Error(`the detail read failed: ${JSON.stringify(read.body)}`);
+  expect(read.status).toBe(200);
+  expect(fieldOf(read.body, 'ok')).toBe(true);
+  return fieldOf(read.body, 'detail');
+}
+
+/** Wait until the audit row for this call exists. */
+async function persisted(host: HostEnvironment, callId: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const read = host.currentAudit()?.readCall(callId);
+    if (read !== undefined && read.record !== null) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`the audit row for ${callId} never appeared`);
+}
+
+function auditPath(): string {
+  return join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db');
+}
+
+const missingOf = (detail: unknown): readonly string[] =>
+  listField(detail, 'missing').filter(
+    (code): code is string => typeof code === 'string',
+  );
+
+describe('full audit detail', () => {
+  test('projects the stored chain, the historical rule name and the execution result', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'rule-denied', 'rm -rf build')).toBe('deny');
+    await persisted(harness.host, 'rule-denied');
+
+    // The rule is renamed afterwards; the detail must still show the name the
+    // row recorded, not the configuration in effect now.
+    harness.applyConfig({
+      ...baseConfig(),
+      rules: [
+        {
+          id: 'no-rm',
+          comment: 'Renamed after the fact',
+          conditions: [{ target: 'command', kind: 'regex', pattern: '^rm .*' }],
+          verdict: 'deny',
+        },
+      ],
+    });
+
+    const detail = await detailOf(harness.host, 'rule-denied');
+    expect(fieldOf(detail, 'source')).toBe('audit');
+    const overview = fieldOf(detail, 'overview');
+    expect(stringField(overview, 'verdict')).toBe('deny');
+    expect(stringField(overview, 'tool')).toBe('bash');
+    expect(stringField(overview, 'approvalMode')).toBe('normal');
+    expect(fieldOf(overview, 'cancelled')).toBe(false);
+
+    const basis = fieldOf(detail, 'basis');
+    expect(fieldOf(basis, 'rule')).toEqual({
+      ruleId: 'no-rm',
+      ruleName: 'Block recursive delete',
+    });
+    const chain = listField(basis, 'chain');
+    expect(chain).toHaveLength(1);
+    expect(fieldOf(chain[0], 'stage')).toBe('rule');
+    expect(fieldOf(chain[0], 'ruleName')).toBe('Block recursive delete');
+    // A rule short-circuit never asked the model: no snapshot, no attempt, and
+    // the detail says so rather than fabricating a review.
+    expect(fieldOf(basis, 'evidence')).toEqual([]);
+    expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toEqual([]);
+    const missing = missingOf(detail);
+    expect(missing).toContain('snapshot-missing');
+    // A denied call never started, so its execution result is not a gap.
+    expect(fieldOf(overview, 'execution')).toEqual({
+      status: 'not-started',
+      startedAt: null,
+      finishedAt: null,
+    });
+    expect(missing).not.toContain('execution-not-observed');
+  });
+
+  test('keeps the permission verdict apart from a later execution result', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'reviewed', 'echo hi')).toBe('allow');
+    await persisted(harness.host, 'reviewed');
+
+    const before = await detailOf(harness.host, 'reviewed');
+    expect(stringField(fieldOf(before, 'overview'), 'verdict')).toBe(
+      'review-allow',
+    );
+    expect(fieldOf(fieldOf(before, 'overview'), 'execution')).toEqual({
+      status: 'pending',
+      startedAt: null,
+      finishedAt: null,
+    });
+    expect(missingOf(before)).toContain('execution-not-observed');
+
+    harness.host
+      .currentAudit()
+      ?.updateExecution('reviewed', 'success', 1_700_000_000_000);
+    const after = await detailOf(harness.host, 'reviewed');
+    // The execution result changed; the permission verdict did not.
+    expect(stringField(fieldOf(after, 'overview'), 'verdict')).toBe(
+      'review-allow',
+    );
+    expect(fieldOf(fieldOf(after, 'overview'), 'execution')).toEqual({
+      status: 'success',
+      startedAt: null,
+      finishedAt: 1_700_000_000_000,
+    });
+    expect(missingOf(after)).not.toContain('execution-not-observed');
+  });
+
+  test('shows every model attempt without authentication material', async () => {
+    const harness = startHarness();
+    const audit = harness.host.currentAudit();
+    if (audit === null) throw new Error('the audit store did not start');
+    const record: CallRecord = {
+      callId: 'with-attempt',
+      ts: Date.now(),
+      sessionId: harness.session.id,
+      sessionKind: 'main',
+      parentSession: null,
+      profile: 'detail',
+      workspace: process.cwd(),
+      tool: 'bash',
+      arguments: {
+        command:
+          'curl -H "Authorization: Bearer top-secret" https://example.test',
+      },
+      cwd: process.cwd(),
+      fingerprint: 'bash:attempt',
+      configRevision: 'rev-1',
+      configSnapshotId: 'cfg-1',
+      approvalMode: 'normal',
+      executionMode: 'guarded',
+      result: 'review-deny',
+      reason: 'the review denied this call',
+      trace: [
+        { stage: 'rule', result: 'review(default)', at: 1 },
+        { stage: 'review', result: 'review-deny', at: 2 },
+      ],
+      effect: null,
+      sessionRecordState: 'written',
+      snapshot: null,
+      modelAttempts: [
+        {
+          requestId: 'with-attempt:model:1',
+          callId: 'with-attempt',
+          attempt: 1,
+          backend: 'decision',
+          protocol: 'arbiter-decision-v1',
+          request: {
+            model: 'clef-flash',
+            headers: { authorization: 'Bearer top-secret' },
+            state: 'Authorization: Bearer top-secret',
+          },
+          responseText: 'echoed Authorization: Bearer top-secret',
+          parsed: { risk: 5 },
+          error: null,
+          startedAt: 1,
+          durationMs: 2,
+          estimatedInputTokens: 3,
+          usage: null,
+        },
+      ],
+      signals: null,
+      policyStrategy: 'normal',
+      decisionRules: ['R7'],
+      executionStatus: 'not-started',
+    };
+    audit.enqueue(record);
+    await persisted(harness.host, 'with-attempt');
+
+    const detail = await detailOf(harness.host, 'with-attempt');
+    const serialized = JSON.stringify(detail);
+    expect(serialized).not.toContain('top-secret');
+    expect(serialized).toContain('[redacted]');
+    const attempts = listField(fieldOf(detail, 'raw'), 'modelAttempts');
+    expect(attempts).toHaveLength(1);
+    // The model's own answer text is still shown, with only the credential masked.
+    expect(stringField(attempts[0], 'responseText')).toContain('echoed');
+    expect(fieldOf(attempts[0], 'parsed')).toEqual({ risk: 5 });
+  });
+});
+
+describe('degraded sources', () => {
+  test('falls back to the session record after the audit rows are cleared', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'cleared', 'echo hi')).toBe('allow');
+    await persisted(harness.host, 'cleared');
+    const cleared = harness.host.currentAudit()?.clearCalls();
+    expect(cleared).toEqual({ ok: true, deleted: 1 });
+
+    // The audit row is gone. This call's verdict is still in the runtime window
+    // or the committed decision record; either way the source is the session,
+    // and the view names the audit gap instead of showing empty layers.
+    const detail = await detailOf(harness.host, 'cleared');
+    expect(fieldOf(detail, 'source')).toBe('session');
+    expect(stringField(fieldOf(detail, 'overview'), 'verdict')).toBe(
+      'review-allow',
+    );
+    const missing = missingOf(detail);
+    expect(missing).toContain('audit-record-cleared');
+    expect(missing).toContain('snapshot-missing');
+    expect(missing).toContain('model-attempts-missing');
+    // The minimal record has no execution observation, and none is invented.
+    expect(fieldOf(fieldOf(detail, 'overview'), 'execution')).toEqual({
+      status: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+  });
+
+  test('reads the committed decision record when memory is gone, without the live rule name', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'log-only', 'rm -rf build')).toBe('deny');
+    await persisted(harness.host, 'log-only');
+    harness.host.currentAudit()?.clearCalls();
+    // Simulate a runtime whose window no longer holds this entry, as a restart
+    // would leave it: only the committed session record remains.
+    harness.host.runtime.priorVerdicts.clear();
+
+    const detail = await detailOf(harness.host, 'log-only');
+    expect(fieldOf(detail, 'source')).toBe('session');
+    const overview = fieldOf(detail, 'overview');
+    expect(stringField(overview, 'verdict')).toBe('deny');
+    expect(stringField(overview, 'sessionId')).toBe(harness.session.id);
+    const basis = fieldOf(detail, 'basis');
+    // The session record keeps result strings, not stage names or rule names.
+    expect(fieldOf(basis, 'chain')).toBeNull();
+    expect(listField(basis, 'trace')).toEqual(['deny']);
+    expect(fieldOf(basis, 'rule')).toEqual({ ruleId: 'no-rm', ruleName: null });
+    const missing = missingOf(detail);
+    expect(missing).toContain('stage-details-missing');
+    expect(missing).toContain('rule-name-missing');
+    // The rule is still named "Block recursive delete" in the live config; the
+    // detail must not borrow it to explain a record that did not store it.
+    const serialized = JSON.stringify(detail);
+    expect(serialized).not.toContain('Block recursive delete');
+  });
+
+  test('reports audit disabled while still explaining the call from memory', async () => {
+    const harness = startHarness();
+    expect(await run(harness, 'disabled-audit', 'rm -rf build')).toBe('deny');
+    await persisted(harness.host, 'disabled-audit');
+    harness.applyConfig({
+      ...baseConfig(),
+      audit: { enabled: false },
+    });
+
+    const detail = await detailOf(harness.host, 'disabled-audit');
+    expect(fieldOf(detail, 'source')).toBe('session');
+    expect(missingOf(detail)).toContain('audit-disabled');
+  });
+
+  test('answers that every source is missing for an unknown call', async () => {
+    const harness = startHarness();
+    const read = await detailBody(harness.host, 'never-happened');
+    expect(read.status).toBe(404);
+    expect(read.body).toEqual({ ok: false, code: 'record-unavailable' });
+  });
+});
+
+describe('old records and endings', () => {
+  test('a v1 row is shown with its absent columns unknown, not defaulted', async () => {
+    const harness = startHarness();
+    harness.host.currentAudit()?.close();
+    const db = new DatabaseSync(auditPath());
+    db.prepare(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+         tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+         execution_mode, result, reason, trace, effect, session_record_state, signals,
+         policy_strategy, decision_rules, execution_status, record_format_version,
+         execution_started_at, execution_finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'legacy-detail',
+      Date.now(),
+      harness.session.id,
+      'main',
+      null,
+      'detail',
+      process.cwd(),
+      'bash',
+      '{"command":"echo hi"}',
+      process.cwd(),
+      'bash:legacy',
+      'rev-old',
+      'cfg-old',
+      'normal',
+      'guarded',
+      'review-deny',
+      'legacy row',
+      '[]',
+      'null',
+      'written',
+      null,
+      null,
+      '[]',
+      'pending',
+      1,
+      null,
+      null,
+    );
+    db.close();
+    harness.host.runtime.audit = null;
+    harness.host.runtime.config = {
+      ...harness.host.runtime.config,
+      audit: { ...harness.host.runtime.config.audit, enabled: true },
+    };
+
+    const detail = await detailOf(harness.host, 'legacy-detail');
+    expect(fieldOf(detail, 'recordFormatVersion')).toBe(1);
+    const overview = fieldOf(detail, 'overview');
+    expect(stringField(overview, 'verdict')).toBe('review-deny');
+    expect(fieldOf(overview, 'execution')).toEqual({
+      status: 'pending',
+      startedAt: null,
+      finishedAt: null,
+    });
+    const basis = fieldOf(detail, 'basis');
+    expect(fieldOf(basis, 'chain')).toBeNull();
+    expect(fieldOf(basis, 'signals')).toBeNull();
+    expect(fieldOf(basis, 'policyStrategy')).toBeNull();
+    const raw = fieldOf(detail, 'raw');
+    expect(fieldOf(raw, 'snapshot')).toBeNull();
+    expect(fieldOf(raw, 'config')).toBeNull();
+    // A v1 row has no stage table entries and no snapshot columns; both are
+    // reported, and no value is invented for either.
+    const missing = missingOf(detail);
+    expect(missing).toContain('snapshot-missing');
+    expect(missing).toContain('config-missing');
+  });
+
+  test('a record written by a newer plugin is reported, not reinterpreted', async () => {
+    const harness = startHarness();
+    harness.host.currentAudit()?.close();
+    const db = new DatabaseSync(auditPath());
+    db.prepare(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+         tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+         execution_mode, result, reason, trace, effect, session_record_state, signals,
+         policy_strategy, decision_rules, execution_status, record_format_version,
+         execution_started_at, execution_finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'future-detail',
+      Date.now(),
+      harness.session.id,
+      'main',
+      null,
+      'detail',
+      process.cwd(),
+      'bash',
+      '{"command":"echo hi"}',
+      process.cwd(),
+      'bash:future',
+      'rev-f',
+      'cfg-f',
+      'normal',
+      'guarded',
+      'review-allow',
+      'future row',
+      '[]',
+      'null',
+      'written',
+      null,
+      null,
+      '[]',
+      'success',
+      99,
+      null,
+      null,
+    );
+    db.close();
+    harness.host.runtime.audit = null;
+
+    const detail = await detailOf(harness.host, 'future-detail');
+    expect(boolField(detail, 'unreadable')).toBe(true);
+    expect(fieldOf(detail, 'recordFormatVersion')).toBe(99);
+    expect(stringField(detail, 'unreadableReason')).toContain('newer');
+    // The verdict is not read from a shape this build cannot interpret.
+    expect(fieldOf(fieldOf(detail, 'overview'), 'verdict')).toBeNull();
+    expect(missingOf(detail)).toEqual(['record-format-newer']);
+  });
+
+  test('a cancelled approval is reported as cancelled, not as a denial', async () => {
+    const harness = startHarness({
+      approval: () => Promise.resolve('cancelled'),
+    });
+    // A cancelled approval refuses the call, so the gate answer is a denial;
+    // the record must still distinguish "withdrawn" from "denied".
+    expect(await run(harness, 'cancelled-call', 'sudo ls')).toBe('deny');
+    await persisted(harness.host, 'cancelled-call');
+
+    const detail = await detailOf(harness.host, 'cancelled-call');
+    const overview = fieldOf(detail, 'overview');
+    expect(stringField(overview, 'verdict')).toBe('human-abort');
+    expect(fieldOf(overview, 'cancelled')).toBe(true);
+    const chain = listField(fieldOf(detail, 'basis'), 'chain');
+    expect(chain.map((stage) => fieldOf(stage, 'result'))).toContain(
+      'human-abort',
+    );
+  });
+});
