@@ -1,4 +1,3 @@
-import { replayPolicy } from '../suggestions.js';
 import { jsonResponse } from './http.js';
 import type { HostEnvironment, FetchRouteLike } from './types.js';
 
@@ -73,49 +72,6 @@ export function logRoute(host: HostEnvironment): FetchRouteLike {
         record === null
           ? jsonResponse({ ok: false, code: 'not-found' }, 404)
           : jsonResponse({ ok: true, record }),
-      );
-    },
-  };
-}
-
-export function suggestionsRoute(host: HostEnvironment): FetchRouteLike {
-  const { audit } = host;
-  return {
-    path: `/api/arbiter/suggestions`,
-    methods: ['GET'],
-    requestBody: 'buffered',
-    fetch: () =>
-      Promise.resolve(
-        jsonResponse({
-          ok: true,
-          candidates: audit?.listCandidates() ?? [],
-          health: audit?.health() ?? { state: 'unavailable' },
-        }),
-      ),
-  };
-}
-
-export function replayRoute(host: HostEnvironment): FetchRouteLike {
-  const { audit, runtime } = host;
-  return {
-    path: `/api/arbiter/replay`,
-    methods: ['GET'],
-    requestBody: 'buffered',
-    fetch: () => {
-      if (audit === null) {
-        return Promise.resolve(
-          jsonResponse({ ok: false, code: 'audit-unavailable' }, 409),
-        );
-      }
-      return Promise.resolve(
-        jsonResponse({
-          ok: true,
-          ...replayPolicy(
-            audit,
-            runtime.config.policy.normal,
-            runtime.config.policy.progress,
-          ),
-        }),
       );
     },
   };

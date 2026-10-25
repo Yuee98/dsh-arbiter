@@ -1,15 +1,16 @@
 /**
  * Offline rule suggestions and policy replay.
  *
- * Analysis is read-only. It groups already-decided calls, refuses hard-risk
- * categories, and writes pending candidates to the audit database. Nothing here
- * changes runtime rules; accepting a candidate is a separate, ordinary
- * configuration save performed by the host.
+ * Deferred beyond the first release: this module stays as prototype reference
+ * only. The first release exposes no offline-suggestion UI, analysis entry, or
+ * accept endpoint, and nothing in the runtime calls these functions to change
+ * configuration. Analysis remains read-only; promoting a candidate to a real
+ * rule would again be an explicit ordinary save.
  */
 
 import { createHash } from 'node:crypto';
 
-import type { AuditStore, CandidateRecord } from './audit.js';
+import type { AuditStore } from './audit.js';
 import type { PolicyThresholds, ReviewSignals } from './types.js';
 import { compareStrategies } from './policy.js';
 import { parseShell } from './shell/parse.js';
@@ -256,37 +257,6 @@ function proposalFor(
       skipped: group.skipped,
     },
   };
-}
-
-/** Persist proposals as pending candidates; existing rows keep their review status. */
-export function persistCandidates(
-  store: AuditStore,
-  proposals: readonly CandidateProposal[],
-  windowStart: number,
-  windowEnd: number,
-): number {
-  let created = 0;
-  const existing = new Set(
-    store.listCandidates().map((candidate) => candidate.candidateId),
-  );
-  for (const proposal of proposals) {
-    if (existing.has(proposal.candidateId)) continue;
-    const record: CandidateRecord = {
-      candidateId: proposal.candidateId,
-      createdAt: Date.now(),
-      status: 'pending',
-      rule: proposal.rule,
-      stats: proposal.stats,
-      evidence: proposal.evidence,
-      windowStart,
-      windowEnd,
-      note: null,
-    };
-    store.saveCandidate(record);
-    created += 1;
-  }
-  store.recordAnalysis(windowStart, windowEnd, proposals.length, created);
-  return created;
 }
 
 export interface ReplayResult {

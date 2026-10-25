@@ -1,5 +1,57 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 import { test, expect } from './fixtures.js';
 import { openArbiterConfiguration } from './dsh/ui.js';
+
+/**
+ * Seed one valid, pending candidate in the isolated profile's audit database.
+ *
+ * This defeats a false positive: the removed prototype accept handler also
+ * answered 404 for an unknown candidate id, so probing with a nonexistent id
+ * would prove nothing. With a real candidate present, a still-registered
+ * handler would accept it and add a rule, while the first release has no route
+ * at all.
+ */
+function seedPendingCandidate(home: string): void {
+  const path = join(home, 'arbiter', 'arbiter.db');
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS candidates (
+      candidate_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      rule TEXT NOT NULL,
+      stats TEXT NOT NULL,
+      evidence TEXT NOT NULL,
+      window_start INTEGER NOT NULL,
+      window_end INTEGER NOT NULL,
+      note TEXT
+    );`);
+    db.prepare(
+      `INSERT OR REPLACE INTO candidates(candidate_id, created_at, status, rule, stats, evidence, window_start, window_end, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'smoke-candidate',
+      Date.now(),
+      'pending',
+      JSON.stringify({
+        id: 'smoke-candidate-rule',
+        match: { node: 'command', kind: 'regex', pattern: '^printf(?:\\s|$)' },
+        verdict: 'allow',
+      }),
+      '{}',
+      '{}',
+      0,
+      Date.now(),
+      null,
+    );
+  } finally {
+    db.close();
+  }
+}
 
 test(
   'loads the real DSH plugin and exercises every extracted configuration panel',
@@ -108,37 +160,59 @@ test(
     await expect(plugin.getByText('没有记录。', { exact: true })).toBeVisible();
     await expect(plugin.getByRole('status')).toHaveCount(0);
 
-    const [suggestions] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === '/api/arbiter/suggestions',
-      ),
-      plugin.getByRole('button', { name: '离线建议', exact: true }).click(),
-    ]);
-    expect(suggestions.status()).toBe(200);
+    // First release: offline rule suggestions are deferred. Their tab and the
+    // analysis / accept actions must not be reachable from the real UI either.
     await expect(
-      plugin.getByRole('heading', { name: '离线规则建议', exact: true }),
-    ).toBeVisible();
-    await expect(
-      plugin.getByText('暂无候选。', { exact: false }),
-    ).toBeVisible();
-    const [replay] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === '/api/arbiter/replay',
-      ),
-      plugin
-        .getByRole('button', {
-          name: '策略回放（normal vs progress）',
-          exact: true,
-        })
-        .click(),
-    ]);
-    expect(replay.status()).toBe(200);
-    await expect(
-      plugin.getByText('可比记录：', { exact: false }),
-    ).toBeVisible();
-    await expect(plugin.getByRole('status')).toHaveCount(0);
+      plugin.getByRole('button', { name: '离线建议', exact: true }),
+    ).toHaveCount(0);
+
+    // A real pending candidate exists, so a still-registered accept handler
+    // would succeed instead of answering "candidate not found".
+    seedPendingCandidate(dsh.home);
+    const rulesBefore: unknown = (await (
+      await page.request.get(`${dsh.origin}/api/arbiter/state`)
+    ).json()) as unknown;
+    const readConfig = (value: unknown): unknown =>
+      typeof value === 'object' && value !== null && 'config' in value
+        ? value.config
+        : null;
+    const configBefore = readConfig(rulesBefore);
+    if (configBefore === null) {
+      throw new Error('DSH state did not supply an effective configuration.');
+    }
+
+    for (const [path, method] of [
+      ['/api/arbiter/analyze', 'POST'],
+      ['/api/arbiter/suggestions', 'GET'],
+      ['/api/arbiter/replay', 'GET'],
+      ['/api/arbiter/suggestions/act', 'POST'],
+    ] as const) {
+      // A GET must not carry a body: the host rejects that before routing, so
+      // the request would no longer prove the route itself is absent.
+      const response = await page.request.fetch(
+        `${dsh.origin}${path}`,
+        method === 'POST'
+          ? {
+              method,
+              data: { candidateId: 'smoke-candidate', action: 'accept' },
+            }
+          : { method },
+      );
+      expect(response.status(), path).toBe(404);
+      // The host's unmatched-route answer is plain text; the prototype handler
+      // answered JSON ({"ok":false,"code":"not-found"}). Asserting the shape
+      // distinguishes "no route" from "route said not found".
+      const body = await response.text();
+      expect(body, path).toBe('not found');
+      expect(body, path).not.toContain('"code"');
+    }
+
+    // Neither the attempted acceptance nor analysis changed the live config,
+    // and the seeded candidate is still pending rather than accepted.
+    const configAfter = readConfig(
+      await (await page.request.get(`${dsh.origin}/api/arbiter/state`)).json(),
+    );
+    expect(configAfter).toEqual(configBefore);
 
     await plugin
       .getByRole('button', { name: '覆盖与试用', exact: true })
