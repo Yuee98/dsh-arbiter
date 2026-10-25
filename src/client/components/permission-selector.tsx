@@ -44,21 +44,27 @@ export function PermissionSelector(props: {
   const trigger = useRef<HTMLButtonElement | null>(null);
   const menuId = useId();
 
-  const hostPreset =
-    admission.catalog?.find(
-      (option) => option.value === admission.hostPreset,
-    ) ?? null;
   const items = selectorItems({
     state: admission.state,
     catalog: admission.catalog,
-    hostPreset,
+    hostPreset:
+      admission.catalog?.find(
+        (option) => option.value === admission.hostPreset?.currentValue,
+      ) ?? null,
     t,
   });
   const interactive = isInteractive(admission.state, {
     locked: props.locked === true,
     sessionId: props.sessionId ?? null,
   });
-  const label = triggerText({ state: admission.state, hostPreset }, t);
+  const label = triggerText(
+    {
+      state: admission.state,
+      hostPreset: admission.hostPreset,
+      catalog: admission.catalog,
+    },
+    t,
+  );
   const failure =
     admission.state.failure === null
       ? null
@@ -80,17 +86,15 @@ export function PermissionSelector(props: {
   };
 
   const choose = async (id: string, danger: boolean): Promise<void> => {
+    setOpen(false);
     if (id === ARBITER_ITEM) {
-      setOpen(false);
       await admission.setEnabled(true);
       return;
     }
     if (id === DISABLE_ITEM) {
-      setOpen(false);
       await admission.setEnabled(false);
       return;
     }
-    setOpen(false);
     if (danger) {
       setAcknowledged(false);
       setConfirming(id);
@@ -110,7 +114,12 @@ export function PermissionSelector(props: {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={t('permission.trigger.open', { current: label })}
+        aria-busy={admission.state.pending}
+        aria-label={
+          admission.state.pending
+            ? t('permission.busy')
+            : t('permission.trigger.open', { current: label })
+        }
         title={failure ?? label}
         disabled={!interactive && !open}
         onClick={() => {

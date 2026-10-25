@@ -124,7 +124,13 @@ function catalogReader(
   return () => Promise.resolve(Reflect.apply(catalog, presets, []) as unknown);
 }
 
-/** Whether a host command result proves the command ran and matched. */
+/**
+ * Whether the host recognized the command at all.
+ *
+ * `session.command()` answers `matched`, which is recognition, not success: an
+ * accepted `/permission` handler can still settle with a handler error. Callers
+ * must confirm the effect through the authoritative admission read.
+ */
 function commandMatched(result: unknown): boolean {
   if (!isRecord(result) || result['ok'] === false) return false;
   const value = result['value'];
@@ -162,7 +168,10 @@ export function createHostBridge(get: (name: string) => unknown): HostBridge {
       const read = catalogReader(presets);
       if (read === null) return null;
       try {
-        return catalogOf(await read());
+        const answer = await read();
+        // A `{ok:false}` Remote answer is a failed read, not an empty catalog.
+        if (isRecord(answer) && answer['ok'] === false) return null;
+        return catalogOf(answer);
       } catch {
         // A failed catalog read is "unavailable", never "no host presets".
         return null;
@@ -184,13 +193,20 @@ export function createHostBridge(get: (name: string) => unknown): HostBridge {
         return false;
       }
     },
-    observe(sessionId, listener) {
-      return observeAll(get, sessionId, listener);
+    observe(sessionId, listener, onCatalogChanged) {
+      return observeAll(get, sessionId, listener, onCatalogChanged);
     },
   };
 }
 
-/** The host's current preset for one materialized session. */
+/**
+ * The host's current preset for one materialized session.
+ *
+ * The raw `currentValue` is kept even when the catalog does not list it: the
+ * host legitimately reports `custom` when the active sandbox/approval pair
+ * matches no configured preset, and dropping that would hide the permission the
+ * session is actually running under.
+ */
 function selectionOf(
   session: Readonly<Record<string, unknown>>,
 ): HostPresetSelection | null {
@@ -214,6 +230,7 @@ function observeAll(
   get: (name: string) => unknown,
   sessionId: string,
   listener: () => void,
+  onCatalogChanged: () => void,
 ): () => void {
   const stops: (() => void)[] = [];
   const service = get('sessions');
@@ -222,15 +239,19 @@ function observeAll(
     if (session !== null) {
       stops.push(observeEvents(session, listener));
       stops.push(observeProjection(session, listener));
-      stops.push(observeGeneration(session, listener));
     }
   }
+  // The connection generation is a client-level service, not a member of the
+  // session face: subscribing the session would install a silent no-op and a
+  // silent reconnect would never trigger a reread.
+  stops.push(observeConnection(get, listener));
   const remote = get('remote');
   if (isRecord(remote) && typeof remote['$on'] === 'function') {
     const on = remote['$on'];
+    // The catalog event must refresh the option set, not only reread admission.
     const stop: unknown = Reflect.apply(on, remote, [
       'permission-presets/catalog-changed',
-      listener,
+      onCatalogChanged,
     ]);
     if (typeof stop === 'function') {
       stops.push(() => {
@@ -318,12 +339,17 @@ function observeProjection(
   return face === null ? () => undefined : face.subscribe(listener);
 }
 
-/** The session's connection generation; a silent reconnect is an invalidation. */
-function observeGeneration(
-  session: Readonly<Record<string, unknown>>,
+/**
+ * The client connection generation; a silent reconnect is an invalidation.
+ *
+ * Read from `ctx.get('connection')` so it works even when no session is bound
+ * yet, which is exactly the composition the optional-service design supports.
+ */
+function observeConnection(
+  get: (name: string) => unknown,
   listener: () => void,
 ): () => void {
-  const connection = session['connection'];
+  const connection = get('connection');
   if (!isRecord(connection)) return () => undefined;
   const generation = observableOf(connection['generation']);
   return generation === null ? () => undefined : generation.subscribe(listener);

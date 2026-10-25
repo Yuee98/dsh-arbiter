@@ -4,7 +4,11 @@ import type {
   AdmissionFailureCode,
   AdmissionState,
 } from '../permission-selector-state.js';
-import type { HostPermissionCatalogOption } from '../view-types.js';
+import type {
+  HostPermissionCatalogOption,
+  HostPresetSelection,
+} from '../view-types.js';
+import { isUnavailable } from '../permission-selector-state.js';
 
 /**
  * Which failure key an answer maps to.
@@ -26,6 +30,7 @@ const FAILURE_KEYS: Readonly<Record<AdmissionFailureCode, string>> = {
   stopping: 'permission.error.stopping',
   'request-failed': 'permission.error.requestFailed',
   'host-unavailable': 'permission.error.hostUnavailableDetail',
+  'command-not-applied': 'permission.error.commandNotApplied',
 };
 
 /** One localized sentence; `detail` is used only where the copy names it. */
@@ -60,22 +65,28 @@ export function boundaryLabel(
 export function triggerText(
   options: {
     readonly state: AdmissionState;
-    readonly hostPreset: HostPermissionCatalogOption | null;
+    /** The host's current preset, including a value the catalog omits. */
+    readonly hostPreset: HostPresetSelection | null;
+    readonly catalog: readonly HostPermissionCatalogOption[] | null;
   },
   t: Translate,
 ): string {
+  // Unavailable wins over the retained confirmation: the host cannot address
+  // this session, so the old enabled label must not look current.
+  if (isUnavailable(options.state)) return t('permission.trigger.unavailable');
   const boundary = boundaryLabel(options.state, t);
   if (boundary !== null) return t('permission.trigger.enabled', { boundary });
-  if (options.state.confirmed === null) {
-    // `session-unknown` means the host has not materialized this session yet;
-    // that is "unavailable", never a confirmed "disabled".
-    return options.state.failure?.code === 'session-unknown'
-      ? t('permission.trigger.unavailable')
-      : t('permission.loading');
-  }
-  if (options.hostPreset === null) return t('permission.trigger.hostUnknown');
+  if (options.state.confirmed === null) return t('permission.loading');
+  const preset = options.hostPreset;
+  if (preset === null) return t('permission.trigger.hostUnknown');
+  // The host keeps the raw value when the catalog does not list it (`custom`,
+  // or a preset removed since the page loaded). Keep showing that identity
+  // rather than pretending the session has no host permission.
+  const listed =
+    options.catalog?.find((option) => option.value === preset.currentValue) ??
+    null;
   return t('permission.trigger.hostOnly', {
-    preset: presetLabel(options.hostPreset, t),
+    preset: listed === null ? preset.currentValue : presetLabel(listed, t),
   });
 }
 

@@ -36,6 +36,7 @@ import type {
   AdmissionAction,
   HostBridge,
   HostPermissionCatalogOption,
+  HostPresetSelection,
   SessionAdmissionResponse,
 } from './view-types.js';
 
@@ -44,7 +45,7 @@ export interface AdmissionController {
   /** The host's own presets, or `null` when that surface is unavailable. */
   readonly catalog: readonly HostPermissionCatalogOption[] | null;
   /** The host's *current* preset, for the label when Arbiter is not enabled. */
-  readonly hostPreset: string | null;
+  readonly hostPreset: HostPresetSelection | null;
   /** Enable or disable this session; the confirmation is the server's answer. */
   readonly setEnabled: (enabled: boolean) => Promise<void>;
   /** Leave Arbiter and apply one host preset through the host's own command. */
@@ -176,32 +177,48 @@ function useBrowserSignals(onRefresh: () => void): void {
   }, [onRefresh]);
 }
 
-/** The host catalog is read once per bridge; a failure is "unavailable". */
-function useHostCatalog(
-  bridge: HostBridge | undefined,
-): readonly HostPermissionCatalogOption[] | null {
+/**
+ * The host catalog, refreshed on its own invalidation.
+ *
+ * A catalog that arrives late (the Remote service became available after this
+ * plugin started) and a catalog that changed must both reach the menu. Reads
+ * carry a ticket so a slow earlier read cannot replace a newer one, and a failed
+ * read is "unavailable" (`null`), never an empty catalog.
+ */
+function useHostCatalog(bridge: HostBridge | undefined): {
+  readonly catalog: readonly HostPermissionCatalogOption[] | null;
+  readonly refresh: () => void;
+} {
   const [catalog, setCatalog] = useState<
     readonly HostPermissionCatalogOption[] | null
   >(null);
+  const [revision, setRevision] = useState(0);
+  const ticket = useRef(0);
   useEffect(() => {
     if (bridge === undefined) {
       setCatalog(null);
       return;
     }
+    ticket.current += 1;
+    const mine = ticket.current;
     let cancelled = false;
     bridge
       .catalog()
       .then((options) => {
-        if (!cancelled) setCatalog(options);
+        if (cancelled || mine !== ticket.current) return;
+        setCatalog(options);
       })
       .catch(() => {
-        if (!cancelled) setCatalog(null);
+        if (!cancelled && mine === ticket.current) setCatalog(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [bridge]);
-  return catalog;
+  }, [bridge, revision]);
+  const refresh = useCallback((): void => {
+    setRevision((value) => value + 1);
+  }, []);
+  return { catalog, refresh };
 }
 
 /** The current host preset; `_revision` re-reads it after an invalidation. */
@@ -209,9 +226,36 @@ function readHostPreset(
   bridge: HostBridge | undefined,
   sessionId: string | undefined,
   _revision: number,
-): string | null {
+): HostPresetSelection | null {
   if (bridge === undefined || sessionId === undefined) return null;
-  return bridge.hostPreset(sessionId)?.currentValue ?? null;
+  return bridge.hostPreset(sessionId);
+}
+
+/** How long a native switch may take to appear in the authoritative answer. */
+const EXIT_CONFIRM_ATTEMPTS = 15;
+const EXIT_CONFIRM_DELAY_MS = 120;
+
+/**
+ * Confirm that a native switch really left Arbiter.
+ *
+ * The read is the only evidence; the loop exists because #4 writes the exit
+ * record one microtask after the command handler, and the host may commit the
+ * command pair before that write lands. It is bounded and authoritative — no
+ * timer-driven polling of a second state.
+ */
+async function reconcileExit(options: {
+  readonly read: () => Promise<void>;
+  readonly view: () => AdmissionState['confirmed'];
+}): Promise<boolean> {
+  for (let attempt = 0; attempt < EXIT_CONFIRM_ATTEMPTS; attempt += 1) {
+    await options.read();
+    const current = options.view();
+    if (current !== null && !current.enabled) return true;
+    await new Promise((resolve) => {
+      setTimeout(resolve, EXIT_CONFIRM_DELAY_MS);
+    });
+  }
+  return false;
 }
 
 interface Barrier {
@@ -219,14 +263,23 @@ interface Barrier {
   readonly opened: () => void;
   readonly closed: () => boolean;
   readonly queue: () => void;
+  /** Drop a queued read: the caller already reconciled authoritatively. */
+  readonly clear: () => void;
 }
 
 /**
  * The two writes the control offers.
  *
- * Enabling/disabling goes through the admission route; leaving Arbiter goes
- * through the host's own command and nothing else, because #4 already owns the
- * admission exit a successful command implies and ignores a failed one.
+ * Both are exclusive mutations: while one runs the control is busy and refuses
+ * another selection, so an older native command can never land after a newer
+ * enable and silently win. Enabling/disabling goes through the admission route.
+ * Leaving Arbiter goes through the host's own `/permission` command and nothing
+ * else, because #4 already owns the admission exit a successful command implies
+ * and ignores a failed one.
+ *
+ * `matched` is recognition, not success: a matched command can still settle with
+ * a handler error, so the caller always reconciles through the authoritative
+ * admission read afterwards.
  */
 function useAdmissionWrites(options: {
   readonly bridge: HostBridge | undefined;
@@ -234,11 +287,17 @@ function useAdmissionWrites(options: {
   readonly ops: FlowOps;
   readonly barrier: Barrier;
   readonly read: () => Promise<void>;
+  /** A reconciliation read bound to the mutation's own ticket. */
+  readonly reconcileFor: (ticket: Ticket) => () => Promise<void>;
+  readonly view: () => AdmissionState['confirmed'];
 }): {
   readonly setEnabled: (enabled: boolean) => Promise<void>;
   readonly chooseHostPreset: (preset: string) => Promise<void>;
+  readonly busy: boolean;
 } {
-  const { bridge, sessionId, ops, barrier, read } = options;
+  const { bridge, sessionId, ops, barrier, read, reconcileFor, view } = options;
+  /** Busy is rendered, so the "refuse another selection" rule is visible too. */
+  const [busy, setBusy] = useState(false);
   const write = useCallback(
     async (action: AdmissionAction): Promise<void> => {
       if (sessionId === undefined) {
@@ -272,20 +331,116 @@ function useAdmissionWrites(options: {
         ops.markFailed({ code: 'host-unavailable', detail: '' });
         return;
       }
-      if (!(await bridge.selectPreset(sessionId, preset))) {
-        ops.markFailed({ code: 'host-unavailable', detail: '' });
+      if (barrier.writing()) return;
+      const ticket = ops.next();
+      barrier.opened();
+      ops.markWriting();
+      setBusy(true);
+      try {
+        const recognized = await bridge.selectPreset(sessionId, preset);
+        if (!ops.current(ticket)) return;
+        if (!recognized) {
+          await reconcileFor(ticket)();
+          if (!ops.current(ticket)) return;
+          ops.markFailed({ code: 'host-unavailable', detail: '' });
+          return;
+        }
+        // The command being recognized is not proof it applied: #4 records the
+        // exit one microtask after the handler, and a handler can settle with an
+        // error. Confirm through the authoritative answer, bounded, so neither a
+        // successful exit nor a refused one is misreported.
+        const exit = await reconcileExit({
+          read: reconcileFor(ticket),
+          view,
+        });
+        if (!ops.current(ticket)) return;
+        if (!exit) ops.markFailed({ code: 'command-not-applied', detail: '' });
+      } catch (error) {
+        ops.markError(ticket, error);
         return;
+      } finally {
+        setBusy(false);
+        // The switch already reconciled through `reconcile`; any read queued
+        // during it is redundant and would clear the refusal just recorded.
+        barrier.clear();
+        barrier.closed();
       }
-      if (barrier.writing()) {
+    },
+    [barrier, bridge, ops, read, reconcileFor, sessionId, view],
+  );
+  return { setEnabled, chooseHostPreset, busy };
+}
+
+/** The read paths one session has: a guarded read and a mutation's own reads. */
+function useReads(options: {
+  readonly enabled: boolean;
+  readonly sessionId: string | undefined;
+  readonly ops: FlowOps;
+  readonly barrier: Barrier;
+}): {
+  readonly read: () => Promise<void>;
+  readonly reconcileFor: (ticket: Ticket) => () => Promise<void>;
+} {
+  const { enabled, sessionId, ops, barrier } = options;
+
+  /**
+   * One guarded read of the authoritative answer.
+   *
+   * `ignoreBarrier` is for a mutation's own reconciliation: that read runs
+   * while the barrier is open by construction, and routing it through the
+   * barrier would queue a read that never runs and leave the caller waiting on
+   * a stale view.
+   */
+  const readNow = useCallback(
+    async (ignoreBarrier: boolean): Promise<void> => {
+      if (!enabled || sessionId === undefined) return;
+      if (!ignoreBarrier && barrier.writing()) {
         barrier.queue();
         ops.markQueued();
         return;
       }
-      await read();
+      const ticket = ops.next();
+      ops.markStarted();
+      try {
+        const answer = await getAdmission(sessionId);
+        if (!ops.current(ticket)) return;
+        ops.apply(answer);
+      } catch (error) {
+        ops.markError(ticket, error);
+      }
     },
-    [barrier, bridge, ops, read, sessionId],
+    [barrier, enabled, ops, sessionId],
   );
-  return { setEnabled, chooseHostPreset };
+
+  /**
+   * A mutation's own reads share the mutation's ticket.
+   *
+   * Taking a fresh ticket per read would invalidate the mutation's own claim,
+   * so its final refusal could never be recorded. The mutation owns the newest
+   * claim for its whole lifetime; only an unrelated newer request can supersede
+   * it, which is exactly the ordering that must win.
+   */
+  const readNowFor = useCallback(
+    async (ticket: Ticket): Promise<void> => {
+      if (!enabled || sessionId === undefined) return;
+      try {
+        const answer = await getAdmission(sessionId);
+        if (!ops.current(ticket)) return;
+        ops.apply(answer);
+      } catch (error) {
+        ops.markError(ticket, error);
+      }
+    },
+    [enabled, ops, sessionId],
+  );
+
+  const read = useCallback((): Promise<void> => readNow(false), [readNow]);
+  return {
+    read,
+    reconcileFor: (ticket) => async () => {
+      await readNowFor(ticket);
+    },
+  };
 }
 
 export function useAdmission(options: {
@@ -295,7 +450,7 @@ export function useAdmission(options: {
 }): AdmissionController {
   const { sessionId, bridge, enabled } = options;
   const { state, ops } = useFlow(sessionId);
-  const catalog = useHostCatalog(bridge);
+  const { catalog, refresh: refreshCatalog } = useHostCatalog(bridge);
   /** Bumped by every host invalidation, so the host-preset read re-runs. */
   const [hostRevision, setHostRevision] = useState(0);
   /**
@@ -323,27 +478,25 @@ export function useAdmission(options: {
       queue: () => {
         queuedRef.current = true;
       },
+      clear: () => {
+        queuedRef.current = false;
+      },
     }),
     [],
   );
 
-  const read = useCallback(async (): Promise<void> => {
-    if (!enabled || sessionId === undefined) return;
-    if (barrier.writing()) {
-      barrier.queue();
-      ops.markQueued();
-      return;
-    }
-    const ticket = ops.next();
-    ops.markStarted();
-    try {
-      const answer = await getAdmission(sessionId);
-      if (!ops.current(ticket)) return;
-      ops.apply(answer);
-    } catch (error) {
-      ops.markError(ticket, error);
-    }
-  }, [barrier, enabled, ops, sessionId]);
+  /**
+   * The confirmed view, read through a ref.
+   *
+   * A write reconciles against the answer it just fetched, and a callback that
+   * captured the render's `state` would compare against the pre-write view.
+   */
+  const viewRef = useRef(state);
+  useEffect(() => {
+    viewRef.current = state;
+  }, [state]);
+
+  const { read, reconcileFor } = useReads({ enabled, sessionId, ops, barrier });
 
   const { setEnabled, chooseHostPreset } = useAdmissionWrites({
     bridge,
@@ -351,6 +504,8 @@ export function useAdmission(options: {
     ops,
     barrier,
     read,
+    reconcileFor,
+    view: () => viewRef.current.confirmed,
   });
 
   // A different session starts from scratch; its predecessor's in-flight answer
@@ -373,8 +528,8 @@ export function useAdmission(options: {
   // a catalog change, or a reconnect. It only triggers a read.
   useEffect(() => {
     if (bridge === undefined || sessionId === undefined) return;
-    return bridge.observe(sessionId, onHostSignal);
-  }, [bridge, onHostSignal, sessionId]);
+    return bridge.observe(sessionId, onHostSignal, refreshCatalog);
+  }, [bridge, onHostSignal, refreshCatalog, sessionId]);
 
   const hostPreset = readHostPreset(bridge, sessionId, hostRevision);
 

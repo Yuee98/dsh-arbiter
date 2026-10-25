@@ -618,6 +618,377 @@ describe('arbiter permission selector', () => {
     ).toBeNull();
   });
 
+  test('refuses a second selection while a native command is in flight', async () => {
+    const command = deferred<unknown>();
+    const writes: string[] = [];
+    let exited = false;
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          exited
+            ? admission({ enabled: false })
+            : admission({ enabled: true, reason: 'session-enabled' }),
+        ),
+      ),
+      http.post('*/api/arbiter/sessions', () => {
+        writes.push('post');
+        return HttpResponse.json(admission({ enabled: true }));
+      }),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          selectPreset: () => command.promise.then(() => true),
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
+    );
+    // A host preset goes through the native command, which this case holds open.
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+    // The mutation is exclusive: the trigger reports busy and refuses input, so
+    // an older command cannot land after a newer one.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
+    });
+    expect(screen.getByRole('button', { name: '正在应用…' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(writes).toEqual([]);
+
+    exited = true;
+    await act(async () => {
+      command.resolve({ ok: true, value: { matched: true } });
+      await Promise.resolve();
+    });
+    // The confirmation loop is bounded and timer-based, so this waits through
+    // one of its attempts rather than for a same-tick state change.
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('button', { name: /未启用自动审查/u }),
+        ).toBeEnabled();
+      },
+      { timeout: 8000 },
+    );
+  });
+
+  test('reports a recognized command that did not change the admission', async () => {
+    // The confirmation loop is bounded but timer-based; this case waits it out.
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        // The command was recognized but the handler did not apply it: the
+        // session is still admitted, so this is a failure, not a success.
+        HttpResponse.json(
+          admission({ enabled: true, reason: 'session-enabled' }),
+        ),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({ selectPreset: () => Promise.resolve(true) })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
+    );
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/宿主命令未实际生效，仍显示上次确认的状态/u),
+        ).toBeInTheDocument();
+      },
+      { timeout: 15_000 },
+    );
+    // The confirmed state is still shown because the backend still says so.
+    expect(
+      screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+    ).toBeInTheDocument();
+  }, 20_000);
+
+  test('keeps an unlisted current host preset in the trigger without inventing an option', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          hostPreset: () => ({ currentValue: 'custom' }),
+          catalog: () =>
+            Promise.resolve([{ value: 'read-only', name: '只读' }]),
+        })}
+      />,
+    );
+    // The host legitimately reports `custom` when no configured preset matches;
+    // that identity is the truth about the session and must not be dropped.
+    const trigger = await screen.findByRole('button', {
+      name: /未启用自动审查（custom）/u,
+    });
+    await user.click(trigger);
+    expect(
+      within(screen.getByRole('menu'))
+        .getAllByRole('menuitemradio')
+        .map((item) => item.getAttribute('aria-label')),
+    ).toEqual(['自动审查（Arbiter）', '关闭自动审查', '只读']);
+  });
+
+  test('shows an unmaterialized session as unavailable and inert', async () => {
+    let unmaterialized = false;
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        unmaterialized
+          ? HttpResponse.json(
+              {
+                ok: false,
+                code: 'session-unknown',
+                message: 'session-1 is not available in this host',
+                revision: 'revision-1',
+              },
+              { status: 404 },
+            )
+          : HttpResponse.json(
+              admission({ enabled: true, reason: 'session-enabled' }),
+            ),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
+
+    // The host restarted and has not materialized this session yet.
+    unmaterialized = true;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+    const unavailable = await screen.findByRole('button', {
+      name: /当前会话不可用/u,
+    });
+    expect(unavailable).toBeDisabled();
+    // The old enabled label is not presented as current.
+    expect(screen.queryByRole('button', { name: /Arbiter ·/u })).toBeNull();
+
+    // Once the session materializes, the fresh confirmed answer is shown.
+    unmaterialized = false;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+      ).toBeEnabled();
+    });
+    expect(user).toBeDefined();
+  });
+
+  test('picks up a catalog that becomes available after mount, and a changed one', async () => {
+    let catalogReads = 0;
+    let notify: (() => void) | null = null;
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          catalog: () => {
+            catalogReads += 1;
+            // The first read fails (service not ready yet), the second answers
+            // one option, the third answers two: a late and a changed catalog
+            // must both reach the menu.
+            if (catalogReads === 1) return Promise.resolve(null);
+            if (catalogReads === 2) {
+              return Promise.resolve([{ value: 'read-only', name: '只读' }]);
+            }
+            return Promise.resolve([
+              { value: 'read-only', name: '只读' },
+              { value: 'workspace-write', name: '工作区内修改' },
+            ]);
+          },
+          observe: (_id, _listener, onCatalogChanged) => {
+            notify = onCatalogChanged;
+            return () => undefined;
+          },
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /未启用自动审查/u }),
+    );
+    expect(
+      within(screen.getByRole('menu')).queryByRole('menuitemradio', {
+        name: '只读',
+      }),
+    ).toBeNull();
+    await user.click(screen.getByRole('button', { name: /取消/u }));
+
+    // The host reports the catalog is available now.
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(catalogReads).toBe(2);
+    });
+    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    ).toBeInTheDocument();
+
+    // And a changed catalog replaces the options rather than appending.
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(catalogReads).toBe(3);
+    });
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('menu')).getByRole('menuitemradio', {
+          name: '工作区内修改',
+        }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test('a newer catalog read wins over a slower earlier one', async () => {
+    const first = deferred<readonly { value: string; name: string }[] | null>();
+    let reads = 0;
+    let notify: (() => void) | null = null;
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          catalog: () => {
+            reads += 1;
+            if (reads === 1) return first.promise;
+            return Promise.resolve([{ value: 'read-only', name: '只读' }]);
+          },
+          observe: (_id, _listener, onCatalogChanged) => {
+            notify = onCatalogChanged;
+            return () => undefined;
+          },
+        })}
+      />,
+    );
+    await screen.findByRole('button', { name: /未启用自动审查/u });
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    // The first read settles last with a stale, larger option set and must not
+    // replace the newer answer.
+    await act(async () => {
+      first.resolve([{ value: 'stale', name: '过期选项' }]);
+      await Promise.resolve();
+    });
+    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
+    const menu = screen.getByRole('menu');
+    expect(
+      within(menu).getByRole('menuitemradio', { name: '只读' }),
+    ).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole('menuitemradio', { name: '过期选项' }),
+    ).toBeNull();
+  });
+
+  test('a connection generation replacement rereads the backend state', async () => {
+    let generationListener: (() => void) | null = null;
+    let enabled = true;
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission(
+            enabled ? { enabled: true, reason: 'session-enabled' } : {},
+          ),
+        ),
+      ),
+    );
+    renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          // A silent reconnect: the generation source publishes a new value with
+          // no browser focus, online or visibility event.
+          observe: (_id, listener) => {
+            generationListener = listener;
+            return () => undefined;
+          },
+        })}
+      />,
+    );
+    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
+
+    enabled = false;
+    await act(async () => {
+      generationListener?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /未启用自动审查/u }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test('a failed native command is reported as a failure, never as applied', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        // The host did not even recognize the command.
+        bridge={bridge({ selectPreset: () => Promise.resolve(false) })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /未启用自动审查/u }),
+    );
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByText(/宿主权限命令未生效，仍显示上次确认的状态/u),
+      ).toBeInTheDocument();
+    });
+    // The previously confirmed value is still what is displayed.
+    expect(
+      screen.getByRole('button', { name: /未启用自动审查/u }),
+    ).toBeInTheDocument();
+  });
+
   test('offers the host presets but never the auto or derived entries', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),

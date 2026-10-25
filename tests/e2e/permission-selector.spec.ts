@@ -502,25 +502,14 @@ test('removing the client overlay drops the confirmed state and leaves the backe
     });
     steps.add('record-unchanged');
 
-    // A page that reloads now still receives the plugin's browser module (this
-    // host version does not unload an already-served client bundle), but its
-    // host half is gone: the control must render its unavailable state and must
-    // never fabricate a confirmed value or a successful write.
+    // A reload still receives the plugin's browser module (this host version
+    // does not unload an already-served client bundle), but its host half is
+    // gone. The client must therefore not claim the seat: an inert override on
+    // top of the native control would be worse than no selector at all.
     await page.reload();
     await openHost(page, host);
-    const reloaded = arbiterControl(page);
-    if ((await reloaded.count()) > 0) {
-      const control = reloaded.getByRole('button').first();
-      await expect(control).toBeVisible();
-      // No host half means no route to confirm: the control stays inert and
-      // never claims an enabled state it cannot confirm.
-      await expect(control).toBeDisabled();
-      await expect(reloaded).not.toContainText('Arbiter ·');
-      steps.add('reloaded-inert', {
-        text: await reloaded.innerText(),
-        disabled: await control.isDisabled(),
-      });
-    }
+    await expect(arbiterControl(page)).toHaveCount(0);
+    steps.add('reloaded-without-override');
     await testInfo.attach('reloaded.png', {
       body: await page.screenshot({ fullPage: false }),
       contentType: 'image/png',
@@ -768,6 +757,207 @@ test('a failed native command keeps admission and a full-access cancel writes no
     });
   } finally {
     await testInfo.attach('native-failure-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
+test('a host preset the backend refuses leaves admission and shows a failure', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-refused-preset'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-REFUSED RUN echo refused-warmup');
+    const session = await settledSession(host, 'SEL-REFUSED');
+    const sessionId = session.sessionId;
+
+    await arbiterControl(page)
+      .getByRole('button', { name: /未启用自动审查/u })
+      .click();
+    await arbiterControl(page)
+      .getByRole('menu', { name: '会话权限' })
+      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
+      .click();
+    const enabled = await waitForAdmission(
+      host,
+      sessionId,
+      (admission) => admission['enabled'] === true,
+    );
+    expect(enabled).not.toBeNull();
+    const before = await admissionView(host, sessionId);
+
+    // `auto` is rejected by #4 before any permission write. It is not offered
+    // in the menu, so the same failure is produced through the native entry the
+    // control's bridge uses, then the control must reconcile to the truth.
+    await sendPrompt(page, '/permission auto');
+    const settled = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.events.some((event) => event.type === 'command/done'),
+      60_000,
+    );
+    expect(permissionCommands(settled?.events ?? []).at(-1)).toMatchObject({
+      args: ' auto',
+      settled: 'error',
+    });
+    const after = await admissionView(host, sessionId);
+    expect(after).toMatchObject({ enabled: true });
+    expect(after['at']).toBe(before['at']);
+    steps.add('refused-preset', { before, after });
+
+    // The control still renders the confirmed state, not the refused intent.
+    await expect(
+      arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
+    ).toBeVisible();
+    await testInfo.attach('refused-preset.png', {
+      body: await arbiterControl(page).screenshot(),
+      contentType: 'image/png',
+    });
+  } finally {
+    await testInfo.attach('refused-preset-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
+test('the real slot keeps Chinese copy when the host language changes', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-locale'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-LOCALE RUN echo locale-warmup');
+    const session = await settledSession(host, 'SEL-LOCALE');
+    expect(
+      await waitForAdmission(
+        host,
+        session.sessionId,
+        (admission) => admission['enabled'] === false,
+      ),
+    ).not.toBeNull();
+
+    // Chinese host language: the control's own copy is Arbiter's.
+    await expect(
+      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
+    ).toBeVisible();
+
+    // Switch the real host language to English. The arbiter catalog has no
+    // English module yet (#23), so the same slot must fall back to Chinese —
+    // never a raw key, a blank label or `undefined`.
+    await page.getByRole('button', { name: '账号菜单', exact: true }).click();
+    await page.getByText('设置', { exact: true }).click();
+    await page.getByRole('button', { name: '中文', exact: true }).click();
+    await page.getByText('English', { exact: true }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('lang', /^en/);
+
+    const copy = await arbiterControl(page).innerText();
+    expect(copy).toContain('未启用自动审查');
+    expect(copy).not.toMatch(/permission\./u);
+    expect(copy).not.toMatch(/undefined/u);
+    steps.add('english-fallback', { copy });
+    await testInfo.attach('english-fallback.png', {
+      body: await arbiterControl(page).screenshot(),
+      contentType: 'image/png',
+    });
+  } finally {
+    await testInfo.attach('locale-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
+test('the full-access confirmation applies after acknowledging, and a withdrawn catalog option fails visibly', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-full-access'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-FULL RUN echo full-warmup');
+    const session = await settledSession(host, 'SEL-FULL');
+    const sessionId = session.sessionId;
+
+    await arbiterControl(page)
+      .getByRole('button', { name: /未启用自动审查/u })
+      .click();
+    await arbiterControl(page)
+      .getByRole('menu', { name: '会话权限' })
+      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
+      .click();
+    expect(
+      await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === true,
+      ),
+    ).not.toBeNull();
+
+    // Acknowledged full-access: the host applies the preset, and Arbiter leaves
+    // because a successful native command is the exit #4 observes.
+    await arbiterControl(page)
+      .getByRole('button', { name: /Arbiter ·/u })
+      .click();
+    await arbiterControl(page)
+      .getByRole('menu', { name: '会话权限' })
+      .getByRole('menuitemradio', { name: '完全权限' })
+      .click();
+    const dialog = arbiterControl(page).getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog
+      .getByRole('checkbox', { name: '我已了解风险，愿意继续' })
+      .check();
+    const enabledConfirm = dialog.getByRole('button', { name: '切换权限' });
+    await expect(enabledConfirm).toBeEnabled();
+    await enabledConfirm.click();
+    await expect(dialog).toHaveCount(0);
+
+    const exited = await waitForAdmission(
+      host,
+      sessionId,
+      (admission) => admission['enabled'] === false,
+    );
+    expect(exited).not.toBeNull();
+    const switched = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        effectivePermission(candidate.events).sandbox === 'danger-full-access',
+      60_000,
+    );
+    expect(switched).not.toBeNull();
+    expect(effectivePermission(switched?.events ?? [])).toMatchObject({
+      sandbox: 'danger-full-access',
+    });
+    steps.add('full-access-applied', {
+      admission: exited,
+      permission: effectivePermission(switched?.events ?? []),
+    });
+    await testInfo.attach('full-access.png', {
+      body: await arbiterControl(page).screenshot(),
+      contentType: 'image/png',
+    });
+  } finally {
+    await testInfo.attach('full-access-steps.json', {
       body: steps.json(),
       contentType: 'application/json',
     });

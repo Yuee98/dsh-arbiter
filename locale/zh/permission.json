@@ -15,7 +15,7 @@
     "hostHint": "交给宿主权限：{preset}",
     "current": "当前",
     "disable": "关闭自动审查",
-    "disableHint": "停止接管本会话的新调用，宿主权限保持不变。"
+    "disableHint": "停止接管本会话的新调用；若此前放宽过执行边界，宿主权限会先收窄回工作区写入再交还。"
   },
   "boundary": {
     "guarded": "工作区写入",
@@ -41,7 +41,8 @@
     "pluginDisabled": "插件总开关已关闭，无法启用会话。",
     "stopping": "插件正在停止，权限未改变。",
     "requestFailed": "请求失败，仍显示上次确认的状态：{detail}",
-    "hostUnavailableDetail": "宿主权限命令未生效，仍显示上次确认的状态。"
+    "hostUnavailableDetail": "宿主权限命令未生效，仍显示上次确认的状态。",
+    "commandNotApplied": "宿主命令未实际生效，仍显示上次确认的状态。"
   },
   "preset": {
     "readOnly": "只读",

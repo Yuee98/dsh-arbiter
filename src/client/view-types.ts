@@ -525,6 +525,8 @@ export interface HostPermissionCatalogOption {
 /** The host's own current selection for the bound session. */
 export interface HostPresetSelection {
   readonly currentValue: string;
+  /** The host's own label for the current value, when the catalog lists it. */
+  readonly name?: string;
   /** The catalog entry matching the current value, when the host lists it. */
   readonly option?: HostPermissionCatalogOption;
 }
@@ -534,17 +536,30 @@ export interface HostBridge {
   available(): boolean;
   /** The host's current preset for this session, or `null` when absent. */
   hostPreset(sessionId: string): HostPresetSelection | null;
-  /** The selectable host presets, or `null` when the catalog is unavailable. */
+  /**
+   * The selectable host presets.
+   *
+   * `null` means the catalog could not be read (unavailable), never "loaded
+   * and empty": those are different facts and the UI treats them differently.
+   */
   catalog(): Promise<readonly HostPermissionCatalogOption[] | null>;
   /** Run the host's own `/permission <preset>` command for this session. */
   selectPreset(sessionId: string, preset: string): Promise<boolean>;
   /**
    * Subscribe to anything that may have changed admission on the host side.
    *
-   * Invalidation only: the callback triggers a read of the authoritative
-   * admission route. It receives no value, so it cannot become a second store.
+   * Invalidation only: `listener` triggers a read of the authoritative
+   * admission route, and `onCatalogChanged` triggers a fresh catalog read. Both
+   * receive no value, so neither can become a second store.
+   *
+   * The connection generation is read from the client connection service, not
+   * from the session face.
    */
-  observe(sessionId: string, listener: () => void): () => void;
+  observe(
+    sessionId: string,
+    listener: () => void,
+    onCatalogChanged: () => void,
+  ): () => void;
 }
 
 export interface SlotProps {
@@ -574,6 +589,6 @@ export interface ClientContext {
         readonly inject?: (sessionId: string) => SlotProps;
       },
       component: ComponentType<SlotProps>,
-    ): unknown;
+    ): () => void;
   };
 }

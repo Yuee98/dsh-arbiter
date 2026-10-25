@@ -27,6 +27,7 @@ const FAILURE_CODES = [
   'stopping',
   'request-failed',
   'host-unavailable',
+  'command-not-applied',
 ] as const;
 
 export type AdmissionFailureCode = (typeof FAILURE_CODES)[number];
@@ -137,6 +138,18 @@ export function failed(
   };
 }
 
+/**
+ * Whether the last answer makes this session addressable.
+ *
+ * `session-unknown` means the host has not materialized the session yet. The
+ * previous confirmation is kept internally, but it must not stay actionable:
+ * a switch would be refused, and showing the old enabled state as if it were
+ * current would misrepresent the session.
+ */
+export function isUnavailable(state: AdmissionState): boolean {
+  return state.failure?.code === 'session-unknown';
+}
+
 /** Whether the control may be operated at all right now. */
 export function isInteractive(
   state: AdmissionState,
@@ -146,6 +159,7 @@ export function isInteractive(
     !options.locked &&
     options.sessionId !== null &&
     state.confirmed !== null &&
-    !state.pending
+    !state.pending &&
+    !isUnavailable(state)
   );
 }
