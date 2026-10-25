@@ -339,6 +339,104 @@ describe('rule list header and inline editing', () => {
     ]);
   });
 
+  test('typing a comma-separated scope keeps both tools and both agents', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '工具' }),
+      'bash, deploy',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'Agent' }),
+      'main, subagent',
+    );
+    // The visible text is exactly what was typed, not a rewritten list.
+    expect(within(row(id)).getByRole('textbox', { name: '工具' })).toHaveValue(
+      'bash, deploy',
+    );
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            scope: {
+              tools: ['bash', 'deploy'],
+              agents: ['main', 'subagent'],
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  test('a scope field normalizes only after it loses focus', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const tools = within(row(id)).getByRole('textbox', { name: '工具' });
+    await user.type(tools, 'bash, , deploy,');
+    // While editing, the raw text stays so the caret does not jump.
+    expect(tools).toHaveValue('bash, , deploy,');
+    await user.tab();
+    expect(tools).toHaveValue('bash, deploy');
+  });
+
+  test('switching a boolean exact value to another type keeps its meaning', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.dryRun',
+    );
+    const type = within(row(id)).getByRole('combobox', { name: '值类型' });
+    await user.selectOptions(type, 'string');
+    await user.clear(within(row(id)).getByRole('textbox', { name: '表达式' }));
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'true',
+    );
+    // Selecting the boolean type parses the literal; it does not force false.
+    await user.selectOptions(type, 'boolean');
+    expect(
+      within(row(id)).getByRole('combobox', { name: '表达式' }),
+    ).toHaveValue('true');
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'command',
+    );
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [
+              {
+                target: 'command',
+                kind: 'exact',
+                pattern: 'true',
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
   test('the header test action focuses the tester without running it', async () => {
     let tests = 0;
     baseHandlers();
@@ -440,10 +538,30 @@ describe('rule validation feedback', () => {
   });
 
   test('a shadowing warning is shown next to the rule and does not block saving', async () => {
+    const loaded = effectiveState();
     server.use(
       http.get('*/api/arbiter/state', () =>
         HttpResponse.json({
-          ...effectiveState(),
+          ...loaded,
+          config: {
+            ...loaded.config,
+            rules: [
+              {
+                id: 'rule-1',
+                conditions: [
+                  { target: 'command', kind: 'regex', pattern: 'gh pr view' },
+                ],
+                verdict: 'allow',
+              },
+              {
+                id: 'rule-2',
+                conditions: [
+                  { target: 'command', kind: 'regex', pattern: 'gh pr' },
+                ],
+                verdict: 'force-review',
+              },
+            ],
+          },
           warnings: [
             {
               path: 'rules.rule-1',
@@ -460,12 +578,21 @@ describe('rule validation feedback', () => {
       }),
     );
     const user = await openRules();
-    const id = await addRule(user);
+    // The warning is attached to the allow rule, not to the reviewer rule.
+    await user.click(
+      within(row('rule-1')).getByRole('button', { name: /^编辑规则/ }),
+    );
     expect(
-      within(row(id)).getByText(
+      within(row('rule-1')).getByText(
         /规则「rule-1」可能被 force-review 规则「rule-2」遮蔽/,
       ),
     ).toBeInTheDocument();
+    await user.click(
+      within(row('rule-2')).getByRole('button', { name: /^编辑规则/ }),
+    );
+    expect(
+      within(row('rule-2')).queryByText(/可能被 force-review 规则/),
+    ).toBeNull();
 
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
@@ -474,6 +601,77 @@ describe('rule validation feedback', () => {
     expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
       '已保存并生效。',
     );
+  });
+
+  test('editing the draft drops findings that were reported for the old content', async () => {
+    baseHandlers();
+    server.use(
+      http.post('*/api/arbiter/validate', () =>
+        HttpResponse.json({
+          ok: true,
+          errors: [
+            {
+              path: 'rules[0].conditions[0].pattern',
+              message: 'a match expression is required',
+              code: 'rule.pattern-empty',
+            },
+          ],
+          warnings: [],
+        }),
+      ),
+    );
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '校验草稿' }));
+    expect(
+      await within(row(id)).findByText(/匹配表达式不能为空/),
+    ).toBeInTheDocument();
+
+    // Neither fixing nor deleting the rule may keep another rule's finding.
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'gh pr view(?: .*)?',
+    );
+    expect(within(row(id)).queryByText(/匹配表达式不能为空/)).toBeNull();
+  });
+
+  test('a validation answer that arrives after an edit is discarded', async () => {
+    baseHandlers();
+    let release: (() => void) | undefined;
+    server.use(
+      http.post('*/api/arbiter/validate', async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json({
+          ok: true,
+          errors: [
+            {
+              path: 'rules[0].conditions[0].pattern',
+              message: 'a match expression is required',
+              code: 'rule.pattern-empty',
+            },
+          ],
+          warnings: [],
+        });
+      }),
+    );
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '校验草稿' }));
+    await waitFor(() => {
+      expect(release).toBeDefined();
+    });
+    // The draft changes while the request is in flight.
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'gh pr view',
+    );
+    release?.();
+    await waitFor(() => {
+      expect(screen.queryByText(/配置校验失败/)).toBeNull();
+    });
+    expect(within(row(id)).queryByText(/匹配表达式不能为空/)).toBeNull();
   });
 
   test('a failed save keeps the expanded edits and the draft', async () => {

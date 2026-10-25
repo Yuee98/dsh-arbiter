@@ -80,17 +80,32 @@ export function exactType(
   return 'string';
 }
 
-/** Convert the current pattern to another exact JSON type without losing text. */
+/**
+ * Convert the current pattern to another exact JSON type.
+ *
+ * Parseable literals keep their meaning (`'true'` becomes `true`, `'42'`
+ * becomes `42`); text that cannot be represented in the target type is left
+ * unchanged rather than replaced by an unrelated default. Turning a typed value
+ * into text keeps its JSON spelling, which is what that value is written as.
+ */
 export function convertExactPattern(
   pattern: RuleCondition['pattern'],
   type: 'string' | 'number' | 'boolean' | 'null',
 ): RuleCondition['pattern'] {
   if (type === 'null') return null;
-  if (type === 'boolean') return typeof pattern === 'boolean' ? pattern : false;
+  if (type === 'boolean') {
+    if (typeof pattern === 'boolean') return pattern;
+    const text = patternText(pattern).trim();
+    if (text === 'true') return true;
+    if (text === 'false') return false;
+    return pattern;
+  }
   if (type === 'number') {
     if (typeof pattern === 'number') return pattern;
-    const parsed = Number(patternText(pattern));
-    return Number.isFinite(parsed) ? parsed : 0;
+    const text = patternText(pattern).trim();
+    if (text.length === 0) return pattern;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : pattern;
   }
   return typeof pattern === 'string' ? pattern : patternText(pattern);
 }
@@ -147,30 +162,50 @@ export function duplicateRule(
   };
 }
 
-/** A move only reorders inside one verdict priority. */
+/**
+ * Where a move would go: the nearest rule with the same verdict.
+ *
+ * "Inside one priority" is the design's constraint, not physical adjacency. A
+ * rule may step past rules of another verdict; it must not cross into a
+ * different priority. Intermediate rules keep their relative order.
+ */
+export function moveTarget(
+  rules: readonly DraftRule[],
+  index: number,
+  direction: -1 | 1,
+): number | null {
+  const current = rules[index];
+  if (current === undefined) return null;
+  for (
+    let candidate = index + direction;
+    candidate >= 0 && candidate < rules.length;
+    candidate += direction
+  ) {
+    if (rules[candidate]?.verdict === current.verdict) return candidate;
+  }
+  return null;
+}
+
 export function canMoveRule(
   rules: readonly DraftRule[],
   index: number,
   direction: -1 | 1,
 ): boolean {
-  const target = rules[index + direction];
-  const current = rules[index];
-  return (
-    target !== undefined &&
-    current !== undefined &&
-    target.verdict === current.verdict
-  );
+  return moveTarget(rules, index, direction) !== null;
 }
 
+/** Swap the rule with the nearest same-verdict rule. */
 export function moveRule(
   rules: DraftRule[],
   index: number,
   direction: -1 | 1,
 ): void {
-  if (!canMoveRule(rules, index, direction)) return;
-  const [rule] = rules.splice(index, 1);
-  if (rule === undefined) return;
-  rules.splice(index + direction, 0, rule);
+  const target = moveTarget(rules, index, direction);
+  const current = rules[index];
+  const other = target === null ? undefined : rules[target];
+  if (target === null || current === undefined || other === undefined) return;
+  rules[index] = other;
+  rules[target] = current;
 }
 
 function splitList(value: string): readonly string[] {
@@ -254,22 +289,21 @@ export function ruleIssues(
       if (Number(indexed[1]) !== index) return [];
       return [{ ...entry, field: ruleIssueField(issue, index) }];
     }
+    // The shadowing warning addresses a rule by its exact id. A dotted id such
+    // as `a.b` must not be read as a field path of rule `a`, so this compares
+    // the whole id instead of accepting a prefix.
     const named = /^rules\.(.+)$/u.exec(issue.path);
-    if (named === null) return [];
-    const rest = named[1] ?? '';
-    if (rest !== rule.id && !rest.startsWith(`${rule.id}.`)) return [];
-    return [{ ...entry, field: ruleIssueField(issue, index) }];
+    if (named === null || named[1] !== rule.id) return [];
+    return [{ ...entry, field: rule.id }];
   });
 }
 
-/** The field part of an issue path, relative to the rule. */
+/** The field part of an indexed issue path, relative to the rule. */
 export function ruleIssueField(issue: ConfigIssueView, index: number): string {
   const prefix = `rules[${String(index)}]`;
   if (issue.path === prefix) return '';
   if (issue.path.startsWith(`${prefix}.`))
     return issue.path.slice(prefix.length + 1);
-  const named = /^rules\.[^.]+\.(.+)$/u.exec(issue.path);
-  if (named !== null) return named[1] ?? '';
   if (issue.path.startsWith('rules.')) return issue.path.slice('rules.'.length);
   return issue.path;
 }

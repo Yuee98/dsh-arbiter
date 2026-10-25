@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type { Translate } from '../../i18n.js';
@@ -157,6 +158,14 @@ export function RuleEditor(props: {
   );
 }
 
+/**
+ * A comma-separated scope list.
+ *
+ * The visible text is local while the field is being edited, so typing
+ * `bash, deploy` is not rewritten after the first comma. The draft is updated
+ * from the same text on every keystroke; blur restores the canonical rendering
+ * of whatever the draft actually holds (for example after `bash, ,` is typed).
+ */
 function ScopeFields(props: {
   readonly rule: DraftRule;
   readonly onChange: (mutator: (rule: DraftRule) => void) => void;
@@ -184,11 +193,10 @@ function ScopeFields(props: {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <label style={{ ...labelStyle, flex: 1, minWidth: 200 }}>
           <span>{t('rules.tools')}</span>
-          <TextInput
+          <ListField
             ariaLabel={t('rules.tools')}
-            value={listText(rule.scope?.tools)}
+            value={rule.scope?.tools}
             placeholder={t('rules.toolsPlaceholder')}
-            monospace
             onChange={(value) => {
               setList('tools', value);
             }}
@@ -196,11 +204,10 @@ function ScopeFields(props: {
         </label>
         <label style={{ ...labelStyle, flex: 1, minWidth: 200 }}>
           <span>{t('rules.agents')}</span>
-          <TextInput
+          <ListField
             ariaLabel={t('rules.agents')}
-            value={listText(rule.scope?.agents)}
+            value={rule.scope?.agents}
             placeholder={t('rules.agentsPlaceholder')}
-            monospace
             onChange={(value) => {
               setList('agents', value);
             }}
@@ -208,6 +215,31 @@ function ScopeFields(props: {
         </label>
       </div>
     </section>
+  );
+}
+
+function ListField(props: {
+  readonly ariaLabel: string;
+  readonly value: readonly string[] | undefined;
+  readonly placeholder: string;
+  readonly onChange: (value: string) => void;
+}): ReactNode {
+  const [editing, setEditing] = useState<string | null>(null);
+  return (
+    <TextInput
+      ariaLabel={props.ariaLabel}
+      value={editing ?? listText(props.value)}
+      placeholder={props.placeholder}
+      monospace
+      onChange={(value) => {
+        setEditing(value);
+        props.onChange(value);
+      }}
+      onBlur={() => {
+        // Show what the draft actually holds once the field is not focused.
+        setEditing(null);
+      }}
+    />
   );
 }
 

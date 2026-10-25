@@ -10,6 +10,7 @@ import {
   duplicateRule,
   exactType,
   moveRule,
+  moveTarget,
   nextRuleId,
   ruleIssues,
   ruleName,
@@ -207,16 +208,33 @@ describe('duplicate', () => {
 });
 
 describe('ordering', () => {
-  it('only moves inside one verdict priority', () => {
+  it('moves to the nearest rule with the same verdict', () => {
+    const rules = [
+      rule({ id: 'a', verdict: 'allow' }),
+      rule({ id: 'x', verdict: 'deny' }),
+      rule({ id: 'b', verdict: 'allow' }),
+    ];
+    // A and B share a priority, so B may step past the deny rule to reach A.
+    expect(moveTarget(rules, 2, -1)).toBe(0);
+    expect(canMoveRule(rules, 2, -1)).toBe(true);
+    expect(moveTarget(rules, 2, 1)).toBeNull();
+
+    moveRule(rules, 2, -1);
+    // The two same-priority rules swap; the deny rule keeps its position.
+    expect(rules.map((entry) => entry.id)).toEqual(['b', 'x', 'a']);
+  });
+
+  it('never crosses into another verdict priority', () => {
     const rules = [
       rule({ id: 'a', verdict: 'deny' }),
       rule({ id: 'b', verdict: 'deny' }),
       rule({ id: 'c', verdict: 'allow' }),
     ];
-    expect(canMoveRule(rules, 1, -1)).toBe(true);
     expect(canMoveRule(rules, 1, 1)).toBe(false);
+    expect(canMoveRule(rules, 2, -1)).toBe(false);
+    expect(moveTarget(rules, 0, 1)).toBe(1);
 
-    moveRule(rules, 1, -1);
+    moveRule(rules, 0, 1);
     expect(rules.map((entry) => entry.id)).toEqual(['b', 'a', 'c']);
     // A denied move keeps the list unchanged.
     moveRule(rules, 1, 1);
@@ -225,17 +243,30 @@ describe('ordering', () => {
 });
 
 describe('exact value types', () => {
-  it('reports and converts the JSON type without losing text', () => {
+  it('reports the JSON type of an exact pattern', () => {
     expect(exactType(null)).toBe('null');
     expect(exactType(3)).toBe('number');
     expect(exactType(false)).toBe('boolean');
     expect(exactType('text')).toBe('string');
+  });
 
+  it('converts parseable literals instead of reversing them', () => {
+    // Choosing the boolean type must not turn `"true"` into `false`.
+    expect(convertExactPattern('true', 'boolean')).toBe(true);
+    expect(convertExactPattern('false', 'boolean')).toBe(false);
     expect(convertExactPattern('42', 'number')).toBe(42);
-    expect(convertExactPattern('not-a-number', 'number')).toBe(0);
-    expect(convertExactPattern('true', 'boolean')).toBe(false);
+    expect(convertExactPattern('-1.5', 'number')).toBe(-1.5);
+    expect(convertExactPattern(7, 'string')).toBe('7');
     expect(convertExactPattern(true, 'string')).toBe('true');
-    expect(convertExactPattern('x', 'null')).toBeNull();
+    expect(convertExactPattern(null, 'string')).toBe('null');
+  });
+
+  it('leaves an unrepresentable value alone rather than inventing a match', () => {
+    // `0` would be a valid but unrelated expression, so the text is kept.
+    expect(convertExactPattern('not-a-number', 'number')).toBe('not-a-number');
+    expect(convertExactPattern('', 'number')).toBe('');
+    expect(convertExactPattern('yes', 'boolean')).toBe('yes');
+    expect(convertExactPattern(7, 'null')).toBeNull();
   });
 });
 
@@ -319,7 +350,7 @@ describe('validation feedback routing', () => {
     expect(issues[0]?.field).toBe('conditions[0].path');
   });
 
-  it('matches a warning by rule id, not by list position', () => {
+  it('matches a warning by the exact rule id, not by list position', () => {
     const warnings = [
       {
         issue: {
@@ -336,7 +367,29 @@ describe('validation feedback routing', () => {
       'rule.shadowed',
     ]);
     expect(attached[0]?.field).toBe('rule-1');
-    // A different rule index and id does not inherit the warning.
+    // A different rule id does not inherit the warning.
     expect(ruleIssues(warnings, rule({ id: 'rule-2' }), 0)).toEqual([]);
+  });
+
+  it('does not let a dotted id read another rule id as a field path', () => {
+    // The backend addresses a shadowing warning as `rules.<allow id>`. For ids
+    // `a` and `a.b`, a prefix match would show one warning on both rules.
+    const warnings = [
+      {
+        issue: {
+          path: 'rules.a.b',
+          message: 'shadowed',
+          code: 'rule.shadowed',
+        },
+        field: '',
+        severity: 'warning' as const,
+      },
+    ];
+    expect(ruleIssues(warnings, rule({ id: 'a' }), 0)).toEqual([]);
+    expect(
+      ruleIssues(warnings, rule({ id: 'a.b' }), 1).map(
+        (entry) => entry.issue.code,
+      ),
+    ).toEqual(['rule.shadowed']);
   });
 });

@@ -81,6 +81,12 @@ export function RuleConditionEditor(props: {
                 // a command is whole-value RE2, a selected argument is exact.
                 if (patternText(next.pattern).length === 0)
                   next.kind = value === 'argument' ? 'exact' : 'regex';
+                // Every target except `argument` compares text: the command
+                // match text, a tool name, or a redirect/assignment word. A
+                // typed exact value is therefore written as its JSON text
+                // instead of staying a number/boolean the target cannot yield.
+                if (value !== 'argument' && typeof next.pattern !== 'string')
+                  next.pattern = patternText(next.pattern);
                 // `path` and `multi` belong to the argument target only. A target
                 // change drops them rather than leaving an invalid combination.
                 if (value === 'argument') return;

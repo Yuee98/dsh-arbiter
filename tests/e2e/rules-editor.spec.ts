@@ -17,6 +17,7 @@ interface RuleState {
   readonly verdict: string;
   readonly enabled?: boolean;
   readonly conditions: readonly unknown[];
+  readonly scope?: unknown;
 }
 
 interface ArbiterState {
@@ -51,6 +52,7 @@ function readState(value: unknown): ArbiterState {
         id: String(entry['id']),
         verdict: String(entry['verdict']),
         conditions,
+        ...('scope' in entry ? { scope: entry['scope'] } : {}),
         ...(typeof name === 'string' ? { name } : {}),
         ...(typeof enabled === 'boolean' ? { enabled } : {}),
       };
@@ -112,7 +114,7 @@ test.describe('rule editing in the real host', () => {
         .pressSequentially('只读查询');
       await row
         .getByRole('textbox', { name: '工具', exact: true })
-        .pressSequentially('bash');
+        .pressSequentially('bash, deploy');
       await row
         .getByRole('textbox', { name: '表达式', exact: true })
         .pressSequentially('gh pr view(?: .*)?');
@@ -185,6 +187,7 @@ test.describe('rule editing in the real host', () => {
         name: '只读查询',
         verdict: 'force-review',
         enabled: true,
+        scope: { tools: ['bash', 'deploy'] },
       });
       expect(saved?.conditions).toHaveLength(2);
       expect(saved?.conditions[0]).toMatchObject({

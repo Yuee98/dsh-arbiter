@@ -64,6 +64,14 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     readonly warnings: readonly ConfigIssueView[];
   }>({ errors: [], warnings: [] });
   const generation = useRef(0);
+  /**
+   * Findings belong to the draft revision that produced them.
+   *
+   * Editing invalidates the current revision, and a late `/validate` answer is
+   * dropped when its revision is no longer current, so a rule never keeps an
+   * error that was reported for different content.
+   */
+  const validationRevision = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
     setError(errorText(failure));
   }, []);
@@ -94,6 +102,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   }, [load, onFailure]);
 
   const onDraft = useCallback((mutator: (draft: Draft) => void): void => {
+    validationRevision.current += 1;
+    setValidation({ errors: [], warnings: [] });
     setDraft((current) => {
       if (current === null) return current;
       const next = cloneDraft(current);
@@ -105,12 +115,15 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
   const validate = useCallback(async (): Promise<void> => {
     if (draft === null) return;
+    const revision = validationRevision.current;
     try {
       const response = await postJson(
         '/validate',
         { config: draft },
         validationResponse,
       );
+      // A draft edit while the request was in flight makes this answer stale.
+      if (validationRevision.current !== revision) return;
       setValidation({ errors: response.errors, warnings: response.warnings });
     } catch (errorValue) {
       setError(errorText(errorValue));
@@ -153,6 +166,7 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         const errors = draftErrors(
           errorValue instanceof ApiError ? errorValue.payload : null,
         );
+        // A rejected save reports errors for exactly this draft revision.
         setValidation((current) => ({ ...current, errors }));
         setError(t('config.invalid', { errors: issuesText(errors, t) }));
         return;

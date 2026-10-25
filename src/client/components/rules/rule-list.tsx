@@ -149,7 +149,7 @@ function RuleRow(props: {
       <div style={headerStyle}>
         <input
           type="checkbox"
-          aria-label={`${t('rules.enabled')}：${name}`}
+          aria-label={t('rules.enabledRule', { name })}
           checked={rule.enabled !== false}
           onChange={(event) => {
             update((next) => {
@@ -203,7 +203,7 @@ function RuleRow(props: {
         </div>
         <div style={{ width: 150 }}>
           <Select
-            ariaLabel={`${t('rules.verdict')}：${name}`}
+            ariaLabel={t('rules.verdictRule', { name })}
             value={rule.verdict}
             options={VERDICT_ORDER}
             labels={verdictLabels(t)}
@@ -304,7 +304,7 @@ function MoreMenu(props: {
   return (
     <details>
       <summary
-        aria-label={`${t('rules.more')}：${ruleName(rule, t)}`}
+        aria-label={t('rules.moreRule', { name: ruleName(rule, t) })}
         style={{
           ...iconButtonStyle,
           listStyle: 'none',
