@@ -237,7 +237,9 @@ describe('chat probe', () => {
     });
     expect(result.status).toBe('failed');
     if (result.status !== 'failed') throw new Error('expected a failure');
-    expect(result.failure).toBe('network');
+    // The provider named its own failure code (AUTH), which the diagnostic maps
+    // to the stage it describes rather than calling it a network fault.
+    expect(result.failure).toBe('unauthorized');
     // Provider failures are not retried: only format failures are.
     expect(calls).toBe(1);
     expect(result.attempts).toHaveLength(1);
@@ -412,6 +414,71 @@ describe('chat probe termination branches', () => {
   });
 });
 
+describe('chat provider classification', () => {
+  test.each([
+    ['AUTH', 'unauthorized'],
+    ['INVALID_API_KEY', 'unauthorized'],
+    ['QUOTA_EXCEEDED', 'rate-limited'],
+    ['RATE_LIMIT', 'rate-limited'],
+    ['TIMEOUT', 'timed-out'],
+    ['SOMETHING_ELSE', 'unknown'],
+  ])('a provider failure code %s maps to %s', async (code, expected) => {
+    const result = await runReviewerProbe({
+      config: chatConfig(),
+      llm: {
+        stream: () =>
+          streamOf([
+            {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: { code, message: 'provider said no' },
+              },
+            },
+          ]),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('expected a failure');
+    expect(result.failure).toBe(expected);
+  });
+
+  test('a real adapter timer abort is reported as timed-out, not network', async () => {
+    // The stub waits for the signal the adapter itself aborts, so the timeout is
+    // the adapter's real timer rather than a hand-written error message.
+    const result = await runReviewerProbe({
+      config: {
+        ...chatConfig(),
+        reviewer: {
+          ...chatConfig().reviewer,
+          chat: { ...chatConfig().reviewer.chat, timeoutMs: 30 },
+        },
+      },
+      llm: {
+        stream: (options) =>
+          (async function* () {
+            await new Promise<void>((resolve) => {
+              options.signal?.addEventListener('abort', () => {
+                resolve();
+              });
+            });
+            yield { type: 'text-delta', text: 'late' };
+          })(),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('expected a failure');
+    expect(result.failure).toBe('timed-out');
+    expect(result.attempts[0]?.error).toContain('timed out');
+  });
+});
+
 describe('diagnostic material boundary', () => {
   test('a decision provider echoing the credential cannot carry it into the result', async () => {
     const secret = 'sk-live-echoed-by-provider';
@@ -446,6 +513,71 @@ describe('diagnostic material boundary', () => {
     });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(result.status).toBe('failed');
+  });
+
+  test('the credential that authenticated the call is the one redacted', async () => {
+    // A resolver may return a different value on a second call (a rotation). The
+    // probe pins the first value and the adapter sends that same one, so the
+    // echoed secret is always the one being masked.
+    const first = 'sk-first-rotation-value';
+    const second = 'sk-second-rotation-value';
+    let calls = 0;
+    let sent: string | null = null;
+    const result = await runReviewerProbe({
+      config: decisionConfig(),
+      llm: undefined,
+      credentials: {
+        resolve: () => {
+          calls += 1;
+          return Promise.resolve({
+            value: calls === 1 ? first : second,
+          });
+        },
+      },
+      fetch: (_input, init) => {
+        sent = new Headers(init?.headers).get('authorization');
+        return Promise.resolve(
+          new Response(`rejected ${first}`, { status: 502 }),
+        );
+      },
+      signal: new AbortController().signal,
+    });
+    const material = JSON.stringify(result);
+    // Exactly one resolution, so the request could only carry the pinned value.
+    expect(calls).toBe(1);
+    expect(sent).toBe(`Bearer ${first}`);
+    // The echoed secret is masked; the never-sent rotation value is not a
+    // credential this run handled.
+    expect(material).not.toContain(first);
+    expect(material).toContain('[redacted]');
+  });
+
+  test('a chat provider echoing an authorization header cannot publish it', async () => {
+    const result = await runReviewerProbe({
+      config: chatConfig(),
+      llm: {
+        stream: () =>
+          streamOf([
+            {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: {
+                  code: 'AUTH',
+                  message:
+                    'upstream said Authorization: Bearer sk-header-secret',
+                },
+              },
+            },
+          ]),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    const material = JSON.stringify(result);
+    expect(material).not.toContain('sk-header-secret');
+    expect(material).toContain('[redacted]');
   });
 
   test('a resolved credential never appears in the submitted request material', async () => {
@@ -546,6 +678,24 @@ describe('decision probe', () => {
     expect(result.status).toBe('failed');
     if (result.status !== 'failed') throw new Error('expected a failure');
     expect(result.failure).toBe('invalid-output');
+  });
+
+  test('a cancel during credential resolution is cancelled, not credential-missing', async () => {
+    const abort = new AbortController();
+    const result = await runReviewerProbe({
+      config: decisionConfig(),
+      llm: undefined,
+      credentials: {
+        resolve: async () => {
+          abort.abort();
+          return Promise.resolve(undefined);
+        },
+      },
+      fetch: () => Promise.resolve(new Response('{}', { status: 200 })),
+      signal: abort.signal,
+    });
+    expect(result.status).toBe('cancelled');
+    expect(JSON.stringify(result)).not.toContain('credential-missing');
   });
 
   test('a network throw is a request failure, not an invalid answer', async () => {

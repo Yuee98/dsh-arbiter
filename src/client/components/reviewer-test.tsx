@@ -17,7 +17,7 @@ type ProbeRun =
   | { readonly kind: 'running' }
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'done'; readonly result: ReviewerProbeView }
-  | { readonly kind: 'error'; readonly message: string };
+  | { readonly kind: 'error' };
 
 /**
  * The one-shot Reviewer connection test.
@@ -49,13 +49,16 @@ export function ReviewerTestDialog(props: {
     props.onClose();
   }, [props]);
 
-  useEffect(() => {
-    const current = controller.current;
-    return () => {
-      // Unmount is a close: an unfinished probe must not keep running.
-      current?.abort();
-    };
-  }, []);
+  useEffect(
+    () => () => {
+      // Unmount is a close — including a parent remount or a tab switch, not
+      // only the explicit close button. Read the ref at cleanup time, because
+      // the controller is created when the run starts, after this effect.
+      controller.current?.abort();
+      controller.current = null;
+    },
+    [],
+  );
 
   const runProbe = useCallback((): void => {
     const abort = new AbortController();
@@ -75,14 +78,18 @@ export function ReviewerTestDialog(props: {
       .then((result) => {
         if (!abort.signal.aborted) setRun({ kind: 'done', result });
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (abort.signal.aborted) return;
-        setRun({
-          kind: 'error',
-          message: error instanceof Error ? error.message : String(error),
-        });
+        setRun({ kind: 'error' });
       });
   }, []);
+
+  // The frozen design starts the run when the entry is pressed, so opening this
+  // dialog is the action — an extra confirmation click would contradict it. The
+  // cost notice is already shown next to the entry.
+  useEffect(() => {
+    runProbe();
+  }, [runProbe]);
 
   return (
     <div
@@ -230,7 +237,7 @@ function ProbeSummary(props: {
   if (run.kind === 'error') {
     return (
       <p role="status" style={{ margin: 0, ...muted }}>
-        {t('reviewer.test.requestFailed', { error: run.message })}
+        {t('reviewer.test.requestFailed')}
       </p>
     );
   }

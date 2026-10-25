@@ -15,19 +15,38 @@ interface CredentialsLike {
 export interface DecisionRunContext {
   readonly fetch: typeof fetch;
   readonly credentials: CredentialsLike | undefined;
+  /**
+   * A value the caller already resolved for this exact run.
+   *
+   * Passing it keeps the sent credential and the redaction target identical;
+   * omitting it makes the backend resolve the reference itself.
+   */
+  readonly preResolvedCredential?: { readonly value: string } | undefined;
   readonly decision: ArbiterConfig['reviewer']['decision'];
   readonly thresholds: PolicyThresholds;
   readonly signal: AbortSignal;
 }
 
+/**
+ * The credential this call sends.
+ *
+ * `resolve` is called at most once per run. A caller that has already resolved
+ * the reference passes the value through `preResolved`, so the same secret
+ * authenticates the request and is the one available for redaction — a value
+ * resolved twice could differ when a credential rotates mid-run.
+ */
 async function decisionCredential(
-  ctx: DecisionRunContext,
+  ctx: DecisionRunContext & {
+    readonly preResolved?: { readonly value: string } | undefined;
+  },
 ): Promise<string | undefined> {
   if (ctx.decision.apiKeyRef.length === 0) return undefined;
   let credential: string | undefined;
   try {
-    credential = (await ctx.credentials?.resolve(ctx.decision.apiKeyRef))
-      ?.value;
+    credential =
+      ctx.preResolved !== undefined
+        ? ctx.preResolved.value
+        : (await ctx.credentials?.resolve(ctx.decision.apiKeyRef))?.value;
   } catch (error) {
     throw new Error(
       `credential lookup failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -106,7 +125,12 @@ export async function runDecisionReviewer(
   const startedAt = Date.now();
   let credential: string | undefined;
   try {
-    credential = await decisionCredential(ctx);
+    credential = await decisionCredential({
+      ...ctx,
+      ...(ctx.preResolvedCredential === undefined
+        ? {}
+        : { preResolved: ctx.preResolvedCredential }),
+    });
   } catch (error) {
     return {
       ok: false,

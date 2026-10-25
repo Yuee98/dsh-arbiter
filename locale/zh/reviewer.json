@@ -47,7 +47,7 @@
     "run": "开始测试",
     "running": "测试中…",
     "cancel": "取消",
-    "idle": "尚未运行。测试使用固定合成样例，只验证请求与输出契约，不代表会放行任何操作。",
+    "idle": "正在准备…",
     "runningHint": "正在请求 {route}…",
     "cancelled": "已取消。",
     "sessionDisabled": "测试需要指定模型，请选择具体模型后测试。",
@@ -67,7 +67,7 @@
     "output": "模型返回",
     "error": "错误",
     "parsed": "解析结果",
-    "requestFailed": "请求失败：{error}",
+    "requestFailed": "请求失败：无法读取测试响应。",
     "failure": {
       "modelRequired": "需要选择具体模型",
       "credentialMissing": "凭据未配置或无法解析",

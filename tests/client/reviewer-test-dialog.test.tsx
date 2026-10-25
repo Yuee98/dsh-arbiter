@@ -178,8 +178,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    expect(within(panel).getByText(/尚未运行/)).toBeInTheDocument();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     expect(
       await within(panel).findByText('已通过：首次返回即符合输出契约。'),
     ).toBeInTheDocument();
@@ -220,7 +218,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     expect(
       await within(panel).findByText(
         '已通过：经过 1 次格式修复后符合输出契约。',
@@ -262,7 +259,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     expect(
       await within(panel).findByText('未通过：认证被拒绝（401／403）'),
     ).toBeInTheDocument();
@@ -291,7 +287,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     expect(
       await within(panel).findByText('未通过：配额或限流（429）'),
     ).toBeInTheDocument();
@@ -326,7 +321,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     await within(panel).findByText(/正在请求/);
     await user.click(within(panel).getByRole('button', { name: '取消' }));
     await waitFor(() => {
@@ -335,7 +329,7 @@ describe('reviewer connection test dialog', () => {
     expect(within(panel).getByText('已取消。')).toBeInTheDocument();
   });
 
-  test('closing discards the result and reopening starts idle', async () => {
+  test('closing discards the result and reopening starts a fresh run', async () => {
     baseHandlers();
     server.use(
       http.post('*/api/arbiter/reviewer-test', () =>
@@ -345,7 +339,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     let panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     await within(panel).findByText('已通过：首次返回即符合输出契约。');
     await user.click(within(panel).getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -353,7 +346,39 @@ describe('reviewer connection test dialog', () => {
     expect(screen.queryByText(/已通过：首次/)).toBeNull();
     await openTestDialog(user);
     panel = dialog();
-    expect(within(panel).getByText(/尚未运行/)).toBeInTheDocument();
+    // A new dialog starts its own run; the earlier pass is not remembered.
+    await within(panel).findByText('已通过：首次返回即符合输出契约。');
+    expect(screen.getByRole('dialog')).toBeVisible();
+  });
+
+  test('unmounting the panel while a run is in flight aborts the request', async () => {
+    baseHandlers();
+    let aborted = false;
+    server.use(
+      http.post('*/api/arbiter/reviewer-test', async ({ request }) => {
+        await new Promise<void>((resolve) => {
+          request.signal.addEventListener('abort', () => {
+            aborted = true;
+            resolve();
+          });
+        });
+        return HttpResponse.json(passedPayload());
+      }),
+    );
+    const view = renderClient(<ArbiterPage />);
+    await view.user.click(
+      await screen.findByRole('button', { name: 'Reviewer' }),
+    );
+    await screen.findByRole('heading', { name: 'Reviewer 类型' });
+    await openTestDialog(view.user);
+    const panel = dialog();
+    await within(panel).findByText(/正在请求/);
+    // A parent unmount (a tab switch, or the host dropping the slot) must cancel
+    // too — not only the explicit close button.
+    view.unmount();
+    await waitFor(() => {
+      expect(aborted).toBe(true);
+    });
   });
 
   test('a transport error is reported without any result material', async () => {
@@ -369,7 +394,6 @@ describe('reviewer connection test dialog', () => {
     const user = await openReviewer();
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     expect(await within(panel).findByText(/请求失败：/)).toBeInTheDocument();
     expect(within(panel).queryByText(/已通过/)).toBeNull();
   });
@@ -395,10 +419,14 @@ describe('reviewer connection test localization', () => {
     await openTestDialog(view.user);
     const panel = dialog();
     expect(within(panel).getByText('Reviewer 连接测试')).toBeVisible();
+    expect(within(panel).getByRole('button', { name: '关闭' })).toBeVisible();
+    // The run starts on open, so the localized running or result state is what
+    // proves the dialog body is translated rather than the idle placeholder.
     expect(
-      within(panel).getByRole('button', { name: '开始测试' }),
+      within(panel).getByText(
+        /正在请求|已通过：首次返回即符合输出契约。|未通过：/,
+      ),
     ).toBeVisible();
-    expect(within(panel).getByText(/尚未运行/)).toBeVisible();
     const text = document.body.textContent;
     expect(text).not.toContain('reviewer.');
     expect(text).not.toContain('undefined');
@@ -417,7 +445,6 @@ describe('reviewer connection test localization', () => {
     );
     await openTestDialog(user);
     const panel = dialog();
-    await user.click(within(panel).getByRole('button', { name: '开始测试' }));
     await waitFor(() => {
       expect(within(panel).queryByText(/reviewer\.test\./)).toBeNull();
     });

@@ -230,9 +230,9 @@ describe('reviewer test route', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       ok: true,
-      // A provider that never answered is a transport failure, reported by stage
-      // rather than as one generic failure.
-      probe: { status: 'failed', failure: 'network' },
+      // The provider named AUTH, so the stage is authentication rather than a
+      // generic transport failure.
+      probe: { status: 'failed', failure: 'unauthorized' },
     });
   });
 

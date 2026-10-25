@@ -103,24 +103,22 @@ test.describe('reviewer connection test in the real host', () => {
         exact: true,
       });
       await expect(openButton).toBeEnabled();
-      await openButton.click();
+      const [probeResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === '/api/arbiter/reviewer-test',
+        ),
+        openButton.click(),
+      ]);
 
       const dialog = plugin.getByRole('dialog', {
         name: 'Reviewer 连接测试',
         exact: true,
       });
       await expect(dialog).toBeVisible();
-      await expect(
-        dialog.getByText('测试会发送模型请求，可能产生费用。'),
-      ).toBeVisible();
 
-      const [probeResponse] = await Promise.all([
-        page.waitForResponse(
-          (response) =>
-            new URL(response.url()).pathname === '/api/arbiter/reviewer-test',
-        ),
-        dialog.getByRole('button', { name: '开始测试', exact: true }).click(),
-      ]);
+      // Opening the dialog starts the run, so the response is awaited from the
+      // entry click rather than from a second confirmation.
       expect(probeResponse.status()).toBe(200);
       await expect(dialog.locator('[data-arbiter-probe-status]')).toBeVisible();
       // The seeded route declares no credential reference, and the
@@ -156,10 +154,12 @@ test.describe('reviewer connection test in the real host', () => {
         name: 'Reviewer 连接测试',
         exact: true,
       });
-      await expect(reopened.getByText(/尚未运行/)).toBeVisible();
-      await expect(reopened.locator('[data-arbiter-probe-status]')).toHaveCount(
-        0,
-      );
+      // A reopened dialog runs again and shows no remembered result from the
+      // previous one; only the new run's own state is present.
+      await expect(
+        reopened.locator('[data-arbiter-probe-status]'),
+      ).toBeVisible();
+      await expect(reopened.getByText(/尚未运行/)).toHaveCount(0);
       await reopened.getByRole('button', { name: '关闭', exact: true }).click();
 
       expect(pageErrors).toEqual([]);
@@ -252,10 +252,8 @@ cancellationTest.describe('reviewer connection test cancellation', () => {
         name: 'Reviewer 连接测试',
         exact: true,
       });
-      await dialog
-        .getByRole('button', { name: '开始测试', exact: true })
-        .click();
-      // The provider sees the request, which is the in-flight state.
+      // Opening the dialog started the run; the provider sees the request,
+      // which is the in-flight state.
       await expect
         .poll(() => holdingProvider.calls.length, { timeout: 20_000 })
         .toBeGreaterThan(0);

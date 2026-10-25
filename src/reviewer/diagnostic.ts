@@ -195,48 +195,63 @@ function redact(text: string, secrets: readonly string[]): string {
   );
 }
 
-function redactUnknown(value: unknown, secrets: readonly string[]): unknown {
-  if (secrets.length === 0) return value;
-  if (typeof value === 'string') return redact(value, secrets);
+/**
+ * Mask an authentication header wherever it appears in free text.
+ *
+ * A provider that echoes `Authorization: Bearer …` in an error message would
+ * otherwise publish a credential it received — and for chat the probe has no
+ * value to match, because the host's LLM service owns the credential. Masking
+ * the header shape covers that path without guessing what the secret is.
+ */
+function redactAuthHeaders(text: string): string {
+  return text.replace(
+    /\b(authorization|proxy-authorization|x-api-key|api-key)(\s*[:=]\s*)(bearer\s+)?[^\s",}]+/giu,
+    (_match, name: string, separator: string, scheme: string | undefined) =>
+      `${name}${separator}${scheme ?? ''}[redacted]`,
+  );
+}
+
+/** Mask known secrets and recognisable auth headers in an arbitrary value. */
+function redactValue(
+  value: unknown,
+  secrets: readonly string[],
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
+  if (typeof value === 'string')
+    return redact(redactAuthHeaders(value), secrets);
   if (Array.isArray(value)) {
     const items: readonly unknown[] = value;
-    return items.map((item) => redactUnknown(item, secrets));
+    return items.map((item) => redactValue(item, secrets, seen));
   }
   if (value !== null && typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        redactUnknown(item, secrets),
+        redactValue(item, secrets, seen),
       ]),
     );
   }
   return value;
 }
 
-/**
- * The attempt as the page may see it.
- *
- * The adapter's own requests are already credential-free by construction, but a
- * provider is free to echo whatever it received in an error body or exception.
- * Known credential values are removed here — at the boundary that publishes the
- * material — because the alternative is trusting every provider's error text.
- */
 function attemptOf(
   record: ModelAttemptRecord,
   secrets: readonly string[],
 ): ProbeAttempt {
+  const clean = (text: string): string =>
+    redact(redactAuthHeaders(text), secrets);
   return {
     attempt: record.attempt,
     backend: record.backend,
     protocol: record.protocol,
     durationMs: record.durationMs,
-    request: redactUnknown(record.request, secrets),
+    request: redactValue(record.request, secrets),
     responseText:
-      record.responseText === null
-        ? null
-        : redact(record.responseText, secrets),
-    parsed: redactUnknown(record.parsed, secrets),
-    error: record.error === null ? null : redact(record.error, secrets),
+      record.responseText === null ? null : clean(record.responseText),
+    parsed: redactValue(record.parsed, secrets),
+    error: record.error === null ? null : clean(record.error),
   };
 }
 
@@ -254,6 +269,44 @@ interface FailureEvidence {
  * with text but an error reached the parser. Credential resolution happens before
  * any attempt, which is why a named reference with no attempts is that case.
  */
+/** The stage an HTTP rejection names, or null when it names none. */
+function httpFailure(httpStatus: number | null): ProbeFailure | null {
+  if (httpStatus === 401 || httpStatus === 403) return 'unauthorized';
+  if (httpStatus === 429) return 'rate-limited';
+  if (httpStatus !== null && httpStatus >= 400) return 'unavailable';
+  return null;
+}
+
+/**
+ * The stage a provider failure code names.
+ *
+ * The formal chat adapter spells a provider failure as
+ * `reviewer ended with <kind> <code>: <message>`. Well-known codes map to the
+ * stage they describe; an unrecognized code stays `unknown` rather than being
+ * called a network fault, because only the absence of an answer proves that.
+ */
+function providerFailure(error: string): ProbeFailure | null {
+  const code = /reviewer ended with \S+ ([A-Z0-9_-]+):/u.exec(error)?.[1];
+  if (code === undefined) return null;
+  if (
+    /AUTH|UNAUTHORI|FORBIDDEN|INVALID_API_KEY|INVALID_CREDENTIAL/iu.test(code)
+  )
+    return 'unauthorized';
+  if (/RATE|QUOTA|TOO_MANY|LIMIT/iu.test(code)) return 'rate-limited';
+  if (/TIMEOUT|TIMED_OUT/u.test(code)) return 'timed-out';
+  if (/CANCEL/u.test(code)) return 'cancelled';
+  return 'unknown';
+}
+
+/**
+ * Identify the stage a failed probe stopped at.
+ *
+ * The adapter's shape carries the evidence: an attempt with no response text
+ * never got an answer, one with an `HTTP <status>` error got a refusal, and one
+ * with text but an error reached the parser. Credential resolution happens
+ * before any attempt, which is why a named reference with no attempts is that
+ * case. Everything unrecognized is `unknown`, never a guessed cause.
+ */
 function classify(evidence: FailureEvidence): ProbeFailure {
   const { attempts, error, httpStatus } = evidence;
   if (
@@ -263,11 +316,11 @@ function classify(evidence: FailureEvidence): ProbeFailure {
   ) {
     return 'credential-missing';
   }
-  if (httpStatus === 401 || httpStatus === 403) return 'unauthorized';
-  if (httpStatus === 429) return 'rate-limited';
-  if (httpStatus !== null && httpStatus >= 500) return 'unavailable';
-  if (httpStatus !== null && httpStatus >= 400) return 'unavailable';
+  const byStatus = httpFailure(httpStatus);
+  if (byStatus !== null) return byStatus;
   if (/timed?\s?out|timeout/iu.test(error)) return 'timed-out';
+  const byProvider = providerFailure(error);
+  if (byProvider !== null) return byProvider;
   const transport = attempts.find(
     (entry) => entry.responseText === null && entry.error !== null,
   );
@@ -281,7 +334,7 @@ function classify(evidence: FailureEvidence): ProbeFailure {
     // one case the format repair exists to fix.
     return 'invalid-output';
   }
-  return attempts.length === 0 ? 'unknown' : 'unknown';
+  return 'unknown';
 }
 
 /** The HTTP status an attempt recorded, when the adapter rejected one. */
@@ -399,9 +452,17 @@ async function runDecision(
       return failedResult(config, startedAt, 'credential-missing', []);
     }
     if (secret === undefined) {
+      // A cancellation during resolution is the caller's action, not a missing
+      // credential.
+      if (callerCancelled(signal)) {
+        return failedResult(config, startedAt, 'cancelled', []);
+      }
       // The formal adapter would refuse this too; classifying it here names the
       // stage instead of reporting an empty, unexplained failure.
       return failedResult(config, startedAt, 'credential-missing', []);
+    }
+    if (callerCancelled(signal)) {
+      return failedResult(config, startedAt, 'cancelled', []);
     }
   }
   const secrets = secret === undefined ? [] : [secret];
@@ -410,6 +471,11 @@ async function runDecision(
       {
         fetch,
         credentials,
+        // The value resolved above is the one this run sends, so the secret that
+        // authenticates the request is exactly the one redacted from its answer.
+        ...(secret === undefined
+          ? {}
+          : { preResolvedCredential: { value: secret } }),
         decision: config.reviewer.decision,
         thresholds: config.policy.normal,
         signal,
