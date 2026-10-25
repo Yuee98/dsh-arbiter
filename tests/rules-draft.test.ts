@@ -264,9 +264,17 @@ describe('exact value types', () => {
   it('leaves an unrepresentable value alone rather than inventing a match', () => {
     // `0` would be a valid but unrelated expression, so the text is kept.
     expect(convertExactPattern('not-a-number', 'number')).toBe('not-a-number');
-    expect(convertExactPattern('', 'number')).toBe('');
     expect(convertExactPattern('yes', 'boolean')).toBe('yes');
     expect(convertExactPattern(7, 'null')).toBeNull();
+  });
+
+  it('keeps a blank expression blank instead of inserting a value', () => {
+    // A blank pattern has no type to carry over; the editor tracks the chosen
+    // type locally so the user still gets the matching value editor.
+    expect(convertExactPattern('', 'number')).toBe('');
+    expect(convertExactPattern('', 'boolean')).toBe('');
+    expect(convertExactPattern('', 'string')).toBe('');
+    expect(convertExactPattern('', 'null')).toBeNull();
   });
 });
 

@@ -93,6 +93,9 @@ export function convertExactPattern(
   type: 'string' | 'number' | 'boolean' | 'null',
 ): RuleCondition['pattern'] {
   if (type === 'null') return null;
+  // An empty expression has no spelling to convert; the editor keeps the value
+  // blank and records the chosen type locally until the user types a value.
+  if (pattern === '') return '';
   if (type === 'boolean') {
     if (typeof pattern === 'boolean') return pattern;
     const text = patternText(pattern).trim();
@@ -102,9 +105,7 @@ export function convertExactPattern(
   }
   if (type === 'number') {
     if (typeof pattern === 'number') return pattern;
-    const text = patternText(pattern).trim();
-    if (text.length === 0) return pattern;
-    const parsed = Number(text);
+    const parsed = Number(patternText(pattern).trim());
     return Number.isFinite(parsed) ? parsed : pattern;
   }
   return typeof pattern === 'string' ? pattern : patternText(pattern);

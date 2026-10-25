@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 
 import type { RuleKind, RuleTarget } from '../../../types.js';
+import { useState } from 'react';
+
 import { useArbiterTranslation } from '../../i18n-provider.js';
 import { Button, Select, TextInput } from '../controls.js';
 import { convertExactPattern, exactType, patternText } from './draft.js';
@@ -15,6 +17,22 @@ const TARGETS: readonly RuleTarget[] = [
 ];
 const KINDS: readonly RuleKind[] = ['exact', 'regex', 'glob'];
 const VALUE_TYPES = ['string', 'number', 'boolean', 'null'] as const;
+
+type ValueType = (typeof VALUE_TYPES)[number];
+
+/** A pattern that carries no JSON type yet. */
+function isBlank(pattern: MutableRuleCondition['pattern']): boolean {
+  return pattern === '';
+}
+
+/** The value a blank expression takes when a type is chosen explicitly. */
+function blankPattern(type: ValueType): MutableRuleCondition['pattern'] {
+  if (type === 'null') return null;
+  if (type === 'boolean') return false;
+  // `number` stays blank: there is no neutral number, and 0 would be a match
+  // expression the user never wrote.
+  return '';
+}
 
 const labelStyle = {
   color: 'var(--dsw-alias-label-secondary)',
@@ -47,6 +65,12 @@ export function RuleConditionEditor(props: {
   const { condition, onChange } = props;
   const isArgument = condition.target === 'argument';
   const isExact = condition.kind === 'exact';
+  // An empty expression carries no JSON type. The chosen type is therefore kept
+  // locally until the user types a value; only then does it enter the draft.
+  const [blankType, setBlankType] = useState<ValueType>('string');
+  const valueType: ValueType = isBlank(condition.pattern)
+    ? blankType
+    : exactType(condition.pattern);
   return (
     <div
       role="group"
@@ -162,7 +186,7 @@ export function RuleConditionEditor(props: {
             <span style={labelStyle}>{t('rules.valueType')}</span>
             <Select
               ariaLabel={t('rules.valueType')}
-              value={exactType(condition.pattern)}
+              value={valueType}
               options={VALUE_TYPES}
               labels={{
                 string: t('rules.valueTypeOption.string'),
@@ -171,8 +195,11 @@ export function RuleConditionEditor(props: {
                 null: t('rules.valueTypeOption.null'),
               }}
               onChange={(value) => {
+                setBlankType(value);
                 onChange((next) => {
-                  next.pattern = convertExactPattern(next.pattern, value);
+                  next.pattern = isBlank(next.pattern)
+                    ? blankPattern(value)
+                    : convertExactPattern(next.pattern, value);
                 });
               }}
             />
@@ -180,7 +207,11 @@ export function RuleConditionEditor(props: {
         ) : null}
         <div style={{ ...rowStyle, flex: 1, minWidth: 240 }}>
           <span style={labelStyle}>{t('rules.pattern')}</span>
-          <ExactValue condition={condition} onChange={onChange} />
+          <ExactValue
+            type={valueType}
+            condition={condition}
+            onChange={onChange}
+          />
         </div>
       </div>
 
@@ -216,6 +247,7 @@ export function RuleConditionEditor(props: {
 
 /** The pattern editor; an exact `null` is a value rather than an empty input. */
 function ExactValue(props: {
+  readonly type: ValueType;
   readonly condition: MutableRuleCondition;
   readonly onChange: (
     mutator: (condition: MutableRuleCondition) => void,
@@ -223,8 +255,7 @@ function ExactValue(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   const { condition, onChange } = props;
-  const type = condition.kind === 'exact' ? exactType(condition.pattern) : null;
-  if (type === 'null') {
+  if (props.type === 'null') {
     return (
       <div
         style={{
@@ -236,7 +267,7 @@ function ExactValue(props: {
       </div>
     );
   }
-  if (type === 'boolean') {
+  if (props.type === 'boolean') {
     return (
       <Select
         ariaLabel={t('rules.pattern')}
@@ -250,30 +281,14 @@ function ExactValue(props: {
       />
     );
   }
-  if (type === 'number') {
+  if (props.type === 'number') {
     return (
-      <input
-        type="number"
-        aria-label={t('rules.pattern')}
-        value={patternText(condition.pattern)}
-        onChange={(event) => {
-          const parsed = Number(event.target.value);
-          if (event.target.value.length === 0 || !Number.isFinite(parsed))
-            return;
+      <NumberPattern
+        value={condition.pattern}
+        onChange={(value) => {
           onChange((next) => {
-            next.pattern = parsed;
+            next.pattern = value;
           });
-        }}
-        style={{
-          boxSizing: 'border-box',
-          height: 30,
-          border: '0.5px solid var(--dsw-alias-border-l4)',
-          borderRadius: 6,
-          background: 'var(--dsw-alias-bg-layer-3)',
-          color: 'var(--dsw-alias-label-primary)',
-          padding: '0 8px',
-          fontSize: 12.5,
-          width: '100%',
         }}
       />
     );
@@ -288,6 +303,54 @@ function ExactValue(props: {
         onChange((next) => {
           next.pattern = value;
         });
+      }}
+    />
+  );
+}
+
+/**
+ * A numeric exact pattern.
+ *
+ * Typing `-`, `1.` or an empty field is a valid intermediate state, so the
+ * visible text is local while focused and only a complete number is committed.
+ * Rendering the parsed value on every keystroke would turn `1.` into `1` and
+ * make `1.5` become `15`.
+ */
+function NumberPattern(props: {
+  readonly value: MutableRuleCondition['pattern'];
+  readonly onChange: (value: MutableRuleCondition['pattern']) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      aria-label={t('rules.pattern')}
+      value={draft ?? patternText(props.value)}
+      onChange={(event) => {
+        const text = event.target.value;
+        setDraft(text);
+        // Only a complete, finite number replaces the stored pattern; while the
+        // text is incomplete the previous value stays in the draft.
+        const parsed = Number(text);
+        if (text.trim().length === 0 || !Number.isFinite(parsed)) return;
+        props.onChange(parsed);
+      }}
+      onBlur={() => {
+        // Show the value the draft actually holds once editing ends.
+        setDraft(null);
+      }}
+      style={{
+        boxSizing: 'border-box',
+        height: 30,
+        border: '0.5px solid var(--dsw-alias-border-l4)',
+        borderRadius: 6,
+        background: 'var(--dsw-alias-bg-layer-3)',
+        color: 'var(--dsw-alias-label-primary)',
+        padding: '0 8px',
+        fontSize: 12.5,
+        width: '100%',
       }}
     />
   );

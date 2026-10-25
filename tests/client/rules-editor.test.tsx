@@ -258,6 +258,78 @@ describe('rule list header and inline editing', () => {
     });
   });
 
+  test('a decimal typed into a numeric exact pattern keeps every digit', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.retries',
+    );
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'number',
+    );
+    const pattern = within(row(id)).getByRole('textbox', {
+      name: '表达式',
+    });
+    // The intermediate `1.` must not be normalized back to `1`.
+    await user.type(pattern, '1.5');
+    expect(pattern).toHaveValue('1.5');
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [
+              {
+                target: 'argument',
+                path: '$.retries',
+                kind: 'exact',
+                pattern: 1.5,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test('a negative numeric pattern survives its leading minus', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.offset',
+    );
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'number',
+    );
+    const pattern = within(row(id)).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.type(pattern, '-3');
+    expect(pattern).toHaveValue('-3');
+    // Blur shows what the draft holds; it is the same negative number.
+    await user.tab();
+    expect(pattern).toHaveValue('-3');
+  });
+
   test('collapsing a row keeps every edit in the draft', async () => {
     baseHandlers();
     const user = await openRules();
