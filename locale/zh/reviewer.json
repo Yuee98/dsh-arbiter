@@ -39,5 +39,46 @@
   },
   "advanced": {
     "title": "高级参数"
+  },
+  "test": {
+    "open": "测试 Reviewer",
+    "title": "Reviewer 连接测试",
+    "close": "关闭",
+    "run": "开始测试",
+    "running": "测试中…",
+    "cancel": "取消",
+    "idle": "尚未运行。测试使用固定合成样例，只验证请求与输出契约，不代表会放行任何操作。",
+    "runningHint": "正在请求 {route}…",
+    "cancelled": "已取消。",
+    "sessionDisabled": "测试需要指定模型，请选择具体模型后测试。",
+    "costNotice": "测试会发送模型请求，可能产生费用。",
+    "passedFirst": "已通过：首次返回即符合输出契约。",
+    "passedRepaired": "已通过：经过 {count} 次格式修复后符合输出契约。",
+    "failed": "未通过：{reason}",
+    "actualModel": "实际模型",
+    "backend": "后端",
+    "protocol": "协议",
+    "duration": "耗时",
+    "durationValue": "{ms} ms",
+    "details": "查看输入、各次返回与错误",
+    "attempt": "第 {n} 次请求",
+    "attemptMeta": "{ms} ms · {protocol}",
+    "input": "输入材料",
+    "output": "模型返回",
+    "error": "错误",
+    "parsed": "解析结果",
+    "requestFailed": "请求失败：{error}",
+    "failure": {
+      "modelRequired": "需要选择具体模型",
+      "credentialMissing": "凭据未配置或无法解析",
+      "unauthorized": "认证被拒绝（401／403）",
+      "rateLimited": "配额或限流（429）",
+      "unavailable": "模型或后端不可用",
+      "network": "无法连接到后端",
+      "timedOut": "请求超时",
+      "invalidOutput": "输出不符合契约",
+      "cancelled": "已取消",
+      "unknown": "无法确定原因，详见下方材料"
+    }
   }
 }

@@ -204,6 +204,63 @@ export interface CredentialStatusView {
   readonly source: string | null;
 }
 
+/** One attempt of a Reviewer connection test, as the host recorded it. */
+export interface ReviewerProbeAttemptView {
+  readonly attempt: number;
+  readonly backend: string;
+  readonly protocol: string;
+  readonly durationMs: number;
+  /** Submitted material, already free of credentials. */
+  readonly request: unknown;
+  readonly responseText: string | null;
+  readonly parsed: unknown;
+  readonly error: string | null;
+}
+
+/**
+ * One completed connection test.
+ *
+ * A pass means the answer satisfied the formal parser, not that the action would
+ * be allowed; the signals stay raw so the dialog can show what the model said.
+ */
+/**
+ * Why a probe did not pass. The host sends a stable code; the page owns the
+ * wording, and an unrecognized code renders a sentence rather than a bare key.
+ */
+export type ReviewerProbeFailure =
+  | 'model-required'
+  | 'credential-missing'
+  | 'unauthorized'
+  | 'rate-limited'
+  | 'unavailable'
+  | 'network'
+  | 'timed-out'
+  | 'invalid-output'
+  | 'cancelled'
+  | 'unknown';
+
+export type ReviewerProbeView =
+  | {
+      readonly status: 'passed';
+      readonly backend: string;
+      readonly provider: string;
+      readonly model: string;
+      readonly protocol: string;
+      readonly durationMs: number;
+      readonly repairs: number;
+      readonly attempts: readonly ReviewerProbeAttemptView[];
+    }
+  | {
+      readonly status: 'failed' | 'cancelled';
+      readonly backend: string;
+      readonly provider: string;
+      readonly model: string;
+      readonly protocol: string;
+      readonly durationMs: number;
+      readonly failure: ReviewerProbeFailure;
+      readonly attempts: readonly ReviewerProbeAttemptView[];
+    };
+
 export interface SlotProps {
   readonly view?: string;
 }

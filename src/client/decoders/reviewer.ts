@@ -4,6 +4,8 @@ import type {
   ModelCatalogView,
   ModelGroupView,
   ModelOptionView,
+  ReviewerProbeAttemptView,
+  ReviewerProbeView,
 } from '../view-types.js';
 import {
   array,
@@ -11,9 +13,11 @@ import {
   choice,
   field,
   nullable,
+  number,
   object,
   optional,
   text,
+  unknownValue,
 } from './values.js';
 
 function modelOption(value: unknown): ModelOptionView {
@@ -78,5 +82,83 @@ export function credentialResponse(value: unknown): CredentialStatusView {
     ),
     configured: field(source, 'configured', boolean),
     source: field(source, 'source', nullable(text)),
+  };
+}
+
+function probeAttempt(value: unknown): ReviewerProbeAttemptView {
+  const source = object(value);
+  return {
+    attempt: field(source, 'attempt', number),
+    backend: field(source, 'backend', text),
+    protocol: field(source, 'protocol', text),
+    durationMs: field(source, 'durationMs', number),
+    request: field(source, 'request', unknownValue),
+    responseText: field(source, 'responseText', nullable(text)),
+    // Model output and parser results stay raw data; only the surrounding
+    // labels are localized.
+    parsed: field(source, 'parsed', unknownValue),
+    error: field(source, 'error', nullable(text)),
+  };
+}
+
+function probeModel(value: Record<string, unknown>): {
+  readonly provider: string;
+  readonly model: string;
+} {
+  const model = field(value, 'model', object);
+  return {
+    provider: field(model, 'provider', text),
+    model: field(model, 'model', text),
+  };
+}
+
+/**
+ * Read one connection test.
+ *
+ * A failed probe is still a successful read: the status and the stable failure
+ * code are the answer. Unknown fields are dropped rather than trusted.
+ */
+export function probeResponse(value: unknown): ReviewerProbeView {
+  const source = object(value);
+  if (!field(source, 'ok', boolean)) {
+    throw new TypeError('probe response is not ok');
+  }
+  const raw = field(source, 'probe', object);
+  const status = field(raw, 'status', choice('passed', 'failed', 'cancelled'));
+  const { provider, model } = probeModel(raw);
+  const base = {
+    backend: field(raw, 'backend', text),
+    provider,
+    model,
+    protocol: field(raw, 'protocol', text),
+    durationMs: field(raw, 'durationMs', number),
+    attempts: field(raw, 'attempts', array(probeAttempt)),
+  };
+  if (status === 'passed') {
+    return {
+      status,
+      ...base,
+      repairs: field(raw, 'repairs', number),
+    };
+  }
+  return {
+    status,
+    ...base,
+    failure: field(
+      raw,
+      'failure',
+      choice(
+        'model-required',
+        'credential-missing',
+        'unauthorized',
+        'rate-limited',
+        'unavailable',
+        'network',
+        'timed-out',
+        'invalid-output',
+        'cancelled',
+        'unknown',
+      ),
+    ),
   };
 }

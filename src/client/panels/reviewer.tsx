@@ -11,7 +11,9 @@ import {
 } from '../components/controls.js';
 import { CredentialStatus } from '../components/credential-status.js';
 import { ModelSelect } from '../components/model-select.js';
+import { ReviewerTestDialog } from '../components/reviewer-test.js';
 import type { CatalogLoad } from '../components/model-select.js';
+import { Button } from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import type { ModelChoice } from '../model-choice.js';
 import type { Draft, ModelCatalogView } from '../view-types.js';
@@ -37,6 +39,8 @@ export function ReviewerPanel(props: {
   const [catalog, setCatalog] = useState<ModelCatalogView | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<CatalogLoad>('loading');
   const [query, setQuery] = useState('');
+  // The dialog owns its own result; this only decides whether it is mounted.
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +127,14 @@ export function ReviewerPanel(props: {
         </label>
       </div>
 
+      <TestEntry
+        draft={draft}
+        open={testing}
+        onOpen={() => {
+          setTesting(true);
+        }}
+      />
+
       {draft.reviewer.type === 'chat' ? (
         <ChatBasics
           provider={draft.reviewer.chat.provider}
@@ -143,6 +155,15 @@ export function ReviewerPanel(props: {
         <DecisionAdvanced draft={draft} onDraft={onDraft} />
       )}
 
+      {testing ? (
+        <ReviewerTestDialog
+          draft={draft}
+          onClose={() => {
+            setTesting(false);
+          }}
+        />
+      ) : null}
+
       <p
         style={{
           margin: 0,
@@ -153,6 +174,44 @@ export function ReviewerPanel(props: {
         {t('reviewer.failureDescription')}
       </p>
     </Section>
+  );
+}
+
+/**
+ * The connection-test entry.
+ *
+ * "Follow the session" names no testable model, so the design disables the
+ * button and says why instead of inventing a route. The cost notice sits beside
+ * it because pressing it sends a model request.
+ */
+function TestEntry({
+  draft,
+  open,
+  onOpen,
+}: {
+  readonly draft: Draft;
+  readonly open: boolean;
+  readonly onOpen: () => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const followSession =
+    draft.reviewer.type === 'chat' &&
+    draft.reviewer.chat.provider === 'session';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Button disabled={followSession || open} onClick={onOpen}>
+          {t('reviewer.test.open')}
+        </Button>
+        <span
+          style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' }}
+        >
+          {followSession
+            ? t('reviewer.test.sessionDisabled')
+            : t('reviewer.test.costNotice')}
+        </span>
+      </div>
+    </div>
   );
 }
 
