@@ -131,7 +131,7 @@ pnpm pr:merge 30
 pnpm pr:merge 30 --body-file /path/to/english-body.txt
 ```
 
-脚本要求 PR 已打开且非 draft，检查所有已报告的 CI（包含非必需 smoke），然后重新读取最新标题与 head。检查期间 head 改变则停止；合并前复用同一校验器检查最新标题、最终 subject 与正文，再显式传入 `--squash`、`--match-head-commit`、subject 和正文 stdin。检查失败或尚未结束时不合并；不使用 admin、auto-merge 或自动删除分支。GitHub 服务端仍执行现有 ruleset。合并过程中标题再次变化不会改变已经校验并明确提交的消息；head 再变化由服务端拒绝。
+脚本要求 PR 已打开且非 draft，检查所有已报告的 CI（包含非必需 smoke），然后重新读取最新标题与 head。检查结果读取 `gh pr checks --json name,bucket`，要求非空且每项均为 `pass`；失败、取消、未完成、跳过、未知或损坏结果都停止，不只依赖 gh 进程退出码。检查期间 head 改变则停止；合并前复用同一校验器检查最新标题、最终 subject 与正文，再显式传入 `--squash`、`--match-head-commit`、subject 和正文 stdin。不使用 admin、auto-merge 或自动删除分支。GitHub 服务端仍执行现有 ruleset。合并过程中标题再次变化不会改变已经校验并明确提交的消息；head 再变化由服务端拒绝。
 
 GitHub 的 squash 默认值不能禁止人在页面或 API 中覆盖消息，因此统一通过上述入口合并，不能只依赖之前通过的标题检查。新增工作流随本 PR 验证；其他旧分支需要同步包含该工作流的 main，再通过 PR 更新触发必需检查。规则格式、消息来源与 Dependabot 设置分别参考 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)、[GitHub squash 配置](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/configuring-commit-squashing-for-pull-requests)与 [Dependabot commit-message](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#commit-message)。
 
