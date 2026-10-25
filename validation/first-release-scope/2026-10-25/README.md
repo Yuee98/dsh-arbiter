@@ -13,7 +13,7 @@
 
 ## 与历史 R1–R9 的关系
 
-`validation/codex-review/2026-10-21/reproduce.mjs` 及其 `results.json` 保持逐字节原样，作为原型行为的原始证据。其 R8 覆盖的候选接纳流程已从首版移除，因此该用例在当前构建上按预期失败，并由 `scripts/check-regressions.ts` 显式列为已知例外，不改写脚本、不删除用例。R1–R7、R9 仍在当前构建上通过。
+`validation/codex-review/2026-10-21/reproduce.mjs` 及其 `results.json` 保持逐字节原样，作为原型行为的原始证据。其 R8 覆盖的候选接纳流程已从首版移除，因此该用例在当前构建上不再通过。`scripts/check-regressions.ts` 不按用例名放行它，而是断言其 `actual` 观测值符合当前契约：候选仍为 `pending`、未新增规则、且接纳尝试确实因路由不存在而失败。若接纳路由被恢复并生效，R8 会通过或记录 `accepted`，该断言随之失败。R1–R7、R9 仍要求原样通过。
 
 ## 运行
 
@@ -22,4 +22,4 @@ pnpm build
 pnpm check:regressions
 ```
 
-`pnpm verify` 会在构建后串联运行两组脚本；任何未列入已知例外的失败都会使检查退出非零。
+`pnpm verify` 会在构建后串联运行两组脚本；任何未通过其观测值断言的用例都会使检查退出非零，判定规则见 `scripts/regression-verdict.ts`。

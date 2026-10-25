@@ -43,7 +43,7 @@ lint 自检包含真实 TSX 配置及结构、Hooks、可访问性、文案和�
 
 已有 R1–R9 复现脚本保持原样，由 `scripts/check-regressions.ts` 复制到相同目录深度的 `.local/regressions/run-*` 后运行，继续导入当前构建；本轮结果写入该目录，不覆盖历史 `validation` 报告。
 
-首版范围收敛（#20）移除离线建议的公开入口后，历史 R8 覆盖的接纳流程不再属于首版：脚本与 `results.json` 保持原样作为历史证据，其预期失败由 runner 显式列为已知例外，而不是改写脚本或删除用例。当前契约由独立的 `validation/first-release-scope/2026-10-25/reproduce.mjs`（S1–S3）验证：建议端点不存在、尝试接纳不改规则与候选状态、规则测试与日志仍可用且已有审计行保留。同一 runner 串联两组脚本，任何未列入已知例外的失败仍使检查退出非零。
+首版范围收敛（#20）移除离线建议的公开入口后，历史 R8 覆盖的接纳流程不再属于首版：脚本与 `results.json` 保持原样作为历史证据，不按用例名建立豁免，也不删除用例。R8 改为对其 `actual` 观测值做正面断言——候选必须仍为 `pending`、`ruleAdded` 必须为 false、且接纳尝试确实因路由不存在而失败（`acceptError` 有值，且没有 handler 的 JSON 回复）。若接纳路由被恢复并真的生效，R8 会转为通过或记录 `accepted`，该断言随即失败，因此它不可能放过一个原因不同的真实缺陷。R1–R7、R9 仍要求原样通过。当前契约另由 `validation/first-release-scope/2026-10-25/reproduce.mjs`（S1–S3）正面验证：建议端点不存在、尝试接纳不改规则与候选状态、规则测试与日志仍可用且已有审计行保留。判定规则实现于 `scripts/regression-verdict.ts` 并有单测覆盖正反例。
 
 ## 分层测试
 
