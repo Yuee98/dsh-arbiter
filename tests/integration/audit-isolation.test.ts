@@ -259,6 +259,32 @@ describe('an unmigratable audit database', () => {
     expect(userVersion(path)).toBe(versionBefore);
   });
 
+  test('settled outcomes are bounded rather than retained forever', async () => {
+    const { host } = await startHost();
+    const session: SessionLike = { id: 'bounded-session' };
+    const settlement = new CallSettlement(host, new DecisionHistory(host));
+    const call = (id: string): CallContext => ({
+      exec: {
+        callId: id,
+        name: 'bash',
+        arguments: { command: 'echo hi' },
+        signal: new AbortController().signal,
+      },
+      agent: { session },
+      session,
+      sessionKind: 'main',
+      mode: 'normal',
+      cwd: '/w',
+      trace: [],
+    });
+    for (let index = 0; index < 600; index += 1) {
+      settlement.claim(call(`b-${String(index)}`), 'allow', 'ok');
+    }
+    // One-shot settlement only needs the winner reachable while a competing
+    // continuation could still arrive, so the table keeps a bounded tail.
+    expect(settlement.settledOutcomeCount()).toBeLessThanOrEqual(512);
+  });
+
   test('unresolved pending entries stay bounded and keep an unknown outcome', async () => {
     const { host } = await startHost();
     const pending = host.runtime.pending;

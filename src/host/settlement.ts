@@ -258,6 +258,11 @@ export class CallSettlement {
     return this.outcomes.get(callId);
   }
 
+  /** How many settled outcomes are still addressable; used to assert the bound. */
+  settledOutcomeCount(): number {
+    return this.outcomes.size;
+  }
+
   /**
    * Write the session record and record what happened.
    *
