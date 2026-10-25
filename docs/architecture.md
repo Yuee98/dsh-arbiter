@@ -429,6 +429,12 @@ subagent 的简短说明草案：
 
 **运行验证（2026-10-21）**：上述四条前端生命周期均已在真实 Web 客户端上确认——刷新保持后端状态；断连期间由第二连接改变状态后重连采用新值；迟到响应未复活旧值；移除客户端覆盖后原生控件回归且后端 `enabled`／`revision` 不变。冷恢复、新会话不误启用、审计库缺失下的恢复也均已确认；启用状态保存在会话日志的可忽略插件记录中，不依赖审计 SQLite。
 
+**正式客户端实现（#5，2026-10-26）**：`src/client/components/permission-selector.tsx` 以 `PERMISSION_SLOT_PRIORITY = -1` 注册在 `conversation.input.permission`，触发按钮只显示后端确认值（启用时带 guarded／trusted），未启用时显示宿主自己的**当前**预设（读 `permissions` projection，不从沙箱值推断）。菜单固定含“自动审查（Arbiter）”与“关闭自动审查”，宿主预设随后；`auto`／`custom` 不作为选项。宿主预设名就是原始 key 时按插件 locale 显示中文，宿主改名则保留其原名。切出 Arbiter **只发宿主 `/permission <preset>` 命令**，不先写停用记录：成功的命令由 #4 观察并退出，失败的命令不改变准入。前端因此只有两处权威：准入 API（唯一启用状态）与宿主自己的命令／目录。
+
+前端时序（`src/client/permission-selector-state.ts`、`permission-selector-model.ts`）：展示值永远是最后一次服务端确认；写操作是**屏障**——写期间的读取合并为写结束后的一次读取，因为“更晚发出”的读取仍可能答出更旧的服务器状态；每个请求带序号与会话身份，被取代或属于其他会话的答案一律丢弃。失效来源为：会话事件里按 `commandId` 配对的 `/permission` 命令对（覆盖同值切出）、`permissions` projection、连接 generation、`permission-presets/catalog-changed`，以及浏览器 `focus`／`online`／`visibilitychange`——共同覆盖同标签页原生切出与静默重连。所有来源只触发对权威 API 的读取，不建立第二份状态、不轮询。
+
+**仍然存在的宿主限制**：本机 0.2.1-rc.3 的管理器停用会移除主机侧与路由，但已发出的浏览器模块仍留在本页 boot graph 中，因此重载后覆盖层会再次注册而主机侧已不在；#5 的 E2E 因此断言“覆盖层消失、确认状态不再显示、记录不变”，并把“原生控件回归”留给不带该模块的 composition（该目录下的既有验证已覆盖）。不使用 DOM 改写或隐藏文本来伪造这两种状态。
+
 <a id="design-7-2"></a>
 
 ### trusted / guarded 设置入口
