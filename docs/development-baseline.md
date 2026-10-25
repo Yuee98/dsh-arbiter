@@ -39,6 +39,8 @@ UI 自有文案已进入中文 locale；API 返回先作为 unknown，由真实�
 
 lint 自检包含真实 TSX 配置及结构、Hooks、可访问性、文案和模块边界正反样例，避免“配置存在但没有作用于文件”。.local、构建结果、覆盖率及历史验证工件不参与源码检查。
 
+三个类型感知 lint 测试文件在 `beforeAll` 中初始化 TypeScript 项目，准备阶段限时 30 秒；单条行为断言仍保留默认的 5 秒时限。这样将冷启动成本与规则行为分开，避免 Linux runner 上首次构建类型项目超过单条测试时限，不关闭规则或重试失败测试。
+
 已有 R1–R9 复现脚本保持原样，由 `scripts/check-regressions.ts` 复制到相同目录深度的 `.local/regressions/run-*` 后运行，继续导入当前构建；本轮结果写入该目录，不覆盖历史 `validation` 报告。
 
 ## 分层测试
@@ -78,7 +80,7 @@ fast-check 已接入现有规则优先级测试，每项 100 轮，失败输出 
 
 ## 真实 DSH E2E
 
-先安装浏览器：`pnpm exec playwright install chromium`。测试默认从 PATH 查找公开 `dsh` 命令，也可用 `DSH_E2E_BIN` 指定可执行文件。`pnpm test:e2e:dsh` 会先构建当前代码，再以临时 `DSH_HOME`、profile、工作区和系统分配端口启动宿主；不会复用日常会话或发送模型请求。
+先安装浏览器：`pnpm exec playwright install chromium`。测试默认从 PATH 查找公开 `dsh` 命令，也可用 `DSH_E2E_BIN` 指定可执行文件。`pnpm test:e2e:dsh` 会先构建当前代码，再以临时 `DSH_HOME`、profile、工作区和系统分配端口启动宿主；不会复用日常会话或发送模型请求。现有 smoke 最多使用三个 worker 并行，每例独立启动并清理宿主；后续需要共享生命周期的场景应在对应测试内明确组织。
 
 fixture 给当前原型显式配置空对象以加载有效默认值。未提供配置时原型会报告 `configuration must be an object`，因此本 smoke 证明的是“已配置插件”的加载与接线，不宣称裸安装默认流程已通过首版验收。相关默认值行为仍由首版配置任务处理。
 
@@ -90,7 +92,11 @@ axe 已对真实插件初始配置页的 `[data-arbiter-root]` 区域运行默�
 
 ## CI
 
-普通 PR／main CI 运行 `pnpm verify`，再生成并上传 coverage 报告，保留 7 天。验证包括运行时依赖循环、actionlint 和 zizmor 离线静态检查；zizmor 由 mise 固定版本，使用标准 regular persona，无需凭据或远端服务。其 auditor 模式另提示已明确采用的 self-hosted runner，这不意味着需要更换已验证的宿主测试环境。Dependabot 的普通更新设置 7 天 cooldown。
+普通 PR／main CI 在 Ubuntu 24.04 上并行执行 `pnpm verify` 包含的检查，共 10 个独立入口：类型、源码 lint、Testing Library lint、格式、依赖边界、工作流／文案／peer 六组静态检查，unit／integration／UI 三层测试，以及构建／消费者／R1–R9 回归。各入口自行安装固定工具和冻结依赖，复用 mise 与 pnpm store 缓存，不经过共享的前置 setup job；同一组 matrix 的失败不取消其他入口。
+
+三层测试各执行一次，同时输出含 coverage 的 Vitest blob。后续 coverage job 只依赖测试，检查三份 blob 均存在后合并生成全量 HTML／LCOV／JSON 报告，不重复运行测试，不设覆盖率门槛；报告保留 7 天。最终常驻 `Verify` job 无论前面成功、失败或跳过都会汇总，仅全部依赖成功时通过，供分支保护使用。汇总代码有实际子进程正反测试，覆盖失败、取消、跳过、未知和缺失结果。连同 coverage 与汇总，工作流共 12 个 job 实例；新提交取消同一 PR 的旧运行。
+
+验证包括运行时依赖循环、actionlint 和 zizmor 离线静态检查；zizmor 由 mise 固定版本，使用标准 regular persona，无需凭据或远端服务。其 auditor 模式另提示已明确采用的 self-hosted runner，这不意味着需要更换已验证的宿主测试环境。Dependabot 的普通更新设置 7 天 cooldown。
 
 独立的 `DSH E2E` 工作流使用带 `dsh-e2e` 标签、已安装 DSH 的 self-hosted runner，手动触发并保留失败工件；不会把 GitHub 托管环境中未执行的宿主测试记为通过。需要预先准备操作系统的浏览器依赖。
 
@@ -98,6 +104,6 @@ axe 已对真实插件初始配置页的 `[data-arbiter-root]` 区域运行默�
 
 ## 建立基线时的验证
 
-2026-10-25 本机通过 `pnpm verify`：123 项 unit、24 项 integration、18 项 UI，以及 R1–R9 全部通过；包括 59 项工程约束正反样例。实际 tarball 的 publint／离线消费、运行时依赖图、actionlint／zizmor 均通过。另在 macOS arm64、DSH 0.2.1-rc.3、Chromium 上完成三项真实浏览器测试，覆盖全部七个设置页签的实际接口读取、规则测试与策略回放，并含初始配置页 axe 扫描，无跳过。可查看 `.local/e2e/report/index.html` 与 `.local/e2e/baseline-verification.json`，其中记录全部 61 个运行产物／locale／清单文件的构建指纹和三个临时 profile 的清理情况；Linux 与远端 runner 尚未运行。
+2026-10-25 本机通过 `pnpm verify`：133 项 unit、24 项 integration、18 项 UI，以及 R1–R9 全部通过；包括 69 项工程约束正反样例。实际 tarball 的 publint／离线消费、运行时依赖图、actionlint／zizmor 均通过。按 CI 命令分别执行三层测试并合并 coverage，确认合并不会重跑测试。另在 macOS arm64、DSH 0.2.1-rc.3、Chromium 上，以三个独立 worker 并行完成三项真实浏览器测试，覆盖全部七个设置页签的实际接口读取、规则测试与策略回放，并含初始配置页 axe 扫描，无跳过。可查看 `.local/e2e/report/index.html` 与 `.local/e2e/baseline-verification.json`，其中记录全部 61 个运行产物／locale／清单文件的构建指纹和三个临时 profile 的清理情况。真实宿主证据来自本机 macOS，远端 self-hosted DSH runner 尚未部署或运行。
 
 反向验证也按预期失败：排除全部 UI 测试后单独运行该项目退出 1；缺失英文的 `pnpm check:i18n:release` 退出 1。它们证明空项目和未完成翻译不会被当成发布就绪。
