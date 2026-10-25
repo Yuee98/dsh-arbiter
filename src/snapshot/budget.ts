@@ -334,16 +334,25 @@ function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
   return { snapshot, system, user };
 }
 
+/**
+ * Whether this state still exceeds the budget, judged on the **stabilized**
+ * payload.
+ *
+ * The budget block itself contains the estimate, so writing the number back
+ * changes the rendered size. Comparing the provisional render (which carries
+ * `estimatedInputTokens: 0`) can report a fit that the final text does not have;
+ * that would turn a satisfiable request into a false preparation failure. This
+ * measures exactly what `renderedSnapshot` would submit.
+ */
 function overBudget(
   base: Omit<ReviewSnapshot, 'budget'>,
   state: BudgetState,
   maxInputTokens: number,
 ): boolean {
-  const candidate = candidateSnapshot(base, state, maxInputTokens);
-  const system = renderSystem();
-  const user = renderUser(candidate);
-  const payloads = estimatePayloads(system, user);
-  return Math.max(payloads.chat, payloads.decision) > maxInputTokens;
+  const rendered = renderedSnapshot(
+    candidateSnapshot(base, state, maxInputTokens),
+  );
+  return rendered.snapshot.budget.estimatedInputTokens > maxInputTokens;
 }
 
 export function truncateSnapshot(

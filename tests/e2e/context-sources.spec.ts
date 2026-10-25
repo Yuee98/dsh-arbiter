@@ -83,6 +83,275 @@ function appendEvent(session: HostSession, type: string, data: unknown): void {
   );
 }
 
+interface DispatchEvidence {
+  readonly outerCallId: string;
+  readonly outerName: string;
+  readonly innerCallId: string | null;
+  readonly innerName: string | null;
+  readonly resultText: string;
+  readonly originalProgramChars: number;
+  readonly executedProgramChars: number;
+}
+
+/** The slice of a Cordis plugin scope this harness needs. */
+interface HostToolRuntime {
+  register(definition: unknown): unknown;
+  execute(input: unknown): Promise<{
+    readonly isError?: boolean;
+    readonly content?: readonly { readonly text?: string }[];
+  }>;
+}
+
+interface HostModules {
+  readonly Context: new () => {
+    plugin(callback: (scope: unknown) => void): unknown;
+  };
+  readonly SystemPrompt: new (scope: unknown, config: unknown) => unknown;
+  readonly LocalSubprocessRuntime: new (
+    scope: unknown,
+    config: unknown,
+  ) => unknown;
+  readonly LocalFileSystem: new (scope: unknown, config: unknown) => unknown;
+  readonly NodePtcRuntime: new (scope: unknown, config: unknown) => unknown;
+  readonly ToolRuntime: new (
+    scope: unknown,
+    config: unknown,
+  ) => HostToolRuntime;
+  readonly defineContentToolFixture: (options: unknown) => unknown;
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+/**
+ * The three scope members this harness calls.
+ *
+ * The host's own scope object is still passed to host constructors unchanged,
+ * because services register against its identity; this adapter only wraps the
+ * members we call so the test owns the exact surface it uses.
+ */
+interface ScopeMembers {
+  provide(name: string, value: unknown): void;
+  on(event: string, handler: (...args: never[]) => unknown): () => void;
+  get(name: string): unknown;
+}
+
+function scopeMembers(value: unknown): ScopeMembers {
+  if (!isRecordValue(value))
+    throw new TypeError('plugin scope is not an object');
+  const provide = value['provide'];
+  const on = value['on'];
+  const get = value['get'];
+  if (
+    typeof provide !== 'function' ||
+    typeof on !== 'function' ||
+    typeof get !== 'function'
+  ) {
+    throw new TypeError('plugin scope lacks provide/on/get');
+  }
+  return {
+    provide(name, provided) {
+      Reflect.apply(provide, value, [name, provided]);
+    },
+    on(event, handler) {
+      const disposer: unknown = Reflect.apply(on, value, [event, handler]);
+      return () => {
+        if (typeof disposer === 'function') {
+          Reflect.apply(disposer, undefined, []);
+        }
+      };
+    },
+    get(name) {
+      const member: unknown = Reflect.apply(get, value, [name]);
+      return member;
+    },
+  };
+}
+
+/** Check each constructor/callable export without widening to `any`. */
+function isHostModules(value: unknown): value is HostModules {
+  if (!isRecordValue(value)) return false;
+  const constructors = [
+    'Context',
+    'SystemPrompt',
+    'LocalSubprocessRuntime',
+    'LocalFileSystem',
+    'NodePtcRuntime',
+    'ToolRuntime',
+  ] as const;
+  for (const key of constructors) {
+    if (typeof value[key] !== 'function') return false;
+  }
+  return typeof value['defineContentToolFixture'] === 'function';
+}
+
+/**
+ * Import the pinned host's own packages by absolute path.
+ *
+ * The spec runs from this checkout, so the host packages are resolved from its
+ * installation and every module is validated before use instead of being
+ * trusted as `any`.
+ */
+async function loadHostModules(
+  resolve: (name: string) => string,
+): Promise<HostModules> {
+  const entries = await Promise.all(
+    [
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-system-prompt',
+      '@deepseek-ai/dsh-subprocess-local',
+      '@deepseek-ai/dsh-fs-local',
+      '@deepseek-ai/dsh-ptc-runtime-node',
+      '@deepseek-ai/dsh-tools',
+    ].map(async (name) => {
+      const loaded: unknown = await import(resolve(name));
+      return loaded;
+    }),
+  );
+  const [cordis, systemPrompt, subprocess, fs, ptc, tools] = entries;
+  if (
+    !isRecordValue(cordis) ||
+    !isRecordValue(systemPrompt) ||
+    !isRecordValue(subprocess) ||
+    !isRecordValue(fs) ||
+    !isRecordValue(ptc) ||
+    !isRecordValue(tools)
+  ) {
+    throw new TypeError('a host module namespace is not an object');
+  }
+  const candidate = {
+    Context: cordis['Context'],
+    SystemPrompt: systemPrompt['SystemPrompt'],
+    LocalSubprocessRuntime: subprocess['LocalSubprocessRuntime'],
+    LocalFileSystem: fs['LocalFileSystem'],
+    NodePtcRuntime: ptc['NodePtcRuntime'],
+    ToolRuntime: tools['ToolRuntime'],
+    defineContentToolFixture: tools['defineContentToolFixture'],
+  };
+  if (!isHostModules(candidate)) {
+    throw new TypeError('pinned host modules are missing a required export');
+  }
+  return candidate;
+}
+
+/**
+ * Execute one real `run_code` program whose body calls an inner `tools.bash`,
+ * using the pinned host's own ToolRuntime inside a plugin scope.
+ *
+ * The scope is required: the PTC worker, fs and subprocess services resolve
+ * through the plugin context, and `tools/pre-execute` fires on the same context
+ * for both the outer program and the inner dispatch.
+ */
+async function runRealOuterInnerDispatch(
+  hostRoot: string,
+): Promise<DispatchEvidence> {
+  const requireFromHost = createRequire(join(hostRoot, 'package.json'));
+  const host = await loadHostModules((name) => requireFromHost.resolve(name));
+
+  const program =
+    'const r = await tools.bash({ command: "echo inner" });\nreturn r;';
+  const admissions: { callId: string; name: string; root: string | null }[] =
+    [];
+  const executed: string[] = [];
+  const ctx = new host.Context();
+  const box: { runtime?: HostToolRuntime } = {};
+  ctx.plugin(function setup(scoped: unknown) {
+    const scope = scopeMembers(scoped);
+    new host.SystemPrompt(scoped, {});
+    new host.LocalSubprocessRuntime(scoped, {});
+    new host.LocalFileSystem(scoped, { diffBasisMaxBytes: 1_048_576 });
+    scope.provide('sandboxPolicy', {
+      defaultMode: 'danger-full-access',
+      resolve: () => ({ mode: 'danger-full-access' }),
+    });
+    scope.provide('workingDirectory', {
+      ensure: () => Promise.resolve(tmpdir()),
+    });
+    new host.NodePtcRuntime(scoped, {
+      launch: { kind: 'node-script', executable: process.execPath },
+      maxOutputBytes: 65_536,
+      maxMessageBytes: 1_048_576,
+      maxPendingCalls: 16,
+      maxOldGenerationSizeMb: 256,
+      timeoutMs: 8_000,
+      maxTimeoutMs: 15_000,
+      graceMs: 800,
+    });
+    const runtime = new host.ToolRuntime(scoped, { mode: 'ptc' });
+    scope.on(
+      'tools/pre-execute',
+      (exec: unknown, next: () => Promise<{ kind: string }>) => {
+        if (exec !== null && typeof exec === 'object') {
+          const name: unknown = Reflect.get(exec, 'name');
+          const rootCallId: unknown = Reflect.get(exec, 'rootCallId');
+          admissions.push({
+            callId: String(Reflect.get(exec, 'callId') as unknown),
+            name: String(name),
+            root: typeof rootCallId === 'string' ? rootCallId : null,
+          });
+          if (name === 'run_code') {
+            const args: unknown = Reflect.get(exec, 'arguments');
+            if (args !== null && typeof args === 'object') {
+              const code: unknown = Reflect.get(args, 'code');
+              if (typeof code === 'string') executed.push(code);
+            }
+          }
+        }
+        return next();
+      },
+    );
+    runtime.register(
+      host.defineContentToolFixture({
+        name: 'bash',
+        description: 'run a shell command',
+        parameters: { command: { type: 'string', required: true } },
+        execute: (args: unknown) => {
+          const command =
+            args !== null && typeof args === 'object'
+              ? String(Reflect.get(args, 'command'))
+              : '';
+          return Promise.resolve([{ type: 'text', text: `ran ${command}` }]);
+        },
+      }),
+    );
+    box.runtime = runtime;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 700));
+
+  const runtime = box.runtime;
+  if (runtime === undefined) throw new Error('tool runtime did not mount');
+  const session = {
+    id: 'sr-dispatch',
+    header: { id: 'sr-dispatch', cwd: tmpdir() },
+    snapshotEvents: () => [],
+    deriveMessages: () => [],
+    append: () => undefined,
+  };
+  const result = await runtime.execute({
+    callId: 'dispatch-outer-1',
+    name: 'run_code',
+    arguments: { code: program, description: 'inner call' },
+    // A real agent carries its scoped context; the PTC retained environment
+    // registers its release effect on it.
+    agent: { session, ctx },
+    signal: new AbortController().signal,
+  });
+  const outer = admissions.find((entry) => entry.name === 'run_code');
+  const inner = admissions.find((entry) => entry.name !== 'run_code');
+  return {
+    outerCallId: outer?.callId ?? '',
+    outerName: outer?.name ?? '',
+    innerCallId: inner?.callId ?? null,
+    innerName: inner?.name ?? null,
+    resultText: (result.content ?? [])
+      .map((block) => block.text ?? '')
+      .join('\n'),
+    originalProgramChars: program.length,
+    executedProgramChars: executed[0]?.length ?? 0,
+  };
+}
+
 test('real DSH sessions expose human originals, ask answers and compaction', async () => {
   const command = await resolveDshCommand();
   // Resolve the host's own packages from its installation, not this checkout.
@@ -443,6 +712,31 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
         JSON.stringify(outer.snapshot.action.arguments).includes('tools.bash'),
     );
 
+    // --- real host dispatch: outer run_code -> inner tools.* ---------------
+    // A genuine ToolRuntime from the pinned runtime executes the program; both
+    // the outer admission and the inner call must pass `tools/pre-execute`, and
+    // the executed arguments must stay complete regardless of review trimming.
+    const dispatch = await runRealOuterInnerDispatch(hostRoot);
+    check(
+      'V13',
+      'a real run_code program dispatches an inner tools.* call through two independent admissions',
+      dispatch.innerCallId !== null &&
+        dispatch.innerCallId !== dispatch.outerCallId &&
+        dispatch.innerName === 'bash' &&
+        dispatch.outerName === 'run_code' &&
+        dispatch.resultText.includes('ran echo inner'),
+    );
+    check(
+      'V14',
+      'the executed program text is the complete original, not the review submission',
+      dispatch.executedProgramChars === dispatch.originalProgramChars &&
+        dispatch.executedProgramChars > 0,
+    );
+    await writeFile(
+      join(artifacts, 'dispatch.json'),
+      `${JSON.stringify(dispatch, null, 2)}\n`,
+      'utf8',
+    );
     const hostVersion: unknown = JSON.parse(
       await readFile(
         join(hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
@@ -460,6 +754,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
             parent: parent.snapshotEvents().length,
             child: child.snapshotEvents().length,
           },
+          dispatch,
           checks,
         },
         null,

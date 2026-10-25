@@ -310,6 +310,10 @@ function precedingQuestion(
     // Another user message or a compaction summary starts a separate exchange:
     // an answer after either cannot be attributed to a question beyond it.
     if (event.type === 'user/message') return null;
+    // A tool exchange is a boundary too. An ask result may already carry the
+    // human's answer, so a later "continue" must not be attributed to the
+    // question that a completed ask already answered.
+    if (event.type === 'tool/call' || event.type === 'tool/result') return null;
     if (event.type !== 'assistant/message' || !isRecord(event.data)) continue;
     const message = event.data['message'];
     if (!isRecord(message)) continue;
@@ -462,7 +466,8 @@ export function checkpointEvents(
   checkpoints.sort((left, right) => left.ts - right.ts);
   toolCalls.sort((left, right) => left.ts - right.ts);
   return {
-    checkpoints: checkpoints.slice(-maxItems),
+    // `slice(-0)` is `slice(0)`: a configured zero must select no checkpoints.
+    checkpoints: maxItems <= 0 ? [] : checkpoints.slice(-maxItems),
     toolCalls,
   };
 }

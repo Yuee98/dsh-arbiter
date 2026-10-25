@@ -1262,3 +1262,147 @@ describe('reopened review findings', () => {
     );
   });
 });
+
+describe('third-round review findings', () => {
+  test('a completed ask blocks a later short answer from inheriting its question', async () => {
+    const cwd = await workspace();
+    const main = session('main', [
+      {
+        seq: 1,
+        time: 5,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'May I delete /workspace/data?' }],
+          },
+        },
+      },
+      askCall(2, 6, 'a1', [
+        { id: 'q1', question: 'May I delete /workspace/data?' },
+      ]),
+      askAnswer(3, 7, 'a1', [{ id: 'q1', selected: ['No'] }]),
+      human(4, 8, 'continue'),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    const continuation = built.snapshot.evidence.find(
+      (item) => item.text === 'continue',
+    );
+    // The ask result already carries the human refusal; the later continuation
+    // must not be scoped by the question that ask answered.
+    expect(continuation?.question).toBeUndefined();
+    // The refusal itself is still explicit human evidence.
+    expect(
+      built.snapshot.evidence.some((item) => item.text.includes('No')),
+    ).toBe(true);
+  });
+
+  test('checkpointMaxItems 0 selects no checkpoints', async () => {
+    const cwd = await workspace();
+    const events = [
+      ...Array.from({ length: 3 }, (_, index) => ({
+        seq: index + 1,
+        time: index + 1,
+        type: 'user/message',
+        data: {
+          source: { kind: 'compact-checkpoint' },
+          content: [{ type: 'text', text: `summary ${String(index)}` }],
+        },
+      })),
+      human(10, 10, 'clean the build'),
+    ];
+    const main = session('main', events);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 0 },
+      },
+    });
+    expect(built.snapshot.checkpoints).toHaveLength(0);
+  });
+
+  test('a configured non-zero checkpoint limit still selects that many', async () => {
+    const cwd = await workspace();
+    const events = [
+      ...Array.from({ length: 3 }, (_, index) => ({
+        seq: index + 1,
+        time: index + 1,
+        type: 'user/message',
+        data: {
+          source: { kind: 'compact-checkpoint' },
+          content: [{ type: 'text', text: `summary ${String(index)}` }],
+        },
+      })),
+      human(10, 10, 'clean the build'),
+    ];
+    const main = session('main', events);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 2 },
+      },
+    });
+    expect(built.snapshot.checkpoints).toHaveLength(2);
+    expect(built.snapshot.checkpoints.at(-1)?.text).toBe('summary 2');
+  });
+
+  test('a request that only fits before the estimate is written still reviews', async () => {
+    const cwd = await workspace();
+    // Prior tool calls give the trimming pass material to remove, so the
+    // provisional-vs-stabilized difference can be absorbed instead of being
+    // reported as an unsatisfiable request.
+    const events: SessionEventLike[] = [
+      human(1, 1, 'clean the build'),
+      ...Array.from({ length: 6 }, (_, index) => ({
+        seq: 10 + index,
+        time: 10 + index,
+        type: 'tool/call',
+        data: {
+          callId: `tc-${String(index)}`,
+          name: 'bash',
+          arguments: { command: `echo ${'x'.repeat(150)}` },
+        },
+      })),
+    ];
+    const main = session('main', events);
+    const overBudget: number[] = [];
+    let accepted = 0;
+    for (let budget = 1_900; budget <= 2_600; budget += 10) {
+      const built = await buildReviewSnapshot({
+        ...base,
+        agent: { session: main },
+        cwd,
+        config: {
+          ...DEFAULT_CONFIG,
+          context: { ...DEFAULT_CONFIG.context, maxInputTokens: budget },
+        },
+      });
+      const segments = built.snapshot.budget.truncatedSegments;
+      if (segments.includes('OVER_BUDGET')) {
+        overBudget.push(budget);
+        continue;
+      }
+      accepted += 1;
+      // Any accepted request really fits, measured on the submitted text.
+      expect(built.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
+        budget,
+      );
+    }
+    // Judging the provisional render instead of the stabilized payload used to
+    // report OVER_BUDGET at ~1,960 for this state even though trimming could
+    // satisfy it. A satisfiable band must not be reported as unsatisfiable.
+    expect(overBudget).toEqual([]);
+    expect(accepted).toBeGreaterThan(0);
+  });
+});
