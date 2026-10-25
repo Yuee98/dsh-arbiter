@@ -615,8 +615,10 @@ describe('rule list header and inline editing', () => {
     ).toBeNull();
     expect(within(row(id)).getByText('填写表达式后可选择')).toBeInTheDocument();
 
-    // Saving a blank exact pattern keeps it blank rather than turning it into a
-    // typed value; the backend then rejects it as an empty expression.
+    // The saved body keeps the blank string the user has; it is never turned
+    // into a typed value. An exact `''` is a valid string value, while the
+    // rejected case is an empty *condition list*, which this test does not
+    // exercise.
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
       expect(saved).toHaveLength(1);
@@ -656,7 +658,7 @@ describe('rule list header and inline editing', () => {
     await waitFor(() => {
       expect(saved).toHaveLength(1);
     });
-    // The blank draft is sent as-is; nothing became 0.
+    // The whitespace expression is sent as-is; nothing became 0.
     expect(saved[0]).toMatchObject({
       config: {
         rules: [{ id, conditions: [{ target: 'argument', pattern: ' ' }] }],
