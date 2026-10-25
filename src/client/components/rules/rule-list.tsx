@@ -268,12 +268,7 @@ function RuleRow(props: {
             padding: '12px 14px',
           }}
         >
-          <RuleEditor
-            rule={rule}
-            index={index}
-            issues={props.issues}
-            onChange={update}
-          />
+          <RuleEditor rule={rule} issues={props.issues} onChange={update} />
         </div>
       ) : null}
     </li>

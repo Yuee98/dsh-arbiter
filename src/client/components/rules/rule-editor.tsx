@@ -44,7 +44,6 @@ const labelStyle = {
  */
 export function RuleEditor(props: {
   readonly rule: DraftRule;
-  readonly index: number;
   readonly issues: readonly RuleIssue[];
   readonly onChange: (mutator: (rule: DraftRule) => void) => void;
 }): ReactNode {
@@ -82,7 +81,6 @@ export function RuleEditor(props: {
           <RuleConditionEditor
             key={`condition-${String(conditionIndex)}`}
             index={conditionIndex}
-            total={rule.conditions.length}
             condition={condition}
             onChange={(mutator) => {
               onChange((next) => {
@@ -154,7 +152,7 @@ export function RuleEditor(props: {
         </label>
       </details>
 
-      <RuleIssueList issues={issues} index={props.index} t={t} />
+      <RuleIssueList issues={issues} t={t} />
     </div>
   );
 }
@@ -215,7 +213,6 @@ function ScopeFields(props: {
 
 function RuleIssueList(props: {
   readonly issues: readonly RuleIssue[];
-  readonly index: number;
   readonly t: Translate;
 }): ReactNode {
   if (props.issues.length === 0) return null;

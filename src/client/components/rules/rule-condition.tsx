@@ -37,7 +37,6 @@ const rowStyle = {
  */
 export function RuleConditionEditor(props: {
   readonly index: number;
-  readonly total: number;
   readonly condition: MutableRuleCondition;
   readonly onChange: (
     mutator: (condition: MutableRuleCondition) => void,
