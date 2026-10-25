@@ -10,6 +10,7 @@ import {
   type LlmLike,
 } from '../reviewer.js';
 import { evaluateCall } from '../rules/match.js';
+import type { HistoryStatus } from '../types.js';
 import {
   buildReviewSnapshot,
   type AgentLike,
@@ -40,6 +41,8 @@ interface PreparedCall extends CallContext {
   /** The exact rule list the evaluation indexed into. */
   readonly evaluatedRules: readonly CommandRule[];
   readonly prior: PriorVerdictItem[];
+  /** The facts about `prior`, read at the same moment so they cannot disagree. */
+  readonly historyStatus: HistoryStatus;
   readonly thresholds: PolicyThresholds;
   readonly extras: AuditExtras;
 }
@@ -305,7 +308,10 @@ export class CallGate {
     } catch {
       /* Keep process cwd; the snapshot records the actual value. */
     }
-    const prior = this.history.priorFor(session.id ?? 'unknown');
+    // Entries and the facts about them are read together, so an in-flight call
+    // cannot pair one observation's window with another's completeness claim.
+    const history = this.history.windowFor(session.id ?? 'unknown');
+    const prior = history.items;
     // The evaluated set is what the matcher indexes into, so it is also what the
     // historical rule name must be resolved against.
     const evaluatedRules = runtime.config.rules.filter(
@@ -319,7 +325,7 @@ export class CallGate {
       workspaceRoot: cwd,
       cwd,
       parentAuthorizationPresent: null,
-      historyTruncated: prior.length >= runtime.config.context.historyMaxItems,
+      historyTruncated: history.status.windowTruncated,
       overlapsDeniedEffect: false,
     });
     const path = evaluation.path;
@@ -331,6 +337,7 @@ export class CallGate {
       mode,
       cwd,
       prior,
+      historyStatus: history.status,
       evaluation,
       evaluatedRules,
       thresholds,
@@ -446,6 +453,7 @@ export class CallGate {
       facts: call.evaluation.facts,
       ...(hint === undefined ? {} : { hint }),
       priorVerdicts: call.prior,
+      historyStatus: call.historyStatus,
       sessionRecordGap:
         runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
     });

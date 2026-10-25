@@ -1,4 +1,4 @@
-import type { CallResult, PreToolDecision, SessionKind } from '../types.js';
+import type { PreToolDecision, SessionKind } from '../types.js';
 import type { AgentLike } from '../snapshot.js';
 import type { ContextLike } from './types.js';
 
@@ -27,26 +27,6 @@ export function deny(reason: string): PreToolDecision {
       reason,
     },
   };
-}
-
-const CALL_RESULTS: readonly CallResult[] = [
-  'allow',
-  'deny',
-  'force-ask',
-  'force-review',
-  'review-allow',
-  'review-deny',
-  'review-escalate',
-  'human-allow',
-  'human-deny',
-  'human-abort',
-  'fallback-deny',
-];
-
-export function asCallResult(value: unknown): CallResult | null {
-  return typeof value === 'string'
-    ? (CALL_RESULTS.find((entry) => entry === value) ?? null)
-    : null;
 }
 
 export function executionModeName(ctx: ContextLike): string {

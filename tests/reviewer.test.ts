@@ -150,6 +150,17 @@ const snapshot: ReviewSnapshot = {
   contextTruncated: false,
   priorVerdicts: [],
   historyTruncated: false,
+  historyStatus: {
+    coverage: 'known-empty',
+    windowTruncated: false,
+    reason: null,
+    sources: {
+      memory: { read: 0, unavailable: null },
+      session: { read: 0, unavailable: null },
+      audit: { read: 0, unavailable: null },
+    },
+    reset: false,
+  },
   missing: [],
   budget: {
     maxInputTokens: 1000,

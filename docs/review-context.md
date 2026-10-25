@@ -300,6 +300,21 @@ const parentHuman = parent?.deriveMessages()
 
 **来源**：正常运行由本会话内存状态提供，不等待持久化成功；冷恢复优先读取 `plugin:arbiter/decision` 会话裁决记录，目标窗口缺段、不可读或完整性不明时再由 SQLite 补充。按共同事件标识去重与阶段顺序补齐后，保留最近 N 条逻辑裁决，N 与 `history.maxItems` 一致。会话与 SQLite 分别接收同一次裁决的数据，不串行依赖写入。审计清理不清空内存或会话裁决记录；两个来源均不足时标明缺失或完整性未知，不能作为“从未有先前裁决”处理。宿主恢复保证待验证，具体见[分层恢复](configuration-and-audit.md#decision-history-recovery)。
 
+**共享选取**：内存、会话记录与 SQLite 只在"哪些终态进入历史""如何排序""怎样去重"上共用一份定义，避免重启改变选取结果：
+
+| 环节 | 规则 |
+|---|---|
+| 候选 | 排除 `allow`、`review-allow`、`human-allow`；其余终态（规则拒绝、审查拒绝、升级人工、人工决定、补缺拒绝）均为候选。中间阶段（`force-ask`、`force-review`、`review-escalate`）不单独当作已完成裁决 |
+| 身份 | 逻辑调用 `callId`；同一次裁决被多个来源观察只占一个窗口名额 |
+| 排序 | 升序 `(ts, callId)` 后取最近 N 条；SQL 在应用 `LIMIT` 前使用同一次序，避免截断后再排序无法找回已排除的候选 |
+| 时间 | 每次逻辑裁决只取一次时间，内存、会话 payload 与审计行共用该值 |
+| 阶段链 | 采用观测到的最长链，不拼接来源都未记录的阶段；同长度或前缀分歧保留双方读数并标记冲突 |
+| 补缺 | 会话记录只有 `string[]` 时按实际可知信息保留；需要真实阶段时读取审计 `stages`，无法确认的字段标为未知，不推断 |
+
+**覆盖与裁剪分开表达**。`coverage` 取 `known-empty`、`complete`、`partial`、`unknown`，描述"已读到的窗口是否被解释清楚"；`windowTruncated` 单独描述容量截断。两者可同时成立：窗口被裁到 N 条仍可完全已知，未被裁断时也可能有来源读不到。`coverage` 只能由读取结果与冲突推出，不能凭返回 0 条或恰好 N 条声称完整。正常容量裁剪沿用 `historyTruncated` 与 `budget.truncatedSegments`，恢复缺口只用 `missing[]`，二者不互相冒充。
+
+**显式重置**：运行历史被明确重置时，写入 `plugin:arbiter/history-reset` 记录作为可恢复边界；之后的冷恢复不再从会话记录或 SQLite 复活被撤销的历史。普通内存释放不在其列，仍按正常流程恢复。清空审计日志只影响 SQLite。
+
 **结构**：保留完整判定链与各阶段原因，字段形态为建议稿，实际审计结构见[记录内容](configuration-and-audit.md#design-9-2)。例如：
 
 ```jsonc
