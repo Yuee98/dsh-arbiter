@@ -151,6 +151,51 @@ export interface LogDetail {
   readonly config: unknown;
 }
 
+/** One model the host catalog offers for a provider route. */
+export interface ModelOptionView {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+}
+
+/** One provider route with its successfully loaded models. */
+export interface ModelGroupView {
+  readonly id: string;
+  readonly name: string;
+  readonly models: readonly ModelOptionView[];
+}
+
+/**
+ * One provider whose catalog lookup failed.
+ *
+ * The host's own message is replaced by a stable code: a provider error may
+ * quote endpoint or credential material, which must not reach the page.
+ */
+export interface ModelCatalogFailureView {
+  readonly id: string;
+  readonly name: string;
+  readonly code: string;
+}
+
+/** The read-only Reviewer model directory. */
+export interface ModelCatalogView {
+  /** False when this composition has no LLM service at all. */
+  readonly supported: boolean;
+  readonly groups: readonly ModelGroupView[];
+  readonly failures: readonly ModelCatalogFailureView[];
+}
+
+/** What the host could determine about one credential reference. */
+export type CredentialState =
+  'configured' | 'unconfigured' | 'unsupported' | 'unavailable';
+
+/** Credential presence only; the value never leaves the host credential store. */
+export interface CredentialStatusView {
+  readonly state: CredentialState;
+  readonly configured: boolean;
+  readonly source: string | null;
+}
+
 export interface SlotProps {
   readonly view?: string;
 }

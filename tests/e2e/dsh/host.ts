@@ -17,6 +17,7 @@ import {
   profileName,
   resolveDshCommand,
 } from './profile.js';
+import type { SeededModelGroup } from './profile.js';
 import { launchHost, redactHostLog, stopHost } from './process.js';
 
 const execFileAsync = promisify(execFile);
@@ -33,6 +34,7 @@ export interface DshHost {
 
 export interface HostOptions {
   readonly arbiterConfig?: 'empty' | 'unset';
+  readonly modelGroups?: readonly SeededModelGroup[];
 }
 
 async function buildFingerprint(
@@ -100,6 +102,9 @@ export async function startDshHost(
     ...(options.arbiterConfig === undefined
       ? {}
       : { arbiterConfig: options.arbiterConfig }),
+    ...(options.modelGroups === undefined
+      ? {}
+      : { modelGroups: options.modelGroups }),
   });
   const env = isolatedEnv(profile.home);
   let host: ReturnType<typeof launchHost> | undefined;

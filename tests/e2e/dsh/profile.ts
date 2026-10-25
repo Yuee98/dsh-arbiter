@@ -21,12 +21,25 @@ export interface IsolatedProfile {
   readonly documentPath: string;
 }
 
+/** One hand-declared provider route seeded for the catalog cases. */
+export interface SeededModelGroup {
+  readonly provider: string;
+  readonly displayName: string;
+  readonly models: readonly { readonly id: string; readonly name: string }[];
+}
+
 export interface ProfileOptions {
   /**
    * `empty` writes an explicit empty object, while `unset` omits the user
    * config entirely so the plugin must apply the first-install defaults.
    */
   readonly arbiterConfig?: 'empty' | 'unset';
+  /**
+   * Hand-declared `llm-pi-ai` routes, so the real host model directory is not
+   * empty without a credential or any network call: pi-ai resolves these
+   * models from configuration alone.
+   */
+  readonly modelGroups?: readonly SeededModelGroup[];
 }
 
 /** Never inherit the user's selected profile, credentials or model settings. */
@@ -88,6 +101,43 @@ export async function resolveDshCommand(): Promise<DshCommand> {
   );
 }
 
+/**
+ * A `llm-pi-ai` row that declares the given routes itself.
+ *
+ * No `apiKeyEnv` is named, so the adapter reads no credential; models resolve
+ * from the declared catalog. The base URL points at a closed local port, which
+ * only matters if a test ever streams a request — the catalog listing never
+ * connects.
+ */
+function seededModelRow(
+  groups: readonly SeededModelGroup[] | undefined,
+): readonly unknown[] {
+  if (groups === undefined || groups.length === 0) return [];
+  const providers = Object.fromEntries(
+    groups.map((group) => [
+      group.provider,
+      {
+        displayName: group.displayName,
+        api: 'openai-completions',
+        baseURL: 'http://127.0.0.1:9/v1',
+        models: group.models.map((model) => ({
+          id: model.id,
+          name: model.name,
+          contextWindow: 32768,
+          maxTokens: 4096,
+        })),
+      },
+    ]),
+  );
+  return [
+    {
+      id: 'llm-pi-ai',
+      name: '@deepseek-ai/dsh-llm-pi-ai',
+      config: { providers },
+    },
+  ];
+}
+
 /** The same public link: profile format as `dsh plugin add`, without downloads. */
 export async function createIsolatedProfile(
   repoRoot: string,
@@ -135,6 +185,7 @@ export async function createIsolatedProfile(
     join(profile, 'cordis.patch.yml'),
     JSON.stringify([
       arbiterRow,
+      ...seededModelRow(options.modelGroups),
       {
         id: 'sandbox-policy',
         name: '@deepseek-ai/dsh-sandbox-policy',

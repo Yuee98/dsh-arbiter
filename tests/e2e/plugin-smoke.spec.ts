@@ -113,23 +113,25 @@ test(
     ).toBeVisible();
     await expect(plugin.getByRole('status')).toHaveCount(0);
 
+    await plugin.getByRole('button', { name: 'Reviewer', exact: true }).click();
+    await expect(
+      plugin.getByRole('heading', { name: 'Reviewer 类型', exact: true }),
+    ).toBeVisible();
+    // The decision backend is the one that holds a credential reference, so
+    // the status query belongs to switching to it rather than to the tab.
     const [credentials] = await Promise.all([
       page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === '/api/arbiter/credentials',
       ),
-      plugin.getByRole('button', { name: 'Reviewer', exact: true }).click(),
+      plugin
+        .getByRole('radio', { name: 'decision（分布 + 四探针）', exact: true })
+        .check(),
     ]);
     expect(credentials.status()).toBe(200);
     await expect(
-      plugin.getByRole('heading', { name: 'Reviewer 类型', exact: true }),
-    ).toBeVisible();
-    await plugin
-      .getByRole('radio', { name: 'decision（分布 + 四探针）', exact: true })
-      .check();
-    await expect(
       plugin.getByText(
-        /^(未设置|已设置.*|当前 composition 没有 credentials 服务)$/,
+        /^(未设置|已设置.*|无法读取凭据状态|当前 composition 没有 credentials 服务)$/,
       ),
     ).toBeVisible();
     await expect(plugin.getByRole('status')).toHaveCount(0);

@@ -21,5 +21,9 @@ export {
   signalsFromChat,
 } from './reviewer/signals.js';
 export { runChatReviewer } from './reviewer/chat.js';
-export type { LlmLike } from './reviewer/chat.js';
+export type {
+  LlmLike,
+  LlmModelLike,
+  LlmProviderLike,
+} from './reviewer/chat.js';
 export { runDecisionReviewer } from './reviewer/decision.js';
