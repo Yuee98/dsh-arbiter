@@ -336,7 +336,10 @@ describe('redirects, assignments and cwd', () => {
       'if true; then cd /tmp; fi\necho hi > out.txt',
       'case x in x) cd /tmp;; esac\necho hi > out.txt',
     ]) {
-      expect({ source, cwd: parseShell(source, '/outside').redirects[0]?.cwd }).toEqual({
+      expect({
+        source,
+        cwd: parseShell(source, '/outside').redirects[0]?.cwd,
+      }).toEqual({
         source,
         cwd: '/outside',
       });
@@ -352,6 +355,18 @@ describe('redirects, assignments and cwd', () => {
       parseShell('cd /tmp && true\necho hi > out.txt', '/outside').redirects[0]
         ?.cwd,
     ).toBeNull();
+  });
+
+  test('a compound redirect resolves from the directory on entry', () => {
+    // The shell opens the redirect before the body runs, so a `cd` inside the
+    // group must not move where the file is written.
+    expect(
+      parseShell('{ cd /workspace; } > out.txt', '/outside').redirects[0]?.cwd,
+    ).toBe('/outside');
+    expect(
+      parseShell('cd /tmp && { echo hi; } > out.txt', '/outside').redirects[0]
+        ?.cwd,
+    ).toBe('/tmp');
   });
 
   test('a function definition does not move the caller', () => {
@@ -531,6 +546,29 @@ describe('effect facts', () => {
     expect(result.facts.expansionRisk).toBeNull();
   });
 
+  test('a pipe argument is not a pipe', () => {
+    // `sh` after `--output` is a filename, not an interpreter receiving stdout.
+    expect(
+      factsOf('curl --output sh https://example.test').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+  });
+
+  test('a pipe is linked from the stage that pipes, not its nested command', () => {
+    // `curl "$(date)" | sh` pipes curl's output. Linking the last extracted
+    // command would report `date | sh` and lose the real execution.
+    const parse = parseShell('curl "$(date)" | sh');
+    const curl = parse.commands[0];
+    const date = parse.commands[1];
+    expect(curl?.text).toBe('curl "$(date)"');
+    expect(date?.text).toBe('date');
+    expect(curl?.pipeTarget).toBe(2);
+    expect(date?.pipeTarget).toBeNull();
+    expect(factsOf('curl "$(date)" | sh').facts.observed.pipelineExec).toEqual([
+      ['curl', 'sh'],
+    ]);
+  });
+
   test('pipeline execution requires a real pipe edge', () => {
     // Two commands on separate lines run sequentially; only `|` makes the second
     // one consume the first one's output.
@@ -571,6 +609,18 @@ describe('effect facts', () => {
     const credentials = factsOf(manyCredentials);
     expect(credentials.facts.observed.credentialPaths).toHaveLength(30);
     expect(credentials.facts.completeness).toBe('partial');
+    // The cap must be stated, not only implied by a lower completeness.
+    expect(credentials.facts.truncated).toBe(true);
+
+    const manyExpansions = factsOf(
+      Array.from(
+        { length: 40 },
+        (_, index) => `echo $VAR_${String(index)}`,
+      ).join('\n'),
+    );
+    expect(manyExpansions.facts.unresolvedExpansions).toHaveLength(30);
+    expect(manyExpansions.facts.truncated).toBe(true);
+    expect(manyExpansions.facts.completeness).toBe('partial');
   });
 });
 

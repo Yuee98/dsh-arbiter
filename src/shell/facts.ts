@@ -149,7 +149,7 @@ class FactCollector {
     const args = command.words.slice(1).map((word) => word.value ?? word.text);
     if (isNetworkCommand(name, args)) this.networkCommands.push(name);
     if (name !== 'curl' && name !== 'wget') return;
-    const interpreter = this.pipedInterpreter(command, args);
+    const interpreter = this.pipedInterpreter(command);
     if (interpreter !== null) this.pipelineExec.push([name, interpreter]);
   }
 
@@ -160,15 +160,9 @@ class FactCollector {
    * sequentially, so reporting `curl\nbash` as `curl | bash` would invent a
    * dangerous fact nobody observed.
    */
-  private pipedInterpreter(
-    command: ShellCommand,
-    args: readonly string[],
-  ): string | null {
-    // `curl ... | sh` names the interpreter as an argument of the downloader.
-    const shellPipe = args.find((argument) =>
-      ['sh', 'bash', 'zsh'].includes(argument),
-    );
-    if (shellPipe !== undefined) return shellPipe;
+  private pipedInterpreter(command: ShellCommand): string | null {
+    // Only a real pipe edge proves the download is executed. A bare `sh` argument
+    // (`curl --output sh …`) is a value, not a pipe.
     if (command.pipeTarget === null) return null;
     const receiver = this.parse.commands.find(
       (other) => other.index === command.pipeTarget,
@@ -257,10 +251,13 @@ class FactCollector {
     // Every capped category downgrades fact completeness; only `writes` has a
     // separate `truncated` flag in the shared shape, so the others are reported
     // through `completeness` rather than silently looking complete.
+    // Any capped list that overflowed makes the observation set incomplete, and
+    // `truncated` says so explicitly rather than only lowering completeness.
     if (
       this.writes.length > LIST_LIMIT ||
       new Set(this.networkCommands).size > LIST_LIMIT ||
       new Set(this.credentialPaths).size > LIST_LIMIT ||
+      this.parse.unresolved.length > LIST_LIMIT ||
       this.pipelineExec.length > PIPELINE_LIMIT
     ) {
       this.truncated = true;
@@ -359,7 +356,10 @@ export function buildFacts(
       parentAuthorizationPresent: options.parentAuthorizationPresent,
       overlapsDeniedEffect: options.overlapsDeniedEffect,
       historyTruncated: options.historyTruncated,
-      ...(observedWrites.length > LIST_LIMIT ? { truncated: true } : {}),
+      // One flag covers every capped category: the reviewer only needs to know
+      // that some observation was cut, and `completeness` already says the set is
+      // not exhaustive.
+      ...(collected.truncated ? { truncated: true } : {}),
     },
     writesOutsideWorkspace: collected.writesOutsideWorkspace,
   };

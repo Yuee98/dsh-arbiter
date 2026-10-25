@@ -436,19 +436,23 @@ class AstVisitor implements ExpansionSink {
     // Each element runs in its own subshell with its own copy of the caller's
     // state. Sharing one mutable frame would let `cd X | echo hi > out` resolve the
     // redirect from X, even though the `cd` never moved the second element.
-    const starts: number[] = [];
+    // The command that *is* the stage is the first one the element produces: a
+    // command is pushed before its nested expansions are visited, so the outer
+    // `curl` comes before the `date` inside `$(date)`. Linking the last command
+    // instead would report `date | sh` for `curl "$(date)" | sh`.
+    const stages: number[] = [];
     for (const element of node.commands) {
-      const first = this.collected.commands.length;
-      starts.push(first);
+      const before = this.collected.commands.length;
       this.node(element, { cwd: frame.cwd, pipeline: frame.pipeline + 1 });
-      starts.push(this.collected.commands.length - 1);
+      stages.push(before < this.collected.commands.length ? before : -1);
     }
     // A pipe edge exists only where the AST has an operator. Adjacent statements in
     // a script are sequential, not piped, so they get no link.
     for (const [index] of node.operators.entries()) {
-      const sender = starts[index * 2 + 1];
-      const receiver = starts[(index + 1) * 2];
+      const sender = stages[index];
+      const receiver = stages[index + 1];
       if (sender === undefined || receiver === undefined) continue;
+      if (sender < 0 || receiver < 0) continue;
       this.collected.pipeLinks.set(sender, receiver);
     }
     // Elements cannot move the caller, so its directory is unchanged.
@@ -480,12 +484,15 @@ class AstVisitor implements ExpansionSink {
     node: Extract<PipelineNode, { readonly type: 'Redirected' }>,
     frame: Frame,
   ): void {
+    // The construct's redirects are opened before its body runs, so they resolve
+    // from the directory on entry — `{ cd /tmp; } > out` writes to the caller's
+    // `out`, not to `/tmp/out`.
+    const entry: Frame = { cwd: frame.cwd, pipeline: frame.pipeline };
     this.node(node.command, frame);
-    // The compound's own redirects are recorded on the global list; they target
-    // the construct rather than the last command inside it, so no command claims
-    // to write them and no subject is lost.
+    // They target the construct rather than the last command inside it, so no
+    // command claims to write them and no subject is lost.
     for (const redirect of node.redirects) {
-      this.redirect(redirect, this.collected.commands.length - 1, frame);
+      this.redirect(redirect, this.collected.commands.length - 1, entry);
     }
     this.flushPending();
     this.cover(node.pos, node.end);
