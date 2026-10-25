@@ -461,22 +461,19 @@ class AstVisitor implements ExpansionSink {
     operators: readonly ('&&' | '||')[],
     frame: Frame,
   ): void {
-    // The right side may or may not run, so the caller's directory afterwards is
-    // the join of "left side ran" and "left side did not". Only a directory both
-    // outcomes agree on survives; everything else is unknown.
+    // The right side of a conditional operator may not run at all, so the
+    // directory the caller is in afterwards is the join of every path through the
+    // list. Only a value all paths agree on survives.
+    const entry = frame.cwd;
     for (const [index, command] of nodes.entries()) {
-      const before = frame.cwd;
       if (operators[index - 1] === '||') {
-        // A failure before `||` means the `cd` that would have run did not.
+        // The right side runs only after a failure, so the state the left side
+        // would have left behind is not the one it starts in.
         frame.cwd = null;
       }
       this.node(command, frame);
-      if (operators[index - 1] === '&&') {
-        // After `&&`, the caller can only be sure the directory if the command
-        // provably did not change it.
-        frame.cwd = frame.cwd === before ? before : null;
-      }
     }
+    if (operators.length > 0 && frame.cwd !== entry) frame.cwd = null;
   }
 
   private redirected(
@@ -515,7 +512,12 @@ class AstVisitor implements ExpansionSink {
   }
 
   private compound(node: CompoundCommand, frame: Frame): void {
+    const entry = frame.cwd;
     this.compoundBody(node, frame);
+    // A loop may run zero times, an `if` may take another branch, and a `case` may
+    // match no arm, so a `cd` inside one is not a directory the rest of the call is
+    // known to be in. Only a brace group always runs its body in order.
+    if (node.type !== 'BraceGroup') frame.cwd = entry;
     this.flushPending();
     this.cover(node.pos, node.end);
   }

@@ -327,6 +327,33 @@ describe('redirects, assignments and cwd', () => {
     ).toBe('/workspace');
   });
 
+  test('a conditional or repeated block does not commit its directory', () => {
+    // A loop may run zero times and an `if` may take another branch, so a `cd`
+    // inside one is not a directory the rest of the call is known to be in.
+    for (const source of [
+      'while true; do cd /tmp; done\necho hi > out.txt',
+      'for i in 1; do cd /tmp; done\necho hi > out.txt',
+      'if true; then cd /tmp; fi\necho hi > out.txt',
+      'case x in x) cd /tmp;; esac\necho hi > out.txt',
+    ]) {
+      expect({ source, cwd: parseShell(source, '/outside').redirects[0]?.cwd }).toEqual({
+        source,
+        cwd: '/outside',
+      });
+    }
+    // A brace group always runs its body in order, so its `cd` does apply.
+    expect(
+      parseShell('{ cd /tmp; }\necho hi > out.txt', '/outside').redirects[0]
+        ?.cwd,
+    ).toBe('/tmp');
+    // An `&&` list may not run its right side, so the joined directory is unknown
+    // even when the left side moved.
+    expect(
+      parseShell('cd /tmp && true\necho hi > out.txt', '/outside').redirects[0]
+        ?.cwd,
+    ).toBeNull();
+  });
+
   test('a function definition does not move the caller', () => {
     expect(
       parseShell('f() { cd /workspace; }\necho hi > out.txt', '/outside')
