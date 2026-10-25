@@ -29,7 +29,7 @@ export interface CoexistenceFeed {
  */
 export function useCoexistenceFeed(
   initial: CoexistenceView | null,
-  onError: (failure: unknown) => void,
+  onError: (failure: unknown) => void = () => undefined,
 ): CoexistenceFeed {
   const [view, setView] = useState<CoexistenceView | null>(initial);
 
@@ -46,6 +46,9 @@ export function useCoexistenceFeed(
         })
         .catch(() => undefined);
     };
+    // A mount is the first observation: an overlay that only polled later would
+    // miss a conflict already standing when the page opened.
+    refresh();
     const timer = setInterval(refresh, COEXISTENCE_POLL_MS);
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') refresh();

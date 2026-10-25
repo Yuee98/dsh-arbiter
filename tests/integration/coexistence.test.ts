@@ -13,6 +13,9 @@ import {
 } from 'vitest';
 
 import { apply } from '../../src/index.js';
+import { appendRecord } from '../../src/records.js';
+import { applyConfig } from '../../src/host/runtime.js';
+import { parseDocument } from '../../src/config.js';
 import { OFFICIAL_AUTO_REVIEW_MODULE } from '../../src/host/coexistence-detect.js';
 import { installSessionRecordApi } from '../../src/records.js';
 import type {
@@ -111,6 +114,8 @@ interface Harness {
     next: () => Promise<{ kind: string; reason?: string }>,
   ) => Promise<{ kind: string; reason?: string }>;
   readonly dispose: () => void;
+  /** Activate a new configuration through the production activation path. */
+  readonly reconfigure: (config: unknown) => void;
   /** Add a foreign approval-capable pre-execute listener to the load-time view. */
   readonly addForeignListener: (moduleName: string) => void;
 }
@@ -138,6 +143,7 @@ type Listener = (...args: never[]) => unknown;
 function createHarness(
   sessions: readonly StubSession[],
   config: unknown,
+  options: { readonly autoSlotTaken?: boolean } = {},
 ): Harness {
   const routes = new Map<string, FetchRouteLike>();
   const disposers: (() => unknown)[] = [];
@@ -223,7 +229,16 @@ function createHarness(
         request: () => Promise.resolve('unavailable'),
       };
     }
-    if (key === 'permissionPresets') return { registerAuto: () => () => {} };
+    if (key === 'permissionPresets') {
+      return {
+        registerAuto: () => {
+          // The host throws when another integration already owns the slot.
+          if (options.autoSlotTaken === true)
+            throw new Error('permission: preset "auto" is already registered');
+          return () => undefined;
+        },
+      };
+    }
     if (key === 'workingDirectory') {
       return { ensure: () => Promise.resolve(process.cwd()) };
     }
@@ -274,7 +289,7 @@ function createHarness(
 
   // The permission lifecycle proves the Auto slot through the registration it
   // ran, so this harness needs no second source for it.
-  apply(ctx, config);
+  const host = apply(ctx, config);
   return {
     official: {
       remove: () => {
@@ -312,6 +327,12 @@ function createHarness(
     },
     dispose: () => {
       for (const dispose of disposers) dispose();
+    },
+    reconfigure: (next) => {
+      // Same path a UI save or file reload takes: parse, commit, notify.
+      const parsed = parseDocument(next);
+      if (parsed.errors.length > 0) throw new Error('invalid test config');
+      applyConfig(host, parsed.config, 'ui');
     },
   };
 }
@@ -642,6 +663,143 @@ describe('conflict state and reminders', () => {
       });
       expect(missing.status).toBe(400);
       expect(missing.body['code']).toBe('invalid-notice-ids');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('resuming a retained admission under a running conflict', () => {
+  test('turning the master switch back on keeps the session at a safe boundary', async () => {
+    const session = makeSession('s-resume');
+    // A retained admission is still in the log from a previous runtime.
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-resume',
+      rootSessionId: 's-resume',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    const harness = createHarness([session], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      // Re-enabling the plugin reconciles retained admissions. A running
+      // conflict must hold the widening rather than restore full access.
+      harness.reconfigure({
+        ...ALLOW_ECHO,
+        enabled: true,
+        boundary: 'trusted',
+      });
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      // The session is still gated: the conflict never withdrew protection.
+      expect((await harness.gate(call(session, 'resumed'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(decisions(session).at(-1)).toMatchObject({
+        callId: 'resumed',
+        result: 'allow',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('with no conflict the configured trusted boundary is applied as before', async () => {
+    const session = makeSession('s-trusted-resume');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-trusted-resume',
+      rootSessionId: 's-trusted-resume',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('cold restore under a running conflict', () => {
+  test('a lazy boundary re-apply never widens while the official plugin runs', async () => {
+    const session = makeSession('s-cold');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-cold',
+      rootSessionId: 's-cold',
+      enabled: true,
+      // The record says trusted, so a cold sync would widen without the veto.
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      // The first call after a reload is where the boundary is re-applied.
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(decisions(session)).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('Auto-slot capability after a cleared conflict', () => {
+  test('a failed registration stays reported even with no official conflict', async () => {
+    const session = makeSession('s-slot');
+    const harness = createHarness([session], ALLOW_ECHO, {
+      autoSlotTaken: true,
+    });
+    try {
+      const view = coexistenceOf(
+        (await harness.request('/api/arbiter/state')).body,
+      );
+      expect(view['blocked']).toBe(false);
+      expect(view['autoSlot']).toBe('other');
+      expect(view['autoSlotProblem']).toMatchObject({
+        kind: 'registration-failed',
+        recovery: 'reload-plugin',
+      });
+      // The capability problem is not a takeover block: the session still works.
+      expect((await enable(harness, 's-slot')).status).toBe(200);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('recovery after the conflict clears', () => {
+  test('the same session takes over again once the official plugin stops', async () => {
+    const session = makeSession('s-recover');
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      harness.official.activate();
+      expect((await enable(harness, 's-recover')).status).toBe(409);
+      expect(admissions(session)).toEqual([]);
+      harness.official.remove();
+      const enabled = await enable(harness, 's-recover');
+      expect(enabled.status).toBe(200);
+      expect(admissions(session).at(-1)?.['enabled']).toBe(true);
+      // The status read confirms the clearing without a restart.
+      const view = coexistenceOf(
+        (await harness.request('/api/arbiter/state')).body,
+      );
+      expect(view).toMatchObject({ blocked: false, conflicts: [] });
     } finally {
       harness.dispose();
     }

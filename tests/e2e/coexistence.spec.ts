@@ -265,7 +265,10 @@ test(
         expect(record(cleared['official'], 'official')).toMatchObject({
           running: false,
         });
-        expect(cleared).toMatchObject({ blocked: false, conflicts: [] });
+        // A host-shipped listener is not a conflict; only an outside plugin
+        // would be listed here, and this profile composes none.
+        expect(cleared['conflicts'] ?? []).toEqual([]);
+        expect(cleared).toMatchObject({ blocked: false });
 
         const fresh = await runOneCall(
           page,
@@ -291,9 +294,12 @@ test(
   },
 );
 
+// Four real agent turns: each one boots the model fixture, waits for the tool
+// result, then settles the turn.
 test('another approval listener warns without blocking and its guard stays separate', async ({
   page,
 }, testInfo) => {
+  test.setTimeout(240_000);
   const caseHost: CaseHost = await createCaseHost(
     testInfo.outputPath('coexist-third-party'),
     {
@@ -328,7 +334,10 @@ test('another approval listener warns without blocking and its guard stays separ
                   'conflicting-provider',
                   'index.ts',
                 ),
-              config: { guardMarker: 'coexist-guard-deny' },
+              config: {
+                guardMarker: 'coexist-guard-deny',
+                denyMarker: 'coexist-listener-deny',
+              },
             },
           ],
         },
@@ -412,6 +421,33 @@ test('another approval listener warns without blocking and its guard stays separ
           JSON.stringify(event.data).includes('conflicting provider guard'),
       ),
     ).toBe(true);
+    // Another plugin's own listener can also deny before Arbiter is reached.
+    // That verdict belongs to its owner: no Arbiter decision record may appear.
+    const deniedByOther = await runOneCall(
+      page,
+      host,
+      'COEXIST-LISTENER',
+      'echo coexist-listener-deny',
+    );
+    const foreignDenial =
+      (await waitForSession(host.home, (item) =>
+        item.events.some(
+          (event) =>
+            event.type === 'tool/result' &&
+            JSON.stringify(event.data).includes('conflicting provider denied'),
+        ),
+      )) ?? deniedByOther;
+    // Arbiter recorded nothing for that call, so no deny or escalation carries
+    // this plugin's name.
+    expect(
+      decisions(foreignDenial).some(
+        (entry) =>
+          entry.includes('coexist-listener-deny') ||
+          entry.includes('"result":"deny"') ||
+          entry.includes('error-escalate'),
+      ),
+    ).toBe(false);
+
     // No approval was opened and no mode was forced: the native permission
     // flow was never touched by detection.
     expect(permissionCommands(guardedSession.events)).toEqual([]);

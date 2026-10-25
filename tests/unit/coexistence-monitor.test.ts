@@ -38,9 +38,9 @@ interface Harness {
   readonly monitor: CoexistenceMonitor;
   /** Replace what the hosts' public surfaces report. */
   readonly setOfficial: (phase: 'active' | 'failed' | null) => void;
+  readonly setAutoSlot: (slot: AutoSlot) => void;
   /** `other` is a foreign approval-capable listener; `self` is Arbiter's own. */
   readonly setHooks: (owner: 'other' | 'self' | null) => void;
-  readonly setAutoSlot: (slot: AutoSlot) => void;
 }
 
 function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
@@ -69,8 +69,8 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
       if (hooks === null) return {};
       // The host's own listener record carries the owning context, so identity
       // is what distinguishes this plugin's gate from a competing one.
-      const fiber =
-        hooks === 'self' ? { ...hostFiber, state: 2 } : foreignFiber;
+      // Identity is the discriminator, so the same object must be reused.
+      const fiber = hooks === 'self' ? hostFiber : foreignFiber;
       return {
         'tools/pre-execute': [{ ctx: { fiber }, callback: () => undefined }],
       };
@@ -102,11 +102,11 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
     setOfficial: (next) => {
       official = next;
     },
-    setHooks: (owner) => {
-      hooks = owner;
-    },
     setAutoSlot: (next) => {
       slot = next;
+    },
+    setHooks: (owner) => {
+      hooks = owner;
     },
   };
 }
@@ -238,5 +238,56 @@ describe('the enable guard', () => {
     const view = test_.monitor.read('own');
     expect(view.conflicts).toEqual([]);
     expect(view.blocked).toBe(false);
+  });
+});
+
+describe('host-side observation without a client', () => {
+  test('the monitor observes on its own schedule and records the transition once', async () => {
+    const test_ = harness();
+    const stop = test_.monitor.start(10);
+    try {
+      // No page and no request: the interval alone must see the conflict.
+      expect(test_.monitor.read('idle').observations).toBeGreaterThan(0);
+      test_.setOfficial('active');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const observed = test_.monitor.read('after');
+      expect(observed.notices).toHaveLength(1);
+      expect(observed.blocked).toBe(true);
+      // The interval keeps observing but never opens a second notice.
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(test_.monitor.read('later').notices).toHaveLength(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('stopping the observation leaves the last confirmed state readable', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    const stop = test_.monitor.start(10_000);
+    stop();
+    const view = test_.monitor.read('after-stop');
+    expect(view.blocked).toBe(true);
+    expect(view.notices).toHaveLength(1);
+  });
+});
+
+describe('resolving a conflict still reports the Auto-slot capability', () => {
+  test('a cleared official conflict does not hide a failed registration', () => {
+    const test_ = harness();
+    test_.setAutoSlot('other');
+    const other = test_.monitor.read('other');
+    expect(other.blocked).toBe(false);
+    expect(other.autoSlotProblem).toMatchObject({
+      kind: 'registration-failed',
+      recovery: 'reload-plugin',
+    });
+    // A host without the slot is a different, also unresolved fact.
+    test_.setAutoSlot('unknown');
+    expect(test_.monitor.read('unknown').autoSlotProblem).toMatchObject({
+      kind: 'slot-unavailable',
+    });
+    test_.setAutoSlot('arbiter');
+    expect(test_.monitor.read('arbiter').autoSlotProblem).toBeNull();
   });
 });

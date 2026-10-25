@@ -34,11 +34,16 @@
   "notice": {
     "blockingTitle": "存在冲突的审批提供者",
     "blockingBody": "检测到官方 Auto Review（{source}）正在运行，因此不会新接管会话，也没有产生权限扩张。",
-    "blockingGuidance": "关闭方式：打开插件管理，停用官方 Auto Review 插件并确认其运行状态变为未运行；随后重新加载本页，再启用会话。设置、规则测试、历史与诊断入口仍可使用。",
+    "blockingGuidance": "关闭方式：点击下方「打开插件管理」，停用官方 Auto Review 插件并确认其运行状态变为未运行；随后重新加载本页，再启用会话。设置、规则测试、历史与诊断入口仍可使用。",
     "warningTitle": "其他插件可能影响审批",
     "warningBody": "{source} 注册了 {capability}；Arbiter 继续按当前模式审查。",
     "dismiss": "知道了",
     "acknowledge": "知道了",
-    "detectionOnly": "本次只显示已观察到的冲突；部分接口不可用时无法确认完整状态。"
+    "detectionOnly": "本次只显示已观察到的冲突；部分接口不可用时无法确认完整状态。",
+    "openManager": "打开插件管理"
+  },
+  "autoSlotProblem": {
+    "failed": "Auto 槽注册失败，该入口未被 Arbiter 接管：{error}。请重新加载本插件后再确认状态。",
+    "unavailable": "当前宿主不提供 Auto 槽，Arbiter 无法在该入口接管。"
   }
 }

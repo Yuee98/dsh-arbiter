@@ -206,7 +206,7 @@ export class SessionAdmissions {
    *     a child on purpose.
    */
   private syncOne(id: string, session: SessionLike): boolean {
-    const boundary = configuredBoundary(this.host.runtime.config);
+    const boundary = this.effectiveBoundary(id, session);
     const folded = this.admissionOf(id);
     if (folded === null) {
       if (boundary !== 'trusted') {
@@ -231,6 +231,43 @@ export class SessionAdmissions {
     }
     // Report whether the promise now holds, not whether a record was written.
     return boundary !== 'guarded' || this.atSafeBoundary(session);
+  }
+
+  /**
+   * The boundary this session may actually receive right now.
+   *
+   * A resume is an activation too: a retained admission whose master switch is
+   * turned back on, or a cold restore that lazily re-applies the configured
+   * boundary, must not widen a session while another approval provider is
+   * running. Widening is the one write that grants a permission this plugin
+   * could not honour, so a blocking conflict degrades the *widening* to guarded
+   * while the gate and the current mode stay exactly as they are. The session
+   * is then recorded at the narrower boundary, so the decision converges
+   * instead of being retried on every call.
+   */
+  private effectiveBoundary(
+    id: string,
+    session: SessionLike,
+  ): ExecutionBoundary {
+    const configured = configuredBoundary(this.host.runtime.config);
+    if (configured !== 'trusted') return configured;
+    const folded = this.admissionOf(id);
+    // A delegated child is never widened by this plugin, and an unadmitted
+    // scope is not a resume; neither needs the veto read.
+    if (session.header?.parentSession !== undefined) return configured;
+    if (folded !== null && !folded.enabled) return configured;
+    const veto = this.enableGuard?.() ?? null;
+    if (veto === null) return configured;
+    this.host.lifecycle('admission/widening-held', {
+      sessionId: id,
+      code: veto.code,
+    });
+    this.host.ctx.logger.warn(
+      'arbiter: session %s keeps the guarded boundary while another approval provider runs (%s)',
+      id,
+      veto.code,
+    );
+    return 'guarded';
   }
 
   /**
@@ -706,7 +743,6 @@ export class SessionAdmissions {
    * enables a session and never rewrites one that left.
    */
   syncBoundary(config: ArbiterConfig): void {
-    const boundary = configuredBoundary(config);
     if (!config.enabled) {
       // The master switch turning off stops the gate, so a session this plugin
       // widened would become ungated while keeping that permission. Narrow the
@@ -715,6 +751,10 @@ export class SessionAdmissions {
       return;
     }
     for (const [id, session] of this.covered) {
+      // Turning the master switch back on is an activation too, so the
+      // configured boundary is filtered per session here as well: a running
+      // conflict may keep a retained admission at guarded but never drops it.
+      const boundary = this.effectiveBoundary(id, session);
       const folded = this.admissionOf(id);
       if (folded === null) {
         // An inherited scope has no record of its own: when its root narrows,

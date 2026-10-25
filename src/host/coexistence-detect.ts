@@ -20,10 +20,27 @@
 export const OFFICIAL_AUTO_REVIEW_MODULE =
   '@deepseek-ai/dsh-experimental-auto-review';
 
-/** Services whose presence means a listener can decide or ask about approvals. */
-const APPROVAL_SERVICES = ['approval', 'permissionPresets'] as const;
+/**
+ * The vendor scope of the host's own shipped packages.
+ *
+ * This is provenance, not a plugin list: a listener that comes from a
+ * first-party host package is host behaviour (an execution constraint the
+ * contract says to keep working), while a listener from any other package is a
+ * candidate competing approval provider. No individual third-party package is
+ * ever named.
+ */
+const HOST_VENDOR_SCOPE = '@deepseek-ai/';
 
-/** Events whose listeners can change an approval outcome. */
+/** Whether a module is host-shipped rather than installed alongside it. */
+function isHostModule(moduleName: string | null): boolean {
+  return moduleName !== null && moduleName.startsWith(HOST_VENDOR_SCOPE);
+}
+
+/**
+ * Events whose listeners can change whether a tool call proceeds or is asked
+ * about. A host guard is not a listener: `tools.guard()` registers in a separate
+ * monotonic list, so it never appears here and is never mistaken for a provider.
+ */
 export const APPROVAL_EVENTS = [
   'tools/pre-execute',
   'approval/request',
@@ -58,7 +75,13 @@ export interface ObservedHook {
   readonly moduleName: string | null;
   readonly prepend: boolean;
   readonly global: boolean;
-  readonly approvalRelated: boolean;
+  /**
+   * Services the owning fiber declared.
+   *
+   * Supporting detail only: a listener on a decision event is already capable of
+   * changing the outcome, whether or not it also injects the approval service.
+   */
+  readonly injects: readonly string[];
 }
 
 /** What the host services exposed for one read. */
@@ -257,10 +280,6 @@ function hookOwner(hook: Record<string, unknown>): {
   return { entryId: entryIdOf(entry), moduleName: moduleOf(entry) };
 }
 
-function approvalRelated(injects: readonly string[]): boolean {
-  return APPROVAL_SERVICES.some((service) => injects.includes(service));
-}
-
 function injectsOfOwner(hook: Record<string, unknown>): readonly string[] {
   const owner = hook['ctx'];
   if (!isRecord(owner)) return [];
@@ -295,7 +314,7 @@ function readHooks(
         moduleName: owner.moduleName,
         prepend: item['prepend'] === true,
         global: item['global'] === true,
-        approvalRelated: approvalRelated(injectsOfOwner(item)),
+        injects: injectsOfOwner(item),
       });
     });
   }
@@ -346,14 +365,29 @@ function hooksOf(observation: CoexistenceObservation): readonly ObservedHook[] {
  * execution and answers approval requests is two observable capabilities, and a
  * second listener on the same event from the same owner is still one row.
  */
+/** What can be said about one listener without inventing a provider identity. */
+function hookDetail(hook: ObservedHook): string | null {
+  const facts: string[] = [];
+  if (hook.prepend) facts.push('prepend');
+  if (hook.global) facts.push('global');
+  const services = hook.injects.filter(
+    (name) => name === 'approval' || name === 'permissionPresets',
+  );
+  if (services.length > 0) facts.push(services.join(','));
+  return facts.length === 0 ? null : facts.join(' ');
+}
+
 function hookConflicts(hooks: readonly ObservedHook[]): CoexistenceConflict[] {
   const seen = new Set<string>();
   const conflicts: CoexistenceConflict[] = [];
   for (const hook of hooks) {
-    if (!hook.approvalRelated) continue;
     // The official provider already has its own blocking row; repeating it as a
     // generic listener would report one fact twice, at two severities.
     if (hook.moduleName === OFFICIAL_AUTO_REVIEW_MODULE) continue;
+    // A host-shipped listener is the host's own execution constraint, which the
+    // contract keeps working. Only a listener from outside that composition is a
+    // candidate competing provider.
+    if (isHostModule(hook.moduleName)) continue;
     const key = `${hook.entryId ?? hook.moduleName ?? 'unknown'}:${hook.event}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -364,7 +398,7 @@ function hookConflicts(hooks: readonly ObservedHook[]): CoexistenceConflict[] {
       source: sourceOf(hook),
       entryId: hook.entryId,
       capability: hook.event,
-      detail: hook.prepend ? 'prepend' : null,
+      detail: hookDetail(hook),
     });
   }
   return conflicts;
@@ -380,10 +414,10 @@ export function assess(
     present: officialEntry !== undefined,
     module: OFFICIAL_AUTO_REVIEW_MODULE,
     enabled: officialEntry?.enabled ?? false,
-    running:
-      officialEntry !== undefined &&
-      officialEntry.enabled &&
-      officialEntry.phase === 'active',
+    // The live fiber state is authoritative: a saved enable flag is
+    // configuration, and the contract forbids concluding "already stopped" from
+    // it. `enabled` is reported as supporting metadata only.
+    running: officialEntry?.phase === 'active',
     phase: officialEntry?.phase ?? null,
   };
   const conflicts: CoexistenceConflict[] = [];

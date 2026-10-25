@@ -59,6 +59,10 @@ export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
     selfFiber: ctx.fiber,
   });
   admissions.setEnableGuard(() => coexistence.enableBlock());
+  // The host observes on its own schedule: a conflict appearing while no
+  // settings page is open must still open one notice and reach the log. The
+  // interval only reads inventory; gate decisions never wait on it.
+  ctx.effect(() => coexistence.start(), 'arbiter coexistence observation');
   const settlement = new CallSettlement(host, history);
   // The boundary is applied to an enabled session; a configuration change must
   // reach the sessions the user already enabled, and nothing else.

@@ -59,6 +59,26 @@ export interface CoexistenceNoticeView {
 }
 
 /**
+ * The Auto-slot capability problem that survives conflict resolution.
+ *
+ * A cleared official conflict does not prove this plugin holds the Auto entry:
+ * a registration that already failed stays failed. The UI shows this separately
+ * so "conflict gone" is never presented as "fully healthy".
+ */
+export type AutoSlotProblemView =
+  | null
+  | {
+      readonly kind: 'registration-failed';
+      readonly error: string | null;
+      readonly recovery: 'reload-plugin';
+    }
+  | {
+      readonly kind: 'slot-unavailable';
+      readonly error: null;
+      readonly recovery: 'host-unsupported';
+    };
+
+/**
  * What the host could establish about other approval providers.
  *
  * `detection: 'partial'` means a public surface was missing, so "no conflict"
@@ -77,8 +97,11 @@ export interface CoexistenceView {
     readonly phase: string | null;
   };
   readonly autoSlot: 'arbiter' | 'other' | 'unknown';
+  readonly autoSlotProblem: AutoSlotProblemView;
   readonly conflicts: readonly CoexistenceConflictView[];
   readonly notices: readonly CoexistenceNoticeView[];
+  /** How many times this runtime observed the host on its own. */
+  readonly observations: number;
   readonly updatedAt: number;
 }
 
@@ -320,11 +343,25 @@ export interface SlotProps {
 
 export interface ClientContext {
   readonly locale: LocaleService;
+  /**
+   * Cross-plugin navigation to the host's plugin panel, when it is mounted.
+   *
+   * Provided by the plugin manager; absent on a deployment that has none, in
+   * which case the conflict guidance names the panel without a shortcut.
+   */
+  readonly pluginNavigation?: {
+    openList(): void;
+    openBundle(packageName: string): void;
+  };
   effect(callback: () => () => void, label?: string): unknown;
   readonly slots: {
     inject(name: string, callback: () => unknown): void;
     register(
-      options: { readonly name: string; readonly key?: string },
+      options: {
+        readonly name: string;
+        readonly key?: string;
+        readonly id?: string;
+      },
       component: ComponentType<SlotProps>,
     ): unknown;
   };

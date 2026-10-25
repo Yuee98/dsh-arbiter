@@ -66,6 +66,46 @@ function ConflictRow({
  * It renders the unresolved state, not the notices: dismissing a reminder never
  * removes a row here, because acknowledgement is "read", not "resolved".
  */
+function slotText(t: Translate, slot: CoexistenceView['autoSlot']): string {
+  if (slot === 'arbiter') return t('coexistence.slot.arbiter');
+  if (slot === 'other') return t('coexistence.slot.other');
+  return t('coexistence.slot.unknown');
+}
+
+function officialStateText(
+  t: Translate,
+  official: CoexistenceView['official'],
+): string {
+  const state = official.running
+    ? t('coexistence.official.running')
+    : official.present
+      ? t('coexistence.official.stopped')
+      : t('coexistence.official.absent');
+  return t('coexistence.officialState', {
+    state,
+    phase: official.phase ?? t('coexistence.official.noPhase'),
+  });
+}
+
+function detectionText(t: Translate, coexistence: CoexistenceView): string {
+  return coexistence.detection === 'complete'
+    ? t('coexistence.detection.complete')
+    : t('coexistence.detection.partial', {
+        surfaces: coexistence.missing.join(', '),
+      });
+}
+
+function autoSlotProblemText(
+  t: Translate,
+  coexistence: CoexistenceView,
+): string | null {
+  const problem = coexistence.autoSlotProblem;
+  if (problem === null) return null;
+  return problem.kind === 'slot-unavailable'
+    ? t('coexistence.autoSlotProblem.unavailable')
+    : t('coexistence.autoSlotProblem.failed', { error: problem.error ?? '' });
+}
+
 export function CoexistenceSection({
   coexistence,
 }: {
@@ -79,12 +119,7 @@ export function CoexistenceSection({
   const warnings = coexistence.conflicts.filter(
     (conflict) => conflict.severity === 'warning',
   );
-  const slot =
-    coexistence.autoSlot === 'arbiter'
-      ? t('coexistence.slot.arbiter')
-      : coexistence.autoSlot === 'other'
-        ? t('coexistence.slot.other')
-        : t('coexistence.slot.unknown');
+  const slotProblem = autoSlotProblemText(t, coexistence);
   return (
     <section
       data-arbiter-coexistence
@@ -110,25 +145,13 @@ export function CoexistenceSection({
         </p>
       </div>
       <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+        <div>{officialStateText(t, coexistence.official)}</div>
         <div>
-          {t('coexistence.officialState', {
-            state: coexistence.official.running
-              ? t('coexistence.official.running')
-              : coexistence.official.present
-                ? t('coexistence.official.stopped')
-                : t('coexistence.official.absent'),
-            phase:
-              coexistence.official.phase ?? t('coexistence.official.noPhase'),
+          {t('coexistence.autoSlotState', {
+            slot: slotText(t, coexistence.autoSlot),
           })}
         </div>
-        <div>{t('coexistence.autoSlotState', { slot })}</div>
-        <div>
-          {coexistence.detection === 'complete'
-            ? t('coexistence.detection.complete')
-            : t('coexistence.detection.partial', {
-                surfaces: coexistence.missing.join(', '),
-              })}
-        </div>
+        <div>{detectionText(t, coexistence)}</div>
       </div>
       {coexistence.conflicts.length === 0 ? (
         <Notice kind="ok" text={t('coexistence.none')} />
@@ -147,6 +170,7 @@ export function CoexistenceSection({
           })}
         />
       ) : null}
+      {slotProblem === null ? null : <Notice kind="info" text={slotProblem} />}
       {warnings.length === 0 ? null : (
         <Notice kind="info" text={t('coexistence.warningGuidance')} />
       )}
@@ -165,9 +189,12 @@ export function CoexistenceSection({
 export function CoexistenceAlert({
   coexistence,
   onAcknowledge,
+  onOpenPluginManager,
 }: {
   readonly coexistence: CoexistenceView | null;
   readonly onAcknowledge: (ids: readonly string[]) => void;
+  /** Opens the host's own plugin panel; absent when the host exposes none. */
+  readonly onOpenPluginManager?: (() => void) | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   if (coexistence === null) return null;
@@ -180,6 +207,7 @@ export function CoexistenceAlert({
         notice={blocking}
         coexistence={coexistence}
         onAcknowledge={onAcknowledge}
+        onOpenPluginManager={onOpenPluginManager}
       />
     );
   return (
@@ -228,10 +256,12 @@ function BlockingAlert({
   notice,
   coexistence,
   onAcknowledge,
+  onOpenPluginManager,
 }: {
   readonly notice: CoexistenceNoticeView;
   readonly coexistence: CoexistenceView;
   readonly onAcknowledge: (ids: readonly string[]) => void;
+  readonly onOpenPluginManager?: (() => void) | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
@@ -273,7 +303,19 @@ function BlockingAlert({
         {coexistence.official.present ? null : (
           <p style={{ margin: 0 }}>{t('coexistence.notice.detectionOnly')}</p>
         )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          {onOpenPluginManager === undefined ? null : (
+            <Button
+              onClick={() => {
+                // Opening the manager is a navigation action, not an
+                // acknowledgement: the conflict stays visible until it is
+                // actually gone.
+                onOpenPluginManager();
+              }}
+            >
+              {t('coexistence.notice.openManager')}
+            </Button>
+          )}
           <Button
             tone="primary"
             onClick={() => {

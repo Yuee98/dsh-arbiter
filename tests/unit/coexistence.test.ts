@@ -42,7 +42,7 @@ function hook(
     moduleName: options.moduleName ?? 'third-party-plugin',
     prepend: options.prepend ?? false,
     global: options.global ?? false,
-    approvalRelated: options.approvalRelated ?? true,
+    injects: options.injects ?? ['tools'],
   };
 }
 
@@ -86,7 +86,11 @@ describe('official Auto Review detection', () => {
   });
 
   test.each([
-    ['disabled entry', { enabled: false }],
+    ['stopped after disable', { enabled: false, phase: 'disposed' as const }],
+    [
+      'registered but not loaded',
+      { enabled: false, phase: 'unknown' as const },
+    ],
     ['failed load', { phase: 'failed' as const }],
     ['still loading', { phase: 'loading' as const }],
     ['pending', { phase: 'pending' as const }],
@@ -104,6 +108,23 @@ describe('official Auto Review detection', () => {
       expect(result.conflicts).toEqual([]);
     },
   );
+
+  test('a saved disabled flag over a still-active fiber still blocks', () => {
+    // The contract forbids concluding "stopped" from the saved switch: only the
+    // live fiber state proves the provider is no longer running.
+    const result = assess(
+      observation({
+        entries: [entry(OFFICIAL_AUTO_REVIEW_MODULE, { enabled: false })],
+      }),
+    );
+    expect(result.official).toMatchObject({
+      present: true,
+      enabled: false,
+      running: true,
+      phase: 'active',
+    });
+    expect(result.blocked).toBe(true);
+  });
 
   test('a saved configuration without a loaded plugin is not a conflict at all', () => {
     // Nothing in the Loader tree: the profile may still list the bundle, but
@@ -161,20 +182,40 @@ describe('other approval listeners', () => {
     ]);
   });
 
-  test('a plain listener without approval capability is not a conflict', () => {
-    // A host guard narrows execution; it is not a competing approval provider,
-    // so it must not appear as a conflict even though it runs on the same hook.
+  test('a plain listener without approval services is still a capability warning', () => {
+    // `tools/pre-execute` can itself decide whether a call proceeds, so a
+    // listener that injects only `tools` is a possible competing provider. The
+    // warning reports the capability it was seen using, never a decision.
     const result = assess(
       observation({
         hooks: [
           hook('tools/pre-execute', {
-            entryId: 'guard',
-            moduleName: 'a-host-guard',
-            approvalRelated: false,
+            entryId: 'tools-only',
+            moduleName: 'tools-only-reviewer',
+            injects: ['tools'],
           }),
         ],
       }),
     );
+    expect(result.blocked).toBe(false);
+    expect(result.conflicts).toEqual([
+      {
+        id: 'hook:tools-only:tools/pre-execute',
+        severity: 'warning',
+        kind: 'approval-hook',
+        source: 'tools-only-reviewer',
+        entryId: 'tools-only',
+        capability: 'tools/pre-execute',
+        detail: null,
+      },
+    ]);
+  });
+
+  test('a host guard is not a listener and therefore not a conflict', () => {
+    // `tools.guard()` stores its checks in a separate monotonic list, so a
+    // guard never appears among these hooks. An empty observation is the honest
+    // answer, not a fabricated provider row.
+    const result = assess(observation({ hooks: [] }));
     expect(result.conflicts).toEqual([]);
     expect(result.blocked).toBe(false);
   });
@@ -378,11 +419,13 @@ describe('structural reader', () => {
     );
     expect(result.detection).toBe('complete');
     expect(result.blocked).toBe(true);
-    // Arbiter's own gate is excluded; the guard has no approval capability.
+    // Arbiter's own gate is excluded; both foreign pre-execute listeners are
+    // capabilities the host allows to change a decision, so both warn.
     expect(result.observedHooks).toHaveLength(2);
     expect(result.conflicts.map((item) => item.id)).toEqual([
       'official-auto-review',
       'hook:other:tools/pre-execute',
+      'hook:guard:tools/pre-execute',
     ]);
   });
 });
@@ -402,5 +445,82 @@ describe('official provider is named once', () => {
     );
     expect(result.conflicts).toHaveLength(1);
     expect(result.conflicts[0]?.kind).toBe('official-auto-review');
+  });
+});
+
+describe('provenance, not a plugin list', () => {
+  test('a host-shipped listener is an execution constraint, not a provider', () => {
+    // The host's own tools contribute pre-execute listeners; keeping them
+    // working is assumed by the contract, so they are not warnings.
+    const result = assess(
+      observation({
+        hooks: [
+          hook('tools/pre-execute', {
+            entryId: 'tool-jobs',
+            moduleName: '@deepseek-ai/dsh-tool-jobs',
+          }),
+          hook('tools/pre-execute', {
+            entryId: 'workspace-changes',
+            moduleName: '@deepseek-ai/dsh-workspace-changes',
+          }),
+        ],
+      }),
+    );
+    expect(result.conflicts).toEqual([]);
+  });
+
+  test('any non-host listener with the capability warns, with no named package', () => {
+    const result = assess(
+      observation({
+        hooks: [
+          hook('tools/pre-execute', {
+            entryId: 'acme',
+            moduleName: 'acme-permissions',
+          }),
+          hook('approval/request', {
+            entryId: 'beta',
+            moduleName: 'beta-reviewer',
+          }),
+        ],
+      }),
+    );
+    expect(result.conflicts.map((conflict) => conflict.source)).toEqual([
+      'acme-permissions',
+      'beta-reviewer',
+    ]);
+    // The detector carries no list to enumerate; the rows are the observation.
+    expect(result.conflicts.every((item) => item.severity === 'warning')).toBe(
+      true,
+    );
+  });
+
+  test('an owner that cannot be identified is still reported honestly', () => {
+    // A hook whose owning context is unavailable has no module name; the row
+    // says so rather than inventing a package identity.
+    const result = assess(
+      observation({
+        hooks: [
+          {
+            event: 'tools/pre-execute',
+            entryId: null,
+            moduleName: null,
+            prepend: false,
+            global: false,
+            injects: [],
+          },
+        ],
+      }),
+    );
+    expect(result.conflicts).toEqual([
+      {
+        id: 'hook:unknown:tools/pre-execute',
+        severity: 'warning',
+        kind: 'approval-hook',
+        source: 'unknown',
+        entryId: null,
+        capability: 'tools/pre-execute',
+        detail: null,
+      },
+    ]);
   });
 });

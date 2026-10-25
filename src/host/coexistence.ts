@@ -31,6 +31,15 @@ import type { HostEnvironment } from './types.js';
 /** How many settled notices stay addressable. */
 const MAX_NOTICES = 20;
 
+/**
+ * How often the host observes the plugin inventory without any client.
+ *
+ * The inventory read is a walk of an in-memory entry list, and this never runs
+ * on the tool path, so a short interval is affordable; it is what makes a
+ * conflict noticed while no settings page is open.
+ */
+export const OBSERVE_INTERVAL_MS = 5_000;
+
 export interface CoexistenceNotice {
   readonly id: string;
   readonly conflictId: string;
@@ -42,6 +51,30 @@ export interface CoexistenceNotice {
   readonly acknowledged: boolean;
 }
 
+/**
+ * The Auto-slot capability problem that survives conflict resolution.
+ *
+ * Clearing the official runtime conflict and proving that this plugin actually
+ * holds the Auto entry are two different facts: a registration that already
+ * failed does not become successful when the other provider stops. This field
+ * keeps that second fact visible instead of reporting "healthy" on the strength
+ * of the first.
+ */
+export type AutoSlotProblem =
+  | null
+  | {
+      readonly kind: 'registration-failed';
+      /** The host's own message, when it gave one. */
+      readonly error: string | null;
+      /** What the user can do; the UI renders it through the locale. */
+      readonly recovery: 'reload-plugin';
+    }
+  | {
+      readonly kind: 'slot-unavailable';
+      readonly error: null;
+      readonly recovery: 'host-unsupported';
+    };
+
 export interface CoexistenceView {
   readonly detection: 'complete' | 'partial';
   readonly missing: readonly string[];
@@ -49,8 +82,11 @@ export interface CoexistenceView {
   readonly reason: 'official-running' | null;
   readonly official: CoexistenceAssessment['official'];
   readonly autoSlot: AutoSlot;
+  readonly autoSlotProblem: AutoSlotProblem;
   readonly conflicts: readonly CoexistenceConflict[];
   readonly notices: readonly CoexistenceNotice[];
+  /** How many times this runtime observed the host on its own. */
+  readonly observations: number;
   readonly updatedAt: number;
 }
 
@@ -86,6 +122,7 @@ export class CoexistenceMonitor {
   private readonly activeConflictIds = new Set<string>();
   private noticeSequence = 0;
   private notices: CoexistenceNotice[] = [];
+  private observations = 0;
   private view: CoexistenceView;
 
   constructor(host: HostEnvironment, options: MonitorOptions) {
@@ -104,8 +141,10 @@ export class CoexistenceMonitor {
         phase: null,
       },
       autoSlot: 'unknown',
+      autoSlotProblem: null,
       conflicts: [],
       notices: [],
+      observations: 0,
       updatedAt: Date.now(),
     };
   }
@@ -137,6 +176,7 @@ export class CoexistenceMonitor {
     for (const id of [...this.activeConflictIds]) {
       if (!present.has(id)) this.activeConflictIds.delete(id);
     }
+    this.observations += 1;
     this.view = {
       detection: assessment.detection,
       missing: assessment.missing,
@@ -144,8 +184,10 @@ export class CoexistenceMonitor {
       reason: blockReasonOf(assessment),
       official: assessment.official,
       autoSlot: assessment.autoSlot,
+      autoSlotProblem: this.autoSlotProblem(assessment.autoSlot),
       conflicts: assessment.conflicts,
       notices: this.notices,
+      observations: this.observations,
       updatedAt: Date.now(),
     };
     this.host.lifecycle('coexistence/refresh', {
@@ -155,6 +197,46 @@ export class CoexistenceMonitor {
       conflicts: assessment.conflicts.map((item) => item.id),
     });
     return this.view;
+  }
+
+  /**
+   * The Auto-slot problem that still stands, independent of the official state.
+   *
+   * `registered` is the only answer that proves this plugin actually took the
+   * entry. Losing it to another provider, or a host without the slot, stays an
+   * unresolved capability fact even after the official plugin stops — the
+   * contract explicitly forbids showing "resolved" from that one signal.
+   */
+  private autoSlotProblem(slot: AutoSlot): AutoSlotProblem {
+    if (slot === 'arbiter') return null;
+    const error = this.options.autoError();
+    if (slot === 'other') {
+      return { kind: 'registration-failed', error, recovery: 'reload-plugin' };
+    }
+    return {
+      kind: 'slot-unavailable',
+      error: null,
+      recovery: 'host-unsupported',
+    };
+  }
+
+  /**
+   * Observe the host on this runtime's own schedule.
+   *
+   * A host without a connected page still has to notice a conflict (the
+   * contract keeps state and logs for a later reconnect), so the monitor owns a
+   * bounded interval instead of waiting for a request. It never touches a gate:
+   * a refresh only records a transition and opens notices.
+   */
+  start(intervalMs = OBSERVE_INTERVAL_MS): () => void {
+    this.refresh('startup');
+    const timer = setInterval(() => this.refresh('interval'), intervalMs);
+    // Never keep the process alive for observation alone. Node's timer always
+    // has `unref`; a browser-like stub may not, so the cast is on the method.
+    (timer as { unref?: () => void }).unref?.();
+    return () => {
+      clearInterval(timer);
+    };
   }
 
   /** Record one notice, bounded and with a stable per-period identity. */

@@ -26,6 +26,8 @@ function blocking(overrides: Partial<CoexistenceView> = {}): CoexistenceView {
       phase: 'active',
     },
     autoSlot: 'arbiter',
+    autoSlotProblem: null,
+    observations: 3,
     conflicts: [
       {
         id: 'official-auto-review',

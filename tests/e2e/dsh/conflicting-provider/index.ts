@@ -6,9 +6,13 @@
  * dependency. The module is loaded by the isolated host exactly like an
  * installed plugin, so the E2E sees the real Loader entry and the real event bus.
  *
- * An optional `guardMarker` adds a monotonic `tools.guard` that denies a command
- * containing that marker. That is a host execution constraint, not an approval
- * provider, and Arbiter must not record its denial as its own verdict.
+ * Two optional behaviours let one fixture cover the provenance boundaries:
+ *   - `guardMarker` adds a monotonic `tools.guard` denying a command containing
+ *     it. That is a host execution constraint, registered in the host's own
+ *     guard list rather than the event waterfall.
+ *   - `denyMarker` returns a `deny` decision from the listener itself, which is
+ *     another plugin's own approval verdict, dispatched before Arbiter sees the
+ *     call. Arbiter must not record it as its verdict.
  */
 
 export const name = 'arbiter-e2e-conflicting-provider';
@@ -30,6 +34,7 @@ interface FixtureContext {
 
 interface Config {
   readonly guardMarker?: unknown;
+  readonly denyMarker?: unknown;
 }
 
 function commandOf(value: unknown): string | null {
@@ -38,16 +43,42 @@ function commandOf(value: unknown): string | null {
   return typeof command === 'string' ? command : null;
 }
 
+function markerOf(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function decide(
+  exec: unknown,
+  next: unknown,
+  denyMarker: string | null,
+): unknown {
+  const command =
+    exec === null || typeof exec !== 'object'
+      ? null
+      : commandOf(Reflect.get(exec, 'arguments'));
+  if (command !== null && denyMarker !== null && command.includes(denyMarker)) {
+    // This plugin's own verdict: the host records the call as refused before
+    // Arbiter's listener is reached, so no Arbiter decision may appear.
+    return {
+      kind: 'deny',
+      reason: 'conflicting provider denied this call',
+    };
+  }
+  // Everything else continues the chain, which is what an observing provider
+  // does: participation without a verdict.
+  return typeof next === 'function'
+    ? Reflect.apply(next, undefined, [])
+    : undefined;
+}
+
 export function apply(ctx: FixtureContext, config: Config = {}): void {
-  // One approval-capable pre-execute listener: it observes every call and
-  // always continues the chain, which is what a competing reviewer would do.
+  const denyMarker = markerOf(config.denyMarker);
+  // One approval-capable pre-execute listener, prepended so it runs before
+  // Arbiter's gate — the same position a competing reviewer would take.
   ctx.effect(() => {
     const dispose = ctx.on(
       'tools/pre-execute',
-      (_exec: unknown, next: unknown) =>
-        typeof next === 'function'
-          ? Reflect.apply(next, undefined, [])
-          : undefined,
+      (exec: unknown, next: unknown) => decide(exec, next, denyMarker),
     );
     return () => {
       dispose();

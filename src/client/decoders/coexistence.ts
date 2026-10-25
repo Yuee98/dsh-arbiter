@@ -1,4 +1,5 @@
 import type {
+  AutoSlotProblemView,
   CoexistenceConflictView,
   CoexistenceNoticeView,
   CoexistenceView,
@@ -50,6 +51,23 @@ const notice = (value: unknown): CoexistenceNoticeView => {
   };
 };
 
+const autoSlotProblem = (value: unknown): AutoSlotProblemView => {
+  if (value === null || value === undefined) return null;
+  const source = object(value);
+  const kind = field(
+    source,
+    'kind',
+    choice('registration-failed', 'slot-unavailable'),
+  );
+  if (kind === 'slot-unavailable')
+    return { kind, error: null, recovery: 'host-unsupported' };
+  return {
+    kind,
+    error: field(source, 'error', nullable(text)),
+    recovery: field(source, 'recovery', choice('reload-plugin')),
+  };
+};
+
 /**
  * Decode one coexistence view.
  *
@@ -74,8 +92,11 @@ export function coexistenceView(value: unknown): CoexistenceView | null {
       phase: field(official, 'phase', nullable(text)),
     },
     autoSlot: field(source, 'autoSlot', choice('arbiter', 'other', 'unknown')),
+    autoSlotProblem:
+      field(source, 'autoSlotProblem', optional(autoSlotProblem)) ?? null,
     conflicts: field(source, 'conflicts', array(conflict)),
     notices: field(source, 'notices', array(notice)),
+    observations: field(source, 'observations', optional(number)) ?? 0,
     updatedAt: field(source, 'updatedAt', number),
   };
 }
