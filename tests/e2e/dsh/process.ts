@@ -1,5 +1,13 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import {
+  execFile,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process';
 import { once } from 'node:events';
+import { promisify } from 'node:util';
+import type { DshCommand } from './profile.js';
+
+const execFileAsync = promisify(execFile);
 
 /** A bootstrap token is local and short-lived, but should not enter artifacts. */
 export function redactHostLog(text: string): string {
@@ -14,14 +22,23 @@ export interface HostProcess {
 }
 
 export function launchHost(
-  executable: string,
+  command: DshCommand,
   profile: string,
   workspace: string,
   env: NodeJS.ProcessEnv,
 ): HostProcess {
   const child = spawn(
-    executable,
-    ['--profile', profile, '--no-open', '--host', '127.0.0.1', '--port', '0'],
+    command.executable,
+    [
+      ...command.args,
+      '--profile',
+      profile,
+      '--no-open',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+    ],
     {
       cwd: workspace,
       env,
@@ -107,6 +124,11 @@ export async function stopHost(
     child.exitCode !== null || child.signalCode !== null;
   if (hasExited()) return;
   const exited = once(child, 'exit');
+  if (process.platform === 'win32') {
+    await execFileAsync('taskkill', ['/pid', String(child.pid), '/t', '/f']);
+    await exited;
+    return;
+  }
   signalGroup(child, 'SIGTERM');
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([

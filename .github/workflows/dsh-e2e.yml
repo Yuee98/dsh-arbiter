@@ -12,9 +12,16 @@ concurrency:
 
 jobs:
   dsh-e2e:
-    name: Real DSH browser smoke
-    runs-on: [self-hosted, dsh-e2e]
-    timeout-minutes: 10
+    name: Real DSH smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,17 +31,29 @@ jobs:
         uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           version: '2026.10.9'
+          install_args: node npm:pnpm
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Install browser
-        run: pnpm exec playwright install chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Install pinned public DSH CLI
+        run: |
+          mkdir -p .local/e2e
+          mkdir -p "$RUNNER_TEMP/dsh-runtime"
+          cp tests/e2e/runtime/package*.json "$RUNNER_TEMP/dsh-runtime/"
+          npm ci --prefix "$RUNNER_TEMP/dsh-runtime" --strict-allow-scripts --no-audit --no-fund 2>&1 | tee .local/e2e/install.log
+          cp "$RUNNER_TEMP/dsh-runtime/package-lock.json" .local/e2e/dsh-package-lock.json
+          node --input-type=module -e 'import manifest from "./tests/e2e/runtime/package.json" with { type: "json" }; console.log("DSH_E2E_VERSION=" + manifest.dependencies["@deepseek-ai/dsh"])' >> "$GITHUB_ENV"
       - name: Run isolated real DSH smoke
+        env:
+          DSH_E2E_CLI: ${{ runner.temp }}/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js
         run: pnpm test:e2e:dsh
       - name: Save browser and host evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: dsh-e2e-${{ github.run_id }}
+          name: dsh-e2e-${{ matrix.os }}-${{ github.run_id }}
           path: .local/e2e/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
