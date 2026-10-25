@@ -13,8 +13,9 @@
  * - **Arrivals are counted, not inferred.** Only an explicit refresh asks how
  *   many matching calls sit above the traversal head; a total delta would also
  *   fire on a filter change, when nothing arrived.
- * - **A page that lost its rows is corrected once.** Returning to the newest page
- *   is bounded, so storage that keeps shrinking cannot spin.
+ * - **A page that lost its rows is corrected once.** The correction reads the
+ *   oldest page by name, which is the only position that still exists after a
+ *   deletion from the tail, and it is bounded so shrinking storage cannot spin.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -74,9 +75,9 @@ export interface LogPages {
   readonly backToLatest: () => void;
 }
 
-/** The row-counting helper the pager needs; `total` is the whole filtered set. */
-function pageHasNext(page: LoadedPage, limit: number): boolean {
-  return page.nextCursor !== null && page.index + limit < page.total;
+/** Whether another page exists after this one; `total` is the whole set. */
+function pageHasNext(page: LoadedPage): boolean {
+  return page.nextCursor !== null && page.index + page.rows.length < page.total;
 }
 
 /**
@@ -335,7 +336,7 @@ function composePages(input: {
     busy: input.busy,
     index: input.index,
     emptyText: emptyTextFor(page, query, t),
-    hasNext: page !== null && pageHasNext(page, query.limit),
+    hasNext: page !== null && pageHasNext(page),
     hasPrevious: page !== null && page.index > 0,
     setDraft: input.setDraft,
     applyFilters: () => {

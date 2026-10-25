@@ -617,3 +617,37 @@ describe('log panel wiring on the page', () => {
     expect(detailRequests).toEqual([]);
   });
 });
+
+describe('log list position bookkeeping', () => {
+  test('a page shorter than the page size still offers the next page when rows remain', async () => {
+    // A tail read returns fewer rows than the page size by design; the "next"
+    // move must follow the total, not the row count of one page.
+    const specs = SEEDED.slice(0, 41);
+    server.use(listHandler(specs));
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('共 41 条');
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 2 / 2 页')).toBeInTheDocument();
+    });
+    // Page two holds 16 rows, so the forward move is exhausted even though the
+    // last page is not full.
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '上一页' })).toBeEnabled();
+    expect(screen.getByText('第 26–41 条')).toBeInTheDocument();
+  });
+
+  test('the position advances by the rows actually read', async () => {
+    const specs = SEEDED.slice(0, 60);
+    server.use(listHandler(specs));
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('第 1 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 2 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 3 / 3 页');
+    expect(screen.getByText('第 51–60 条')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  });
+});
