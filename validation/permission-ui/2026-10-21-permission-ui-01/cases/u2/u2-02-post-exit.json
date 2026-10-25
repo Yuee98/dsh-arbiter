@@ -1,0 +1,16 @@
+{
+  "done": true,
+  "enabled": false,
+  "hostCurrent": "workspace-write",
+  "gatesAfterExit": [],
+  "results": [
+    {
+      "isError": false,
+      "text": "(no output)"
+    }
+  ],
+  "marker": {
+    "exists": true,
+    "content": "PUI-DENY after-exit\n"
+  }
+}

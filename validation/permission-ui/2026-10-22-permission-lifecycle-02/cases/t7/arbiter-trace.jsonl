@@ -1,0 +1,10 @@
+{"at":1792665154422,"event":"gate/entered","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0","tool":"read","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","active":1}
+{"at":1792665154425,"event":"review/start","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"}
+{"at":1792665154427,"event":"review/settled","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"}
+{"at":1792665154428,"event":"gate/entered","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1","tool":"read","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","active":1}
+{"at":1792665154430,"event":"review/start","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"}
+{"at":1792665155080,"event":"review/settled","callId":"fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"}
+{"at":1792665157082,"event":"unload/stop-admission","active":0,"managed":1}
+{"at":1792665157082,"event":"unload/rollback","sessionId":"session-034b57f9-e354-4f6d-a7c7-e8891b5deef8","changed":true}
+{"at":1792665157082,"event":"unload/drained","active":0,"waitedMs":0,"rolledBeforeDrainMs":0}
+{"at":1792665157082,"event":"unload/release","managed":0}

@@ -1,0 +1,20 @@
+{
+  "before": 1,
+  "after": 2,
+  "records": [
+    {
+      "seq": 19,
+      "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+      "tool": "bash",
+      "result": "review-allow",
+      "ignorable": true
+    },
+    {
+      "seq": 19,
+      "callId": "fx-session-f2710943-3679-4777-90c5-072e8139905e-0-0",
+      "tool": "write",
+      "result": "review-allow",
+      "ignorable": true
+    }
+  ]
+}

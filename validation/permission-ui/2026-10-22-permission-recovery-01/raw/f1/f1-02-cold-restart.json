@@ -1,0 +1,34 @@
+{
+  "resumed": {
+    "status": 200
+  },
+  "state": {
+    "ok": true,
+    "sessionRecords": {
+      "ready": true,
+      "error": null,
+      "failures": []
+    }
+  },
+  "decisionsAfterRestart": [
+    {
+      "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+      "seq": 19,
+      "ignorable": true,
+      "callId": "fx-session-67f1adc9-e13c-411a-be77-9ebaf3443185-0-0",
+      "tool": "bash",
+      "result": "review-allow"
+    }
+  ],
+  "loadedSessions": [
+    {
+      "sessionId": "session-67f1adc9-e13c-411a-be77-9ebaf3443185",
+      "events": 29
+    },
+    {
+      "sessionId": "session-f2710943-3679-4777-90c5-072e8139905e",
+      "events": 3
+    }
+  ],
+  "nonIgnorablePluginEvents": []
+}

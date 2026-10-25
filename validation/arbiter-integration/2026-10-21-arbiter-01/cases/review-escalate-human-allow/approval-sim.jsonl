@@ -1,0 +1,2 @@
+{"event":"approval-sim/mounted","outcome":"allowed-once","simulated":true,"at":"2026-10-21T08:15:18.749Z"}
+{"event":"approval-sim/answer","outcome":"allowed-once","toolName":"bash","callId":"fixture-session-b615da14-6af0-436c-97b9-fadab9b1ae6c-0-0","reason":"review requires a human decision: no sufficient authorization was found","agentSessionId":"session-b615da14-6af0-436c-97b9-fadab9b1ae6c","simulated":true,"at":"2026-10-21T08:15:18.850Z"}

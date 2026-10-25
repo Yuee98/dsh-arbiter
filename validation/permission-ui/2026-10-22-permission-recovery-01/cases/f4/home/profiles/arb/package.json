@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-arb",
+  "private": true,
+  "dependencies": {
+    "dsh-arbiter": "link:/Volumes/sandisk/code/dsh-arbiter"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-arbiter"
+      ]
+    }
+  }
+}

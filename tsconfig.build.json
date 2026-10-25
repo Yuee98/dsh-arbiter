@@ -6,7 +6,9 @@
     "noEmit": false,
     "rootDir": "src",
     "outDir": "lib",
-    "declaration": true
+    "declaration": true,
+    "allowImportingTsExtensions": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/client/**"]
 }

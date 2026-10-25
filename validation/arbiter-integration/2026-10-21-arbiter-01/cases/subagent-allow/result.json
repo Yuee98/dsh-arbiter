@@ -1,0 +1,222 @@
+{
+  "caseId": "subagent-allow",
+  "title": "A parent subagent delegation and the child's own tool call are both gated",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:19.701Z",
+  "elapsedMs": 436,
+  "exitCode": 0,
+  "stdout": "[fixture] out of scripted steps\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": true,
+    "content": "CHILD-ALLOW\n"
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 110592,
+    "calls": [
+      {
+        "call_id": "fixture-session-5a80c1ce-30a7-4866-bdae-8a43e1896d15-0-0",
+        "session_kind": "main",
+        "result": "allow",
+        "reason": "Arbiter: a complete allow rule covered this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "allow",
+            "ruleId": "subagent-allow-tool",
+            "configRevision": "529dd53f7b5e",
+            "at": 1792570519611
+          }
+        ],
+        "execution_status": "success",
+        "approval_mode": "normal",
+        "signals": null
+      },
+      {
+        "call_id": "fixture-cacb734e-41fc-4c50-b785-6ffcdf534c2f-0-2",
+        "session_kind": "subagent",
+        "result": "allow",
+        "reason": "Arbiter: a complete allow rule covered this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "allow",
+            "ruleId": "child-printf",
+            "configRevision": "529dd53f7b5e",
+            "at": 1792570519642
+          }
+        ],
+        "execution_status": "success",
+        "approval_mode": "strict",
+        "signals": null
+      }
+    ],
+    "modelCalls": [],
+    "candidates": []
+  },
+  "reviewerRequests": [],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:19.609Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+    },
+    {
+      "at": "2026-10-21T08:15:19.609Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+    },
+    {
+      "at": "2026-10-21T08:15:19.632Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+    },
+    {
+      "at": "2026-10-21T08:15:19.640Z",
+      "route": "ARBITER-CHILD",
+      "index": 0,
+      "sessionId": "cacb734e-41fc-4c50-b785-6ffcdf534c2f"
+    },
+    {
+      "at": "2026-10-21T08:15:19.655Z",
+      "route": "ARBITER-CHILD",
+      "index": 1,
+      "sessionId": "cacb734e-41fc-4c50-b785-6ffcdf534c2f"
+    },
+    {
+      "at": "2026-10-21T08:15:19.665Z",
+      "route": "default",
+      "index": 2,
+      "sessionId": "session-5a80c1ce-30a7-4866-bdae-8a43e1896d15"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/subagent-allow/sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f__session.v4.jsonl.zstd",
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/subagent-allow/sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [
+      {
+        "id": "subagent-allow-tool",
+        "match": {
+          "node": "tool",
+          "kind": "exact",
+          "pattern": "subagent",
+          "tool": "subagent"
+        },
+        "verdict": "allow"
+      },
+      {
+        "id": "child-printf",
+        "match": {
+          "node": "command",
+          "kind": "regex",
+          "pattern": "^printf"
+        },
+        "verdict": "allow"
+      },
+      {
+        "id": "workspace-writes",
+        "match": {
+          "node": "file_redirect",
+          "kind": "glob",
+          "pattern": "{{WORKSPACE}}/**"
+        },
+        "verdict": "allow"
+      }
+    ],
+    "reviewerScript": []
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 722
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 110592
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-05a1e6f8.json",
+      "bytes": 2411
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 2848
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/cacb734e-41fc-4c50-b785-6ffcdf534c2f/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/cacb734e-41fc-4c50-b785-6ffcdf534c2f/session.v4.jsonl.zstd",
+      "bytes": 15812
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-subagent-allow-ws--/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15/session.v4.jsonl.zstd",
+      "bytes": 16217
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f.json",
+      "bytes": 4755
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15.json",
+      "bytes": 4418
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 805
+    },
+    {
+      "path": "sessions/cacb734e-41fc-4c50-b785-6ffcdf534c2f__session.v4.jsonl.zstd",
+      "bytes": 15812
+    },
+    {
+      "path": "sessions/session-5a80c1ce-30a7-4866-bdae-8a43e1896d15__session.v4.jsonl.zstd",
+      "bytes": 16217
+    },
+    {
+      "path": "ws/child-marker.txt",
+      "bytes": 12
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "clicked": {
+    "ok": true,
+    "before": "true"
+  },
+  "wentOff": true,
+  "beforeStatus": 200,
+  "afterStatus": 404,
+  "afterBody": "not found"
+}

@@ -1,0 +1,18 @@
+{
+  "routes": [
+    { "match": "F2TRUSTED", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f2/outside/f2-trusted.txt", "content": "trusted write\n" } } ] },
+      { "type": "text", "text": "F2TRUSTED-DONE" }
+    ]},
+    { "match": "F2GUARDED", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f2/outside/f2-guarded.txt", "content": "guarded write\n" } } ] },
+      { "type": "text", "text": "F2GUARDED-DONE" }
+    ]},
+    { "match": "F2ALLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f2/ws/f2-allow.txt", "content": "allow\n" } } ] },
+      { "type": "text", "text": "F2ALLOW-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDefault": { "risk": 3, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

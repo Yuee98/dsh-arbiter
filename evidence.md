@@ -598,6 +598,198 @@ Cordis `waterfall` 用 `unshift` 插入 prepend 监听，而宿主 bundle 早于
 持久 PTC、后台 workflow 与取消、Web/headless 以外的 surface、外部后端 subagent、
 真实人工审批，以及插件在不同 profile 上的实际安装。源码结论不外推到这些组合。
 
+<a id="conflict-detection-source"></a>
+
+### 22.2 审批插件冲突检测：源码补核（2026-10-21）
+
+本轮只读核对本机已提取的 DSH 0.2.1-rc.2 包源码与随包文档。以下是源码支持的接入方向，尚未运行 arbiter 的冲突检测／热更新实验，也不把这些文件视作上一轮安装指纹的重新验证。
+
+| 能力或限制 | 源码依据（相对 `dsh/node_modules/@deepseek-ai/`） | 结论 |
+|---|---|---|
+| 读取实际插件条目与运行状态 | `dsh-host-plugin-inventory/lib/index.js:122–156` 的 `readPluginInventory`；包根 exports 导出该函数 | 清单含 moduleName、enabled、fiberPhase，也包含可用的 agent preset composition。可识别官方模块并区分 active、loading、failed 等状态；作用域映射与第三方实际接入仍需验证 |
+| 读取组合包选择与运行插件 | `dsh-plugin-manager/lib/index.js:1657–1683` 的 listPlugins／listBundles；随包 README“使用本包” | bundle.enabled 是保存的选择，不等于加载成功或当前仍在执行；没有 HMR 时修改后可能需要重启，不能只靠磁盘配置判定冲突已消除 |
+| Auto 槽互斥 | `dsh-permission-presets/lib/index.js:239–268` 的 names／catalog／registerAuto | 目录可以表明 Auto 已注册；重复注册会抛错。查到的公开目录不返回注册者身份，需要结合插件清单识别来源；有 Auto 也不等于所有会话都在使用它 |
+| 官方插件同时注册监听器和 Auto 槽 | `dsh-experimental-auto-review/lib/index.js:460–506` | 预设注册冲突不应被当成整条插件门禁必然不存在的证据；实际启用、失败清理和加载顺序需要运行验证 |
+| 按监听器识别所有审批插件 | `cordis/src/events.ts:118–132, 160–176, 255–259` 的 Hook／_hooks／dispatch | 内部监听记录有归属 Context，可以辅助诊断；同名事件也用于调度、guard 和记录，不能直接推导“第二个审批者”。本轮未发现可统一查询审批能力及其拥有者的专用声明接口，不承诺通用功能识别完整性 |
+| 全局前端提示 | `dsh-client-ui-plugin-manager/lib/client.js:3811–3829` 使用 UI primitives 的 Modal；`:4268–4284, 4399–4411` 在 shell.overlay 注册 Toast；随包 README“理解实现”说明后台／离开插件页后的通知 | 源码显示插件可使用前端弹窗／Toast 及全局覆盖层，不限自己的配置页面。arbiter 的状态传递、一次性提醒与重连行为尚待实现验证；无连接前端时不能保证显示弹窗 |
+
+据此可实现“官方模块识别＋实际运行状态＋Auto 槽占用”的检查；未知插件的功能识别只能作为有限诊断，不因同样监听 pre-execute 就自动停用 arbiter，也不建立第三方互斥名单。Auto 只允许单一注册，因此在 arbiter 持有该槽时启用官方可能失败，实际清理和动态时序须运行验证。已确认的[共存与冲突产品契约](docs/architecture.md#approval-provider-coexistence)与上述源码能力分开维护，不能把产品确认记作已完成检测实验。
+
+<a id="agentless-tool-api"></a>
+
+### 22.3 无 agent 工具调用：API 能力与实际用例的区别（2026-10-21）
+
+核对范围为本机已提取的 DSH 包源码与随包文档，未执行新探针。可以确认工具执行 API 支持省略 agent；**当前没有找到随附业务插件实际这样调用的确定实例**，也没有运行该场景。此前“宿主插件通过工具服务发起调用”应理解为可构造的 API 用法，不作为已有业务路径的验证结论。
+
+| 依据（相对 `dsh/node_modules/@deepseek-ai/`） | 能确认的内容 |
+|---|---|
+| `dsh-tool-cordis/lib/types/api-catalog.js:8172–8173` 的 ToolExecutionInput 声明 | agent 是可选字段；其余输入包括 callId、工具名、arguments 和 signal |
+| `dsh-tools/lib/index.js:3213–3262, 3311–3330` | `ctx.tools.execute(input)` 进入正常执行准备；未传 agent 时不会在 createExecution 中凭空补出一个 agent，仍可派发 pre-execute。具体工具是否接受无 agent 调用另由工具与 guard 决定 |
+| `dsh-tools/lib/index.js:3524–3552` 的 serviceAsk | 已有无 agent 分支；需要人工审批时拒绝，原因是无法路由审批，不等于有人拒绝 |
+| `dsh-repeat-tool-reminder/README.zh.md:80–87` | 官方文档明确说明忽略无 agent 的直接 `ctx.tools.execute()` 调用，因为没有可提醒的模型或作为键的活跃 agent |
+| `dsh-agent-loop/lib/index.js:498–522` | 正常模型工具执行从驱动取得 agent 并显式放进执行输入；不能据“程序化／后台”推断没有身份 |
+| `dsh-tools/lib/index.js:1364–1379` | PTC 内层传递外层的 agent；普通 agent 发起的 run_code 内层不是本节的身份缺失路径 |
+
+插件直接调用 Node 文件／网络 API，或直接调用业务服务而不经工具 registry，属于工具入口之外的宿主代码执行，和“经过 registry 但未传 agent”是不同情况。后续如需验证本节，只构造明确省略 agent 的独立测试调用；不把这种测试称为找到了现有业务插件用例。
+
+<a id="permission-ui-source"></a>
+
+### 22.4 权限选择器与生命周期：源码补核（2026-10-21）
+
+本轮只读核对已提取的 DSH 0.2.1-rc.2 包源码与随包说明，**没有运行自有权限选择器、原生命令同步、重连或卸载探针**，也没有重新确认当前安装包指纹。用户选定的是[产品方案](docs/architecture.md#permission-selector-contract)，不等于下表能力已在目标宿主实测通过。四组运行任务与状态统一见[验证任务](docs/permission-ui-validation.md)。
+
+| 源码依据（相对 `dsh/node_modules/@deepseek-ai/`） | 能确认的内容与限制 |
+|---|---|
+| `dsh-permission-presets/lib/index.js:53–62, 259–268, 296–306, 403–405`；随包 README.zh.md“用户看到什么” | 固定 auto 组合属于宿主权限预设服务，registerAuto 只接收准入回调，不能配置沙箱；将沙箱改成 workspace-write 后不会继续派生为 auto。这不是官方 reviewer 插件自己的选择 |
+| `dsh-client-ui-conversation/lib/client.js:19880–19905` | 会话 composer 声明 `conversation.input.permission` 为 session 作用域的 single slot，可作为自有权限控件的挂载目标 |
+| `dsh-client-ui-permission-presets/lib/client.js:800–812`；随包 README.zh.md“使用本包” | 原生选择器本身由独立客户端插件在该 slot 注册，并提交 `/permission <preset>`；其选项来自宿主目录，不提供单独前端菜单项就能改变预设语义的能力 |
+| `dsh-client-ui-renderer/lib/client.js:594–600, 1174–1178, 1546–1556, 1604–1623` | slot 注册／渲染具有按优先级选出同位置 entry、shadowing 与注册 disposer 的机制，是自有控件覆盖与撤销回退的源码依据；具体优先级、依赖和热卸载仍需 U1 实测 |
+| `dsh-client-ui-permission-presets/lib/client.js:358–369`；`dsh-permission-presets/lib/index.js:351–363` | 原控件点击当前值直接返回；原生命令应用同值组合可能既不追加 permission/preset，也不改变沙箱／审批值。只监听值变化不足以证明捕获退出意图；公开命令接入点尚未验证 |
+| `dsh-sandbox-policy/lib/index.js:8–22, 33–43`；`dsh-tools/lib/index.js:3311–3330` | 沙箱有独立的会话事件写入路径，工具 pre-execute 不以 auto 身份作为分发前提；插件审查与工作区沙箱可以组合。所需启用状态及 UI／命令一致性仍须另行实现验证 |
+| `dsh-user-approval/lib/index.js:129–145, 171–189` | 人工审批在进入时检查策略，随后等待应答并观察请求 signal；不能由此推断热卸载或 PTC 取消时审批一定继续存在 |
+| `cordis/src/fiber.ts:675–690`；`dsh-experimental-auto-review/lib/index.js:489–506` | 宿主可等待异步 disposer；官方插件跟踪 active 请求，但卸载时主动 abort，再等待收尾。arbiter 不主动 abort 的方案及资源释放顺序需要 U4 运行验证，不是照抄官方即可满足 |
+| `dsh-tools/lib/index.js:896–903`；随包 README.zh.md“执行与取消” | 沙箱模式改变会取消受影响的运行中 PTC 调用；其内层等待可能随 signal 取消。不能承诺所有在途审批在任何切换下都保持运行 |
+| `dsh-permission-presets/lib/index.js:375–380` | 恢复存储的 auto 身份时要求活跃 integration；只迁移当前存活会话不能证明卸载后所有关闭会话均可恢复，该边界纳入 U4 |
+
+目前只确认上述源码与文档事实。自有控件是否能稳定覆盖原控件、同值命令是否有公开意图接入、启用状态如何冷恢复、卸载如何迁移关闭会话与完成在途请求，均不得提前记为运行通过。
+
+#### 22.4.1 四组运行验证结果（2026-10-21，运行 id `2026-10-21-permission-ui-01`）
+
+上一段"不得提前记为运行通过"的边界**已由本轮实测回答**。宿主仍是上表所指的同一安装
+（`dsh/package.json`、`dsh-tools`、`dsh-user-approval` 的 SHA 与 §22 一致，见
+[ENVIRONMENT.md](validation/permission-ui/2026-10-21-permission-ui-01/ENVIRONMENT.md)）。
+完整报告与断言见 [REPORT.md](validation/permission-ui/2026-10-21-permission-ui-01/REPORT.md)（`63 passed, 0 failed`）。
+
+| 上表待验证项 | 本轮结论 | 证据 |
+|---|---|---|
+| 自有控件能否稳定覆盖原控件 | **能**。`conversation.input.permission` 为 `kind: 'single'`；`SlotCore.entriesOfSlot` 按 **priority 升序**取第一个（**数值越低越优先**），native 在 0，自有控件用 −1 即占据该位置；同 priority 重复注册直接抛 `single slot … already has a registration`。注册必须走 `slots.inject`（slot 声明晚于插件启动） | `raw/artifacts/u1/u1-01-slot-initial.json`、`u1-09-override-removed.json` |
+| 同值命令是否有公开意图接入 | **有**。`command/run` 在 handler 之前 commit，`/permission workspace-write` 即使宿主值不变（无 `permission/preset`、无 `sandbox/mode`）也可捕获。约束：观察者在 commit 内，`append` 必须 defer | `raw/artifacts/u2/u2-01-same-value.json` |
+| 启用状态如何冷恢复 | 用会话日志中的**可忽略插件记录**（`appendPluginRecord`，`ignorable: true`）折叠；与审计 SQLite 无关。`session.append('plugin:…')` 不带该标记时，冷读会以 `unknown to this harness and not marked ignorable` **拒绝整份日志** | `raw/artifacts/u3/u3-04-cold-restart.json`、`u3-07-audit-removed.json` |
+| 卸载如何迁移关闭会话、完成在途请求 | 在途 8 s 审查未被插件取消（`outcome: done`、`signalAborted: false`），卸载等待 7.8 s 后才回退；关闭会话重开后正常加载且未被重新启用。已弹出人工审批未被代批／代拒，但**无真实人类** | `raw/artifacts/u4/u4-03-inflight-unload.json`、`u4-05-reopen.json`、`raw/artifacts/u4a/u4-07-pending-approval.json` |
+
+**新增的源码事实（本轮核对）**
+
+| 源码位置 | 内容 |
+|---|---|
+| `SlotCore.register` / `entriesOfSlot`（`dsh-web-frontend/dist/assets/index-*.js`，运行时实现） | 单值 slot 同 priority 重复注册抛错；`entriesOfSlot` 按 priority 升序，与"越大越优先"的直觉相反 |
+| `dsh-client-ui-conversation/lib/client.js:19880–19905` | `conversation.input.permission` 声明为 `single` / `session`；composer 通过 `renderSlot` 渲染 |
+| `dsh-client-ui-permission-presets/lib/client.js:766–812` | 原生控件用 `slots.inject` 注册，`submit` 走 `live.command('/permission <preset>')`——自有控件可复用同一公开路径 |
+| `dsh-session/lib/index.js:1270–1300, 1548–1562` | `appendPluginRecord` 写 `ignorable: true`；`session.append` 不写。冷读只保留可忽略的未知类型 |
+| `dsh-commands/lib/index.js:300–360` | `command/run` 在 `command.definition.handler` 之前 append，`command/done` 在结算后 append |
+| `dsh-permission-presets/lib/index.js:352–372` | `apply()` 先 `autoAdmit?.()`，再按 `AUTO_PRESET_SPEC` 写 `danger-full-access` + `ask`；同值不追加事件 |
+
+**仍未运行**：真实人类审批、`run_code`／PTC 在沙箱切换下的宿主取消（本机 `sandbox-exec` 不可用）、
+DSH 原生 `plugin_manager` 热卸载与 `SIGKILL` 对照。
+
+<a id="permission-ui-review"></a>
+
+#### 22.4.2 结果复核与补测边界（2026-10-22）
+
+本次只读核对保留产物、探针代码、正式写入代码与**当前安装包**，未重新启动 DSH 验证环境，也未重跑或改写原始报告／断言。当前安装包 `dsh-permission-presets/lib/index.js` 的 SHA-256 为 `4f23c620145098d611d04d8363bc6716f49b26930c9141a21dc9a8df2b72ba63`，`dsh-session/lib/index.js` 为 `2f5dd07cb5c744a29abbb8003a8a4cefd9e582c6e2538074ca299a0ddd02a3bf`，均与该轮 ENVIRONMENT.md 相符。
+
+| 复核点 | 证据与结论 |
+|---|---|
+| 拒绝原生 auto 与修改 auto 组合不同 | 当前安装包 `dsh-permission-presets/lib/index.js:350–360` 在写预设与旋钮之前同步执行 `autoAdmit?.()`；异常未被该方法吞掉。源码支持用拒绝准入回调阻止进入 auto 的候选方案，但本轮探针没有实测该路径；不注册该入口也是待补测候选。因此原报告“已接受 auto 会展开 full-access”成立，“不存在公开的生效前拒绝路径”不能由该实测推出 |
+| 观察到意图不等于退出完成 | `cases/u2/home/pui/events.jsonl` 的 seq 57 为 permission/preset:auto、58 为 sandbox/mode:danger-full-access，观察时 enabled 均仍为 true，59 才写 plugin:pui/disabled。未证明“先完成退出再展开”；后续需分别验证内存生效、延后持久化、命令失败与并发新调用 |
+| 卸载运行证据是 fiber.dispose 路径 | `probes/pui-probe/index.js` 的 unload route 调用 `ctx.fiber.dispose()`；本轮未通过真实 plugin_manager 停用／卸载触发重组合。8 s 夹具确实证明该探针的在途收尾，但不证明真实管理器所有依赖时序或等待期间新调用处理已验证 |
+| 正式会话写入仍需修复 | 当前安装包 dsh-session 根模块公开导出 appendPluginRecord；`src/index.ts` 的 decision 写入仍调用 session.append，已知缺少 ignorable。应修复实际写入、验证冷恢复并处理旧不兼容日志；此处未修改实现 |
+
+以上修正的是证据外推边界；U1 菜单及文件沙箱、U2 同值命令意图可观测、U3 恢复等实测结论保留。用户随后于 2026-10-22 确认拒绝原生 `/permission auto`，并授权[正式冷恢复修复及 F1–F6 补测](docs/permission-recovery-followup.md)；这是产品决定与工作授权，不是新的运行证据。新增验证另建产物，不覆盖原始报告。
+
+<a id="permission-recovery-run"></a>
+
+#### 22.4.3 正式修复与 F1–F6 补测（2026-10-22，运行 id `2026-10-22-permission-recovery-01`）
+
+被测对象换成**正式插件**（profile `link:` 到本仓库，执行 `lib/` 构建）。报告：
+[REPORT.md](validation/permission-ui/2026-10-22-permission-recovery-01/REPORT.md)；
+环境与代码指纹：[ENVIRONMENT.md](validation/permission-ui/2026-10-22-permission-recovery-01/ENVIRONMENT.md)。
+`pnpm verify` 通过（78 tests + R1–R9 9/9）。
+
+| 项 | 结论 | 级别 |
+|---|---|---|
+| F1 记录写入 | 只走公开 `appendPluginRecord`；真实"写→关→退宿主→重启→重开"可加载、可读回，记录 `ignorable: true`；移走审计目录后仍恢复 | 正式插件运行确认 |
+| F1 旧记录兼容 | `src/repair.ts` 备份式定点修复，只改 `plugin:arbiter/*`、保留其他事件、幂等；5 个单测 | 单测 + 真实旧日志检查（0 处需修） |
+| F2 auto 拒绝 | guarded／trusted／未启用三档在权限变化前失败，`preset/sandbox/approval` 零变化；`/permission workspace-write` 同值、`read-only`、`danger-full-access`、未知预设均回归 | 正式插件运行确认 |
+| F3 真实停用 | 插件页开关（`setPluginEnabled`）→ 路由 200→404，热停机；重新启用恢复。9s 审查与停用操作是否重叠不能由延迟结束后才写的请求日志确认 | 真实管理器基本操作确认；在途重叠待补测 |
+| F3 真实卸载 | 插件页「卸载」（`removeBundle`）→ 依赖删除、bundle 取消选择、404；重启后不复活；关闭会话可重开。12s 在途重叠需换正确开始信号补测 | 真实管理器基本操作确认；在途重叠待补测 |
+| F4 收尾期新调用 | 当前产物证明回退后的越界写入未落地；原裁决在停用步骤前已完成，没有覆盖真实 active > 0 的 drain 窗口 | 收尾窗口待重新构造；不能据此认定绕过窗口已修复 |
+| F5 人工审批 | 操作者本人点击：「允许一次」→ `human-allow`、工具执行、`ws/f5-ask.txt` 落盘；「拒绝」→ `human-deny`、工具未执行、`ws/` 为空。裁决链均为 `review(default) → review-escalate → human-*` | 正式插件运行确认（真人） |
+| F6 PTC 取消 | trusted 启动的真实 `run_code`，内层停在 10s 审查，切 workspace-write 后宿主返回 `Error: code run failed (abort): sandbox mode changed`；内层文件未生成；迟到 `review-allow` 未驱动 body；外层已写文件保留 | 正式插件运行确认 |
+
+**新增源码/接口事实（本轮核对）**
+
+| 事实 | 依据 |
+|---|---|
+| `appendPluginRecord` 写 `ignorable: true`，`session.append` 不写；冷读拒绝未知且非 ignorable 的类型 | `dsh-session/lib/index.js:1548–1562`，以及本轮实际失败日志 |
+| `apply()` 在写 `permission/preset` / `sandbox/mode` / `approval/policy` **之前**同步调用 `autoAdmit`，异常不被吞 | `dsh-permission-presets/lib/index.js:350–360`；本轮三档拒绝且零写入 |
+| `autoAdmit` **没有参数**，无法区分用户切换与旧会话恢复 | 同上签名 `registerAuto(admit)` |
+| 插件管理器公开 `setPluginEnabled(id, enabled)` 与 `removeBundle(name)` 两个不同入口，前者热生效 | `dsh-plugin-manager/lib/index.js:1930–1953`；本轮停用实测 |
+| `run_code` 在沙箱模式变化时被宿主取消，错误为 `abort: sandbox mode changed` | 本轮 F6 的 `tool/result` |
+
+**仍未运行**：正式客户端选择器接入会话启停、日常 profile 的历史日志迁移。
+**待补测**：审批挂起期间的切出／管理器操作。当前值重复选择和未提供测试 bridge 不能证明所有公开入口都不可用，详见下节复核。
+
+<a id="permission-recovery-review"></a>
+
+#### 22.4.4 正式补测产物的结果复核（2026-10-22）
+
+本次只读核对源码、驱动、保留产物与安装包控件，没有重新运行集成用例，也不覆盖原始报告。F1 正式冷恢复、F2 命令拒绝、真实管理器基本停用／卸载、F5 真人允许／拒绝及 F6 宿主取消的已有证据保留；以下外推不计作完成。
+
+| 复核点 | 证据与可得结论 |
+|---|---|
+| 请求日志在延迟结束后才写 | 该轮 `probes/arbiter-llm.mjs:63–71` 先 await reviewerDelayMs，再写 reviewer-requests.jsonl，然后返回信号。`scripts/f3.mjs`、`f3-uninstall.mjs` 和 `f4.mjs` 均等待该文件非空后才操作管理器，不能将其当成审查刚开始的证明 |
+| F4 的停用操作晚于原审查结算 | `raw/f4/f4-02-drain.json` 中原 decision 的 ts 为 1792647520087，驱动记录停用步骤开始 t0 为 1792647520106，新消息提交 tNew 为 1792647522938；裁决已先完成。回退后新调用被沙箱挡住，不等于仍有审查在途时不会绕过 |
+| 正式源码的放行路径仍需验证 | `src/index.ts` 在卸载时先设 accepting=false，等待 runtime.active，再回退；pre-execute 遇 accepting=false 直接 next。该路径没有先确认目标权限已应用，现有用例不足以证明真实并发窗口安全；是否仍可实际绕过需正确构造的集成用例，不在本次只读复核中宣称新运行复现 |
+| F5 点击的是已经选中的预设 | `raw/f5s/f5s-02-switch.json` 的当前模式为 workspace-write，驱动 `scripts/f5-switch.mjs` 仍点击“工作区内修改”。当前安装包 `dsh-client-ui-permission-presets/lib/client.js:358–366` 在 id===selection.currentValue 时直接返回，不调用 submit；无新命令／权限事件不能归因于审批入口被封锁 |
+| 公开命令并未调用 | 同份产物 switched 为 `{ok:false,note:"no bridge"}`；驱动只检查 window.__puiCommand 是否存在。未调用 session.command，不构成该公开路径被宿主拒绝的证据 |
+
+原生控件安装包 SHA-256 为 `d35ea0b7c74ad66481bd33fa38fc7d7751edf4336e11c0058a992464862cc119`，与此前核对版本一致。上述复核不改变产品契约，尤其不将“审批中不能切出”升级为已确认宿主限制。
+
+下一次使用延迟前的 review-started 与可控释放屏障，按 callId 确认 active，再触发真实管理器；并发新调用须真正进入 stop-admission 与 drain-end／rollback 之间，不能仅将同会话的新消息排队到旧轮结束。审批切换应选择不同预设，并通过最小客户端实际调用公开命令；原始报告和产物保留，补测另建 run-id。当前任务状态见[交接复核](docs/permission-recovery-followup.md)。
+
+<a id="permission-lifecycle-run"></a>
+
+#### 22.4.5 时序修正与真实并发补测（2026-10-22，运行 id `2026-10-22-permission-lifecycle-02`）
+
+报告：[REPORT.md](validation/permission-ui/2026-10-22-permission-lifecycle-02/REPORT.md)。原始报告与产物保留。
+
+**先把 22.4.4 指出的三个测试错误改正**：
+
+| 复核点 | 更正 |
+|---|---|
+| 请求日志在延迟后才写 | 夹具改为**等待前**写 `<callId>-started.json`，按 `<callId>-release` 可控释放；`callId` 取自生产代码 `review/start` 轨迹（对照 §22.4.4 第 1 行） |
+| F4 停用晚于原审查结算 | 驱动改以 `unload/stop-admission` 轨迹为闸门；本轮 `newAfterStopMs: 3251`，即新调用确实在停接管之后到达 |
+| 点击的是已选中的预设 | 改为 workspace-write → **read-only**，并经 `sessions.binding(id).session.command(...)` 真实调用，返回 `{ok:true,value:{matched:true}}` |
+| 公开命令并未调用 | 已补齐最小客户端接入（`probes/command-bridge/`），真实发出 `command/run` 与 `command/done` |
+
+**复现出真实实现缺陷并修复**：卸载 disposer 上一轮为 `停接管 → 等 active → 回退`。
+drain 期间 gate 已撤，但会话仍是 `danger-full-access`，因此该窗口内到达的调用被免审放行并按旧权限执行。
+修复前证据：`raw/t2-failure/`（新调用写出了 workspace 外的 `t2-new.txt`，回退事件晚于该次执行）。
+修复为**回退先于 drain**；修复后同一场景：`stop-admission` 后 1ms 写入 `workspace-write`，
+新调用返回 `Operation not permitted [sandbox: file access denied under workspace-write mode]`，文件未生成。
+新增回归测试 `tests/unload.test.ts`，已验证其在旧顺序下失败。
+
+**更正一个结论**：审批挂起时**并非**无法切出。上一轮点击的是当前已选中的 workspace-write，
+原生控件在同值时直接 return，未发出命令；本轮两种入口均成功，审批**保持挂起**。
+真实停用与卸载期间，已弹出的审批同样保留且可继续答复（`raw/t5l/`）。
+
+**切换之后由真人结算（已取得）**：审批挂起时切到 `read-only`，操作者随后点「允许一次」。
+序列为 `tool/call`(27) → `approval/asked`(28) → `/permission read-only` 成功(29–32) →
+`approval/decided: allowed-once`(33) → `plugin:arbiter/decision: human-allow`(34) →
+`tool/result: Operation not permitted [sandbox: file access denied under read-only mode]`(37)。
+即：**真人批准决定裁决，但不重新放宽权限**；该调用被批准后仍被收紧的沙箱挡住，文件未生成。
+这符合"实际执行仍尊重宿主沙箱"，并且没有被记成 `human-deny`。证据 `raw/t5h/`。
+
+**另一对照（非真人）**：宿主在审批挂起时被终止，`approval/decided` 为 `cancelled`、裁决为 `human-abort`
+而非 `human-deny`，符合契约对等待与取消的区分。证据 `raw/t5h-cancel/`。
+
+**同一会话内的并行工具入口（已实测）**：原先"串行队列"的判断不成立。宿主在同一步骤内通过调度池并发派发
+（`dsh-agent-loop` 的 `maxParallelToolCalls`，默认 10；是否并行由工具的 `isConcurrencySafe(args)` 决定，
+`read`/`web_search` 声明为 `true`，`bash` 不是）。实测同一步骤两个 `read`：`gate/entered` 分别 +0ms 与 +6ms，
+两条独立 `review-allow`，两个结果均成功。证据 `raw/t7/`。
+
+**仍未验证**：无遗留并发项；剩余为范围限制（冷恢复只覆盖被打开的会话、正式客户端选择器接入、日常 profile 日志迁移）。
+
 ---
 
 

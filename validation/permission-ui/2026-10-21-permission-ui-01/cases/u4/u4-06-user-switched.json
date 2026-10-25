@@ -1,0 +1,38 @@
+{
+  "fresh": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+  "before": {
+    "known": true,
+    "sessionId": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+    "enabled": false,
+    "boundary": "guarded",
+    "reason": "permission-command",
+    "origin": "client-selector",
+    "revision": 2
+  },
+  "sandboxBefore": {
+    "ok": true,
+    "effectiveMode": "workspace-write",
+    "approval": "ask"
+  },
+  "skipped": [
+    {
+      "at": 1792599488674,
+      "t": 11174,
+      "event": "pui/dispose-skip",
+      "sessionId": "session-25306a93-6092-4aaf-8027-ec9fa65d155f",
+      "reason": "not-managed"
+    }
+  ],
+  "rolledBack": [],
+  "modeEvents": [
+    {
+      "mode": "workspace-write"
+    },
+    {
+      "mode": "workspace-write"
+    },
+    {
+      "mode": "read-only"
+    }
+  ]
+}

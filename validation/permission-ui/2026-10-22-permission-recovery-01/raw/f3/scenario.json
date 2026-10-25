@@ -1,0 +1,15 @@
+{
+  "routes": [
+    { "match": "F3SLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F3-SLOW-MARK\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3/ws/f3-slow.txt'", "description": "slow review call" } } ] },
+      { "type": "text", "text": "F3SLOW-DONE" }
+    ]},
+    { "match": "F3AFTER", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F3-AFTER-MARK\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f3/ws/f3-after.txt'", "description": "after disable" } } ] },
+      { "type": "text", "text": "F3AFTER-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDelayMs": 9000,
+  "reviewerDefault": { "risk": 2, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

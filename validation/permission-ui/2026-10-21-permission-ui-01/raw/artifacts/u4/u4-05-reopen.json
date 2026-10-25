@@ -1,0 +1,59 @@
+{
+  "resumed": {
+    "ok": false,
+    "code": "resume-failed",
+    "message": "session \"session-eec873bd-88ea-4366-a54d-a0c3126d8266\" is already owned by an active write handle"
+  },
+  "status": {
+    "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+    "enabled": false,
+    "boundary": "guarded",
+    "reason": "plugin-unload",
+    "origin": "client-selector",
+    "revision": 2
+  },
+  "rollbackEvents": [
+    {
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    }
+  ],
+  "restored": [],
+  "ignorableRecords": [
+    {
+      "type": "plugin:pui/enabled",
+      "ignorable": true
+    },
+    {
+      "type": "plugin:pui/disabled",
+      "ignorable": true
+    }
+  ],
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+    "nativeControl": false,
+    "puiPresent": true,
+    "selected": "workspace-write"
+  }
+}

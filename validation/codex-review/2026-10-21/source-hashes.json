@@ -1,0 +1,10 @@
+{
+  "src/index.ts": "a55b80ac7e5248a18eb4a1397f14ee0d071c3256fbfc85dd0a62f7c4c8e02041",
+  "src/rules/match.ts": "be6d058980a06f76d910b1a74338ad0fc69c0bdc5c6aba6d8a5ff7a543a38245",
+  "src/shell/parse.ts": "28f73f7ded952b90499e084d91611ecd6efaacff93e3410dba3a8886db5d9297",
+  "src/policy.ts": "8ebdf5fba4f9316566cfef13d55e3f5284626eab772bdd31d1065e635dfe06d1",
+  "src/reviewer.ts": "27685e8d067653f54474b506f47c647e5841294a4569a99832f09557fb1d77d9",
+  "src/snapshot.ts": "7deadb2482693a28c73c182337098320a5d075a85b5bc3d042149a64afb5b9ee",
+  "src/audit.ts": "6df77681bb18ddd0271c5f2c21cf7b6705ae412957c3841508ee7950c1026c1d",
+  "src/suggestions.ts": "51dc05a488e973b8afbcfc600df872883d6ec05ecfb4daa165ef99247ee24dae"
+}

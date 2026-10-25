@@ -1,0 +1,2 @@
+{"event":"approval-sim/mounted","outcome":"rejected","simulated":true,"at":"2026-10-21T08:15:18.381Z"}
+{"event":"approval-sim/answer","outcome":"rejected","toolName":"bash","callId":"fixture-session-18e4ede1-1fac-481a-ad78-52a90d5004c5-0-0","reason":"force-ask requires a human decision for this call.","agentSessionId":"session-18e4ede1-1fac-481a-ad78-52a90d5004c5","simulated":true,"at":"2026-10-21T08:15:18.480Z"}

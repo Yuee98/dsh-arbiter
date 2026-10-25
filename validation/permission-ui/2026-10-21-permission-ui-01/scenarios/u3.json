@@ -1,0 +1,13 @@
+{
+  "routes": [
+    { "match": "U3ENABLE", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-ALLOW u3\\n' > '{{WS}}/u3-allow.txt'", "description": "u3 allow" } } ] },
+      { "type": "text", "text": "U3ENABLE-DONE" }
+    ]},
+    { "match": "U3AFTER", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY u3\\n' > '{{WS}}/u3-deny.txt'", "description": "u3 deny" } } ] },
+      { "type": "text", "text": "U3AFTER-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ]
+}

@@ -1,0 +1,11 @@
+{
+  "routes": [
+    { "match": "T5ASK", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'T5-ASK\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5/ws/t5-ask.txt'", "description": "needs human" } } ] },
+      { "type": "text", "text": "T5ASK-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "holdMatch": [],
+  "reviewerDefault": { "risk": 8, "authorized": 1, "secrets": true, "destructive": false, "egress": false, "bulk": false }
+}

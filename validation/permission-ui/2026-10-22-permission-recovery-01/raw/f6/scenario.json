@@ -1,0 +1,14 @@
+{
+  "routes": [
+    { "match": "F6PTC", "steps": [
+      { "type": "calls", "calls": [ { "name": "run_code", "arguments": {
+        "description": "start PTC, then wait inside for a sandbox switch",
+        "code": "const fs = await import('node:fs');\nfs.writeFileSync('f6-outer-started.txt', 'outer started\\n');\nconst r = await tools.bash({ command: \"printf 'F6-INNER\\\\n' > 'f6-inner.txt'\", description: 'inner call' });\nfs.writeFileSync('f6-outer-finished.txt', JSON.stringify(r).slice(0, 300));\nreturn r;"
+      } } ] },
+      { "type": "text", "text": "F6PTC-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDelayMs": 10000,
+  "reviewerDefault": { "risk": 2, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

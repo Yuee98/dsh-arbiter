@@ -1,0 +1,18 @@
+{
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "workspace-write",
+    "enabled": false
+  },
+  "status": {
+    "known": true,
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": false,
+    "boundary": "guarded",
+    "reason": "late-response-probe",
+    "origin": "client-selector",
+    "revision": 4
+  }
+}

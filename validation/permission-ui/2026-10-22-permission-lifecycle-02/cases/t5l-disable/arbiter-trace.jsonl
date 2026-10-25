@@ -1,0 +1,7 @@
+{"at":1792664040815,"event":"gate/entered","callId":"fx-session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8-0-0","tool":"bash","sessionId":"session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8","active":1}
+{"at":1792664040819,"event":"review/start","callId":"fx-session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8-0-0","sessionId":"session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8"}
+{"at":1792664040820,"event":"review/settled","callId":"fx-session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8-0-0","sessionId":"session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8"}
+{"at":1792664042380,"event":"unload/stop-admission","active":1,"managed":1}
+{"at":1792664042380,"event":"unload/rollback","sessionId":"session-6998f1f8-ad4d-45ea-bbac-da6fc6a8e8f8","changed":false}
+{"at":1792664045909,"event":"unload/drained","active":0,"waitedMs":3529,"rolledBeforeDrainMs":0}
+{"at":1792664045909,"event":"unload/release","managed":0}

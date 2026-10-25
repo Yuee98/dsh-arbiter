@@ -1,0 +1,187 @@
+{
+  "caseId": "review-error-fallback",
+  "title": "Malformed reviewer output escalates and strict mode falls back to deny",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:16.625Z",
+  "elapsedMs": 377,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": false
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 126976,
+    "calls": [
+      {
+        "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+        "session_kind": "main",
+        "result": "fallback-deny",
+        "reason": "Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "review(default)",
+            "reason": "no-match",
+            "configRevision": "7a836ea448f8",
+            "at": 1792570516592
+          },
+          {
+            "stage": "review",
+            "result": "error-escalate",
+            "reason": "reviewer output remained invalid after 2 attempts: reviewer output is not valid JSON: Unexpected token 's', \"still not json\" is not valid JSON",
+            "configRevision": "7a836ea448f8",
+            "at": 1792570516594
+          },
+          {
+            "stage": "fallback",
+            "result": "fallback-deny",
+            "reason": "automatic_mode_no_human",
+            "at": 1792570516594
+          }
+        ],
+        "execution_status": "not-started",
+        "approval_mode": "strict",
+        "signals": null
+      }
+    ],
+    "modelCalls": [
+      {
+        "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+        "attempt": 1,
+        "backend": "chat",
+        "error": "reviewer output is not valid JSON: Unexpected token 'o', \"not json\" is not valid JSON",
+        "response_text": "not json",
+        "parsed": null
+      },
+      {
+        "call_id": "fixture-session-d01bd389-b989-4042-87ea-663233a57916-0-0",
+        "attempt": 2,
+        "backend": "chat",
+        "error": "reviewer output is not valid JSON: Unexpected token 's', \"still not json\" is not valid JSON",
+        "response_text": "still not json",
+        "parsed": null
+      }
+    ],
+    "candidates": []
+  },
+  "reviewerRequests": [
+    {
+      "at": "2026-10-21T08:15:16.593Z",
+      "index": 0,
+      "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+      "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_trunca",
+      "reply": "not json"
+    },
+    {
+      "at": "2026-10-21T08:15:16.594Z",
+      "index": 1,
+      "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+      "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_trunca",
+      "reply": "still not json"
+    }
+  ],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:16.590Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+    },
+    {
+      "at": "2026-10-21T08:15:16.590Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+    },
+    {
+      "at": "2026-10-21T08:15:16.602Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-d01bd389-b989-4042-87ea-663233a57916"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-error-fallback/sessions/session-d01bd389-b989-4042-87ea-663233a57916__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "strict",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [],
+    "reviewerScript": [
+      "not json",
+      "still not json"
+    ]
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 126976
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-70860d9d.json",
+      "bytes": 1742
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 1961
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-error-fallback-ws--/session-d01bd389-b989-4042-87ea-663233a57916/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-error-fallback-ws--/session-d01bd389-b989-4042-87ea-663233a57916/session.v4.jsonl.zstd",
+      "bytes": 15152
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-d01bd389-b989-4042-87ea-663233a57916.json",
+      "bytes": 4103
+    },
+    {
+      "path": "reviewer-requests.jsonl",
+      "bytes": 1468
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 420
+    },
+    {
+      "path": "sessions/session-d01bd389-b989-4042-87ea-663233a57916__session.v4.jsonl.zstd",
+      "bytes": 15152
+    }
+  ]
+}

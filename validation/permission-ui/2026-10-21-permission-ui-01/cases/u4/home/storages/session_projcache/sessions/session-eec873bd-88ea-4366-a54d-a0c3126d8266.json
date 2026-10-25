@@ -1,0 +1,275 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792599441535,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u4/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 32,
+        "val": "U4SLOWALLOW"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "first": {
+            "seq": 11,
+            "text": "U4SLOWALLOW"
+          },
+          "count": 1,
+          "lastSeq": 11
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 32,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 32,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 32,
+        "val": {
+          "surfaceTokens": 2747,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 2735
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "systems": [
+            {
+              "seq": 10,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 2747,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1342
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 24,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 26
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "turns": 1,
+          "steps": 2,
+          "llmMs": 17,
+          "toolMs": 26708,
+          "ttftMs": 17,
+          "ttftSteps": 2,
+          "decodeMs": 0,
+          "decodeTokens": 20,
+          "lastTurn": 1,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 7,
+              "prompt": "U4SLOWALLOW",
+              "response": "U4SLOWALLOW-DONE"
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 32,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": true
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 32,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u4/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 32,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 32,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "lastMessageTime": 1792599471376,
+          "lastInjectionTime": 1792599444639,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 32,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 32,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 32,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "puiPermission": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "enabled": false,
+          "boundary": "guarded",
+          "revision": 2
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 32,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 32,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792599444639
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 32,
+        "val": null
+      }
+    }
+  }
+}

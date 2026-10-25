@@ -1,0 +1,19 @@
+{
+  "routes": [
+    { "match": "F4SLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F4-SLOW\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f4/ws/f4-slow.txt'", "description": "slow review call" } } ] },
+      { "type": "text", "text": "F4SLOW-DONE" }
+    ]},
+    { "match": "F4NEW", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F4-NEW\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f4/outside/f4-new.txt'", "description": "new call during drain" } } ] },
+      { "type": "text", "text": "F4NEW-DONE" }
+    ]},
+    { "match": "F4SECOND", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F4-SECOND\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f4/outside/f4-second.txt'", "description": "second session during drain" } } ] },
+      { "type": "text", "text": "F4SECOND-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDelayMs": 9000,
+  "reviewerDefault": { "risk": 2, "authorized": 6, "secrets": false, "destructive": false, "egress": false, "bulk": false }
+}

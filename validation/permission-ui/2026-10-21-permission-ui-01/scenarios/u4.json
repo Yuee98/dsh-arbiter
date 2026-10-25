@@ -1,0 +1,21 @@
+{
+  "routes": [
+    { "match": "U4SLOWALLOW", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "{{WS}}/u4-slow-allow.txt", "content": "PUI-SLOW-8000 allow\n" } } ] },
+      { "type": "text", "text": "U4SLOWALLOW-DONE" }
+    ]},
+    { "match": "U4SLOWASK", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "{{WS}}/u4-slow-ask.txt", "content": "PUI-SLOW-6000 PUI-ASK ask\n" } } ] },
+      { "type": "text", "text": "U4SLOWASK-DONE" }
+    ]},
+    { "match": "U4AFTER", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'PUI-DENY u4\\n' > '{{WS}}/u4-after.txt'", "description": "u4 after disable" } } ] },
+      { "type": "text", "text": "U4AFTER-DONE" }
+    ]},
+    { "match": "U4RESTORED", "steps": [
+      { "type": "calls", "calls": [ { "name": "write", "arguments": { "file_path": "{{WS}}/u4-restored.txt", "content": "after reopen\n" } } ] },
+      { "type": "text", "text": "U4RESTORED-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ]
+}

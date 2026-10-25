@@ -1,0 +1,24 @@
+{
+  "before": {
+    "effective": {
+      "preset": "workspace-write",
+      "sandbox": "workspace-write",
+      "approval": "ask"
+    },
+    "pending": true
+  },
+  "switched": {
+    "ok": true,
+    "value": {
+      "matched": true
+    }
+  },
+  "after": {
+    "effective": {
+      "preset": "read-only",
+      "sandbox": "read-only",
+      "approval": "ask"
+    },
+    "pending": true
+  }
+}

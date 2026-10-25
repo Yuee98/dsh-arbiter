@@ -1,0 +1,87 @@
+{
+  "state": {
+    "cellText": "自动审查（Arbiter）\nread-only\nworkspace-write\ndanger-full-access",
+    "nativeControl": false,
+    "puiPresent": true,
+    "puiDot": "",
+    "options": [
+      {
+        "value": "__arbiter__",
+        "label": "自动审查（Arbiter）"
+      },
+      {
+        "value": "read-only",
+        "label": "read-only"
+      },
+      {
+        "value": "workspace-write",
+        "label": "workspace-write"
+      },
+      {
+        "value": "danger-full-access",
+        "label": "danger-full-access"
+      }
+    ],
+    "selected": "workspace-write"
+  },
+  "events": [
+    {
+      "at": 1792600321741,
+      "t": 0,
+      "event": "probe/ready",
+      "holdApprovals": false,
+      "registerAuto": false
+    },
+    {
+      "at": 1792600325391,
+      "t": 3650,
+      "event": "session/event",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "seq": 0,
+      "type": "permission/preset",
+      "data": {
+        "preset": "workspace-write"
+      },
+      "enabled": false
+    },
+    {
+      "at": 1792600325392,
+      "t": 3651,
+      "event": "session/event",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "seq": 1,
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "workspace-write"
+      },
+      "enabled": false
+    },
+    {
+      "at": 1792600325392,
+      "t": 3651,
+      "event": "session/event",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "seq": 2,
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      },
+      "enabled": false
+    },
+    {
+      "at": 1792600325392,
+      "t": 3651,
+      "event": "session/created",
+      "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+      "seq": 3,
+      "record": {
+        "sessionId": "session-0c4afc30-ea6e-45b3-966d-5ccde26c9f1d",
+        "enabled": false,
+        "boundary": null,
+        "reason": null,
+        "origin": null,
+        "revision": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "stillPending": true,
+  "approvals": [
+    {
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "type": "approval/asked",
+      "outcome": null
+    }
+  ],
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "note": "left pending for a human answer; see t5h for the answered variant"
+}

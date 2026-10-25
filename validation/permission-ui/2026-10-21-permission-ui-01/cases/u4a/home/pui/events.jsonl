@@ -1,0 +1,29 @@
+{"at":1792600048496,"t":0,"event":"probe/start","logPath":"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u4a/home/pui/events.jsonl","pid":7094}
+{"at":1792600048496,"t":0,"event":"probe/ready","holdApprovals":false,"registerAuto":false}
+{"at":1792600048873,"t":377,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":0,"type":"permission/preset","data":{"preset":"workspace-write"},"enabled":false}
+{"at":1792600048873,"t":377,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":1,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":false}
+{"at":1792600048873,"t":377,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":2,"type":"approval/policy","data":{"policy":"ask"},"enabled":false}
+{"at":1792600048873,"t":377,"event":"session/created","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":3,"record":{"sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","enabled":false,"boundary":null,"reason":null,"origin":null,"revision":0}}
+{"at":1792600049346,"t":850,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":3,"type":"plugin:pui/enabled","data":{"boundary":"guarded","origin":"client-selector","at":1792600049346},"enabled":true}
+{"at":1792600049346,"t":850,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":4,"type":"sandbox/mode","data":{"mode":"workspace-write"},"enabled":true}
+{"at":1792600049347,"t":851,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":5,"type":"approval/policy","data":{"policy":"ask"},"enabled":true}
+{"at":1792600049347,"t":851,"event":"pui/enabled","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","boundary":"guarded","origin":"client-selector","seq":6}
+{"at":1792600069206,"t":20710,"event":"gate/call","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","tool":"write","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0","boundary":"guarded","text":"{\"file_path\":\"/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u4a/ws/u4-slow-ask.txt\",\"content\":\"PUI-SLOW-6000 PUI-ASK ask\\n\"}"}
+{"at":1792600069206,"t":20710,"event":"review/inflight","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0","delayMs":6000}
+{"at":1792600075206,"t":26710,"event":"review/settled","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0","outcome":"done","signalAborted":false}
+{"at":1792600075207,"t":26711,"event":"approval/opening","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"}
+{"at":1792600075449,"t":26953,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":23,"type":"command/run","data":{"commandId":"cmd-6609cfb7-1","name":"permission","args":" danger-full-access","source":{"kind":"user"}},"enabled":true}
+{"at":1792600075450,"t":26954,"event":"pui/command-exit","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","target":"danger-full-access","nativeValueMayBeUnchanged":true}
+{"at":1792600075450,"t":26954,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":24,"type":"permission/preset","data":{"preset":"danger-full-access"},"enabled":true}
+{"at":1792600075450,"t":26954,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":25,"type":"sandbox/mode","data":{"mode":"danger-full-access"},"enabled":true}
+{"at":1792600075451,"t":26955,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":26,"type":"approval/policy","data":{"policy":"never"},"enabled":true}
+{"at":1792600075451,"t":26955,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":28,"type":"plugin:pui/disabled","data":{"reason":"permission-command","at":1792600075451},"enabled":false}
+{"at":1792600075451,"t":26955,"event":"pui/disabled","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","reason":"permission-command","mode":null}
+{"at":1792600075451,"t":26955,"event":"pui/command-exit-applied","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","target":"danger-full-access","changed":true}
+{"at":1792600075452,"t":26956,"event":"session/event","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","seq":29,"type":"command/done","data":{"commandId":"cmd-6609cfb7-1","kind":"success","text":"preset danger-full-access"},"enabled":false}
+{"at":1792600109593,"t":61097,"event":"pui/dispose-begin","active":["fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"],"drainMs":0}
+{"at":1792600109593,"t":61097,"event":"pui/dispose-drained","active":["fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"],"waitedMs":0}
+{"at":1792600109593,"t":61097,"event":"pui/dispose-skip","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","reason":"not-managed"}
+{"at":1792600109593,"t":61097,"event":"pui/dispose-end","waitedMs":0}
+{"at":1792600109623,"t":61127,"event":"approval/outcome","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0","outcome":"cancelled","signalAborted":true}
+{"at":1792600109623,"t":61127,"event":"gate/released","sessionId":"session-919f8361-0e60-4372-acb7-14947eff56a9","callId":"fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0","active":0}

@@ -1,0 +1,56 @@
+[
+  {
+    "preset": "read-only",
+    "submission": " read-only",
+    "effective": {
+      "preset": "read-only",
+      "sandbox": "read-only",
+      "approval": "ask"
+    },
+    "last": {
+      "seq": 31,
+      "args": " read-only",
+      "done": {
+        "seq": 34,
+        "kind": "success",
+        "text": "preset read-only"
+      }
+    }
+  },
+  {
+    "preset": "danger-full-access",
+    "submission": " danger-full-access",
+    "effective": {
+      "preset": "danger-full-access",
+      "sandbox": "danger-full-access",
+      "approval": "never"
+    },
+    "last": {
+      "seq": 35,
+      "args": " danger-full-access",
+      "done": {
+        "seq": 40,
+        "kind": "success",
+        "text": "preset danger-full-access"
+      }
+    }
+  },
+  {
+    "preset": "workspace-write",
+    "submission": " workspace-write",
+    "effective": {
+      "preset": "workspace-write",
+      "sandbox": "workspace-write",
+      "approval": "ask"
+    },
+    "last": {
+      "seq": 41,
+      "args": " workspace-write",
+      "done": {
+        "seq": 46,
+        "kind": "success",
+        "text": "preset workspace-write"
+      }
+    }
+  }
+]

@@ -1,0 +1,135 @@
+{
+  "opened": [
+    {
+      "at": 1792600069206,
+      "t": 20710,
+      "event": "review/inflight",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "delayMs": 6000
+    },
+    {
+      "at": 1792600075206,
+      "t": 26710,
+      "event": "review/settled",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "outcome": "done",
+      "signalAborted": false
+    },
+    {
+      "at": 1792600075207,
+      "t": 26711,
+      "event": "approval/opening",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"
+    }
+  ],
+  "beforeSwitch": [
+    {
+      "at": 1792600075207,
+      "t": 26711,
+      "event": "approval/opening",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"
+    }
+  ],
+  "afterSwitch": [
+    {
+      "at": 1792600069206,
+      "t": 20710,
+      "event": "review/inflight",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "delayMs": 6000
+    },
+    {
+      "at": 1792600075206,
+      "t": 26710,
+      "event": "review/settled",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "outcome": "done",
+      "signalAborted": false
+    },
+    {
+      "at": 1792600075207,
+      "t": 26711,
+      "event": "approval/opening",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"
+    }
+  ],
+  "switchResult": {
+    "ok": true,
+    "value": {
+      "matched": true
+    },
+    "error": null
+  },
+  "settled": [
+    {
+      "at": 1792600069206,
+      "t": 20710,
+      "event": "review/inflight",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "delayMs": 6000
+    },
+    {
+      "at": 1792600075206,
+      "t": 26710,
+      "event": "review/settled",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+      "outcome": "done",
+      "signalAborted": false
+    },
+    {
+      "at": 1792600075207,
+      "t": 26711,
+      "event": "approval/opening",
+      "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+      "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0"
+    }
+  ],
+  "status": {
+    "known": true,
+    "sessionId": "session-919f8361-0e60-4372-acb7-14947eff56a9",
+    "enabled": false,
+    "boundary": "guarded",
+    "reason": "permission-command",
+    "origin": "client-selector",
+    "revision": 2
+  },
+  "approvalEvents": [
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "type": "approval/asked",
+      "data": {
+        "id": "994f71c9-8d0e-4f3f-a289-31bcc7f7fe57",
+        "toolName": "write",
+        "callId": "fixture-session-919f8361-0e60-4372-acb7-14947eff56a9-0-0",
+        "reason": "pui probe: manual approval probe"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "data": {
+        "policy": "never"
+      }
+    }
+  ],
+  "bodyTail": "U4SLOWASK\n标准模式\n对话\n轨迹\nU4SLOWASK\n00:27\n运行中\n写入\nu4-slow-ask.txt\n1KB\n+1 -0\n+1 -0\n深度求索中\n深度求索中，用时 59秒 ···\n等待审批\npui probe: manual approval probe\n拒绝\n允许一次"
+}

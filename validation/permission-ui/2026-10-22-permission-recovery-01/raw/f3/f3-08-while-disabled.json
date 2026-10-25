@@ -1,0 +1,18 @@
+{
+  "marker": "F3-AFTER-MARK\n",
+  "lastResults": [
+    {
+      "isError": false,
+      "text": "(no output)"
+    },
+    {
+      "isError": false,
+      "text": "(no output)"
+    }
+  ],
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  }
+}

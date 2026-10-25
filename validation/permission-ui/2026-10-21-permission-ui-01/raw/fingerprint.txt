@@ -1,0 +1,14 @@
+date=2026-10-21T22:20:30+08:00
+os=27.0.1 arm64
+node=v24.21.0
+dsh_runtime=0.2.1-rc.2
+app_build=0.2.1-rc.2
+b67a65b9719272b2eb54093b63c121d05907da062a1393e8c9f871e1cd18f94e  dsh/package.json
+1e53932e7c4213ea24a7d87f06960b7a7702cb21f8a5741c97242b4a470a442a  dsh/node_modules/@deepseek-ai/dsh-tools/lib/index.js
+6a5ad1ba3c3dc3abbbae52e6c8c4463970ee0c1c8988cebb0d5cf2acd17ee90b  dsh/node_modules/@deepseek-ai/dsh-user-approval/lib/index.js
+772ca58f0f786d6cb4d839deb621634c31097c13228d81b14e3f3153d0524924  dsh/node_modules/@deepseek-ai/dsh-sandbox-policy/lib/index.js
+4f23c620145098d611d04d8363bc6716f49b26930c9141a21dc9a8df2b72ba63  dsh/node_modules/@deepseek-ai/dsh-permission-presets/lib/index.js
+d35ea0b7c74ad66481bd33fa38fc7d7751edf4336e11c0058a992464862cc119  dsh/node_modules/@deepseek-ai/dsh-client-ui-permission-presets/lib/client.js
+2f5dd07cb5c744a29abbb8003a8a4cefd9e582c6e2538074ca299a0ddd02a3bf  dsh/node_modules/@deepseek-ai/dsh-session/lib/index.js
+1b8bf9eb266d7b3b7f899175e3f435c89ed8baa8aabc677212759f8c6cd23132  dsh/node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
+143b445f1b303be83d56f9e7d3992e1a4885850c08f1082065d332ba7a70ae0a  dsh/node_modules/@deepseek-ai/dsh-hmr/lib/index.js

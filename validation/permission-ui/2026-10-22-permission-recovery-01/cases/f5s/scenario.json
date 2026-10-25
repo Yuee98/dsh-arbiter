@@ -1,0 +1,10 @@
+{
+  "routes": [
+    { "match": "F5ASK", "steps": [
+      { "type": "calls", "calls": [ { "name": "bash", "arguments": { "command": "printf 'F5S\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f5s/ws/f5s-ask.txt'", "description": "needs human" } } ] },
+      { "type": "text", "text": "F5ASK-DONE" }
+    ]}
+  ],
+  "default": [ { "type": "text", "text": "IDLE" } ],
+  "reviewerDefault": { "risk": 8, "authorized": 1, "secrets": true, "destructive": false, "egress": false, "bulk": false }
+}

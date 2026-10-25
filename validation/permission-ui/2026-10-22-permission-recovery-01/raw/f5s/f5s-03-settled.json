@@ -1,0 +1,22 @@
+{
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "outcome": null
+    }
+  ],
+  "decisions": [],
+  "results": [],
+  "marker": null,
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  }
+}

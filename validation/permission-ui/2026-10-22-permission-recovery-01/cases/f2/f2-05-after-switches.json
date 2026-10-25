@@ -1,0 +1,111 @@
+{
+  "label": "05-after-switches",
+  "submission": {
+    "ok": true,
+    "attempts": 1,
+    "args": " auto",
+    "command": {
+      "seq": 47,
+      "args": " auto",
+      "done": {
+        "seq": 48,
+        "kind": "error",
+        "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+      },
+      "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+    }
+  },
+  "before": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "after": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "timelineTail": [
+    {
+      "seq": 40,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-7",
+        "kind": "success",
+        "text": "preset danger-full-access"
+      }
+    },
+    {
+      "seq": 41,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-8",
+        "name": "permission",
+        "args": " workspace-write",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 42,
+      "type": "permission/preset",
+      "ignorable": false,
+      "data": {
+        "preset": "workspace-write"
+      }
+    },
+    {
+      "seq": 43,
+      "type": "sandbox/mode",
+      "ignorable": false,
+      "data": {
+        "mode": "workspace-write"
+      }
+    },
+    {
+      "seq": 44,
+      "type": "approval/policy",
+      "ignorable": false,
+      "data": {
+        "policy": "ask"
+      }
+    },
+    {
+      "seq": 46,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-8",
+        "kind": "success",
+        "text": "preset workspace-write"
+      }
+    },
+    {
+      "seq": 47,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-9",
+        "name": "permission",
+        "args": " auto",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 48,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-9",
+        "kind": "error",
+        "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+      }
+    }
+  ],
+  "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF2 bootstrap\n13:09\n已完成\n已完成，用时 1秒\n\nIDLE\n\n用量 110 tok\n13:09\n\n/permission auto\n\n工作区内修改\nfixture-1\n1 轮 1 步\n110 tok·缓存命中 0%\n0%\ncommand.execute failed: gateway/internal: 此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+}

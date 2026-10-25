@@ -1,0 +1,58 @@
+{
+  "decided": {
+    "seq": 33,
+    "outcome": "allowed-once"
+  },
+  "effective": {
+    "preset": "read-only",
+    "sandbox": "read-only",
+    "approval": "ask"
+  },
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "outcome": null
+    },
+    {
+      "seq": 33,
+      "type": "approval/decided",
+      "outcome": "allowed-once"
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 34,
+      "result": "human-allow",
+      "trace": [
+        "review(default)",
+        "review-escalate",
+        "human-allow"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "seq": 29,
+      "type": "command/run",
+      "args": " read-only"
+    },
+    {
+      "seq": 32,
+      "type": "command/done",
+      "kind": "success"
+    }
+  ],
+  "results": [
+    {
+      "isError": false,
+      "text": "[stderr]\nbash: /Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5h/ws/t5-ask.txt: Operation not permitted\n[sandbox: file access denied under read-only mode]\n[sandbox: e"
+    }
+  ],
+  "marker": null
+}

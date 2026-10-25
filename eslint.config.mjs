@@ -56,6 +56,23 @@ export default defineConfig(
     },
   },
   {
+    // The browser API boundary converts trusted host JSON into the declared
+    // response type. Parsing is the one place an untyped JSON value is assigned
+    // to a generic; every caller-facing schema is defined at the call site.
+    files: ['src/client/api.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+    },
+  },
+  {
+    // A stub ContextLike answers a set of exact `get` overloads from one
+    // services table; the structural mismatch is the test double's whole point.
+    files: ['tests/unload.test.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-type-assertion': 'off',
+    },
+  },
+  {
     files: ['tests/**/*.test.ts'],
     plugins: { vitest },
     rules: {

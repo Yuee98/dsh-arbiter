@@ -1,0 +1,20 @@
+{
+  "done": true,
+  "hostCurrent": "auto",
+  "enabled": false,
+  "gates": [],
+  "results": [
+    {
+      "isError": false,
+      "text": "(no output)"
+    },
+    {
+      "isError": false,
+      "text": "(no output)"
+    }
+  ],
+  "marker": {
+    "exists": true,
+    "content": "PUI-ALLOW auto\n"
+  }
+}

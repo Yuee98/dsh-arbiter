@@ -1,0 +1,58 @@
+{
+  "submission": {
+    "ok": true,
+    "attempts": 1,
+    "args": " auto",
+    "command": {
+      "seq": 21,
+      "args": " auto",
+      "done": {
+        "seq": 22,
+        "kind": "error",
+        "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+      },
+      "sessionId": "session-84d6d097-6431-43fa-a6eb-166f28331cad"
+    }
+  },
+  "before": {
+    "preset": "danger-full-access",
+    "sandbox": "danger-full-access",
+    "approval": "never"
+  },
+  "after": {
+    "preset": "danger-full-access",
+    "sandbox": "danger-full-access",
+    "approval": "never"
+  },
+  "newEvents": [
+    {
+      "seq": 21,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-fa50cef1-1",
+        "name": "permission",
+        "args": " auto",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 22,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-fa50cef1-1",
+        "kind": "error",
+        "text": "此入口不受 Arbiter 支持。请在会话权限菜单中选择\"自动审查（Arbiter）\"。"
+      }
+    }
+  ],
+  "autoEntry": {
+    "rejected": true,
+    "rejections": 1,
+    "legacyAutoRestores": 0,
+    "registrationError": null
+  }
+}

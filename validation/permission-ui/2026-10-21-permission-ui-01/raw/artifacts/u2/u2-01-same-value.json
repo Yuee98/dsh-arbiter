@@ -1,0 +1,48 @@
+{
+  "before": {
+    "enabled": true,
+    "boundary": "guarded",
+    "hostCurrent": "workspace-write",
+    "seq": 23
+  },
+  "after": {
+    "enabled": false,
+    "boundary": "guarded",
+    "hostCurrent": "workspace-write",
+    "seq": 26
+  },
+  "newEvents": [
+    {
+      "seq": 23,
+      "type": "command/run",
+      "data": {
+        "commandId": "cmd-6688d4c9-1",
+        "name": "permission",
+        "args": " workspace-write",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 24,
+      "type": "plugin:pui/disabled",
+      "data": {
+        "reason": "permission-command",
+        "at": 1792595904065
+      }
+    },
+    {
+      "seq": 25,
+      "type": "command/done",
+      "data": {
+        "commandId": "cmd-6688d4c9-1",
+        "kind": "success",
+        "text": "preset workspace-write"
+      }
+    }
+  ],
+  "hostValueUnchanged": true,
+  "noKnobEvents": true,
+  "commandRunLogged": true
+}

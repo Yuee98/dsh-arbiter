@@ -1,0 +1,89 @@
+{
+  "run": {
+    "at": 1792595914855,
+    "event": "session/event",
+    "sessionId": "session-51147434-2384-4a1b-aefd-be5d93c35868",
+    "seq": 47,
+    "type": "command/run",
+    "data": {
+      "commandId": "cmd-6688d4c9-3",
+      "name": "permission",
+      "args": " danger-full-access",
+      "source": {
+        "kind": "user"
+      }
+    },
+    "enabled": false
+  },
+  "after": {
+    "enabled": false,
+    "hostCurrent": "danger-full-access"
+  },
+  "tail": [
+    {
+      "seq": 47,
+      "type": "command/run",
+      "data": {
+        "commandId": "cmd-6688d4c9-3",
+        "name": "permission",
+        "args": " danger-full-access",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 48,
+      "type": "permission/preset",
+      "data": {
+        "preset": "danger-full-access"
+      }
+    },
+    {
+      "seq": 49,
+      "type": "sandbox/mode",
+      "data": {
+        "mode": "danger-full-access"
+      }
+    },
+    {
+      "seq": 50,
+      "type": "approval/policy",
+      "data": {
+        "policy": "never"
+      }
+    },
+    {
+      "seq": 51,
+      "type": "agent/inbox/spliced",
+      "data": {
+        "target": "next-step",
+        "start": 0,
+        "inserted": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "text": "The approval policy changed from \"ask\" to \"never\" (changed by the user)."
+              }
+            ],
+            "source": {
+              "kind": "user-approval"
+            },
+            "role": "user",
+            "id": "b0734288-3e12-4c51-88c0-f145b7ab9864"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 52,
+      "type": "command/done",
+      "data": {
+        "commandId": "cmd-6688d4c9-3",
+        "kind": "success",
+        "text": "preset danger-full-access"
+      }
+    }
+  ]
+}

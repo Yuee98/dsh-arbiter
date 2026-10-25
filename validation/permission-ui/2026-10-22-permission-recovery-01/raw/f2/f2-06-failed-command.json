@@ -1,0 +1,36 @@
+{
+  "submission": {
+    "ok": true,
+    "attempts": 2,
+    "args": " not-a-preset",
+    "command": {
+      "seq": 51,
+      "args": " not-a-preset",
+      "done": {
+        "seq": 52,
+        "kind": "error",
+        "text": "unknown preset \"not-a-preset\" (available: read-only, workspace-write, danger-full-access, auto)"
+      },
+      "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+    }
+  },
+  "before": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "after": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "last": {
+    "seq": 51,
+    "args": " not-a-preset",
+    "done": {
+      "seq": 52,
+      "kind": "error",
+      "text": "unknown preset \"not-a-preset\" (available: read-only, workspace-write, danger-full-access, auto)"
+    }
+  }
+}

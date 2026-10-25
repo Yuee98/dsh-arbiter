@@ -1,0 +1,4 @@
+window.__ModuleLoader__.load({ id: 'pui-probe', factory: (require) => {
+  const apply = (ctx) => { window.__pui = { ok: true, hasSlots: !!ctx.slots, hasSessions: !!ctx.sessions, hasRemote: !!ctx.remote }; };
+  return { apply, inject: [] };
+}});

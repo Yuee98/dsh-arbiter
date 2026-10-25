@@ -1,0 +1,22 @@
+{
+  "arbiterRoute": 404,
+  "bundles": [
+    "@deepseek-ai/dsh-base",
+    "@deepseek-ai/dsh-web-app"
+  ],
+  "sessionLoaded": true,
+  "sessionEvents": 37,
+  "decisions": [
+    {
+      "seq": 28,
+      "ignorable": true,
+      "result": "review-allow"
+    }
+  ],
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "selectorText": ""
+}

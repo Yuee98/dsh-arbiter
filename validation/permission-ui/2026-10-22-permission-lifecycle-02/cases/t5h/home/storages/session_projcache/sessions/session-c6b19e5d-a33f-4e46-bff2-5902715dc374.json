@@ -1,0 +1,272 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792664578835,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5h/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 44,
+        "val": "IDLE"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 44,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "T5H bootstrap"
+          },
+          "count": 2,
+          "lastSeq": 25
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 44,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 44,
+        "val": "read-only"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 44,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 300,
+            "outputTokens": 30,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 2,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 44,
+        "val": {
+          "surfaceTokens": 3048,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 3037
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 44,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 3048,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1643
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 39,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 42
+          },
+          "lastTurn": 2
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 44,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 44,
+        "val": {
+          "turns": 2,
+          "steps": 3,
+          "llmMs": 21,
+          "toolMs": 127810,
+          "ttftMs": 18,
+          "ttftSteps": 3,
+          "decodeMs": 3,
+          "decodeTokens": 30,
+          "lastTurn": 2,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 4,
+              "prompt": "T5H bootstrap",
+              "response": "IDLE"
+            },
+            {
+              "turn": 2,
+              "seq": 22,
+              "prompt": "T5ASK",
+              "response": "T5ASK-DONE"
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 44,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "preset": "read-only",
+          "sandbox": "read-only",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 44,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5h/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 44,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 44,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 44,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "lastMessageTime": 1792664710363,
+          "lastInjectionTime": 1792664580424,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 44,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 44,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 44,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 44,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 44,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 44,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792664582538
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 44,
+        "val": null
+      }
+    }
+  }
+}

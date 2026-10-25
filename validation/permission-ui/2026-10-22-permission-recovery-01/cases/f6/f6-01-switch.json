@@ -1,0 +1,39 @@
+{
+  "sawOuter": true,
+  "submission": {
+    "ok": true,
+    "attempts": 1,
+    "args": " workspace-write",
+    "command": {
+      "seq": 30,
+      "args": " workspace-write",
+      "done": {
+        "seq": 35,
+        "kind": "success",
+        "text": "preset workspace-write"
+      },
+      "sessionId": "session-7279c3b6-c0ae-49f8-ab76-ca21d6ad9b9b"
+    }
+  },
+  "outerStarted": null,
+  "mid": {
+    "effective": {
+      "preset": "workspace-write",
+      "sandbox": "workspace-write",
+      "approval": "ask"
+    },
+    "calls": [
+      {
+        "seq": 27,
+        "name": "run_code",
+        "callId": "fx-session-7279c3b6-c0ae-49f8-ab76-ca21d6ad9b9b-0-0"
+      }
+    ],
+    "results": []
+  },
+  "markers": {
+    "outerStarted": "outer started",
+    "inner": null,
+    "outerFinished": null
+  }
+}

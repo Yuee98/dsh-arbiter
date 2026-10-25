@@ -1,0 +1,27 @@
+{
+  "before": {
+    "known": true,
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": null,
+    "origin": "client-selector",
+    "revision": 1
+  },
+  "after": {
+    "known": true,
+    "sessionId": "session-589c9e83-d5f9-4eef-96a7-4e497c5a4ff5",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": null,
+    "origin": "client-selector",
+    "revision": 1
+  },
+  "selector": {
+    "cells": 1,
+    "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+    "puiDot": "",
+    "selected": "__arbiter__",
+    "enabled": true
+  }
+}

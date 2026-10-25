@@ -1,0 +1,43 @@
+{
+  "default": [
+    {
+      "type": "calls",
+      "calls": [
+        {
+          "name": "subagent",
+          "arguments": {
+            "description": "arbiter child",
+            "prompt": "ARBITER-CHILD run the marker command"
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "parent done"
+    }
+  ],
+  "routes": [
+    {
+      "match": "ARBITER-CHILD",
+      "steps": [
+        {
+          "type": "calls",
+          "calls": [
+            {
+              "name": "bash",
+              "arguments": {
+                "command": "printf 'CHILD-ALLOW\\n' > child-marker.txt",
+                "description": "child marker"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "child done"
+        }
+      ]
+    }
+  ]
+}

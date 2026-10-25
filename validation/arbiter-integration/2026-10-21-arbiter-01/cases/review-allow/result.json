@@ -1,0 +1,194 @@
+{
+  "caseId": "review-allow",
+  "title": "Real reviewer signals produce review-allow",
+  "task": "write the integration marker",
+  "startedAt": "2026-10-21T08:15:15.861Z",
+  "elapsedMs": 409,
+  "exitCode": 0,
+  "stdout": "done\n",
+  "stderrTail": "",
+  "marker": {
+    "exists": true,
+    "content": "ARBITER_MARKER\n"
+  },
+  "audit": {
+    "exists": true,
+    "bytes": 114688,
+    "calls": [
+      {
+        "call_id": "fixture-session-7eea8561-3a0e-4042-a362-9d250fe5af45-0-0",
+        "session_kind": "main",
+        "result": "review-allow",
+        "reason": "Arbiter: the review allowed this call.",
+        "trace": [
+          {
+            "stage": "rule",
+            "result": "review(default)",
+            "reason": "no-match",
+            "configRevision": "78ca2a3f9522",
+            "at": 1792570515819
+          },
+          {
+            "stage": "review",
+            "result": "review-allow",
+            "reason": "ordinary low-risk action",
+            "decisionRules": [
+              "R7"
+            ],
+            "configRevision": "78ca2a3f9522",
+            "at": 1792570515821
+          }
+        ],
+        "execution_status": "success",
+        "approval_mode": "normal",
+        "signals": {
+          "riskDist": null,
+          "riskPoint": 1,
+          "riskScore": null,
+          "riskClass": "low",
+          "authDist": null,
+          "authPoint": 8,
+          "authClass": "explicit",
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false,
+          "source": "chat",
+          "repairs": 0
+        }
+      }
+    ],
+    "modelCalls": [
+      {
+        "call_id": "fixture-session-7eea8561-3a0e-4042-a362-9d250fe5af45-0-0",
+        "attempt": 1,
+        "backend": "chat",
+        "error": null,
+        "response_text": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}",
+        "parsed": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+      }
+    ],
+    "candidates": []
+  },
+  "reviewerRequests": [
+    {
+      "at": "2026-10-21T08:15:15.821Z",
+      "index": 0,
+      "systemHead": "REVIEW_POLICY\nYou are the authorization reviewer for exactly one pending tool ca",
+      "userText": "PROJECT_RULES\n\n(none)\n\nENVIRONMENT\n\n{\n  \"cwd\": \"/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-allow/ws\"\n}\n\nCONTEXT\n\n{\n  \"tool_calls\": [],\n  \"checkpoints\": [],\n  \"context_truncated\": false\n}\n\nEVIDENCE\n\n{\n  \"evidence\": [],\n  \"evidence_truncated\": false,\n  \"parent_authorization_present\": null\n}\n\nMISSING_INPUT\n\n[\n  \"no human authorization evidence is readable in this session\"\n]\n\nPRIOR_VERDICTS\n\n{\n  \"prior_verdicts\": [],\n  \"history_truncated\": fal",
+      "reply": "{\"risk\":1,\"authorized\":8,\"secrets\":false,\"destructive\":false,\"egress\":false,\"bulk\":false}"
+    }
+  ],
+  "agentRequests": [
+    {
+      "at": "2026-10-21T08:15:15.817Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+    },
+    {
+      "at": "2026-10-21T08:15:15.817Z",
+      "route": "default",
+      "index": 0,
+      "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+    },
+    {
+      "at": "2026-10-21T08:15:15.837Z",
+      "route": "default",
+      "index": 1,
+      "sessionId": "session-7eea8561-3a0e-4042-a362-9d250fe5af45"
+    }
+  ],
+  "approvalSim": [],
+  "sessionLogs": [
+    "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/review-allow/sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45__session.v4.jsonl.zstd"
+  ],
+  "profile": {
+    "mode": "normal",
+    "subagentMode": "strict",
+    "approvalPolicy": "ask",
+    "sandbox": "danger-full-access",
+    "toolsMode": "native",
+    "rules": [],
+    "reviewerScript": [
+      {
+        "risk": 1,
+        "authorized": 8,
+        "secrets": false,
+        "destructive": false,
+        "egress": false,
+        "bulk": false
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "agent-requests.jsonl",
+      "bytes": 363
+    },
+    {
+      "path": "home/arbiter/arbiter.db",
+      "bytes": 114688
+    },
+    {
+      "path": "home/arbiter/arbiter.db-shm",
+      "bytes": 32768
+    },
+    {
+      "path": "home/arbiter/arbiter.db-wal",
+      "bytes": 0
+    },
+    {
+      "path": "home/arbiter/last-good/arbiter-it-a79389bd.json",
+      "bytes": 1742
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.patch.yml",
+      "bytes": 1943
+    },
+    {
+      "path": "home/profiles/arbiter-it/cordis.yml",
+      "bytes": 223
+    },
+    {
+      "path": "home/profiles/arbiter-it/node_modules/dsh-arbiter",
+      "bytes": 960
+    },
+    {
+      "path": "home/profiles/arbiter-it/package.json",
+      "bytes": 278
+    },
+    {
+      "path": "home/profiles/arbiter-it/pnpm-workspace.yaml",
+      "bytes": 13
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-allow-ws--/session-7eea8561-3a0e-4042-a362-9d250fe5af45/session.lock",
+      "bytes": 0
+    },
+    {
+      "path": "home/sessions/--Volumes-sandisk-code-dsh-arbiter-validation-arbiter-integration-2026-10-21-arbiter-01-cases-review-allow-ws--/session-7eea8561-3a0e-4042-a362-9d250fe5af45/session.v4.jsonl.zstd",
+      "bytes": 15508
+    },
+    {
+      "path": "home/storages/session_projcache/sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45.json",
+      "bytes": 4085
+    },
+    {
+      "path": "reviewer-requests.jsonl",
+      "bytes": 825
+    },
+    {
+      "path": "scenario.json",
+      "bytes": 530
+    },
+    {
+      "path": "sessions/session-7eea8561-3a0e-4042-a362-9d250fe5af45__session.v4.jsonl.zstd",
+      "bytes": 15508
+    },
+    {
+      "path": "ws/marker.txt",
+      "bytes": 15
+    }
+  ]
+}

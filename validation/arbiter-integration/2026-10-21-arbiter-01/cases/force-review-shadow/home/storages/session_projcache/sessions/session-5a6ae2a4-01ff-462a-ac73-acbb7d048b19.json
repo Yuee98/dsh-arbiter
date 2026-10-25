@@ -1,0 +1,188 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792570517303,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-review-shadow/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 26,
+        "val": "write the integration marker"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 26,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "write the integration marker"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 26,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 26,
+        "val": "danger-full-access"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 26,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 26,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 26,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 200,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 2,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 26,
+        "val": {
+          "surfaceTokens": 1771,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 1762
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 26,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 644
+            }
+          ],
+          "surfaceTokens": 1771,
+          "breakdown": {
+            "systemTokens": 644,
+            "toolsTokens": 4899,
+            "messageTokens": 1127
+          }
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 26,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 26,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 23,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 25
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 26,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 26,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 26,
+        "val": {
+          "preset": "arbiter-trusted",
+          "sandbox": "danger-full-access",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 26,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/arbiter-integration/2026-10-21-arbiter-01/cases/force-review-shadow/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 26,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 26,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 26,
+        "val": {}
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 26,
+        "val": null
+      }
+    }
+  }
+}

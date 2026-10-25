@@ -1,0 +1,158 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 1749,
+    "value": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"
+  },
+  {
+    "name": "two-parallel-reads-one-held",
+    "ok": true,
+    "ms": 3541,
+    "value": {
+      "heldCall": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+      "gateEntriesWhileHeld": 2,
+      "reviewsWhileHeld": 2,
+      "concurrent": true,
+      "barrier": [
+        {
+          "event": "agent-step",
+          "route": "default",
+          "index": 0,
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665152706
+        },
+        {
+          "event": "agent-step",
+          "route": "default",
+          "index": 0,
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665152707
+        },
+        {
+          "event": "agent-step",
+          "route": "T7PAR",
+          "index": 0,
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665154420
+        },
+        {
+          "event": "review-started",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665154426
+        },
+        {
+          "event": "review-released",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "released": true,
+          "waitedMs": 0,
+          "t": 1792665154426
+        },
+        {
+          "event": "review-started",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665154431
+        },
+        {
+          "event": "review-released",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "released": true,
+          "waitedMs": 648,
+          "t": 1792665155079
+        },
+        {
+          "event": "agent-step",
+          "route": "T7PAR",
+          "index": 1,
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "t": 1792665155110
+        }
+      ],
+      "trace": [
+        {
+          "at": 1792665154422,
+          "event": "gate/entered",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "tool": "read",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "active": 1
+        },
+        {
+          "at": 1792665154425,
+          "event": "review/start",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"
+        },
+        {
+          "at": 1792665154427,
+          "event": "review/settled",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"
+        },
+        {
+          "at": 1792665154428,
+          "event": "gate/entered",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "tool": "read",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8",
+          "active": 1
+        },
+        {
+          "at": 1792665154430,
+          "event": "review/start",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"
+        },
+        {
+          "at": 1792665155080,
+          "event": "review/settled",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "sessionId": "session-034b57f9-e354-4f6d-a7c7-e8891b5deef8"
+        }
+      ],
+      "toolCalls": [
+        {
+          "seq": 27,
+          "step": 1,
+          "name": "read",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0"
+        },
+        {
+          "seq": 29,
+          "step": 1,
+          "name": "read",
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1"
+        }
+      ],
+      "toolResults": [
+        {
+          "seq": 31,
+          "isError": false,
+          "text": "<path>/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t7/ws/t7-a.txt</path>\n<type>file</type>\n<content>\n1: A"
+        },
+        {
+          "seq": 32,
+          "isError": false,
+          "text": "<path>/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t7/ws/t7-b.txt</path>\n<type>file</type>\n<content>\n1: B"
+        }
+      ],
+      "decisions": [
+        {
+          "seq": 28,
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-0",
+          "result": "review-allow"
+        },
+        {
+          "seq": 30,
+          "callId": "fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1",
+          "result": "review-allow"
+        }
+      ],
+      "bodyTail": "E\n\n用量 110 tok\n18:32\nT7PAR\n18:32\n已完成\n已完成，用时 1秒\n\nT7PAR-DONE\n\n已编辑 14 个文件\n+953\n-0\n../arbiter-trace.jsonl\n+1\n-0\n../barrier/fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1-finished.json\n+1\n-0\n../barrier/fx-session-034b57f9-e354-4f6d-a7c7-e8891b5deef8-0-1-release\n+1\n-0\n../barrier/timeline.jsonl\n+2\n-0\n全部 14 个文件\n用量 220 tok\n18:32\n发消息或创建任务, / 调用指令, @ 文件或对话\nfixture-1\n2 轮 3 步·10000 tok/s\n330 tok·缓存命中 0%\n0%"
+    }
+  }
+]

@@ -1,0 +1,138 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 2166,
+    "value": "session-2a87abbb-fb1b-467d-8d6c-2ca38701c31e"
+  },
+  {
+    "name": "before-uninstall",
+    "ok": true,
+    "ms": 5,
+    "value": {
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "manifest": {
+        "name": "dsh-profile-arb",
+        "private": true,
+        "dependencies": {
+          "dsh-arbiter": "link:/Volumes/sandisk/code/dsh-arbiter"
+        },
+        "dsh": {
+          "profile": {
+            "bundles": [
+              "@deepseek-ai/dsh-base",
+              "@deepseek-ai/dsh-web-app",
+              "dsh-arbiter"
+            ]
+          }
+        }
+      },
+      "state": 200
+    }
+  },
+  {
+    "name": "uninstall-through-plugin-page",
+    "ok": true,
+    "ms": 2619,
+    "value": {
+      "opened": "detail",
+      "menu": [
+        "卸载 dsh-arbiter"
+      ]
+    }
+  },
+  {
+    "name": "click-uninstall",
+    "ok": true,
+    "ms": 866,
+    "value": {
+      "clicked": {
+        "ok": true
+      },
+      "confirmed": {
+        "ok": true,
+        "inDialog": true,
+        "label": "卸载"
+      }
+    }
+  },
+  {
+    "name": "wait-for-removal",
+    "ok": true,
+    "ms": 2033,
+    "value": {
+      "gone": true,
+      "manifest": {
+        "name": "dsh-profile-arb",
+        "private": true,
+        "dsh": {
+          "profile": {
+            "bundles": [
+              "@deepseek-ai/dsh-base",
+              "@deepseek-ai/dsh-web-app"
+            ]
+          }
+        }
+      },
+      "stillSelected": false,
+      "stillDependency": false,
+      "state": 404,
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "timelineTail": [
+        {
+          "seq": 0,
+          "type": "permission/preset",
+          "ignorable": false,
+          "data": {
+            "preset": "workspace-write"
+          }
+        },
+        {
+          "seq": 1,
+          "type": "sandbox/mode",
+          "ignorable": false,
+          "data": {
+            "mode": "workspace-write"
+          }
+        },
+        {
+          "seq": 2,
+          "type": "approval/policy",
+          "ignorable": false,
+          "data": {
+            "policy": "ask"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "restart-and-reopen-session",
+    "ok": true,
+    "ms": 4917,
+    "value": {
+      "arbiterRoute": 404,
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ],
+      "sessionLoaded": true,
+      "sessionEvents": 21,
+      "decisions": [],
+      "effective": {
+        "preset": "workspace-write",
+        "sandbox": "workspace-write",
+        "approval": "ask"
+      },
+      "selectorText": "工作区内修改"
+    }
+  }
+]

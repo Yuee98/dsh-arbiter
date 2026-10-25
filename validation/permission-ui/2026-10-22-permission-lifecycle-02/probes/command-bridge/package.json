@@ -1,0 +1,28 @@
+{
+  "name": "pui-command-bridge",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./client": {
+      "default": "./client.js"
+    },
+    ".": {
+      "import": "./index.js"
+    },
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  },
+  "main": "./index.js"
+}

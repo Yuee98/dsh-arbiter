@@ -1,0 +1,64 @@
+{
+  "decided": {
+    "seq": 33,
+    "outcome": "cancelled"
+  },
+  "effective": {
+    "preset": "read-only",
+    "sandbox": "read-only",
+    "approval": "ask"
+  },
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "outcome": null
+    },
+    {
+      "seq": 33,
+      "type": "approval/decided",
+      "outcome": "cancelled"
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 34,
+      "result": "human-abort",
+      "trace": [
+        "review(default)",
+        "review-escalate",
+        "human-abort"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "seq": 29,
+      "type": "command/run",
+      "args": " read-only"
+    },
+    {
+      "seq": 32,
+      "type": "command/done",
+      "kind": "success"
+    }
+  ],
+  "results": [
+    {
+      "isError": true,
+      "text": "Error: Not executed [human-abort]: the approval ended without a grant or denial."
+    }
+  ],
+  "marker": null,
+  "interpretation": {
+    "what": "The host was terminated while the approval was pending (driver cleanup), not a human click.",
+    "outcome": "approval/decided: cancelled -> plugin:arbiter/decision: human-abort",
+    "why_it_matters": "Contract requires waiting and host cancellation not be recorded as human rejection. This run shows they are distinguished: cancelled maps to human-abort, never to human-deny.",
+    "not": "This is NOT a human answer and must not be counted as F5 human evidence."
+  }
+}

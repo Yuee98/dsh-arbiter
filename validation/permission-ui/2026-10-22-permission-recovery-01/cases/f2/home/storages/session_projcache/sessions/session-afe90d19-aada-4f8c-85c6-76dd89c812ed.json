@@ -1,0 +1,293 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1792645785985,
+      "cwd": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f2/ws",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 50,
+        "val": "IDLE"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 50,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "F2 bootstrap"
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 50,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 50,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 50,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 100,
+            "outputTokens": 10,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": {
+            "turn": 1,
+            "step": 1,
+            "buckets": {
+              "uncachedInputTokens": 100,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            }
+          }
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 50,
+        "val": {
+          "surfaceTokens": 2641,
+          "contextWindow": 200000,
+          "pressureTokens": 100,
+          "sampledSurfaceTokens": 2632
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 50,
+        "val": {
+          "systems": [
+            {
+              "seq": 7,
+              "tokens": 1405
+            }
+          ],
+          "surfaceTokens": 2641,
+          "breakdown": {
+            "systemTokens": 1405,
+            "toolsTokens": 6902,
+            "messageTokens": 1236
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 6,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 18
+          },
+          "lastTurn": 1
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 50,
+        "val": {
+          "next-turn": [],
+          "next-step": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The approval policy changed from \"ask\" to \"never\" (changed by the user)."
+                }
+              ],
+              "source": {
+                "kind": "user-approval"
+              },
+              "role": "user",
+              "id": "e15e9d67-e43e-45f5-b8cd-b452a4eef880"
+            },
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The approval policy changed from \"never\" to \"ask\" (changed by the user)."
+                }
+              ],
+              "source": {
+                "kind": "user-approval"
+              },
+              "role": "user",
+              "id": "08bcb1e8-ba66-4ee2-a8e9-c205a371c0f2"
+            }
+          ]
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 50,
+        "val": {
+          "turns": 1,
+          "steps": 1,
+          "llmMs": 12,
+          "toolMs": 0,
+          "ttftMs": 12,
+          "ttftSteps": 1,
+          "decodeMs": 0,
+          "decodeTokens": 10,
+          "lastTurn": 1,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "turns": [
+            {
+              "turn": 1,
+              "seq": 4,
+              "prompt": "F2 bootstrap",
+              "response": "IDLE"
+            }
+          ],
+          "draft": ""
+        }
+      },
+      "agentPreset": {
+        "ver": 1,
+        "seq": 50,
+        "val": "standard"
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 50,
+        "val": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f2/ws"
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 50,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 50,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 50,
+        "val": {}
+      },
+      "timeContext": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "lastMessageTime": 1792645787597,
+          "lastInjectionTime": 1792645787587,
+          "lastTurnInjectionTime": null
+        }
+      },
+      "todos": {
+        "ver": 2,
+        "seq": 50,
+        "val": null
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 50,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 50,
+        "val": null
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 50,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 50,
+        "val": {
+          "lastUsed": {
+            "provider": "pui",
+            "model": "fixture-1"
+          },
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 50,
+        "val": {
+          "blank": false,
+          "lastPromptAt": 1792645787586
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 50,
+        "val": null
+      }
+    }
+  }
+}

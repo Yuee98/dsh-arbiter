@@ -1,0 +1,210 @@
+[
+  {
+    "name": "session",
+    "ok": true,
+    "ms": 1757,
+    "value": "session-ac42b446-42d1-4845-afec-cfaa5354bfac"
+  },
+  {
+    "name": "baseline-trusted",
+    "ok": true,
+    "ms": 4,
+    "value": {
+      "effective": {
+        "preset": "danger-full-access",
+        "sandbox": "danger-full-access",
+        "approval": "never"
+      },
+      "state": true
+    }
+  },
+  {
+    "name": "drain-window-new-calls",
+    "ok": true,
+    "ms": 25507,
+    "value": {
+      "clicked": {
+        "ok": true,
+        "before": "true"
+      },
+      "unmountedStatus": 404,
+      "timeline": {
+        "t0": 1792647520106,
+        "tNew": 1792647522938,
+        "tSecond": 1792647529235
+      },
+      "sessions": [
+        {
+          "sessionId": "session-ac42b446-42d1-4845-afec-cfaa5354bfac",
+          "effective": {
+            "preset": "danger-full-access",
+            "sandbox": "workspace-write",
+            "approval": "ask"
+          },
+          "timeline": [
+            {
+              "seq": 0,
+              "type": "permission/preset",
+              "ignorable": false,
+              "data": {
+                "preset": "danger-full-access"
+              }
+            },
+            {
+              "seq": 1,
+              "type": "sandbox/mode",
+              "ignorable": false,
+              "data": {
+                "mode": "danger-full-access"
+              }
+            },
+            {
+              "seq": 2,
+              "type": "approval/policy",
+              "ignorable": false,
+              "data": {
+                "policy": "never"
+              }
+            },
+            {
+              "seq": 28,
+              "type": "plugin:arbiter/decision",
+              "ignorable": true,
+              "data": {
+                "version": 1,
+                "callId": "fx-session-ac42b446-42d1-4845-afec-cfaa5354bfac-0-0",
+                "tool": "bash",
+                "fingerprint": "bash:3a77768d904b1bb919b890c9",
+                "trace": [
+                  "review(default)",
+                  "review-allow"
+                ],
+                "result": "review-allow",
+                "reason": "Arbiter: the review allowed this call.",
+                "ruleId": null,
+                "decisionRules": [
+                  "R7"
+                ],
+                "configRevision": "56286690c5d2",
+                "effect": {
+                  "version": 1,
+                  "parse": {
+                    "status": "ok",
+                    "statements": 1
+                  },
+                  "observed": {
+                    "writes": [
+                      "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f4/ws/f4-slow.txt"
+                    ],
+                    "networkCommands": [],
+                    "credentialPaths": [],
+                    "pipelineExec": [],
+                    "substitutions": 0,
+                    "subshells": 0
+                  },
+                  "opaque": false,
+                  "opaqueReason": null,
+                  "unresolvedExpansions": [],
+                  "expansionRisk": null,
+                  "completeness": "complete",
+                  "parentAuthorizationPresent": null,
+                  "overlapsDeniedEffect": false,
+                  "historyTruncated": false
+                },
+                "ts": 1792647520087
+              }
+            },
+            {
+              "seq": 36,
+              "type": "sandbox/mode",
+              "ignorable": false,
+              "data": {
+                "mode": "workspace-write"
+              }
+            },
+            {
+              "seq": 37,
+              "type": "approval/policy",
+              "ignorable": false,
+              "data": {
+                "policy": "ask"
+              }
+            }
+          ],
+          "results": [
+            {
+              "isError": false,
+              "text": "(no output)"
+            },
+            {
+              "isError": false,
+              "text": "[stderr]\nbash: /Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f4/outside/f4-new.txt: Operation not permitted"
+            }
+          ],
+          "decisions": [
+            {
+              "seq": 28,
+              "result": "review-allow",
+              "ignorable": true
+            }
+          ]
+        },
+        {
+          "sessionId": "session-02e880f3-f4e9-4ca6-9737-008252f67f59",
+          "effective": {
+            "preset": "danger-full-access",
+            "sandbox": "danger-full-access",
+            "approval": "never"
+          },
+          "timeline": [
+            {
+              "seq": 0,
+              "type": "permission/preset",
+              "ignorable": false,
+              "data": {
+                "preset": "danger-full-access"
+              }
+            },
+            {
+              "seq": 1,
+              "type": "sandbox/mode",
+              "ignorable": false,
+              "data": {
+                "mode": "danger-full-access"
+              }
+            },
+            {
+              "seq": 2,
+              "type": "approval/policy",
+              "ignorable": false,
+              "data": {
+                "policy": "never"
+              }
+            }
+          ],
+          "results": [],
+          "decisions": []
+        }
+      ],
+      "markers": {
+        "slowInside": "F4-SLOW",
+        "newOutside": null,
+        "secondOutside": null
+      },
+      "openedSecond": true
+    }
+  },
+  {
+    "name": "settle-and-reenable",
+    "ok": true,
+    "ms": 10781,
+    "value": {
+      "clicked": {
+        "ok": true,
+        "before": "false"
+      },
+      "status": 200,
+      "enabled": true
+    }
+  }
+]

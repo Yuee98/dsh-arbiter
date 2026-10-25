@@ -1,0 +1,41 @@
+{
+  "switched": {
+    "ok": false,
+    "note": "no bridge"
+  },
+  "composerUsable": false,
+  "submission": {
+    "composerUsable": false,
+    "picker": {
+      "ok": true
+    },
+    "chosen": {
+      "ok": true
+    }
+  },
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "outcome": null
+    }
+  ],
+  "effective": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "bodyTail": "IDLE\n标准模式\n对话\n轨迹\nF5S bootstrap\n16:03\n已完成\n已完成，用时 1秒\n\nIDLE\n\n用量 110 tok\n16:03\nF5ASK\n16:03\n运行中\n运行命令\nneeds human\n深度求索中\n深度求索中，用时 3秒 ···\n等待审批\nArbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。\nprintf 'F5S\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-recovery-01/cases/f5s/ws/f5s-ask.txt'\n拒绝\n允许一次",
+  "observed": {
+    "composerBlocked": true,
+    "nativePickerOpened": true,
+    "optionClicked": true,
+    "approvalStillPendingAfterClick": true,
+    "interpretation": "pending approval disables the whole permission entry: the native picker opens and the item can be clicked, but no permission/preset is appended and the approval stays open. There is no public route to switch away while an approval is pending."
+  }
+}

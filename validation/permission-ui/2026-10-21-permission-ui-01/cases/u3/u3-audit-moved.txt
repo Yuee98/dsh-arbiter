@@ -1,0 +1,3 @@
+moved=yes
+from=/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/home/arbiter
+to=/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-21-permission-ui-01/cases/u3/audit-moved-away

@@ -1,0 +1,71 @@
+{
+  "decided": {
+    "seq": 33,
+    "outcome": "allowed-once"
+  },
+  "effective": {
+    "preset": "read-only",
+    "sandbox": "read-only",
+    "approval": "ask"
+  },
+  "approvals": [
+    {
+      "seq": 2,
+      "type": "approval/policy",
+      "outcome": null
+    },
+    {
+      "seq": 28,
+      "type": "approval/asked",
+      "outcome": null
+    },
+    {
+      "seq": 33,
+      "type": "approval/decided",
+      "outcome": "allowed-once"
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 34,
+      "result": "human-allow",
+      "trace": [
+        "review(default)",
+        "review-escalate",
+        "human-allow"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "seq": 29,
+      "type": "command/run",
+      "args": " read-only"
+    },
+    {
+      "seq": 32,
+      "type": "command/done",
+      "kind": "success"
+    }
+  ],
+  "results": [
+    {
+      "isError": false,
+      "text": "[stderr]\nbash: /Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5h/ws/t5-ask.txt: Operation not permitted\n[sandbox: file access denied under read-only mode]\n[sandbox: e"
+    }
+  ],
+  "marker": null,
+  "interpretation": {
+    "sequence": [
+      "seq 27 tool/call",
+      "seq 28 approval/asked",
+      "seq 29-32 /permission read-only succeeded (command/run -> sandbox/mode read-only -> command/done success)",
+      "seq 33 approval/decided allowed-once  (real human click)",
+      "seq 34 plugin:arbiter/decision human-allow",
+      "seq 37 tool/result: Operation not permitted [sandbox: file access denied under read-only mode]"
+    ],
+    "finding": "A human approval settles the arbiter verdict (human-allow) but does NOT re-widen the host permission. The call was approved and still blocked by the read-only sandbox at execution time.",
+    "contract": "Matches the rule that actual execution still respects the host sandbox; approval is not a permission escalation.",
+    "not": "Not recorded as human-deny. The distinction between \"approved but blocked by sandbox\" and \"rejected by human\" is preserved."
+  }
+}

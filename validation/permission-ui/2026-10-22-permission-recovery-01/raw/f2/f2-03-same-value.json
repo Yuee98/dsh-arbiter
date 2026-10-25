@@ -1,0 +1,75 @@
+{
+  "submission": {
+    "ok": true,
+    "attempts": 2,
+    "args": " workspace-write",
+    "command": {
+      "seq": 29,
+      "args": " workspace-write",
+      "done": {
+        "seq": 30,
+        "kind": "success",
+        "text": "preset workspace-write"
+      },
+      "sessionId": "session-afe90d19-aada-4f8c-85c6-76dd89c812ed"
+    }
+  },
+  "before": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "after": {
+    "preset": "workspace-write",
+    "sandbox": "workspace-write",
+    "approval": "ask"
+  },
+  "newEvents": [
+    {
+      "seq": 27,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-4",
+        "name": "permission",
+        "args": " auto/permission workspace-write",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 28,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-4",
+        "kind": "error",
+        "text": "unknown preset \"auto/permission workspace-write\" (available: read-only, workspace-write, danger-full-access, auto)"
+      }
+    },
+    {
+      "seq": 29,
+      "type": "command/run",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-5",
+        "name": "permission",
+        "args": " workspace-write",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "seq": 30,
+      "type": "command/done",
+      "ignorable": false,
+      "data": {
+        "commandId": "cmd-958c34e4-5",
+        "kind": "success",
+        "text": "preset workspace-write"
+      }
+    }
+  ]
+}

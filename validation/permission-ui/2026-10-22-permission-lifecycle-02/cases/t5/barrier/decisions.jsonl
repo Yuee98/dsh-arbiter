@@ -1,0 +1,1 @@
+{"callId":"fx-session-ae0f310d-b4f1-4b3f-8654-b9c1511c793b-0-0","hold":false,"pending":"\n\n{\n  \"name\": \"bash\",\n  \"arguments\": {\n    \"command\": \"printf 'T5-ASK\\\\n' > '/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5/ws/t5-ask.txt'\",\n    \"description\": \"needs human\"\n  }\n}\n","at":1792663937149}

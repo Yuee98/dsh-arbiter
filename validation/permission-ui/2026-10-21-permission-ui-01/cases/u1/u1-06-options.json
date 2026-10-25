@@ -1,0 +1,25 @@
+{
+  "cellText": "自动审查（Arbiter · guarded）\nread-only\nworkspace-write\ndanger-full-access",
+  "nativeControl": false,
+  "puiPresent": true,
+  "puiDot": "",
+  "options": [
+    {
+      "value": "__arbiter__",
+      "label": "自动审查（Arbiter · guarded）"
+    },
+    {
+      "value": "read-only",
+      "label": "read-only"
+    },
+    {
+      "value": "workspace-write",
+      "label": "workspace-write"
+    },
+    {
+      "value": "danger-full-access",
+      "label": "danger-full-access"
+    }
+  ],
+  "selected": "__arbiter__"
+}

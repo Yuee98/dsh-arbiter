@@ -1,0 +1,19 @@
+{
+  "markers": {
+    "slow": "F3-SLOW-MARK\n"
+  },
+  "decisions": [
+    {
+      "seq": 28,
+      "ignorable": true,
+      "result": "review-allow"
+    }
+  ],
+  "lastResults": [
+    {
+      "isError": false,
+      "text": "(no output)"
+    }
+  ],
+  "bodyTail": "插件\n安装、启用和配置插件\n添加插件\n内置插件配置\n子智能体\n设置子智能体的递归层级、数量和模型。\n网页搜索\n设置 DeepSeek 的搜索提供方。\nAgent 循环\n控制 Agent 派发工具调用的方式。\n终端\n限制每条命令最多能跑多久、最多输出多少内容。\n实验性插件\n更多\n智能体团队\n实验性\n启用团队协作、团队工具、成员列表和共享任务看板。\n语音输入\n实验性\n在本机使用 SenseVoice 转写录音，首次使用需安装依赖。\n自动授权审查\n实验性\n提供自动审查权限模式，由模型在每次工具调用前判断是否授权。\n开发者工具\n实验性\n查看调试会话原始数据、聊天消息分组数据，以及调试 NodeJS 后端\n已安装插件\ndsh-arbiter\nDeterministic command rules plus real auto review for DeepSeek Harness."
+}

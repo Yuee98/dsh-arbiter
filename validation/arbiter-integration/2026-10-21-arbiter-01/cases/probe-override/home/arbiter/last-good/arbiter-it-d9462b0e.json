@@ -1,0 +1,83 @@
+{
+  "enabled": true,
+  "modes": {
+    "main": "normal",
+    "subagent": "strict"
+  },
+  "rules": [],
+  "reviewer": {
+    "type": "chat",
+    "chat": {
+      "provider": "session",
+      "model": "",
+      "temperature": 0,
+      "maxTokens": 400,
+      "timeoutMs": 8000,
+      "maxRepairRetries": 1
+    },
+    "decision": {
+      "url": "",
+      "model": "clef-flash",
+      "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+      "timeoutMs": 8000,
+      "costTier": "paid"
+    }
+  },
+  "policy": {
+    "version": "arbiter-policy-v1",
+    "normal": {
+      "tauAuth": 0.8,
+      "tauRisk": 0.75,
+      "tauCritical": 0.25,
+      "tauLow": 0.7,
+      "chatLowRiskMax": 3,
+      "chatMediumRiskMax": 6,
+      "mediumRiskCeiling": 6,
+      "explicitFromRisk": 4,
+      "allowBulkEgress": false
+    },
+    "progress": {
+      "tauAuth": 0.8,
+      "tauRisk": 0.75,
+      "tauCritical": 0.25,
+      "tauLow": 0.7,
+      "chatLowRiskMax": 3,
+      "chatMediumRiskMax": 8,
+      "mediumRiskCeiling": 8,
+      "explicitFromRisk": 4,
+      "allowBulkEgress": true
+    },
+    "probeMode": "override"
+  },
+  "context": {
+    "maxInputTokens": 10000,
+    "evidenceMaxItems": 20,
+    "parentHumanItems": 5,
+    "parentEvidenceFloor": 1,
+    "historyMaxItems": 40,
+    "checkpointMaxItems": 3,
+    "toolCallArgumentMaxChars": 200,
+    "customRules": "",
+    "projectRules": {
+      "enabled": true,
+      "files": [
+        ".dsh/arbiter.md",
+        ".arbiter.md"
+      ]
+    }
+  },
+  "audit": {
+    "enabled": true,
+    "retentionDays": 30,
+    "retentionBytes": 1073741824,
+    "maxQueue": 500
+  },
+  "breaker": {
+    "mode": "preset",
+    "preset": "balanced",
+    "consecutiveDenials": 3,
+    "windowDenials": 6,
+    "windowSize": 10
+  },
+  "reviewBudget": null
+}

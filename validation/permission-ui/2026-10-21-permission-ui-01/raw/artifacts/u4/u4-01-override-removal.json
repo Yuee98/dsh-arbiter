@@ -1,0 +1,27 @@
+{
+  "before": {
+    "known": true,
+    "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": null,
+    "origin": "client-selector",
+    "revision": 1
+  },
+  "after": {
+    "known": true,
+    "sessionId": "session-eec873bd-88ea-4366-a54d-a0c3126d8266",
+    "enabled": true,
+    "boundary": "guarded",
+    "reason": null,
+    "origin": "client-selector",
+    "revision": 1
+  },
+  "selector": {
+    "cells": 1,
+    "cellText": "工作区内修改",
+    "nativeControl": true,
+    "puiPresent": false,
+    "selected": null
+  }
+}

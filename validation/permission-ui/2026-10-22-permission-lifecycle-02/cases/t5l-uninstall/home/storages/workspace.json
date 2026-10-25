@@ -1,0 +1,28 @@
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": {
+    "initialized": true,
+    "workspaceIds": [
+      "01920000-0000-4000-8000-000000000001"
+    ],
+    "archivedSessionIds": [],
+    "pinnedSessionIds": [],
+    "defaultWorkspaceId": "01920000-0000-4000-8000-000000000001"
+  },
+  "tables": {
+    "workspaces": {
+      "01920000-0000-4000-8000-000000000001": {
+        "path": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/ws",
+        "title": "recovery-workspace",
+        "sessionIds": [
+          "session-9868c2e2-fd6c-4a6e-add1-823f4ed2514f"
+        ],
+        "createdAt": "2026-10-22T10:14:12.496Z",
+        "updatedAt": "2026-10-22T10:14:13.890Z"
+      }
+    }
+  }
+}

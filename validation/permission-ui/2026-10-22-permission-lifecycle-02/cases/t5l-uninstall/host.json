@@ -1,0 +1,13 @@
+{
+  "pid": 23126,
+  "port": 58701,
+  "origin": "http://127.0.0.1:58701",
+  "cookie": "<redacted>",
+  "tokenUrl": "http://127.0.0.1:58701/?token=<redacted>",
+  "home": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/home",
+  "workspace": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/ws",
+  "outside": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/outside",
+  "dir": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall",
+  "scenarioPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/scenario.json",
+  "eventsPath": "/Volumes/sandisk/code/dsh-arbiter/validation/permission-ui/2026-10-22-permission-lifecycle-02/cases/t5l-uninstall/home/arbiter/events.jsonl"
+}
