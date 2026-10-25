@@ -149,6 +149,7 @@ function callSubjects(
     identity,
     argumentsValue,
     subjects: structuralSubjects({ tool, argumentsValue, parse }),
+    shellCall: isShellCall,
     // A parse error leaves no trustworthy structure at all. A partial parse does
     // have usable nodes, so its existing commands stay matchable; #8 refines how
     // incomplete structure propagates into coverage.
@@ -278,9 +279,11 @@ function allowCoverage(
     ),
   );
   // A non-shell call has no AST to cover; its arguments are the entire judged
-  // input, so a matching argument condition covers it.
+  // input, so a matching argument condition covers it. The tool category decides
+  // this, never an empty subject list: a shell call whose structure could not be
+  // determined also has no subjects, and its arguments are not the whole input.
   const argumentOnly =
-    structural.length === 0 &&
+    !call.shellCall &&
     allows.some((result) =>
       result.conditions.some(
         (condition) =>

@@ -63,6 +63,14 @@ export interface CallSubjects {
   readonly identity: string;
   readonly argumentsValue: unknown;
   readonly subjects: readonly Subject[];
+  /**
+   * True when the call went through the shell reader at all.
+   *
+   * This is a fact about the tool, not about the parse: a shell call whose
+   * structure could not be determined still carries shell structure in principle,
+   * so "no subjects" must not be read as "this tool has no structure".
+   */
+  readonly shellCall: boolean;
   /** True when the shell structure itself could not be determined. */
   readonly structureUnknown: boolean;
   /** True when the structure is fully known, so coverage can be claimed. */
@@ -338,11 +346,18 @@ function evaluateStructural(
     (subject) => subject.target === condition.target,
   );
   if (subjects.length === 0) {
-    // Missing structure can mean two different things. A call that has no shell
-    // structure at all (a non-shell tool) can never satisfy a command condition,
-    // which is a fact. A shell call whose structure could not be determined is
-    // unknown, because the missing node might have matched.
-    return call.structureUnknown
+    // No node can mean two different things, and only the tool category plus the
+    // parse state can tell them apart:
+    //   - a non-shell tool never has a command, redirect or assignment node, and
+    //     a shell call whose structure is fully known simply has no node of this
+    //     kind (an empty command, or a call with no redirect) — both are facts,
+    //     so the condition is a mismatch;
+    //   - a shell call whose structure could not be determined (a parse error, or
+    //     a construct recorded as partial/none without extracting a node) might
+    //     have had the node, so the honest answer is unknown.
+    const undetermined =
+      call.shellCall && (call.structureUnknown || !call.structureComplete);
+    return undetermined
       ? conditionResult(index, condition, 'unknown', {
           reason: 'unresolved-structure',
         })

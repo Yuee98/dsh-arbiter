@@ -1149,6 +1149,85 @@ describe('unknown results', () => {
     ).toBe('deny');
   });
 
+  test('an incomplete shell structure cannot be covered by an argument condition', () => {
+    // `(` is recorded as an incomplete subshell with no extracted node, so the
+    // call still carries shell structure in principle. Its arguments are not the
+    // whole judged input, and the missing node might have matched.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'arg-only',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'argument',
+              path: '$.command',
+              kind: 'exact',
+              pattern: '(',
+            }),
+          ],
+        }),
+      ],
+      '(',
+    );
+    expect(evaluation.rules[0]?.conditions[0]?.outcome).toBe('match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'incomplete',
+    });
+  });
+
+  test('an incomplete shell structure makes a missing command condition unknown', () => {
+    // A command condition on the same input must not be a confident mismatch, or
+    // a lower-priority tool allow could decide an undetermined call.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-cmd',
+          verdict: 'deny',
+          conditions: [
+            condition({ target: 'command', kind: 'regex', pattern: '.*' }),
+          ],
+        }),
+        rule({
+          id: 'tool-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      '(',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('unknown');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a complete shell call without a node of that kind is a plain mismatch', () => {
+    // An empty command parses cleanly and simply has no command node; that is a
+    // fact, not an undetermined structure.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'cmd',
+          verdict: 'deny',
+          conditions: [
+            condition({ target: 'command', kind: 'regex', pattern: '.*' }),
+          ],
+        }),
+      ],
+      '',
+    );
+    expect(evaluation.rules[0]?.conditions[0]?.outcome).toBe('no-match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'no-match',
+    });
+  });
+
   test('a non-shell tool has no structural target rather than an unknown one', () => {
     const evaluation = callTool(
       [
