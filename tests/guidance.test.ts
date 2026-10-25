@@ -59,7 +59,7 @@ describe('standing guidance text', () => {
 
   test('every managed agent is told not to repeat an unchanged blocked effect', () => {
     for (const text of BOTH) {
-      expect(text).toMatch(/do not repeat the same blocked effect/iu);
+      expect(text).toMatch(/do not repeat a blocked effect/iu);
     }
   });
 
@@ -87,10 +87,20 @@ describe('standing guidance text', () => {
   });
 
   test('a parent relays with the original words and scope unchanged', () => {
-    expect(PARENT_GUIDANCE).toMatch(/relay the answer to the subtask/iu);
+    expect(PARENT_GUIDANCE).toMatch(/relay the answer/iu);
+    expect(PARENT_GUIDANCE).toMatch(/original words and scope unchanged/iu);
+  });
+
+  test('a main agent whose own call is blocked asks the user, not the subtask', () => {
+    // A main session also runs its own tool calls, so its guidance must name
+    // the remaining path for those: ask the user for the clarification or the
+    // scoped authorization needed.
+    expect(PARENT_GUIDANCE).toMatch(/When your own call is blocked/iu);
     expect(PARENT_GUIDANCE).toMatch(
-      /original words and authorization scope unchanged/iu,
+      /ask the user for the missing clarification or scope/iu,
     );
+    // That path belongs to the main text; the subagent reports to its parent.
+    expect(SUBAGENT_GUIDANCE).not.toMatch(/When your own call is blocked/iu);
   });
 
   test('a parent never asks on the subagent behalf and states the exact scope', () => {
@@ -106,7 +116,9 @@ describe('standing guidance text', () => {
   });
 
   test.each(BOTH)('the text is short and single-paragraph: %s', (text) => {
-    expect(text.length).toBeLessThan(1_000);
+    // Two paragraphs' worth of instruction at most: the common contract plus
+    // one role duty, never a handbook.
+    expect(text.length).toBeLessThan(820);
     expect(text).not.toContain('\n');
   });
 

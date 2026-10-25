@@ -30,7 +30,7 @@ import {
 const FORMAT = 'arbiter-config-v2';
 
 /** Distinctive fragments of the guidance, stable across rewording. */
-const PARENT_MARKER = 'relay the answer to the subtask';
+const PARENT_MARKER = 'relay the answer with the original words';
 const SUBAGENT_MARKER = 'report the pending operation';
 /** The part every managed agent gets, whichever role it plays. */
 const COMMON_MARKER = 'An approval-rejected tool call was not executed';
@@ -66,6 +66,20 @@ function runtimeContext(request: LoggedRequest): string {
   return request.userTexts
     .filter((text) => text.includes('Current runtime context'))
     .join('\n');
+}
+
+/**
+ * The single runtime-context snapshot the host treats as effective.
+ *
+ * A snapshot message states that it supersedes earlier ones, so the last such
+ * message in the request is the one the model is told to follow — the honest
+ * target for "is this contribution still present".
+ */
+function latestRuntimeContext(request: LoggedRequest): string {
+  const snapshots = request.userTexts.filter((text) =>
+    text.includes('Current runtime context'),
+  );
+  return snapshots[snapshots.length - 1] ?? '';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -647,8 +661,22 @@ test.describe('standing agent guidance', () => {
           requestDir,
           'GUIDE-AFTER-DISABLE',
         );
-        expect(afterDisable.system ?? '').not.toContain(COMMON_MARKER);
-        expect(afterDisable.system ?? '').not.toContain(PARENT_MARKER);
+        // The contribution lives in the user-role runtime-context snapshot, so
+        // this must inspect that snapshot, not the system prompt. Earlier
+        // snapshots stay in the conversation by design (each supersedes the last
+        // rather than erasing it), so the *latest* snapshot is the effective
+        // one — asserting over the whole history would fail even when the
+        // contribution is correctly gone.
+        const latestContext = latestRuntimeContext(afterDisable);
+        expect(latestContext.length).toBeGreaterThan(0);
+        expect(latestContext).not.toContain(COMMON_MARKER);
+        expect(latestContext).not.toContain(PARENT_MARKER);
+        // The newest snapshot really is newer than the managed turn's, so this
+        // is a fresh projection rather than the retained one.
+        const managedSnapshots = afterDisable.userTexts.filter((text) =>
+          text.includes('Current runtime context'),
+        );
+        expect(managedSnapshots.length).toBeGreaterThan(1);
       } finally {
         await caseHost.dispose();
       }

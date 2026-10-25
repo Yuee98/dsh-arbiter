@@ -49,7 +49,7 @@ export const GUIDANCE_SECTION = 'arbiter:agent-guidance';
  * evidence a review lacked — all of that arrives with the tool result.
  */
 export const COMMON_GUIDANCE =
-  'An approval-rejected tool call was not executed. First try an allowed alternative that the stated reason permits. Do not repeat the same blocked effect with different wording while the conditions are unchanged; after the authorization or the operation scope changes you may submit again.';
+  'An approval-rejected tool call was not executed. First try an allowed alternative the stated reason permits. Do not repeat a blocked effect under unchanged conditions; resubmit only after the authorization or scope changes.';
 
 /**
  * What a subagent additionally does when genuinely blocked.
@@ -57,17 +57,28 @@ export const COMMON_GUIDANCE =
  * It reports upward rather than inventing authority, and says exactly what the
  * parent needs in order to decide.
  */
-export const SUBAGENT_GUIDANCE = `${COMMON_GUIDANCE} When genuinely blocked, report the pending operation, the blocking reason and the help you need to the parent agent.`;
+const SUBAGENT_DUTY =
+  'When genuinely blocked, report the pending operation, the blocking reason and the help you need to the parent agent.';
 
 /**
- * What a parent agent additionally does when a subtask asks for help.
+ * What a parent agent additionally does.
  *
- * A request for help is a planning question first: adjust the plan when that is
- * enough, and only then ask the user — precisely, through whatever asking
- * surface the host offers. Asking is never restricted by the approval mode, and
- * the relay keeps the human's original words and scope unchanged.
+ * Two directions: its own blocked call (ask the user for the missing
+ * clarification or the specific scope) and a subtask's request for help (a
+ * planning question first, adjust the plan when that is enough, and only then
+ * ask). Asking is never restricted by the approval mode, and the relay keeps the
+ * human's original words and scope unchanged.
  */
-export const PARENT_GUIDANCE = `${COMMON_GUIDANCE} When a subtask is blocked by permissions and asks for help, first judge whether the plan can be adjusted. When more authorization is needed, state the exact operation and scope through the ask surface available to you or in chat, then relay the answer to the subtask with the original words and authorization scope unchanged. Approval modes do not restrict these questions. A subtask review may use the parent session original human words; only when the authorization still cannot be verified or is insufficient should you guide the user to confirm directly in the subtask session.`;
+const PARENT_DUTY =
+  'When your own call is blocked with no permitted alternative left, ask the user for the missing clarification or scope. ' +
+  'When a subtask asks for help, first judge whether the plan can be adjusted; if authorization is needed, state the exact operation and scope through the ask surface or chat, then relay the answer with the original words and scope unchanged. ' +
+  'Approval modes do not restrict these questions. Subtask review may use the parent session original human words; only if that is unverifiable or insufficient, guide the user to confirm in the subtask session.';
+
+/** What a subagent receives: the shared contract plus its reporting duty. */
+export const SUBAGENT_GUIDANCE = `${COMMON_GUIDANCE} ${SUBAGENT_DUTY}`;
+
+/** What a main session receives: the shared contract plus its two duties. */
+export const PARENT_GUIDANCE = `${COMMON_GUIDANCE} ${PARENT_DUTY}`;
 
 /** The standing text for one orchestration role. */
 export function guidanceText(kind: SessionKind): string {
