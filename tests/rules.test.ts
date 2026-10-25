@@ -1206,6 +1206,75 @@ describe('unknown results', () => {
     });
   });
 
+  test.each([
+    ['a null command', { command: null, environment: 'test' }],
+    ['a non-string command', { command: 42, environment: 'test' }],
+    ['no command field', { environment: 'test' }],
+  ])(
+    'a shell tool whose arguments carry %s is still a shell call',
+    (_label, args) => {
+      // The tool name decides the category, not whether a command could be read.
+      // Otherwise the argument allow would cover a call whose structure is
+      // unknown, and the higher-priority command deny would look like a mismatch.
+      const evaluation = callTool(
+        [
+          rule({
+            id: 'deny-cmd',
+            verdict: 'deny',
+            conditions: [
+              condition({ target: 'command', kind: 'regex', pattern: '.*' }),
+            ],
+          }),
+          rule({
+            id: 'arg-allow',
+            verdict: 'allow',
+            conditions: [
+              condition({
+                target: 'argument',
+                path: '$.environment',
+                kind: 'exact',
+                pattern: 'test',
+              }),
+            ],
+          }),
+        ],
+        'bash',
+        args,
+      );
+      expect(evaluation.rules[0]?.outcome).toBe('unknown');
+      expect(evaluation.path).toEqual({
+        kind: 'review-default',
+        reason: 'unresolved',
+      });
+    },
+  );
+
+  test('a shell tool with unreadable arguments gets no argument-only coverage', () => {
+    const evaluation = callTool(
+      [
+        rule({
+          id: 'arg-only',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'argument',
+              path: '$.environment',
+              kind: 'exact',
+              pattern: 'test',
+            }),
+          ],
+        }),
+      ],
+      'bash',
+      { command: null, environment: 'test' },
+    );
+    expect(evaluation.rules[0]?.conditions[0]?.outcome).toBe('match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'incomplete',
+    });
+  });
+
   test('a complete shell call without a node of that kind is a plain mismatch', () => {
     // An empty command parses cleanly and simply has no command node; that is a
     // fact, not an undetermined structure.

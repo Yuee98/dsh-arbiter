@@ -138,11 +138,14 @@ function callSubjects(
   parse: ShellParse | null,
   identity: SessionKind,
 ): CallSubjects {
-  // A tool that carries no shell command has no shell structure to be missing.
-  const isShellCall = parse !== null;
+  // The tool category is a fact about the tool name, not about whether a command
+  // could be extracted. A shell tool whose arguments carry no usable command text
+  // still carries shell structure in principle; treating it as a non-shell tool
+  // would let an argument condition cover a call whose structure is unknown.
+  const isShellCall = SHELL_TOOLS.has(tool);
   const complete =
     parse === null
-      ? true
+      ? false
       : parse.status === 'ok' && parse.completeness === 'complete';
   return {
     tool,
@@ -150,10 +153,12 @@ function callSubjects(
     argumentsValue,
     subjects: structuralSubjects({ tool, argumentsValue, parse }),
     shellCall: isShellCall,
-    // A parse error leaves no trustworthy structure at all. A partial parse does
-    // have usable nodes, so its existing commands stay matchable; #8 refines how
+    // A shell call with no readable command text has no trustworthy structure at
+    // all, which is as undetermined as a parse error. A partial parse does have
+    // usable nodes, so its existing commands stay matchable; #8 refines how
     // incomplete structure propagates into coverage.
-    structureUnknown: parse !== null && parse.status === 'error',
+    structureUnknown:
+      isShellCall && (parse === null || parse.status === 'error'),
     structureComplete: !isShellCall || complete,
   };
 }
