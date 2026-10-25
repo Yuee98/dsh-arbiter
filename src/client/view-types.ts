@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import type {
   ArbiterConfig,
   CommandRule,
+  ExecutionBoundary,
   RulePath,
   RuleTestResult,
 } from '../types.js';
@@ -455,17 +456,123 @@ export interface RuleListProps {
   readonly onTest: (id: string) => void;
 }
 
+/** Why the backend resolved one session the way it did (#4's scope reasons). */
+export type AdmissionReason =
+  | 'boundary-unconfirmed'
+  | 'session-enabled'
+  | 'parent-session-enabled'
+  | 'no-admission'
+  | 'session-disabled'
+  | 'parent-not-admitted'
+  | 'parent-unresolved'
+  | 'parent-cycle';
+
+/** The two writes the selector may perform; the boundary stays configuration. */
+export type AdmissionAction = 'enable' | 'disable';
+
+/**
+ * The backend-confirmed admission of one session.
+ *
+ * `revision` is the effective configuration revision the answer was computed
+ * under, so a client compares answers with each other instead of trusting an
+ * optimistic local value.
+ */
+export interface SessionAdmissionView {
+  readonly sessionId: string;
+  readonly rootSessionId: string;
+  readonly enabled: boolean;
+  readonly boundary: ExecutionBoundary;
+  readonly revision: string;
+  readonly admissionRevision: string | null;
+  readonly seq: number | null;
+  readonly at: number | null;
+  readonly reason: AdmissionReason;
+  readonly managed: boolean;
+}
+
+/** A confirmed view, or the refusal the host actually answered. */
+export type SessionAdmissionResponse =
+  | {
+      readonly ok: true;
+      readonly admission: SessionAdmissionView;
+      readonly revision: string;
+    }
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly message: string;
+      readonly revision: string;
+    };
+
+/**
+ * The host permission surfaces the selector needs, as a structural shape.
+ *
+ * They are read through `ctx.get` rather than declared dependencies: a
+ * composition without the host permission UI must still load the Arbiter
+ * settings page, so the selector degrades instead of parking the plugin.
+ *
+ * The bridge has exactly two jobs: report the host's *current* selection and
+ * its *selectable* presets, and run the host's own `/permission` command. It
+ * never computes admission state and never derives the current preset from a
+ * sandbox value.
+ */
+export interface HostPermissionCatalogOption {
+  readonly value: string;
+  readonly name: string;
+  readonly description?: string;
+}
+
+/** The host's own current selection for the bound session. */
+export interface HostPresetSelection {
+  readonly currentValue: string;
+  /** The catalog entry matching the current value, when the host lists it. */
+  readonly option?: HostPermissionCatalogOption;
+}
+
+export interface HostBridge {
+  /** Whether native switching is possible in this composition at all. */
+  available(): boolean;
+  /** The host's current preset for this session, or `null` when absent. */
+  hostPreset(sessionId: string): HostPresetSelection | null;
+  /** The selectable host presets, or `null` when the catalog is unavailable. */
+  catalog(): Promise<readonly HostPermissionCatalogOption[] | null>;
+  /** Run the host's own `/permission <preset>` command for this session. */
+  selectPreset(sessionId: string, preset: string): Promise<boolean>;
+  /**
+   * Subscribe to anything that may have changed admission on the host side.
+   *
+   * Invalidation only: the callback triggers a read of the authoritative
+   * admission route. It receives no value, so it cannot become a second store.
+   */
+  observe(sessionId: string, listener: () => void): () => void;
+}
+
 export interface SlotProps {
   readonly view?: string;
+  /** Session-scoped slots supply the identity; other slots do not. */
+  readonly sessionId?: string;
+  /** Composer owner prop: the host currently refuses composer interaction. */
+  readonly locked?: boolean;
+  /** Injected host adapter; absent in a composition without the permission UI. */
+  readonly bridge?: HostBridge;
 }
 
 export interface ClientContext {
   readonly locale: LocaleService;
   effect(callback: () => () => void, label?: string): unknown;
+  /** Read one host client service without declaring it as a dependency. */
+  get(name: string): unknown;
   readonly slots: {
     inject(name: string, callback: () => unknown): void;
     register(
-      options: { readonly name: string; readonly key?: string },
+      options: {
+        readonly name: string;
+        readonly key?: string;
+        /** Single slots render the lowest priority first; native sits at 0. */
+        readonly priority?: number;
+        readonly locale?: string;
+        readonly inject?: (sessionId: string) => SlotProps;
+      },
       component: ComponentType<SlotProps>,
     ): unknown;
   };

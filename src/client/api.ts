@@ -5,7 +5,12 @@
  * the page never talks to SQLite or the profile file directly.
  */
 
+import { sessionAdmissionResponse } from './decoders/admission.js';
 import type { Decoder } from './decoders/values.js';
+import type {
+  AdmissionAction,
+  SessionAdmissionResponse,
+} from './view-types.js';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -75,6 +80,15 @@ export async function getJson(
   return decode === undefined ? value : decode(value);
 }
 
+/** Read with a caller-owned lifetime, for a request a component may cancel. */
+export function getJsonWithSignal(
+  path: string,
+  signal: AbortSignal,
+  decode: Decoder<unknown>,
+): Promise<unknown> {
+  return request(path, { signal }).then((value) => decode(value));
+}
+
 /**
  * Post with a caller-owned lifetime.
  *
@@ -123,4 +137,86 @@ export async function postJson(
     body: JSON.stringify(body),
   });
   return decode === undefined ? value : decode(value);
+}
+
+/**
+ * One session's admission, as the backend confirmed it.
+ *
+ * A 404/409 answer is a refusal in the same shape as a decoded body, so the
+ * caller handles both transports through one branch; a malformed success body
+ * still throws, because it is not an answer at all.
+ */
+export async function getAdmission(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionAdmissionResponse> {
+  const path = `/sessions?sessionId=${encodeURIComponent(sessionId)}`;
+  try {
+    if (signal === undefined) {
+      return await getJson(path, sessionAdmissionResponse);
+    }
+    return sessionAdmissionResponse(
+      await getJsonWithSignal(path, signal, (value) => value),
+    );
+  } catch (error) {
+    return refusalOrThrow(error);
+  }
+}
+
+/**
+ * Ask the backend to enable or disable one session.
+ *
+ * The body never carries a boundary: the execution boundary is a plugin
+ * configuration setting, and the route rejects a per-session override instead
+ * of silently ignoring it.
+ */
+export async function setAdmission(
+  sessionId: string,
+  action: AdmissionAction,
+  signal?: AbortSignal,
+): Promise<SessionAdmissionResponse> {
+  try {
+    if (signal === undefined) {
+      return await postJson(
+        '/sessions',
+        { sessionId, action },
+        sessionAdmissionResponse,
+      );
+    }
+    const value: unknown = await postJsonWithSignal(
+      '/sessions',
+      { sessionId, action },
+      signal,
+    );
+    return sessionAdmissionResponse(value);
+  } catch (error) {
+    return refusalOrThrow(error);
+  }
+}
+
+/** A refused answer becomes a refusal; anything else is rethrown as-is. */
+function refusalOrThrow(error: unknown): SessionAdmissionResponse {
+  const refusal = refusalOf(error);
+  if (refusal !== null) return refusal;
+  throw error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Convert a refused HTTP answer into the admission refusal shape.
+ *
+ * The route answers `{ok:false, code, message, revision}` with a 4xx status, so
+ * the body is already the refusal; `request()` throws before the decoder runs.
+ * Anything without that body (a network failure, a proxy error page) stays a
+ * thrown error so it is not mistaken for a host decision.
+ */
+function refusalOf(error: unknown): SessionAdmissionResponse | null {
+  if (!(error instanceof ApiError)) return null;
+  const payload: unknown = error.payload;
+  if (payload === null || typeof payload !== 'object') return null;
+  if (Reflect.get(payload, 'ok') !== false) return null;
+  try {
+    return sessionAdmissionResponse(payload);
+  } catch {
+    return null;
+  }
 }
