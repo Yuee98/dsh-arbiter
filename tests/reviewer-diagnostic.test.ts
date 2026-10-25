@@ -422,6 +422,8 @@ describe('chat provider classification', () => {
     ['RATE_LIMIT', 'rate-limited'],
     ['TIMEOUT', 'timed-out'],
     ['SOMETHING_ELSE', 'unknown'],
+    // A provider-side cancel is the provider's outcome, not the user's.
+    ['CANCEL', 'unknown'],
   ])('a provider failure code %s maps to %s', async (code, expected) => {
     const result = await runReviewerProbe({
       config: chatConfig(),
@@ -580,6 +582,36 @@ describe('diagnostic material boundary', () => {
     expect(material).toContain('[redacted]');
   });
 
+  test('a chat provider echoing a quoted JSON authorization field is masked', async () => {
+    const result = await runReviewerProbe({
+      config: chatConfig(),
+      llm: {
+        stream: () =>
+          streamOf([
+            {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: {
+                  code: 'AUTH',
+                  message:
+                    'upstream echo {"authorization":"Bearer sk-json-secret","x-api-key":"sk-other"} and Authorization: Basic c2stYmFzaWM=',
+                },
+              },
+            },
+          ]),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    const material = JSON.stringify(result);
+    expect(material).not.toContain('sk-json-secret');
+    expect(material).not.toContain('sk-other');
+    expect(material).not.toContain('c2stYmFzaWM=');
+    expect(material).toContain('[redacted]');
+  });
+
   test('a resolved credential never appears in the submitted request material', async () => {
     const secret = 'sk-live-request-material';
     const result = await runReviewerProbe({
@@ -689,6 +721,24 @@ describe('decision probe', () => {
         resolve: async () => {
           abort.abort();
           return Promise.resolve(undefined);
+        },
+      },
+      fetch: () => Promise.resolve(new Response('{}', { status: 200 })),
+      signal: abort.signal,
+    });
+    expect(result.status).toBe('cancelled');
+    expect(JSON.stringify(result)).not.toContain('credential-missing');
+  });
+
+  test('a resolver that throws after a caller cancel is cancelled, not credential-missing', async () => {
+    const abort = new AbortController();
+    const result = await runReviewerProbe({
+      config: decisionConfig(),
+      llm: undefined,
+      credentials: {
+        resolve: () => {
+          abort.abort();
+          return Promise.reject(new Error('lookup interrupted'));
         },
       },
       fetch: () => Promise.resolve(new Response('{}', { status: 200 })),

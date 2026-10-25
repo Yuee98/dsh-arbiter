@@ -198,16 +198,25 @@ function redact(text: string, secrets: readonly string[]): string {
 /**
  * Mask an authentication header wherever it appears in free text.
  *
- * A provider that echoes `Authorization: Bearer …` in an error message would
- * otherwise publish a credential it received — and for chat the probe has no
- * value to match, because the host's LLM service owns the credential. Masking
- * the header shape covers that path without guessing what the secret is.
+ * A provider that echoes `Authorization: Bearer …` — or the same field inside a
+ * JSON body, quoted — would otherwise publish a credential it received. For
+ * chat the probe has no value to match, because the host's LLM service owns the
+ * credential, so masking the field shape covers that path without guessing what
+ * the secret is. Every auth scheme is masked, not only `Bearer`: `Basic` carries
+ * base64 credentials just as directly.
  */
 function redactAuthHeaders(text: string): string {
-  return text.replace(
-    /\b(authorization|proxy-authorization|x-api-key|api-key)(\s*[:=]\s*)(bearer\s+)?[^\s",}]+/giu,
+  // Plain `name: value` / `name=value`, optionally with an auth scheme.
+  const plain = text.replace(
+    /\b(authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token)(\s*[:=]\s*)(?:(bearer|basic|digest|token|negotiate)\s+)?[^\s",\]}]+/giu,
     (_match, name: string, separator: string, scheme: string | undefined) =>
-      `${name}${separator}${scheme ?? ''}[redacted]`,
+      `${name}${separator}${scheme === undefined ? '' : `${scheme} `}[redacted]`,
+  );
+  // Quoted JSON members: `"authorization": "Bearer …"`.
+  return plain.replace(
+    /("(?:authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token)"\s*:\s*")((?:(?:bearer|basic|digest|token|negotiate)\s+)?)([^"]*)(")/giu,
+    (_match, prefix: string, _scheme: string, _value: string, suffix: string) =>
+      `${prefix}[redacted]${suffix}`,
   );
 }
 
@@ -294,7 +303,8 @@ function providerFailure(error: string): ProbeFailure | null {
     return 'unauthorized';
   if (/RATE|QUOTA|TOO_MANY|LIMIT/iu.test(code)) return 'rate-limited';
   if (/TIMEOUT|TIMED_OUT/u.test(code)) return 'timed-out';
-  if (/CANCEL/u.test(code)) return 'cancelled';
+  // A provider-side cancel is the provider's own outcome. Only the caller's
+  // signal may claim `cancelled`, so this stays an unnamed failure.
   return 'unknown';
 }
 
@@ -431,6 +441,38 @@ async function runChat(
   }
 }
 
+/**
+ * Resolve the decision credential once, naming the stage when it fails.
+ *
+ * The value is returned so the adapter can send exactly it and the result can
+ * redact exactly it. A caller cancellation during the lookup wins over a
+ * credential verdict, because the user ended the run.
+ */
+async function decisionSecret(
+  options: ProbeOptions,
+): Promise<
+  | { readonly kind: 'ok'; readonly secret: string | undefined }
+  | { readonly kind: 'failed'; readonly failure: ProbeFailure }
+> {
+  const { config, credentials, signal } = options;
+  if (config.reviewer.decision.apiKeyRef.length === 0)
+    return { kind: 'ok', secret: undefined };
+  let secret: string | undefined;
+  try {
+    secret = (await credentials?.resolve(config.reviewer.decision.apiKeyRef))
+      ?.value;
+  } catch {
+    return {
+      kind: 'failed',
+      failure: callerCancelled(signal) ? 'cancelled' : 'credential-missing',
+    };
+  }
+  if (callerCancelled(signal)) return { kind: 'failed', failure: 'cancelled' };
+  if (secret === undefined)
+    return { kind: 'failed', failure: 'credential-missing' };
+  return { kind: 'ok', secret };
+}
+
 async function runDecision(
   options: ProbeOptions,
   startedAt: number,
@@ -440,31 +482,11 @@ async function runDecision(
     user: renderUser(PROBE_SNAPSHOT),
     estimatedInputTokens: 0,
   };
-  // Resolve the credential here as well, so the probe can name that stage and so
-  // the resolved value can be redacted out of any provider echo. The adapter
-  // resolves it again for the request itself; this is a boundary guard.
-  let secret: string | undefined;
-  if (config.reviewer.decision.apiKeyRef.length > 0) {
-    try {
-      secret = (await credentials?.resolve(config.reviewer.decision.apiKeyRef))
-        ?.value;
-    } catch {
-      return failedResult(config, startedAt, 'credential-missing', []);
-    }
-    if (secret === undefined) {
-      // A cancellation during resolution is the caller's action, not a missing
-      // credential.
-      if (callerCancelled(signal)) {
-        return failedResult(config, startedAt, 'cancelled', []);
-      }
-      // The formal adapter would refuse this too; classifying it here names the
-      // stage instead of reporting an empty, unexplained failure.
-      return failedResult(config, startedAt, 'credential-missing', []);
-    }
-    if (callerCancelled(signal)) {
-      return failedResult(config, startedAt, 'cancelled', []);
-    }
+  const resolved = await decisionSecret(options);
+  if (resolved.kind === 'failed') {
+    return failedResult(config, startedAt, resolved.failure, []);
   }
+  const { secret } = resolved;
   const secrets = secret === undefined ? [] : [secret];
   try {
     const result = await runDecisionReviewer(
