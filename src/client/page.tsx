@@ -76,8 +76,18 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     setError(errorText(failure));
   }, []);
 
+  /**
+   * Read the host state.
+   *
+   * When a save initiated the reload, the submitted draft revision travels with
+   * it: the decision to keep or replace the draft is made after `/state`
+   * resolves, immediately before the draft is written, so edits made during
+   * either the save or the reload survive.
+   */
   const load = useCallback(
-    async (options: { readonly keepDraft?: boolean } = {}): Promise<void> => {
+    async (
+      options: { readonly submittedRevision?: number } = {},
+    ): Promise<void> => {
       const ticket = generation.current + 1;
       generation.current = ticket;
       setBusy(true);
@@ -87,11 +97,12 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         if (generation.current !== ticket) return;
         // A reload or a completed save replaces the draft, so any answer for
         // the previous draft is stale from here on.
+        const edited = validationRevision.current !== options.submittedRevision;
         validationRevision.current += 1;
         setState(value);
-        if (options.keepDraft === true) {
-          // The user edited while the request was in flight. Those edits were
-          // not part of what was applied, so they stay as unsaved work.
+        if (options.submittedRevision !== undefined && edited) {
+          // The user edited after submitting the save. The applied
+          // configuration is what was sent; the newer edits stay unsaved.
           setValidation({ errors: [], warnings: [] });
           return;
         }
@@ -160,7 +171,7 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       // Reload first: the reload clears transient state, so the saved-and-
       // effective feedback is published after the fresh identities arrive. A
       // draft edited during the request is preserved instead of discarded.
-      await load({ keepDraft: validationRevision.current !== revision });
+      await load({ submittedRevision: revision });
       // Saved and effective are reported separately: the API only returns this
       // payload after the candidate was written and applied.
       setSaveStatus(response.changed ? 'saved' : 'unchanged');

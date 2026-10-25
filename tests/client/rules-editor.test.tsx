@@ -717,7 +717,12 @@ describe('rule validation feedback', () => {
     // Reload replaces the draft, so the old validation is about nothing.
     await user.click(screen.getByRole('button', { name: '重新读取' }));
     gate.release();
+    // The answer is consumed only after the reload has already replaced the
+    // draft, which is exactly the stale case.
     await answered;
+    await waitFor(() => {
+      expect(screen.queryByRole('list', { name: '规则' })).toBeNull();
+    });
     await waitFor(() => {
       expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
         '当前草稿与生效配置一致。',
@@ -775,40 +780,49 @@ describe('rule validation feedback', () => {
     ).toBeNull();
   });
 
-  test('a successful save keeps edits typed while it was in flight', async () => {
+  test('edits made while the post-save reload is pending are preserved', async () => {
     baseHandlers();
-    const gate = deferred();
-    let handled: (() => void) | undefined;
-    const answered = new Promise<void>((resolve) => {
-      handled = resolve;
-    });
+    const reloadGate = deferred();
+    let stateCalls = 0;
     server.use(
-      http.post('*/api/arbiter/config/save', async ({ request }) => {
-        saved.push(await request.json());
-        await gate.promise;
-        const response = HttpResponse.json(savedBody());
-        handled?.();
-        return response;
+      http.get('*/api/arbiter/state', async () => {
+        stateCalls += 1;
+        const loaded = effectiveState();
+        // The reload after a save reports the new identities.
+        if (stateCalls === 1) return HttpResponse.json(loaded);
+        await reloadGate.promise;
+        return HttpResponse.json({
+          ...loaded,
+          fileRevision: 'file-2',
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+        });
       }),
     );
     const user = await openRules();
     const id = await addRule(user);
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
-    const pattern = within(row(id)).getByRole('textbox', { name: '表达式' });
-    await user.type(pattern, 'gh pr view');
-    gate.release();
-    await answered;
-
-    // The newer edit is not part of what was applied, so it stays unsaved.
     await waitFor(() => {
-      expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
-        '草稿未保存',
-      );
+      expect(stateCalls).toBe(2);
+    });
+
+    // The save succeeded and its reload is still pending; the user edits.
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'typed during reload',
+    );
+    reloadGate.release();
+
+    // The new identities arrive, and the newer edit is still an unsaved draft.
+    await waitFor(() => {
+      expect(screen.getByText('文件修订 file-2')).toBeVisible();
     });
     expect(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
-    ).toHaveValue('gh pr view');
-    expect(saved).toHaveLength(1);
+    ).toHaveValue('typed during reload');
+    expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
+      '草稿未保存',
+    );
   });
 
   test('a failed save keeps the expanded edits and the draft', async () => {
