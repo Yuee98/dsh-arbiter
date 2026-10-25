@@ -35,6 +35,14 @@ const SCHEMA_SQL = `
           scope TEXT NOT NULL,
           revision TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS templates (
+          template_id TEXT PRIMARY KEY,
+          content_hash TEXT NOT NULL UNIQUE,
+          content TEXT NOT NULL,
+          format_version INTEGER NOT NULL,
+          renderer_version TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS calls (
           call_id TEXT PRIMARY KEY,
           ts INTEGER NOT NULL,
@@ -98,6 +106,7 @@ const SCHEMA_SQL = `
           backend TEXT NOT NULL,
           protocol TEXT NOT NULL,
           request TEXT NOT NULL,
+          template_id TEXT,
           response_text TEXT,
           parsed TEXT,
           error TEXT,
@@ -250,7 +259,7 @@ function verifyMigration(
 /** Columns a v1 database may already carry from an interrupted earlier attempt. */
 function columnNames(
   db: DatabaseSync,
-  table: 'calls' | 'stages',
+  table: 'calls' | 'stages' | 'model_calls',
 ): ReadonlySet<string> {
   const rows: readonly unknown[] = db
     .prepare(`PRAGMA table_info(${table})`)
@@ -277,6 +286,7 @@ function applyStep(db: DatabaseSync, from: number): void {
   if (from >= 2) return;
   const existingCalls = columnNames(db, 'calls');
   const existingStages = columnNames(db, 'stages');
+  const existingModels = columnNames(db, 'model_calls');
   const additions: readonly (readonly [string, string, string])[] = [
     ['calls', 'record_format_version', 'INTEGER NOT NULL DEFAULT 1'],
     ['calls', 'arguments_schema', 'TEXT'],
@@ -284,14 +294,26 @@ function applyStep(db: DatabaseSync, from: number): void {
     ['calls', 'execution_finished_at', 'INTEGER'],
     ['stages', 'rule_name', 'TEXT'],
     ['stages', 'config_snapshot_id', 'TEXT'],
+    ['model_calls', 'template_id', 'TEXT'],
   ];
   const present =
-    from === 0 ? undefined : { calls: existingCalls, stages: existingStages };
+    from === 0
+      ? undefined
+      : {
+          calls: existingCalls,
+          stages: existingStages,
+          model_calls: existingModels,
+        };
   // A brand-new database got every column from SCHEMA_SQL above, so there is
   // nothing to add; a v1 database is missing them.
   if (present === undefined) return;
   for (const [table, column, type] of additions) {
-    const columns = table === 'calls' ? present.calls : present.stages;
+    const columns =
+      table === 'calls'
+        ? present.calls
+        : table === 'stages'
+          ? present.stages
+          : present.model_calls;
     if (!columns.has(column))
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -5,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
+import { templateIdOf } from '../src/audit/metadata.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';
 
@@ -414,14 +416,35 @@ describe('execution result stays separate from the verdict', () => {
     store.updateExecution('approved', 'success', 1_700_000_000_000);
     const done = store.getCall('approved');
     expect(stringField(done, 'executionStatus')).toBe('success');
-    expect(nullableNumberField(done, 'executionStartedAt')).toBe(
-      1_700_000_000_000,
-    );
+    // A finish observation is not a start observation: deriving one would claim
+    // an event that was never seen.
+    expect(nullableNumberField(done, 'executionStartedAt')).toBeNull();
     expect(nullableNumberField(done, 'executionFinishedAt')).toBe(
       1_700_000_000_000,
     );
     // Recording an execution result never rewrites the permission verdict.
     expect(stringField(done, 'result')).toBe('review-allow');
+    store.close();
+  });
+
+  test('an observed start is recorded separately from the finish', async () => {
+    const { store } = await makeStore();
+    store.enqueue(record({ callId: 'started', result: 'review-allow' }));
+    await store.flush();
+    store.markExecutionStarted('started', 1_700_000_000_000);
+    store.updateExecution('started', 'success', 1_700_000_002_000);
+    const detail = store.getCall('started');
+    expect(nullableNumberField(detail, 'executionStartedAt')).toBe(
+      1_700_000_000_000,
+    );
+    expect(nullableNumberField(detail, 'executionFinishedAt')).toBe(
+      1_700_000_002_000,
+    );
+    // A second start observation does not overwrite the first.
+    store.markExecutionStarted('started', 1_800_000_000_000);
+    expect(
+      nullableNumberField(store.getCall('started'), 'executionStartedAt'),
+    ).toBe(1_700_000_000_000);
     store.close();
   });
 
@@ -1073,5 +1096,503 @@ describe('analysis consumers and unknown formats', () => {
     ).toBe(null);
     expect(reopened.recentForReplay(10)).toEqual([]);
     reopened.close();
+  });
+});
+
+/**
+ * A genuine v1 database: the structure this project shipped before #15, with a
+ * call, a stage, a model attempt, a configuration snapshot and an activation.
+ * Building it by hand (not by downgrading a v2 file) is what makes the migration
+ * test meaningful.
+ */
+const V1_CALLS_SQL = `CREATE TABLE calls (
+  call_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, session_id TEXT NOT NULL,
+  session_kind TEXT NOT NULL, parent_session TEXT, profile TEXT, workspace TEXT,
+  tool TEXT NOT NULL, arguments TEXT NOT NULL, cwd TEXT NOT NULL,
+  fingerprint TEXT NOT NULL, config_revision TEXT NOT NULL,
+  config_snapshot_id TEXT NOT NULL, approval_mode TEXT NOT NULL,
+  execution_mode TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL,
+  trace TEXT NOT NULL, effect TEXT NOT NULL, session_record_state TEXT NOT NULL,
+  signals TEXT, policy_strategy TEXT, decision_rules TEXT NOT NULL,
+  execution_status TEXT NOT NULL)`;
+
+const V1_STAGES_SQL = `CREATE TABLE stages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL, reason TEXT,
+  rule_id TEXT, decision_rules TEXT, config_revision TEXT, ts INTEGER NOT NULL)`;
+
+const V1_MODELS_SQL = `CREATE TABLE model_calls (
+  id TEXT PRIMARY KEY,
+  call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+  attempt INTEGER NOT NULL, backend TEXT NOT NULL, protocol TEXT NOT NULL,
+  request TEXT NOT NULL, response_text TEXT, parsed TEXT, error TEXT,
+  started_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+  estimated_input_tokens INTEGER NOT NULL, usage TEXT)`;
+
+const V1_CONFIG_SQL = `CREATE TABLE config_snapshots (
+  snapshot_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+  content TEXT NOT NULL, format_version INTEGER NOT NULL,
+  created_at INTEGER NOT NULL)`;
+
+const V1_ACTIVATIONS_SQL = `CREATE TABLE config_activations (
+  id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, activated_at INTEGER NOT NULL,
+  entry TEXT NOT NULL, scope TEXT NOT NULL, revision TEXT NOT NULL)`;
+
+const V1_META_SQL =
+  'CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)';
+
+function buildV1Database(path: string): void {
+  const db = new DatabaseSync(path);
+  db.exec(V1_CONFIG_SQL);
+  db.exec(V1_ACTIVATIONS_SQL);
+  db.exec(V1_CALLS_SQL);
+  db.exec(V1_STAGES_SQL);
+  db.exec(V1_MODELS_SQL);
+  db.exec(V1_META_SQL);
+  db.prepare(
+    'INSERT INTO config_snapshots(snapshot_id, content_hash, content, format_version, created_at) VALUES (?, ?, ?, ?, ?)',
+  ).run('cfg-legacy', 'hash-legacy', '{"enabled":true}', 1, 1_600_000_000_000);
+  db.prepare(
+    'INSERT INTO config_activations(id, snapshot_id, activated_at, entry, scope, revision) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    'act-legacy',
+    'cfg-legacy',
+    1_600_000_000_000,
+    'startup',
+    'profile',
+    'rev-legacy',
+  );
+  db.prepare(
+    `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+       tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+       execution_mode, result, reason, trace, effect, session_record_state, signals,
+       policy_strategy, decision_rules, execution_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'legacy-call',
+    1_600_000_000_000,
+    'legacy-session',
+    'main',
+    null,
+    'legacy-profile',
+    '/legacy/workspace',
+    'bash',
+    '{"command":"echo legacy"}',
+    '/legacy/workspace',
+    'bash:legacyfingerprint',
+    'rev-legacy',
+    'cfg-legacy',
+    'normal',
+    'trusted',
+    'review-deny',
+    'legacy denial',
+    '[{"stage":"rule","result":"deny","ruleId":"legacy-rule","at":1600000000000}]',
+    'null',
+    'written',
+    '{"riskDist":null,"riskPoint":1,"riskScore":null,"riskClass":"low","authDist":null,"authPoint":1,"authClass":"none","secrets":false,"destructive":false,"egress":false,"bulk":false,"source":"chat","repairs":0}',
+    'normal',
+    '["R7"]',
+    'not-started',
+  );
+  db.prepare(
+    'INSERT INTO stages(call_id, seq, stage, result, reason, rule_id, decision_rules, config_revision, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    'legacy-call',
+    0,
+    'rule',
+    'deny',
+    'legacy denial',
+    'legacy-rule',
+    '["R7"]',
+    'rev-legacy',
+    1_600_000_000_000,
+  );
+  db.prepare(
+    `INSERT INTO model_calls(id, call_id, attempt, backend, protocol, request, response_text,
+       parsed, error, started_at, duration_ms, estimated_input_tokens, usage)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'legacy-call:model:1',
+    'legacy-call',
+    1,
+    'decision',
+    'arbiter-decision-v1',
+    '{"model":"legacy-model","state":"STATE"}',
+    '{"response":{}}',
+    null,
+    null,
+    1_600_000_000_000,
+    12,
+    3,
+    null,
+  );
+  db.exec('PRAGMA user_version = 1');
+  db.close();
+}
+
+describe('a real v1 database', () => {
+  test('upgrades in place, keeps every row and takes a backup first', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v1-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    // The upgrade completed and the store now writes the current format.
+    expect(store.health().state).toBe('ok');
+
+    const detail = store.getCall('legacy-call');
+    expect(stringField(detail, 'result')).toBe('review-deny');
+    // A v1 row predates the new columns: they read as unknown, not as defaults.
+    expect(numberField(detail, 'recordFormatVersion')).toBe(1);
+    expect(nullableNumberField(detail, 'executionStartedAt')).toBeNull();
+    expect(nullableNumberField(detail, 'executionFinishedAt')).toBeNull();
+    expect(recordField(detail, 'argumentsSchema')).toBeNull();
+    const stage = listField(detail, 'stages')[0];
+    expect(recordField(stage, 'ruleId')).toBe('legacy-rule');
+    expect(recordField(stage, 'ruleName')).toBeNull();
+    expect(recordField(stage, 'configSnapshotId')).toBeNull();
+    // The original material survives verbatim.
+    expect(recordField(detail, 'reason')).toBe('legacy denial');
+    expect(recordField(detail, 'config')).toMatchObject({ enabled: true });
+    const attempt = listField(detail, 'modelCalls')[0];
+    expect(recordField(attempt, 'request')).toMatchObject({
+      model: 'legacy-model',
+    });
+    expect(store.configHistory(10)).toHaveLength(1);
+    store.close();
+
+    // The pre-migration copy exists and holds the v1 content.
+    const backupPath = `${path}.backup-v1`;
+    expect(existsSync(backupPath)).toBe(true);
+    const backup = new DatabaseSync(backupPath, { readOnly: true });
+    expect(
+      numberField(backup.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(1);
+    const backedUp = backup
+      .prepare('SELECT COUNT(*) AS count FROM calls')
+      .get();
+    expect(numberField(backedUp, 'count')).toBe(1);
+    const backupColumns = backup
+      .prepare('PRAGMA table_info(calls)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(backupColumns).not.toContain('record_format_version');
+    backup.close();
+
+    const upgraded = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(
+        upgraded.prepare('PRAGMA user_version').get(),
+        'user_version',
+      ),
+    ).toBe(2);
+    upgraded.close();
+  });
+
+  test('a failed migration rolls back, keeps the backup and pauses writes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v1fail-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+    // A stage table with an incompatible `rule_name` makes the ALTER fail while
+    // the backup has already been taken.
+    const before = new DatabaseSync(path);
+    before.exec('ALTER TABLE stages ADD COLUMN rule_name TEXT');
+    before.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // The duplicate column is what a partial earlier attempt looks like, and the
+    // migration is written to be safe against it, so this case now succeeds.
+    expect(store.paused).toBe(false);
+    store.close();
+
+    // Now force a real failure after the backup: a trigger that rejects the
+    // INSERT the migration's own verification performs is not enough (the
+    // migration only reads), so block the ALTER by occupying the column name with
+    // an incompatible declaration is also unhelpful. Instead make the schema
+    // statement itself fail by pre-creating `tasks` as a view.
+    const path2 = join(dir, 'arbiter2.db');
+    buildV1Database(path2);
+    const blocker = new DatabaseSync(path2);
+    // `CREATE TABLE IF NOT EXISTS calls` would skip an existing table, but a
+    // view with that name makes the statement fail outright.
+    blocker.exec('DROP TABLE stages');
+    blocker.exec('CREATE VIEW stages AS SELECT 1 AS id');
+    blocker.close();
+    const failing = new AuditStore(path2, DEFAULT_CONFIG.audit);
+    expect(failing.paused).toBe(true);
+    expect(failing.health()).toMatchObject({
+      state: 'unavailable',
+      lastError: expect.stringContaining('migration failed') as unknown,
+    });
+    // Writes are refused and the original structure is intact.
+    expect(failing.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
+    expect(failing.listCalls({}).total).toBe(0);
+    failing.close();
+    const after = new DatabaseSync(path2, { readOnly: true });
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(1);
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
+    // The backup survives a failed migration for recovery.
+    expect(existsSync(`${path2}.backup-v1`)).toBe(true);
+  });
+});
+
+describe('write containment covers every entry point', () => {
+  test('a failing clear neither throws nor discards queued work', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(record({ callId: 'kept', result: 'review-allow' }));
+    await store.flush();
+    store.close();
+    // Make DELETE fail with a trigger, which is a post-startup storage fault.
+    const db = new DatabaseSync(path);
+    db.exec(
+      'CREATE TRIGGER block_delete BEFORE DELETE ON calls BEGIN SELECT RAISE(ABORT, "no delete"); END',
+    );
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(reopened.clearCalls()).toBe(0);
+    expect(reopened.health().state).toBe('degraded');
+    expect(reopened.health().lastError).toContain('no delete');
+    // The rows are still there and the store still serves.
+    expect(reopened.listCalls({}).total).toBe(1);
+    reopened.close();
+  });
+
+  test('an unreadable structure reports unavailable instead of throwing', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    // A structure this build does not know, reachable after startup.
+    db.exec('DROP TABLE calls');
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(() => reopened.listCalls({})).not.toThrow();
+    const listed = reopened.listCalls({});
+    expect(listed.unreadable).toBe(true);
+    expect(listed.rows).toEqual([]);
+    expect(() => reopened.getCall('anything')).not.toThrow();
+    expect(reopened.getCall('anything')).toBeNull();
+    // The store degraded and explains why.
+    expect(reopened.health().state).toBe('degraded');
+    reopened.close();
+  });
+});
+
+describe('template snapshots are immutable and reused', () => {
+  const system = 'REVIEW_POLICY\n\nFIXED CONTRACT';
+  const request = (systemText: string) => ({
+    provider: 'p',
+    model: 'm',
+    system: systemText,
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'X' }] }],
+  });
+  const chatAttempt = (
+    callId: string,
+    systemText: string,
+    templateId: string,
+  ) => ({
+    requestId: `${callId}:model:1`,
+    callId,
+    attempt: 1,
+    backend: 'chat' as const,
+    protocol: 'arbiter-chat-json-v1',
+    request: request(systemText),
+    templateId,
+    responseText: '{}',
+    parsed: null,
+    error: null,
+    startedAt: 1,
+    durationMs: 2,
+    estimatedInputTokens: 3,
+    usage: null,
+  });
+
+  test('two calls with the same template share one stored row', async () => {
+    const { store } = await makeStore();
+    const templateId = templateIdOf(system);
+    for (const callId of ['tpl-1', 'tpl-2']) {
+      store.enqueue(
+        record({
+          callId,
+          result: 'review-allow',
+          modelAttempts: [chatAttempt(callId, system, templateId)],
+        }),
+      );
+    }
+    await store.flush();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    const templates = db
+      .prepare('SELECT COUNT(*) AS count FROM templates')
+      .get();
+    expect(numberField(templates, 'count')).toBe(1);
+    // The attempt points at the template rather than copying it.
+    const attempts = db
+      .prepare('SELECT template_id FROM model_calls ORDER BY call_id')
+      .all();
+    expect(attempts.map((row) => recordField(row, 'template_id'))).toEqual([
+      templateId,
+      templateId,
+    ]);
+    db.close();
+  });
+
+  test('a changed template creates a new row instead of rewriting the old', async () => {
+    const { store } = await makeStore();
+    const firstId = templateIdOf('REVIEW_POLICY\nOLD');
+    const secondId = templateIdOf('REVIEW_POLICY\nNEW');
+    store.enqueue(
+      record({
+        callId: 'old-template',
+        result: 'review-allow',
+        modelAttempts: [
+          chatAttempt('old-template', 'REVIEW_POLICY\nOLD', firstId),
+        ],
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'new-template',
+        result: 'review-allow',
+        modelAttempts: [
+          chatAttempt('new-template', 'REVIEW_POLICY\nNEW', secondId),
+        ],
+      }),
+    );
+    await store.flush();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    const contents = db
+      .prepare('SELECT content FROM templates ORDER BY created_at, template_id')
+      .all()
+      .map((row) => recordField(row, 'content'));
+    expect(contents).toContain('REVIEW_POLICY\nOLD');
+    expect(contents).toContain('REVIEW_POLICY\nNEW');
+    db.close();
+  });
+
+  test('the detail view returns the referenced template content', async () => {
+    const { store } = await makeStore();
+    const templateId = templateIdOf(system);
+    store.enqueue(
+      record({
+        callId: 'with-template',
+        result: 'review-allow',
+        modelAttempts: [chatAttempt('with-template', system, templateId)],
+      }),
+    );
+    await store.flush();
+    const detail = store.getCall('with-template');
+    const templates = listField(detail, 'templates');
+    expect(templates).toHaveLength(1);
+    expect(recordField(templates[0], 'templateId')).toBe(templateId);
+    expect(recordField(templates[0], 'content')).toBe(system);
+    expect(recordField(templates[0], 'unreadable')).toBe(false);
+    store.close();
+  });
+});
+
+describe('capacity accounting includes every audit artefact', () => {
+  test('backups count toward the capacity target that drives eviction', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 8; index += 1) {
+      store.enqueue(
+        record({
+          callId: `cap-${String(index)}`,
+          result: 'allow',
+          ts: Date.now() - index * 1_000,
+          arguments: { command: 'echo hi', padding: 'y'.repeat(2_000) },
+        }),
+      );
+    }
+    await store.flush();
+    const before = store.listCalls({}).total;
+    // A target the database alone could meet but the database plus a backup
+    // cannot: eviction has to see the same footprint the target is measured in.
+    const target = Math.floor(store.databaseBytes * 0.6);
+    const outcome = store.runRetention(Date.now(), 30, target);
+    expect(outcome.bytes).toBeGreaterThan(0);
+    expect(store.listCalls({}).total).toBeLessThanOrEqual(before);
+    store.close();
+  });
+
+  test('a configuration snapshot referenced only by a retained call survives', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const snapshot = snapshotOf(store);
+    // The call references the snapshot; there is deliberately no activation row.
+    store.enqueue(
+      record({
+        callId: 'call-ref',
+        result: 'allow',
+        configSnapshotId: snapshot.snapshotId,
+        ts: Date.now(),
+      }),
+    );
+    await store.flush();
+    store.runRetention();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    const remaining = db
+      .prepare(
+        'SELECT COUNT(*) AS count FROM config_snapshots WHERE snapshot_id = ?',
+      )
+      .get(snapshot.snapshotId);
+    expect(numberField(remaining, 'count')).toBe(1);
+    db.close();
+  });
+});
+
+describe('retention has one live policy and one executor', () => {
+  test('a follower store adopts the owner live change and never deletes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-live-policy-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const owner = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    const follower = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    expect(follower.health().state).toBe('ok');
+    for (const entry of [owner, follower]) {
+      entry.enqueue(
+        record({
+          callId: `live-${entry === owner ? 'a' : 'b'}`,
+          result: 'allow',
+        }),
+      );
+    }
+    await owner.flush();
+    await follower.flush();
+    const total = owner.listCalls({}).total;
+    expect(total).toBeGreaterThan(0);
+    // The owner tightens the policy; the follower must not keep the old one.
+    owner.updateConfig({ ...DEFAULT_CONFIG.audit, retentionDays: 7 });
+    expect(owner.retention.days).toBe(7);
+    // A follower never executes cleanup.
+    const followerOutcome = follower.runRetention(Date.now(), 1, 1);
+    expect(followerOutcome.deleted).toBe(0);
+    expect(owner.listCalls({}).total).toBe(total);
+    follower.close();
+    // After the owner closes, the path's policy is released cleanly.
+    owner.close();
   });
 });

@@ -17,6 +17,7 @@ import {
 } from '../snapshot.js';
 import type {
   AdmissionScopeReason,
+  CommandRule,
   PolicyThresholds,
   PreToolDecision,
   PriorVerdictItem,
@@ -36,6 +37,8 @@ import type {
 
 interface PreparedCall extends CallContext {
   readonly evaluation: ReturnType<typeof evaluateCall>;
+  /** The exact rule list the evaluation indexed into. */
+  readonly evaluatedRules: readonly CommandRule[];
   readonly prior: PriorVerdictItem[];
   readonly thresholds: PolicyThresholds;
   readonly extras: AuditExtras;
@@ -98,14 +101,15 @@ export class CallGate {
         // a call that never entered it is not this map's business.
         if (!this.host.runtime.pending.has(exec.callId)) return;
         this.host.runtime.pending.delete(exec.callId);
-        // A terminal result is the only thing that ends a pending entry, so the
-        // map cannot grow past the calls the host actually has in flight.
         this.host
           .currentAudit()
           ?.updateExecution(
             exec.callId,
             result.isError === true ? 'failed' : 'success',
           );
+        // A terminal result ends a pending entry; unresolved entries are reaped
+        // by the bounded sweep so an observed-but-abandoned call cannot grow the
+        // map without limit.
       },
     );
   }
@@ -302,8 +306,13 @@ export class CallGate {
       /* Keep process cwd; the snapshot records the actual value. */
     }
     const prior = this.history.priorFor(session.id ?? 'unknown');
+    // The evaluated set is what the matcher indexes into, so it is also what the
+    // historical rule name must be resolved against.
+    const evaluatedRules = runtime.config.rules.filter(
+      (rule) => rule.enabled !== false,
+    );
     const evaluation = evaluateCall({
-      rules: runtime.config.rules.filter((rule) => rule.enabled !== false),
+      rules: evaluatedRules,
       tool: exec.name,
       arguments: exec.arguments,
       identity: sessionKind,
@@ -323,6 +332,7 @@ export class CallGate {
       cwd,
       prior,
       evaluation,
+      evaluatedRules,
       thresholds,
       trace: [
         {
@@ -331,7 +341,9 @@ export class CallGate {
           ...(path.kind === 'rule'
             ? {
                 ruleId: path.ruleId,
-                ...ruleNameStage(this.ruleNameOf(evaluation, path.ruleId)),
+                ...ruleNameStage(
+                  this.ruleNameOf(evaluatedRules, evaluation, path.ruleId),
+                ),
               }
             : {}),
           ...(path.kind === 'review-default' ? { reason: path.reason } : {}),
@@ -357,12 +369,14 @@ export class CallGate {
   /**
    * The matched rule's display name at decision time.
    *
-   * It is read from the evaluation's own match (which carries the rule's index
-   * in the configuration used for this call), so a later rename or deletion
-   * cannot rewrite what this record says happened. A rule without a comment is
-   * labelled by its id, the same way the rules table labels it.
+   * The match index refers to the *evaluated* list (disabled rules are filtered
+   * out before matching), so the name is resolved against that same list. Using
+   * the unfiltered configuration would point at the wrong rule whenever a
+   * disabled rule precedes the match. A rule without a comment is labelled by
+   * its id, the same way the rules table labels it.
    */
   private ruleNameOf(
+    rules: readonly CommandRule[],
     evaluation: {
       readonly matches: readonly {
         readonly index: number;
@@ -373,7 +387,7 @@ export class CallGate {
   ): string | null {
     const match = evaluation.matches.find((entry) => entry.id === ruleId);
     if (match === undefined) return null;
-    const rule = this.host.runtime.config.rules[match.index];
+    const rule = rules[match.index];
     if (rule === undefined || rule.id !== ruleId) return null;
     return rule.comment === undefined || rule.comment.length === 0
       ? rule.id

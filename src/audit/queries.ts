@@ -213,6 +213,8 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
     backend: rowText(model['backend']),
     protocol: rowText(model['protocol']),
     request: rowJson(model['request']),
+    templateId:
+      typeof model['template_id'] === 'string' ? model['template_id'] : null,
     responseText:
       typeof model['response_text'] === 'string'
         ? model['response_text']
@@ -224,6 +226,37 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
     estimatedInputTokens: rowNumber(model['estimated_input_tokens']),
     usage: rowJson(model['usage']),
   };
+}
+
+/** Template content for the identities a detail view references. */
+function templatesFor(
+  db: DatabaseSync,
+  models: readonly Record<string, unknown>[],
+): readonly unknown[] {
+  const ids = [
+    ...new Set(
+      models
+        .map((model) => model['template_id'])
+        .filter((id): id is string => typeof id === 'string'),
+    ),
+  ];
+  return ids.map((id) => {
+    const row = asRow(
+      db
+        .prepare(
+          'SELECT template_id, content, format_version, renderer_version FROM templates WHERE template_id = ?',
+        )
+        .get(id),
+    );
+    const version = rowNumber(row['format_version'], 1);
+    return {
+      templateId: id,
+      content: readableFormat(version) ? rowText(row['content']) : null,
+      formatVersion: version,
+      rendererVersion: rowText(row['renderer_version']),
+      unreadable: !readableFormat(version),
+    };
+  });
 }
 
 export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
@@ -238,18 +271,26 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
       .all(callId),
   );
   const snapshotValue = db
-    .prepare('SELECT content FROM snapshots WHERE call_id = ?')
+    .prepare('SELECT content, format_version FROM snapshots WHERE call_id = ?')
     .get(callId);
   const snapshot = asRow(snapshotValue);
+  const snapshotUnreadable = !readableFormat(
+    rowNumber(snapshot['format_version'], 1),
+  );
   const models = asRows(
     db
       .prepare('SELECT * FROM model_calls WHERE call_id = ? ORDER BY attempt')
       .all(callId),
   );
   const configValue = db
-    .prepare('SELECT content FROM config_snapshots WHERE snapshot_id = ?')
+    .prepare(
+      'SELECT content, format_version FROM config_snapshots WHERE snapshot_id = ?',
+    )
     .get(rowText(call['config_snapshot_id']));
   const config = asRow(configValue);
+  const configUnreadable = !readableFormat(
+    rowNumber(config['format_version'], 1),
+  );
   const version = versionFields(call);
   // A record this build cannot interpret is returned with its raw identifying
   // fields and the marker; the adapter never guesses at the current shape.
@@ -308,9 +349,17 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     executionStartedAt: optionalNumber(call['execution_started_at']),
     executionFinishedAt: optionalNumber(call['execution_finished_at']),
     stages: stages.map(stageRow),
-    snapshot: rowJson(snapshot['content']),
+    // A structured snapshot written by a newer format is not presented under
+    // current semantics: the raw content stays readable, its interpretation is
+    // marked unavailable.
+    snapshot: snapshotUnreadable ? null : rowJson(snapshot['content']),
+    snapshotFormatVersion: rowNumber(snapshot['format_version'], 1),
+    snapshotUnreadable,
     modelCalls: models.map(modelCallRow),
-    config: rowJson(config['content']),
+    templates: templatesFor(db, models),
+    config: configUnreadable ? null : rowJson(config['content']),
+    configFormatVersion: rowNumber(config['format_version'], 1),
+    configUnreadable,
   };
 }
 
@@ -415,28 +464,35 @@ export function priorVerdictsForSession(
   const rows = asRows(
     db
       .prepare(
-        `SELECT ts, call_id, config_revision, tool, fingerprint, trace, result, reason, decision_rules, effect
+        `SELECT ts, call_id, config_revision, tool, fingerprint, trace, result, reason,
+                decision_rules, effect, record_format_version
            FROM calls WHERE session_id = ? AND result NOT IN ('allow', 'review-allow', 'human-allow')
            ORDER BY ts DESC LIMIT ?`,
       )
       .all(sessionId, limit),
   );
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
+    // A row this build cannot interpret must not become prior-verdict evidence:
+    // recovery reads a denial as a fact, and a guessed shape could make an
+    // unknown record look like a known authorization decision.
+    if (!readableFormat(formatOf(row))) return [];
     const trace = rowTrace(row['trace']);
     const rule = trace.find((stage) => stage.stage === 'rule');
-    return {
-      ts: rowNumber(row['ts']),
-      callId: rowText(row['call_id']),
-      configRevision: rowText(row['config_revision']),
-      tool: rowText(row['tool']),
-      fingerprint: rowText(row['fingerprint']),
-      trace: trace.map((stage) => stage.result),
-      result: rowText(row['result']),
-      reason: rowText(row['reason']),
-      ruleId: rule?.ruleId ?? null,
-      decisionRules: rowStrings(row['decision_rules']),
-      effect: rowJson(row['effect']),
-    };
+    return [
+      {
+        ts: rowNumber(row['ts']),
+        callId: rowText(row['call_id']),
+        configRevision: rowText(row['config_revision']),
+        tool: rowText(row['tool']),
+        fingerprint: rowText(row['fingerprint']),
+        trace: trace.map((stage) => stage.result),
+        result: rowText(row['result']),
+        reason: rowText(row['reason']),
+        ruleId: rule?.ruleId ?? null,
+        decisionRules: rowStrings(row['decision_rules']),
+        effect: rowJson(row['effect']),
+      },
+    ];
   });
 }
 

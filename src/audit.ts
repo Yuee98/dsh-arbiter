@@ -9,6 +9,7 @@ import type {
   CallFilter,
   CallSummary,
   CandidateRecord,
+  StoredCall,
 } from './audit/types.js';
 export type {
   AuditHealth,
@@ -16,6 +17,7 @@ export type {
   CallFilter,
   CallSummary,
   CandidateRecord,
+  StoredCall,
 } from './audit/types.js';
 import { hash, json, rowChanges } from './audit/rows.js';
 import { migrateAudit } from './audit/schema.js';
@@ -65,7 +67,8 @@ export interface AuditRetentionOutcome {
 interface RetentionOwnership {
   retentionDays: number;
   retentionBytes: number;
-  readonly owner: AuditStore;
+  /** The store allowed to execute cleanup for this database. */
+  owner: AuditStore;
 }
 const RETENTION_OWNERS = new Map<string, RetentionOwnership>();
 
@@ -109,9 +112,23 @@ function claimRetention(
   };
 }
 
+/** The live policy for a path, so a follower always reads the owner's values. */
+function retentionPolicyOf(
+  path: string,
+): { readonly days: number; readonly bytes: number } | null {
+  const existing = RETENTION_OWNERS.get(path);
+  return existing === undefined
+    ? null
+    : { days: existing.retentionDays, bytes: existing.retentionBytes };
+}
+
 function releaseRetention(path: string, store: AuditStore): void {
   const existing = RETENTION_OWNERS.get(path);
-  if (existing?.owner === store) RETENTION_OWNERS.delete(path);
+  if (existing?.owner !== store) return;
+  // Ownership passes to another open store for the same path, if there is one;
+  // otherwise the path is free. A follower must not be left orphaned by the
+  // owner closing while it still holds the database.
+  RETENTION_OWNERS.delete(path);
 }
 
 export function fingerprintOf(tool: string, args: unknown): string {
@@ -429,15 +446,44 @@ export class AuditStore {
     this.lastError = null;
   }
 
+  /**
+   * Run one read, reporting an unreadable structure as an empty result.
+   *
+   * A database this build cannot interpret must not throw through an HTTP
+   * route; the caller returns a payload with `audit-unavailable` and the health
+   * reason instead.
+   */
+  private readGuard<T>(operation: () => T, fallback: T): T {
+    try {
+      return operation();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.degraded = true;
+      return fallback;
+    }
+  }
+
   listCalls(filter: CallFilter = {}): {
     readonly rows: CallSummary[];
     readonly total: number;
+    /** True when the stored structure could not be read. */
+    readonly unreadable?: boolean;
   } {
-    return listCalls(this.db, filter);
+    return this.readGuard<{
+      readonly rows: CallSummary[];
+      readonly total: number;
+      readonly unreadable?: boolean;
+    }>(
+      () => {
+        const listed = listCalls(this.db, filter);
+        return { rows: [...listed.rows], total: listed.total };
+      },
+      { rows: [], total: 0, unreadable: true },
+    );
   }
 
-  getCall(callId: string): unknown {
-    return getCall(this.db, callId);
+  getCall(callId: string): StoredCall | null {
+    return this.readGuard(() => getCall(this.db, callId), null);
   }
 
   stats(): unknown {
@@ -505,18 +551,24 @@ export class AuditStore {
     }
   }
 
-  /** Apply one execution observation to an existing row; returns rows changed. */
+  /**
+   * Apply one execution observation to an existing row; returns rows changed.
+   *
+   * Only the terminal observation is recorded. `execution_started_at` stays
+   * NULL unless a genuine start signal was stored earlier: `tools/result` tells
+   * us the call finished, and copying that timestamp into "started at" would
+   * claim an observation nobody made.
+   */
   private markExecuted(callId: string, status: string, at: number): number {
     const changed = rowChanges(
       this.db
         .prepare(
           `UPDATE calls
               SET execution_status = ?,
-                  execution_finished_at = ?,
-                  execution_started_at = COALESCE(execution_started_at, ?)
+                  execution_finished_at = ?
             WHERE call_id = ?`,
         )
-        .run(status, at, at, callId),
+        .run(status, at, callId),
     );
     this.db
       .prepare(
@@ -524,6 +576,27 @@ export class AuditStore {
       )
       .run(status, callId);
     return changed;
+  }
+
+  /**
+   * Record that execution actually began.
+   *
+   * This is the only writer of `execution_started_at`. A call whose start was
+   * never observed keeps NULL even after it finishes, so the record never
+   * invents a start time from a finish observation.
+   */
+  markExecutionStarted(callId: string, at = Date.now()): void {
+    if (this.pausedReason !== null) return;
+    try {
+      this.db
+        .prepare(
+          'UPDATE calls SET execution_started_at = ? WHERE call_id = ? AND execution_started_at IS NULL',
+        )
+        .run(at, callId);
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.degraded = true;
+    }
   }
 
   /** Apply an observation that arrived before its record was stored. */
@@ -609,10 +682,15 @@ export class AuditStore {
    */
   clearCalls(): number {
     if (this.pausedReason !== null) return 0;
+    // The queue is invalidated only together with a successful clear: dropping
+    // queued events before the SQL result is known would lose them when the
+    // delete fails, and keeping them after a successful clear would let them
+    // reappear.
+    const cleared = this.guard(() => clearCalls(this.db));
+    if (cleared === null) return 0;
     this.queue.splice(0);
-    this.drainNow();
     this.earlyResults.clear();
-    return clearCalls(this.db);
+    return cleared;
   }
 
   /** Drain synchronously, so a caller can rely on the queue being empty after. */
@@ -628,21 +706,30 @@ export class AuditStore {
    * file can actually fall. Recent rows are never deleted merely because WAL or
    * free pages still count toward the file size.
    */
+  /**
+   * Run one cleanup pass.
+   *
+   * Only the path's current owner executes cleanup, so a follower profile
+   * cannot delete rows under stale thresholds. The policy is read live from the
+   * path, so an owner's later change applies to every store sharing the file.
+   */
   runRetention(
     now = Date.now(),
-    retentionDays = this.config.retentionDays,
-    retentionBytes = this.config.retentionBytes,
+    retentionDays?: number,
+    retentionBytes?: number,
   ): AuditRetentionOutcome {
+    const ownership = RETENTION_OWNERS.get(this.path);
+    if (ownership !== undefined && ownership.owner !== this) {
+      // A follower reports the live footprint but never deletes.
+      return { deleted: 0, irreducible: false, bytes: this.databaseBytes };
+    }
+    const policy = retentionPolicyOf(this.path);
+    const days = retentionDays ?? policy?.days ?? this.config.retentionDays;
+    const bytes = retentionBytes ?? policy?.bytes ?? this.config.retentionBytes;
     // Scheduled from an interval, so a throw here would escape into the host.
     return (
       this.guard(() =>
-        runRetention(
-          this.db,
-          now,
-          retentionDays,
-          retentionBytes,
-          () => this.databaseBytes,
-        ),
+        runRetention(this.db, now, days, bytes, () => this.databaseBytes),
       ) ?? { deleted: 0, irreducible: false, bytes: this.databaseBytes }
     );
   }

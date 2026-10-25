@@ -72,6 +72,32 @@ function humanUnavailable(
 /** How many session-record failures stay addressable for diagnostics. */
 const MAX_SESSION_RECORD_ERRORS = 200;
 
+/**
+ * How long an approved call may wait for a result before its entry is reaped.
+ *
+ * `tools/result` is expected for every allowed call, but a cancelled or
+ * abandoned call may never produce one. The entry is dropped after this window
+ * and the stored row keeps `pending` — the record must say "unknown outcome",
+ * not invent success or failure.
+ */
+const PENDING_TTL_MS = 30 * 60 * 1000;
+
+/** How many unresolved entries may accumulate before the oldest are reaped. */
+const MAX_PENDING = 512;
+
+/** Drop entries that are stale or beyond the cap; unknown outcomes stay unknown. */
+function reapPending(pending: HostEnvironment['runtime']['pending']): void {
+  const cutoff = Date.now() - PENDING_TTL_MS;
+  for (const [callId, entry] of pending) {
+    if (entry.ts < cutoff) pending.delete(callId);
+  }
+  while (pending.size > MAX_PENDING) {
+    const oldest = pending.keys().next().value;
+    if (oldest === undefined) break;
+    pending.delete(oldest);
+  }
+}
+
 /** Settles decisions independently of best-effort audit persistence. */
 export class CallSettlement {
   private readonly host: HostEnvironment;
@@ -167,10 +193,13 @@ export class CallSettlement {
     const record = this.createRecord(call, result, reason, extras);
     this.host.currentAudit()?.enqueue(record);
     if (record.executionStatus === 'pending') {
-      this.host.runtime.pending.set(call.exec.callId, {
+      const pending = this.host.runtime.pending;
+      pending.set(call.exec.callId, {
         sessionId: record.sessionId,
         ts: record.ts,
       });
+      // Keep the map bounded even when results never arrive.
+      reapPending(pending);
     }
     if (
       [

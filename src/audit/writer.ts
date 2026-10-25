@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { CallRecord } from './types.js';
 import { json, hash } from './rows.js';
 import { RECORD_FORMAT } from './schema.js';
+import { saveTemplateSnapshot } from './metadata.js';
 function insertCall(db: DatabaseSync, record: CallRecord): void {
   db.prepare(
     `INSERT OR REPLACE INTO calls(
@@ -82,12 +83,39 @@ function insertSnapshot(
     );
   }
 }
+/**
+ * Materialise the templates the attempts reference.
+ *
+ * The attempt carries the template's content identity; the content itself is
+ * stored once per identity and reused across calls. Persisting here keeps the
+ * reference from dangling if the adapter's template ever changes between the
+ * decision and the write.
+ */
+function insertTemplates(db: DatabaseSync, record: CallRecord): void {
+  for (const attempt of record.modelAttempts) {
+    if (attempt.templateId === undefined) continue;
+    const system =
+      typeof attempt.request === 'object' &&
+      attempt.request !== null &&
+      'system' in attempt.request &&
+      typeof attempt.request.system === 'string'
+        ? attempt.request.system
+        : '';
+    if (system.length === 0) continue;
+    const stored = saveTemplateSnapshot(db, system, attempt.protocol);
+    // The adapter's id and the stored id are derived from the same content; a
+    // mismatch would mean the reference and the row disagree.
+    if (stored.templateId !== attempt.templateId) continue;
+  }
+}
+
 function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
   const modelStatement = db.prepare(
     `INSERT OR REPLACE INTO model_calls(
-          id, call_id, attempt, backend, protocol, request, response_text, parsed, error,
-          started_at, duration_ms, estimated_input_tokens, usage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, call_id, attempt, backend, protocol, request, template_id,
+          response_text, parsed, error, started_at, duration_ms,
+          estimated_input_tokens, usage)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const attempt of record.modelAttempts) {
     modelStatement.run(
@@ -97,6 +125,7 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
       attempt.backend,
       attempt.protocol,
       json(attempt.request),
+      attempt.templateId ?? null,
       attempt.responseText,
       attempt.parsed === null ? null : json(attempt.parsed),
       attempt.error,
@@ -114,6 +143,7 @@ export function writeCallRecord(db: DatabaseSync, record: CallRecord): void {
     insertCall(db, record);
     insertStages(db, record);
     insertSnapshot(db, record, now);
+    insertTemplates(db, record);
     insertModelAttempts(db, record);
     db.exec('COMMIT');
   } catch (error) {

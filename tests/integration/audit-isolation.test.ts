@@ -11,6 +11,14 @@ import { initializeHost } from '../../src/host/runtime.js';
 import { ConfigurationAccess } from '../../src/host/configuration.js';
 import { statePayload } from '../../src/host/state.js';
 import type { ConnectionLike, HostEnvironment } from '../../src/host/types.js';
+import { DecisionHistory } from '../../src/host/history.js';
+import { CallSettlement } from '../../src/host/settlement.js';
+import type {
+  AuditExtras,
+  CallContext,
+  ToolExecutionLike,
+} from '../../src/host/types.js';
+import type { AgentLike, SessionLike } from '../../src/snapshot/types.js';
 import { createStubContext, stubEditor } from '../helpers/host-stub.js';
 
 /**
@@ -125,6 +133,52 @@ function stateOf(host: HostEnvironment): Record<string, unknown> {
   return asRecord(statePayload(host, new ConfigurationAccess(host)));
 }
 
+/**
+ * Settle one approved call through the real settlement adapter.
+ *
+ * This is the production path that adds a `runtime.pending` entry, so the test
+ * exercises the same code the host runs rather than a hand-written map insert.
+ */
+function settle(options: {
+  readonly host: HostEnvironment;
+  readonly callId: string;
+  readonly ts: number;
+}): void {
+  const { host, callId, ts } = options;
+  const settlement = new CallSettlement(host, new DecisionHistory(host));
+  const extras: AuditExtras = {
+    effect: null,
+    signals: null,
+    snapshot: null,
+    strategy: 'normal',
+    decisionRules: [],
+    modelAttempts: [],
+    ruleId: null,
+  };
+  const session: SessionLike = { id: 'session' };
+  const agent: AgentLike = { session };
+  const exec: ToolExecutionLike = {
+    callId,
+    name: 'bash',
+    arguments: { command: 'echo hi' },
+    signal: new AbortController().signal,
+  };
+  const call: CallContext = {
+    exec,
+    agent,
+    session,
+    sessionKind: 'main',
+    mode: 'normal',
+    cwd: '/w',
+    trace: [],
+  };
+  settlement.finalize(call, 'review-allow', 'approved', extras);
+  // The entry's timestamp drives the stale sweep; shift it for the stale case.
+  const entry = host.runtime.pending.get(callId);
+  if (entry !== undefined)
+    host.runtime.pending.set(callId, { sessionId: entry.sessionId, ts });
+}
+
 describe('an unmigratable audit database', () => {
   test('keeps configuration readable and reports why audit is down', async () => {
     const { host } = await startHost({ breakDatabase: true });
@@ -195,6 +249,34 @@ describe('an unmigratable audit database', () => {
     expect(store.clearCalls()).toBe(0);
     store.close();
     expect(userVersion(path)).toBe(versionBefore);
+  });
+
+  test('unresolved pending entries stay bounded and keep an unknown outcome', async () => {
+    const { host } = await startHost();
+    const pending = host.runtime.pending;
+    // Simulate approved calls whose result event never arrives.
+    for (let index = 0; index < 900; index += 1) {
+      settle({
+        host,
+        callId: `abandoned-${String(index)}`,
+        ts: Date.now(),
+      });
+    }
+    expect(pending.size).toBeLessThanOrEqual(512);
+    // The stored record must keep `pending`: the outcome is unknown, not failed.
+    const audit = host.audit;
+    if (audit === null) throw new Error('missing audit');
+    await audit.flush();
+    const stored = audit.getCall('abandoned-899');
+    expect(stored).not.toBeNull();
+    expect(recordField(stored, 'executionStatus')).toBe('pending');
+    expect(recordField(stored, 'executionFinishedAt')).toBeNull();
+    // A stale entry is reaped even when the map is under the cap.
+    pending.clear();
+    settle({ host, callId: 'stale', ts: Date.now() - 60 * 60 * 1000 });
+    settle({ host, callId: 'fresh', ts: Date.now() });
+    expect(pending.has('stale')).toBe(false);
+    expect(pending.has('fresh')).toBe(true);
   });
 
   test('the payload keeps the effective revision while history is unavailable', async () => {

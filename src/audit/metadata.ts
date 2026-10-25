@@ -81,3 +81,44 @@ export function recordAnalysis(
     created,
   );
 }
+
+/** Record format for template content written by this build. */
+const TEMPLATE_FORMAT = 1;
+
+/**
+ * Insert or reuse one immutable template snapshot.
+ *
+ * The template is identified by its content hash, the same way configuration
+ * snapshots are: the same policy text used by a thousand calls is stored once,
+ * and a later edit creates a new row instead of rewriting the one a past
+ * decision was rendered with.
+ */
+/**
+ * The identity of one immutable template snapshot.
+ *
+ * It depends on the content alone, so every producer (the chat adapter and the
+ * audit writer) derives the same id from the same text without sharing state.
+ */
+export function templateIdOf(content: string): string {
+  return `tpl-${hash(content).slice(0, 16)}`;
+}
+
+export function saveTemplateSnapshot(
+  db: DatabaseSync,
+  content: string,
+  rendererVersion: string,
+): { readonly templateId: string } {
+  const contentHash = hash(content);
+  const templateId = templateIdOf(content);
+  db.prepare(
+    'INSERT OR IGNORE INTO templates(template_id, content_hash, content, format_version, renderer_version, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    templateId,
+    contentHash,
+    content,
+    TEMPLATE_FORMAT,
+    rendererVersion,
+    Date.now(),
+  );
+  return { templateId };
+}

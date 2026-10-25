@@ -443,6 +443,12 @@ export interface ModelAttemptRecord {
   readonly backend: 'chat' | 'decision';
   readonly protocol: string;
   readonly request: unknown;
+  /**
+   * The immutable template snapshot this attempt was rendered from, or absent
+   * when the backend has no reusable template (the decision protocol sends a
+   * fixed structure, so it carries none).
+   */
+  readonly templateId?: string;
   readonly responseText: string | null;
   readonly parsed: unknown;
   readonly error: string | null;

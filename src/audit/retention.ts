@@ -15,14 +15,6 @@ export function clearCalls(db: DatabaseSync): number {
   }
   return count;
 }
-function effectiveBytes(db: DatabaseSync): number {
-  const page = asRow(db.prepare('PRAGMA page_count').get());
-  const free = asRow(db.prepare('PRAGMA freelist_count').get());
-  const size = asRow(db.prepare('PRAGMA page_size').get());
-  const used =
-    rowNumber(page['page_count']) - rowNumber(free['freelist_count']);
-  return Math.max(0, used) * rowNumber(size['page_size']);
-}
 function compact(db: DatabaseSync): void {
   try {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -65,7 +57,10 @@ export function runRetention(
     db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
   );
   let guard = 0;
-  while (effectiveBytes(db) > retentionBytes && guard < 40) {
+  // Eviction must see the same footprint the target is measured against,
+  // including migration backups; otherwise the database alone can look small
+  // while the audit directory is already over budget.
+  while (databaseBytes() > retentionBytes && guard < 40) {
     guard += 1;
     const remaining = rowNumber(
       asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
@@ -81,7 +76,7 @@ export function runRetention(
         )
         .get(),
     );
-    const excess = effectiveBytes(db) - retentionBytes;
+    const excess = databaseBytes() - retentionBytes;
     const batch = Math.max(
       1,
       Math.min(
@@ -107,9 +102,12 @@ export function runRetention(
   db.prepare(
     'DELETE FROM snapshots WHERE call_id NOT IN (SELECT call_id FROM calls)',
   ).run();
+  // A retained call may reference a configuration without any activation row,
+  // so both references keep a snapshot alive.
   db.prepare(
     `DELETE FROM config_snapshots
       WHERE snapshot_id NOT IN (SELECT snapshot_id FROM config_activations)
+        AND snapshot_id NOT IN (SELECT config_snapshot_id FROM calls)
         AND created_at < ?`,
   ).run(cutoff);
   if (deleted > 0 || databaseBytes() > retentionBytes) compact(db);
