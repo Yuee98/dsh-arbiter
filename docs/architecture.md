@@ -274,7 +274,7 @@ subagent 的简短说明草案：
 
 这里常驻的是稳定语义，当前模式、故障细节和具体缺失证据随当次结果提供。放置方案已确认，具体文字可在实现与评估中调整。注入执行指引有助于模型恢复，但权限判定仍由插件执行。
 
-**接入结果（#21，DSH 0.2.1-rc.3 实测）**：经宿主公开的 `ctx.systemPrompt.section()` 注册一个 system prompt 段（与官方工具包贡献自身常驻说明的入口相同），文本按每次组装时的会话决定；未接管会话返回空串，因此不注入。该段位于 system prompt 的首条系统消息中，压缩只替换其后的历史区间，所以压缩后仍保留；实测主会话得到父 agent 文案、子会话得到 subagent 文案，未接管会话与插件停用时不出现。文案不走 `context()` 运行时快照，也不进入 `src/snapshot.ts` 的 Reviewer 输入：Reviewer 的授权契约独立维护在 `src/reviewer/prompt.ts`。三档均不禁止 agent 通过宿主 ask 工具或聊天提问，插件既不代问也不把答复记作 human-allow；当次拒绝理由仍由 #12 的 `src/host/feedback.ts` 提供。
+**接入结果（#21，DSH 0.2.1-rc.3 实测）**：经宿主公开的 `ctx.systemPrompt.context()` 注册为**必需的运行时上下文**（`required: true`），文本按每次组装时的会话决定；未接管会话返回空串，因此不注入。选择该入口而非 `section()` 有两个实测理由：宿主自带 `minimal` preset 的 persona 使用 `complete: true`，会把全部 section 收缩为它自己；`includeRuntimeContext: false` 又会丢弃可选 context。只有 `required` 的 context 在两种组合下都保留，实测在完整 persona 加关闭运行时上下文的组装中仍出现在模型收到的上下文里。运行时快照在压缩替换其所在区间后会由宿主重新投影，实测 `/compact` 后下一轮请求仍带指引。实测主会话得到父 agent 文案、子会话得到 subagent 文案，未接管与显式停用的会话均不出现。父、子两份文案共享同一段「未执行、优先允许替代方案、条件未变不重复」语义，再各自追加角色职责；文本不含当前模式、故障或具体缺失证据，也不是分步脚本。该指引不进入 `src/snapshot.ts` 的 Reviewer 输入：Reviewer 的授权契约独立维护在 `src/reviewer/prompt.ts`。三档均不禁止 agent 通过宿主 ask 工具或聊天提问，插件既不代问也不把答复记作 human-allow；当次拒绝理由仍由 #12 的 `src/host/feedback.ts` 提供。
 
 **启用判断**：读取插件的实际会话启用状态及所属覆盖范围，不能只比较原生预设名称。子任务可能因宿主旋钮组合而显示不同预设；不能据此漏掉已接管范围内的调用。父子范围映射需在接入中验证，不改变子任务共用 strict / progress 的既定设置；见[权限选择器契约](#permission-selector-contract)。
 

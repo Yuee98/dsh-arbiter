@@ -270,7 +270,7 @@ F5 由操作者本人用自己的浏览器打开宿主的 token URL 完成，驱
 编号保留用于追溯。旧条目中的示例数值和待决方案不因此成为发布标准；实际执行前按当前产品契约确认用例，下方“新增验收”同样在相应功能实现或评测阶段执行。
 
 1. **Shell 解析与静态词解码接入**：2026-10-22 已确认 `unbash` 为优先候选，验证具体版本、DSH Node 与浏览器支持、解析错误及未知结构处理、静态／动态区分、引号／转义／拼接／空参数、字节边界与性能。按[独立状态契约](rules.md#matching-uncertainty)分别记录结构、词值和事实，验证嵌套错误、遍历上限、条件“或”三态传播、无关适用范围排除及相关高优先级未知阻止 allow 短路；实际匹配与测试共用转换和求值。匹配器按[完整匹配与大小写](rules.md#matcher-semantics)验证，不沿用旧前缀查找和强制 `^`。原条目为 tree-sitter WASM 的运行时、加载开销与内存验证，保留作替代方案，不表示已采用 unbash 或已完成宿主接入；
-2. **插件能否贡献 system prompt 上下文段**（官方 tool-bash 有此先例，需确认插件侧 API）；按已确认的[执行指引放置方案](architecture.md#agent-instruction-placement)，验证主／子 agent 的覆盖、作用范围与压缩后保留。**#21 已确认**：`ctx.systemPrompt.section()` 可用，主／子 agent 覆盖、未接管会话不注入及 `/compact` 后保留均在隔离 DSH 实测通过，见该节「接入结果」；
+2. **插件能否贡献 system prompt 上下文段**（官方 tool-bash 有此先例，需确认插件侧 API）；按已确认的[执行指引放置方案](architecture.md#agent-instruction-placement)，验证主／子 agent 的覆盖、作用范围与压缩后保留。**#21 已确认**：`ctx.systemPrompt.context()` 以 `required` 注册可用；完整 persona 加关闭运行时上下文的组合仍保留，主／子 agent 覆盖、未接管与停用会话不注入、`/compact` 后下一轮请求仍带指引，均在隔离 DSH 实测通过；见该节「接入结果」；
 3. **`permissionPresets.set()` 能否从斜杠命令 handler 调用**（官方 `/permission` 走该路径，需确认权限）；
 4. **Clef API 可达性**（网络环境、Workers AI 账户开通）；
 5. **Neuron 实际消耗**（按 1.5K tok/次估算是否准确）；
