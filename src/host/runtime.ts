@@ -67,11 +67,12 @@ function consumeApplySource(
   candidate: ArbiterConfig,
 ): ConfigApplySource {
   const pending = runtime.pendingApplySource;
-  runtime.pendingApplySource = null;
-  const matched =
-    pending !== null &&
-    Date.now() - pending.at <= UI_APPLY_WINDOW_MS &&
-    pending.content === JSON.stringify(candidate);
+  const fresh =
+    pending !== null && Date.now() - pending.at <= UI_APPLY_WINDOW_MS;
+  // A marker only answers for its own content: an unrelated reload stays
+  // `file` and must not consume a save that has not been reloaded yet.
+  const matched = fresh && pending.content === JSON.stringify(candidate);
+  if (matched || !fresh) runtime.pendingApplySource = null;
   if (matched) return 'ui';
   // The first application in a profile is the startup load. Later ones come
   // from an external document change, including a reload after an unload that
@@ -246,14 +247,32 @@ export function applyConfig(
         };
       }
     }
-    audit.runRetention();
-    return {
-      changed,
-      revision: snapshot.revision,
-      snapshotId: snapshot.snapshotId,
-      recorded: record,
-      auditError: null,
-    };
+    // Retention is housekeeping after the metadata is committed: a cleanup
+    // failure must not revoke a snapshot and activation that were persisted.
+    try {
+      audit.runRetention();
+      return {
+        changed,
+        revision: snapshot.revision,
+        snapshotId: snapshot.snapshotId,
+        recorded: record,
+        auditError: null,
+      };
+    } catch (error) {
+      // Cleanup failed but the history itself is complete: log it as a cleanup
+      // problem instead of reporting the activation as unrecorded.
+      ctx.logger.warn(
+        'arbiter: audit retention failed after activation: %s',
+        error instanceof Error ? error.message : String(error),
+      );
+      return {
+        changed,
+        revision: snapshot.revision,
+        snapshotId: snapshot.snapshotId,
+        recorded: record,
+        auditError: null,
+      };
+    }
   } catch (error) {
     runtime.auditError = error instanceof Error ? error.message : String(error);
     runtime.effectiveRevision = revision;

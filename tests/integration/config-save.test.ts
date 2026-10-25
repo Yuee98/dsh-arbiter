@@ -626,33 +626,64 @@ describe('audit failure ordering', () => {
 });
 
 describe('cold restart recovery', () => {
-  test('the first accepted document is recoverable after a restart', async () => {
-    // A cold process with an existing valid custom document.
+  test('the first accepted document is recoverable after a real cold start', async () => {
+    // Phase 1: a first process writes the continuity copy for a custom document.
     const first = await createHarness({ config: { enabled: false } });
-    const lastGood = join(first.home, 'arbiter', 'last-good');
+    const home = first.home;
+    const lastGood = join(home, 'arbiter', 'last-good');
+    const firstState = first.state();
+    const snapshotBefore = firstState['configSnapshotId'];
     try {
       const entries = await readdir(lastGood);
       expect(entries).toHaveLength(1);
       expect(
         JSON.parse(await readFile(join(lastGood, entries[0] ?? ''), 'utf8')),
       ).toMatchObject({ enabled: false });
+      expect(String(snapshotBefore)).toMatch(/^cfg-/);
     } finally {
       first.dispose();
     }
 
-    // A new process sees an invalid document and must fall back to that copy,
-    // not to the built-in defaults.
-    const cold = await createHarness({
-      config: { format: 'arbiter-config-v9' },
+    // Phase 2: a genuinely new module instance, so the in-process runtime map is
+    // empty and only the on-disk copy can supply the fallback.
+    vi.resetModules();
+    const freshRuntime = await import('../../src/host/runtime.js');
+    const freshConfiguration = await import('../../src/host/configuration.js');
+    const profileDir = join(home, 'profiles', 'arbiter-config-test');
+    const documentPath = join(profileDir, 'cordis.patch.yml');
+    await writeFile(
+      documentPath,
+      JSON.stringify({ format: 'arbiter-config-v9' }),
+      'utf8',
+    );
+    const parts = createStubContext({
+      profileContext: { home, dir: profileDir, name: 'arbiter-config-test' },
+      sandboxPolicy: { defaultMode: 'workspace-write' },
+      configEditor: stubEditor({
+        documentPath,
+        config: () => ({}),
+        onEdit: () => undefined,
+      }),
+      connection: { fetch: { register: () => () => undefined } },
+    });
+    const cold = freshRuntime.initializeHost(parts.ctx, {
+      format: 'arbiter-config-v9',
     });
     try {
-      expect(cold.state()['config']).toMatchObject({
+      expect(cold.runtime.config).toMatchObject({
         enabled: false,
         modes: { main: 'normal', subagent: 'strict' },
       });
-      expect(cold.state()['invalidConfigError']).toContain('format');
+      expect(cold.runtime.invalidConfigError).toContain('format');
+      // Identical content reuses the persisted snapshot, so a cold start never
+      // creates a second snapshot for the same effective configuration.
+      expect(cold.runtime.configSnapshotId).toBe(String(snapshotBefore));
+      // The rejected document itself was never activated.
+      const entries = cold.audit?.configHistory(10) ?? [];
+      expect(entries[0]?.snapshotId).toBe(String(snapshotBefore));
+      expect(freshConfiguration.ConfigurationAccess).toBeTypeOf('function');
     } finally {
-      cold.dispose();
+      for (const dispose of parts.disposers) dispose();
     }
   });
 });
@@ -678,6 +709,81 @@ describe('UI attribution correlation', () => {
       // The external change is attributed to the file, not to this save.
       expect(harness.history()[0]?.entry).toBe('file');
       expect(harness.host.runtime.config.modes.main).toBe('progress');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('retention failure scope', () => {
+  test('a retention error keeps the committed snapshot and activation reusable', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const audit = harness.host.audit;
+      if (audit === null) throw new Error('missing audit');
+      audit.runRetention = () => {
+        throw new Error('retention failed');
+      };
+      const result = await save(harness, { enabled: true });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({
+        effective: true,
+        changed: true,
+        activationRecorded: true,
+        // Cleanup failed, but history for this activation is complete.
+        auditError: null,
+      });
+      const committed = harness.state()['configSnapshotId'];
+      expect(committed).toMatch(/^cfg-/);
+      expect(harness.state()['configHistoryComplete']).toBe(true);
+      expect(harness.history()).toHaveLength(2);
+
+      // Same content again: the persisted snapshot is reused, no extra row.
+      const again = await save(harness, { enabled: true });
+      expect(again.body).toMatchObject({
+        changed: false,
+        activationRecorded: false,
+      });
+      expect(harness.state()['configSnapshotId']).toBe(committed);
+      expect(harness.history()).toHaveLength(2);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('competing UI saves', () => {
+  test('the rejected save does not relabel the accepted one as a file change', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const editor = harness.host.services.configEditor;
+      if (editor === undefined) throw new Error('missing editor');
+      const access = new ConfigurationAccess(harness.host);
+      const revision = access.fileRevision();
+      const request = (config: Record<string, unknown>): Request =>
+        new Request('http://localhost/api/arbiter/config/save', {
+          method: 'POST',
+          body: JSON.stringify({ revision, config }),
+        });
+
+      const firstEdit = editor.edit.bind(editor);
+      let nested: Promise<Response> | undefined;
+      editor.edit = (entry, change) => {
+        // A second save with different content lands while the first holds the
+        // lock; it must be rejected by the revision check, not steal the marker.
+        if (nested === undefined)
+          nested = new ConfigurationAccess(harness.host).save(
+            request({ enabled: true, modes: { main: 'progress' } }),
+          );
+        return firstEdit(entry, change);
+      };
+      const accepted = await access.save(request({ enabled: true }));
+      expect(accepted.status).toBe(200);
+      expect(nested).toBeDefined();
+      expect(await nested?.then((response) => response.status)).toBe(409);
+      // The accepted content's reload is attributed to the UI exactly once.
+      expect(harness.history()[0]?.entry).toBe('ui');
+      expect(harness.host.runtime.config.modes.main).toBe('normal');
     } finally {
       harness.dispose();
     }

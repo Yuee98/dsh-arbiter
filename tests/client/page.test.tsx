@@ -356,3 +356,36 @@ test('an explicitly declared format survives decode, draft and the actual save r
     });
   }
 });
+
+test('a known rule compile failure is localized while its id stays data', async () => {
+  server.use(
+    http.get('*/api/arbiter/state', () => HttpResponse.json(effectiveState())),
+    http.post('*/api/arbiter/config/save', () =>
+      HttpResponse.json(
+        {
+          ok: false,
+          code: 'config-invalid',
+          errors: [
+            {
+              path: 'rules[0]',
+              message:
+                'regex patterns must be anchored with "^" or "(?:^" (rule "gh")',
+              code: 'rule.regex-anchor',
+              params: { id: 'gh' },
+            },
+          ],
+          warnings: [],
+        },
+        { status: 422 },
+      ),
+    ),
+  );
+  const { user } = renderClient(<ArbiterPage />);
+  await screen.findByLabelText('主会话审批模式', { exact: false });
+  await user.click(screen.getByRole('button', { name: '保存并应用' }));
+  const alert = await screen.findByText(/配置校验失败，未保存/);
+  expect(alert).toHaveTextContent(
+    'rules[0]: 正则表达式必须以 "^" 或 "(?:^" 开头。',
+  );
+  expect(alert).not.toHaveTextContent('regex patterns must be anchored');
+});

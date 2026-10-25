@@ -11,6 +11,27 @@ export interface RuleCompileError {
   readonly params?: Readonly<Record<string, string | number>>;
 }
 
+/**
+ * A rule problem with a stable reason code.
+ *
+ * The code selects a localized sentence; `message` stays the developer-facing
+ * English text inserted as `{message}` only for reasons that have no template.
+ */
+export class RuleCompileFailure extends Error {
+  readonly code: string;
+  readonly params: Readonly<Record<string, string | number>>;
+  constructor(
+    code: string,
+    message: string,
+    params: Readonly<Record<string, string | number>> = {},
+  ) {
+    super(message);
+    this.name = 'RuleCompileFailure';
+    this.code = code;
+    this.params = params;
+  }
+}
+
 export interface CompiledRule {
   readonly rule: CommandRule;
   readonly index: number;
@@ -50,14 +71,21 @@ function compileGlob(pattern: string): (value: string) => boolean {
 function validateAgentIdentities(agents: readonly string[] | undefined): void {
   if (agents !== undefined) {
     if (agents.length === 0)
-      throw new Error('agents must not be empty when present');
+      throw new RuleCompileFailure(
+        'rule.agents-empty',
+        'agents must not be empty when present',
+      );
     for (const agent of agents) {
       if (
         agent !== 'main' &&
         agent !== 'subagent' &&
         !agent.startsWith('preset:')
       ) {
-        throw new Error(`unknown agent identity "${agent}"`);
+        throw new RuleCompileFailure(
+          'rule.agent-unknown',
+          `unknown agent identity "${agent}"`,
+          { agent },
+        );
       }
     }
   }
@@ -65,25 +93,45 @@ function validateAgentIdentities(agents: readonly string[] | undefined): void {
 
 function validateRuleShape(rule: CommandRule): void {
   const { match } = rule;
-  if (rule.id.length === 0) throw new Error('rule id must not be empty');
-  if (match.pattern.length === 0) throw new Error('pattern must not be empty');
+  if (rule.id.length === 0)
+    throw new RuleCompileFailure('rule.id-empty', 'rule id must not be empty');
+  if (match.pattern.length === 0)
+    throw new RuleCompileFailure(
+      'rule.pattern-empty',
+      'pattern must not be empty',
+    );
   if (
     match.node === 'tool' &&
     (match.tool === undefined || match.tool.length === 0)
   ) {
-    throw new Error('node "tool" requires an explicit tool name');
+    throw new RuleCompileFailure(
+      'rule.tool-required',
+      'node "tool" requires an explicit tool name',
+    );
   }
   if (match.node !== 'tool' && match.tool !== undefined) {
-    throw new Error('tool is only valid for node "tool"');
+    throw new RuleCompileFailure(
+      'rule.tool-scope',
+      'tool is only valid for node "tool"',
+    );
   }
   if (match.selector !== undefined && match.node !== 'tool') {
-    throw new Error('selector is only valid for node "tool"');
+    throw new RuleCompileFailure(
+      'rule.selector-scope',
+      'selector is only valid for node "tool"',
+    );
   }
   if (match.node === 'file_redirect' && match.kind === 'regex') {
-    throw new Error('path targets use glob or exact matching, not regex');
+    throw new RuleCompileFailure(
+      'rule.path-regex',
+      'path targets use glob or exact matching, not regex',
+    );
   }
   if (match.node === 'command' && match.kind === 'glob') {
-    throw new Error('command nodes use exact or regex matching, not glob');
+    throw new RuleCompileFailure(
+      'rule.command-glob',
+      'command nodes use exact or regex matching, not glob',
+    );
   }
   validateAgentIdentities(match.agents);
 }
@@ -94,12 +142,16 @@ function compilePattern(
   let test: (value: string) => boolean;
   if (match.kind === 'regex') {
     const anchor = anchorError(match.pattern);
-    if (anchor !== null) throw new Error(anchor);
+    if (anchor !== null)
+      throw new RuleCompileFailure('rule.regex-anchor', anchor);
     const regex = compileRegex(match.pattern);
     test = (value: string) => regex.test(value);
   } else if (match.kind === 'glob') {
     if (hasParentSegment(match.pattern))
-      throw new Error('glob patterns must not contain ".." segments');
+      throw new RuleCompileFailure(
+        'rule.glob-parent',
+        'glob patterns must not contain ".." segments',
+      );
     test = compileGlob(match.pattern);
   } else {
     const expected = match.pattern;
@@ -177,6 +229,9 @@ export function compileRules(rules: readonly CommandRule[]): {
         id: rule.id,
         path: `rules[${String(index)}]`,
         message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof RuleCompileFailure
+          ? { code: error.code, params: error.params }
+          : {}),
       });
     }
   });

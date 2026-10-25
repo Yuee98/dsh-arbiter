@@ -437,7 +437,7 @@ describe('malformed parent objects', () => {
 });
 
 describe('rule compiler issues carry localized parameters', () => {
-  test('an unanchored regex reports the raw sentence as a parameter', () => {
+  test('an unanchored regex reports a stable reason code', () => {
     const parsed = parseConfig({
       rules: [
         {
@@ -448,11 +448,12 @@ describe('rule compiler issues carry localized parameters', () => {
       ],
     });
     const issue = parsed.errors.find((error) => error.path === 'rules[0]');
-    expect(issue?.code).toBe('rule.invalid');
-    expect(issue?.params).toMatchObject({
-      id: 'unanchored',
-      message: 'regex patterns must be anchored with "^" or "(?:^"',
-    });
+    expect(issue?.code).toBe('rule.regex-anchor');
+    expect(issue?.params).toMatchObject({ id: 'unanchored' });
+    // The developer sentence stays available for logs and unknown reasons.
+    expect(issue?.message).toBe(
+      'regex patterns must be anchored with "^" or "(?:^" (rule "unanchored")',
+    );
   });
 
   test('a duplicate id reports the duplicated identifier', () => {

@@ -156,7 +156,6 @@ export class ConfigurationAccess {
     const { runtime } = this.host;
     const before = JSON.stringify(runtime.config);
     const activationsBefore = runtime.configActivations;
-    markUiApply(runtime, prepared.parsed.config);
     try {
       await editor.edit(entry, () => {
         // Re-check under the editor's write lock: a competing save can win
@@ -164,6 +163,10 @@ export class ConfigurationAccess {
         const current = this.fileRevision();
         if (current !== null && current !== prepared.expected)
           throw new ConfigConflict(current);
+        // Only an accepted write may claim the upcoming reload. Setting this
+        // before the lock would let a rejected save (or a competing one of
+        // different content) attribute an unrelated reload to the UI.
+        markUiApply(runtime, prepared.parsed.config);
         return prepared.parsed.config;
       });
     } catch (error) {

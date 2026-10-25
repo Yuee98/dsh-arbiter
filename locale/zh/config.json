@@ -52,6 +52,17 @@
     "reviewerUrlScheme": "必须是 http(s) URL。",
     "reviewerCredentialRequired": "decision 后端必须填写凭据引用。",
     "configUnknown": "配置无效。",
-    "ruleShadowed": "规则「{allow}」可能被 force-review 规则「{review}」遮蔽。"
+    "ruleShadowed": "规则「{allow}」可能被 force-review 规则「{review}」遮蔽。",
+    "ruleAgentsEmpty": "规则范围不能是空列表。",
+    "ruleAgentUnknown": "未知的 agent 范围「{agent}」。",
+    "ruleIdEmpty": "规则 ID 不能为空。",
+    "rulePatternEmpty": "匹配表达式不能为空。",
+    "ruleToolRequired": "工具规则必须指定明确的工具名。",
+    "ruleToolScope": "只有工具规则可以指定工具名。",
+    "ruleSelectorScope": "只有工具规则可以指定参数选择器。",
+    "rulePathRegex": "路径规则使用 glob 或精确匹配，不能使用正则。",
+    "ruleCommandGlob": "命令规则使用精确或正则匹配，不能使用 glob。",
+    "ruleRegexAnchor": "正则表达式必须以 \"^\" 或 \"(?:^\" 开头。",
+    "ruleGlobParent": "glob 表达式不能包含 \"..\" 路径段。"
   }
 }
