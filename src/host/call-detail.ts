@@ -221,7 +221,7 @@ function rememberedDetail(
   if (item.ruleId !== undefined) gaps.push('rule-name-missing');
   // A proven review makes its absent material a real gap; a short-circuit does
   // not, and an unprovable state is left to the reviewState field.
-  const reviewState = reviewStateOf(trace);
+  const reviewState = reviewStateOf(trace, chain);
   if (reviewState === 'reviewed')
     gaps.push('snapshot-missing', 'model-attempts-missing');
   gaps.push('execution-not-observed');

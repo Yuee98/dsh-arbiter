@@ -15,6 +15,7 @@ import { reviewStateOf } from './call-detail-trace.js';
 import type {
   CallDetail,
   CallDetailBasis,
+  CallDetailReviewState,
   CallDetailMissingCode,
   CallDetailModelAttempt,
   CallDetailRaw,
@@ -147,9 +148,10 @@ function materialMissing(options: {
   readonly attempts: readonly CallDetailModelAttempt[];
   readonly templates: readonly StoredCall[];
   readonly trace: readonly string[];
+  readonly reviewState: CallDetailReviewState;
 }): CallDetailMissingCode[] {
   const missing: CallDetailMissingCode[] = [];
-  const reviewState = reviewStateOf(options.trace);
+  const { reviewState } = options;
   // A rule short-circuit never asked the model, so its absent snapshot and
   // attempts are not missing material. Reporting them would describe a gap the
   // record never had, and would imply a review this call did not receive.
@@ -302,6 +304,7 @@ export function auditDetail(record: StoredCall): CallDetail {
       attempts,
       templates,
       trace,
+      reviewState: reviewStateOf(trace, chain ?? null),
     }),
     ...(rule.missing === null ? [] : [rule.missing]),
     // No structured chain: either the source kept result strings only, or it
@@ -351,7 +354,7 @@ export function auditDetail(record: StoredCall): CallDetail {
       conflictsTruncated: false,
       policyStrategy: textOf(record, 'policyStrategy'),
       chain,
-      reviewState: reviewStateOf(trace),
+      reviewState: reviewStateOf(trace, chain),
       trace,
       signals: valueOf(record, 'signals'),
       evidence: basis.evidence,

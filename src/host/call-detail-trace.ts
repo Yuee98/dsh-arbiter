@@ -1,34 +1,84 @@
 /**
- * Reading a stored result chain without inventing stages.
+ * What a stored chain proves about whether a model request was actually made.
  *
- * The `trace` a record carries is a list of *stage results*, not a list of stage
- * names: `review(default)` is the rule stage handing the call to the review, and
- * `review-allow` is the review stage's own answer. Both begin with `review`, so
- * "did a model review happen" is answered by the prefix, not by an exact verb.
+ * The stored chain mixes two different things, and treating them alike is how a
+ * detail starts making claims it cannot support:
  *
- * A human or fallback stage alone proves nothing either way: a `force-ask` rule
- * reaches a human without any model call, so only a stored `review…` result (or
- * the review-failure stage) marks a model review.
+ *   - `review(default)` is the rule stage *routing* the call to review. It proves
+ *     the review pipeline was entered, not that a request was sent.
+ *   - `error-escalate` can be written before any request exists — an open circuit
+ *     breaker, a snapshot that could not be built, an input budget that cannot be
+ *     assembled — as well as after a request failed.
+ *   - `review-allow` / `review-deny` / `review-escalate` are the policy's answer
+ *     to a model response, so they do prove one was obtained.
+ *
+ * The three states are kept distinct because they mean different things to a
+ * reader: no request was made, a request was made, or the record cannot tell.
  */
 
 import type { CallDetailReviewState } from './call-detail-types.js';
 
-/** Whether any stored stage result means the call reached a model review. */
-export function reviewedTrace(trace: readonly string[]): boolean {
-  return trace.some(
-    (result) => result.startsWith('review') || result === 'error-escalate',
+/** One stage's result and the reason recorded with it. */
+export interface TraceStageFacts {
+  readonly result: string;
+  readonly reason: string | null;
+}
+
+/**
+ * Reasons an `error-escalate` stage is written *before* any model request.
+ *
+ * These are the gate's own pre-request exits; a failure with any other reason
+ * came back from the model attempt itself.
+ */
+const PRE_REQUEST_REASONS: ReadonlySet<string> = new Set([
+  'circuit_open',
+  'input_budget_exceeded',
+]);
+
+/** Whether a reason names a failure that happened before the model was called. */
+function preRequestFailure(reason: string | null): boolean {
+  if (reason === null) return false;
+  return (
+    PRE_REQUEST_REASONS.has(reason) || reason.startsWith('snapshot_error:')
+  );
+}
+
+/** Whether a stage result is the policy's answer to an actual model response. */
+function definitiveReview(result: string): boolean {
+  return (
+    result === 'review-allow' ||
+    result === 'review-deny' ||
+    result === 'review-escalate'
   );
 }
 
 /**
- * What a stored chain proves about a model review.
+ * Classify one call from its stored chain.
  *
- * A chain that records a review stage proves one happened. A chain that records
- * only rule or tool stages proves a short-circuit. An empty chain proves
- * nothing: an old row may simply never have stored its stages, so the honest
- * answer is `unknown`, not "no review".
+ * `stages` is the structured chain when the source stored one. Without it, an
+ * `error-escalate` cannot be attributed, so the answer is `unknown` rather than
+ * a guess in either direction.
  */
-export function reviewStateOf(trace: readonly string[]): CallDetailReviewState {
-  if (reviewedTrace(trace)) return 'reviewed';
-  return trace.length === 0 ? 'unknown' : 'none';
+export function reviewStateOf(
+  trace: readonly string[],
+  stages: readonly TraceStageFacts[] | null,
+): CallDetailReviewState {
+  if (trace.length === 0) return 'unknown';
+  if (trace.some(definitiveReview)) return 'reviewed';
+  const escalations = (stages ?? []).filter(
+    (stage) => stage.result === 'error-escalate',
+  );
+  if (escalations.some((stage) => !preRequestFailure(stage.reason)))
+    return 'reviewed';
+  if (escalations.length > 0) {
+    // Every escalation is a pre-request exit: the pipeline was entered and the
+    // request never was.
+    return 'none';
+  }
+  // No review answer and no escalation. A chain that still names a review stage
+  // cannot be attributed without its reasons, so it stays unknown.
+  if (trace.some((result) => result.startsWith('review'))) return 'unknown';
+  // A rule, human or fallback ending with no review stage at all: no request was
+  // made, whatever supplied the final verdict.
+  return 'none';
 }

@@ -124,7 +124,7 @@ function Attempts({ detail }: { readonly detail: CallDetailView }): ReactNode {
       detail.basis.reviewState === 'reviewed'
         ? t('callDetail.attemptsLost')
         : detail.basis.reviewState === 'none'
-          ? t('callDetail.noAttempts')
+          ? t('callDetail.noAttemptsNotNeeded')
           : t('callDetail.attemptsUnknown');
     return (
       <p style={{ margin: 0, fontSize: 12 }} data-call-detail-attempts="none">

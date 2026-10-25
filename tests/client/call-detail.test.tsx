@@ -281,21 +281,74 @@ describe('shared call detail', () => {
 
     // The trace proves a review ran, so the page must not claim it did not.
     expect(
-      screen.getByText('这次调用进入过模型审查，但送审证据没有保存。'),
+      screen.getByText('这条记录显示曾发出模型请求，但送审证据没有保存。'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText('这次调用由规则直接决定，没有进入模型审查。'),
+      screen.queryByText('这次调用没有发出模型请求，因此没有送审证据。'),
     ).toBeNull();
 
     await user.click(
       screen.getByRole('button', { name: '原始材料（默认折叠）' }),
     );
     expect(
-      screen.getByText('这次调用进入过模型审查，但模型尝试没有保存。'),
+      screen.getByText('这条记录显示曾发出模型请求，但模型尝试没有保存。'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText('这次调用没有送入模型审查，因此没有模型尝试。'),
+      screen.queryByText('这次调用没有发出模型请求，因此没有模型尝试。'),
     ).toBeNull();
+  });
+
+  test('a pre-request failure is not described as lost attempts', async () => {
+    const body = auditDetailBody();
+    body.detail.source = 'session';
+    body.detail.recordFormatVersion = null;
+    body.detail.basis['reviewState'] = 'none';
+    body.detail.basis['evidence'] = [];
+    body.detail.basis['materials'] = [];
+    body.detail.raw['modelAttempts'] = [];
+    body.detail.missing = [];
+    body.detail.basis['chain'] = [
+      {
+        seq: 0,
+        stage: 'rule',
+        result: 'review(default)',
+        reason: null,
+        ruleId: null,
+        ruleName: null,
+        decisionRules: [],
+        configRevision: 'rev-1',
+        configSnapshotId: 'cfg-1',
+        ts: 1,
+      },
+      {
+        seq: 1,
+        stage: 'review',
+        result: 'error-escalate',
+        reason: 'circuit_open',
+        ruleId: null,
+        ruleName: null,
+        decisionRules: [],
+        configRevision: 'rev-1',
+        configSnapshotId: 'cfg-1',
+        ts: 2,
+      },
+    ];
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('region', { name: '最终裁决' });
+
+    // The breaker failed before any request, so the page must not say material
+    // was lost, and must not claim a rule decided the call.
+    expect(
+      screen.getByText('这次调用没有发出模型请求，因此没有送审证据。'),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: '原始材料（默认折叠）' }),
+    );
+    expect(
+      screen.getByText('这次调用没有发出模型请求，因此没有模型尝试。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/送审证据没有保存|模型尝试没有保存/u)).toBeNull();
   });
 
   test('does not claim a review ran when the record cannot say', async () => {
@@ -313,12 +366,12 @@ describe('shared call detail', () => {
     const { user } = renderClient(<CallDetailPanel callId="call-1" />);
     await screen.findByRole('region', { name: '最终裁决' });
 
-    expect(screen.getByText(/无法确认是否进入过模型审查/u)).toBeInTheDocument();
+    expect(screen.getByText(/无法确认是否发出过模型请求/u)).toBeInTheDocument();
     await user.click(
       screen.getByRole('button', { name: '原始材料（默认折叠）' }),
     );
     expect(
-      screen.getByText(/无法确认是否进入过模型审查，也没有模型尝试记录/u),
+      screen.getByText(/无法确认是否发出过模型请求，也没有模型尝试记录/u),
     ).toBeInTheDocument();
   });
 

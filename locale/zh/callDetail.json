@@ -124,13 +124,14 @@
   "missingTitle": "材料缺失",
   "signals": "信号与阈值",
   "effect": "效果",
-  "notReviewed": "这次调用由规则直接决定，没有进入模型审查。",
-  "reviewUnknown": "这条记录没有保存判定链，无法确认是否进入过模型审查；也没有可展示的送审证据。",
-  "evidenceLost": "这次调用进入过模型审查，但送审证据没有保存。",
-  "attemptsLost": "这次调用进入过模型审查，但模型尝试没有保存。",
-  "attemptsUnknown": "这条记录没有保存判定链，无法确认是否进入过模型审查，也没有模型尝试记录。",
+  "reviewUnknown": "这条记录无法确认是否发出过模型请求，也没有可展示的送审证据。",
+  "evidenceLost": "这条记录显示曾发出模型请求，但送审证据没有保存。",
+  "attemptsLost": "这条记录显示曾发出模型请求，但模型尝试没有保存。",
+  "attemptsUnknown": "这条记录无法确认是否发出过模型请求，也没有模型尝试记录。",
   "conflictsTitle": "两个来源对这次调用的记录不一致；以下同时保留两种读数，未作取舍。",
   "conflictField": "字段",
   "conflictObserved": "两种读数",
-  "conflictsTruncated": "更多不一致超出单条记录可表示的范围，只保留了前两条读数。"
+  "conflictsTruncated": "更多不一致超出单条记录可表示的范围，只保留了前两条读数。",
+  "noEvidenceNotNeeded": "这次调用没有发出模型请求，因此没有送审证据。",
+  "noAttemptsNotNeeded": "这次调用没有发出模型请求，因此没有模型尝试。"
 }

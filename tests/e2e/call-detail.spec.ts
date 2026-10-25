@@ -134,7 +134,7 @@ test(
     // of listing review material as missing; the named configuration snapshot
     // has no row here, which is a genuine gap and is labelled as one.
     await expect(
-      plugin.getByText('这次调用由规则直接决定，没有进入模型审查。', {
+      plugin.getByText('这次调用没有发出模型请求，因此没有送审证据。', {
         exact: true,
       }),
     ).toBeVisible();

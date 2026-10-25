@@ -180,7 +180,7 @@ function SubmittedEvidence({
       detail.basis.reviewState === 'reviewed'
         ? t('callDetail.evidenceLost')
         : detail.basis.reviewState === 'none'
-          ? t('callDetail.notReviewed')
+          ? t('callDetail.noEvidenceNotNeeded')
           : t('callDetail.reviewUnknown');
     return (
       <div style={{ fontSize: 12.5 }} data-call-detail-evidence="none">

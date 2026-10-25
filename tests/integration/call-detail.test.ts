@@ -695,6 +695,66 @@ describe('conflicting and partial evidence', () => {
   });
 });
 
+describe('pre-request review failures', () => {
+  test('an open circuit breaker reports no model request rather than a lost one', async () => {
+    const harness = startHarness({
+      // The channel is unavailable, so a breaker exit settles as a fallback
+      // without ever calling the model.
+      approval: () => Promise.resolve('unavailable'),
+    });
+    // Open the breaker through the real gate: three consecutive rule denials
+    // trip the balanced preset. A rule denial short-circuits before the review,
+    // so it never asks the model itself.
+    for (let index = 0; index < 3; index += 1) {
+      expect(await run(harness, `trip-${String(index)}`, 'rm -rf build')).toBe(
+        'deny',
+      );
+    }
+    expect(await run(harness, 'breaker-open', 'echo breaker')).not.toBe(
+      'allow',
+    );
+    await persisted(harness.host, 'breaker-open');
+
+    const detail = await detailOf(harness.host, 'breaker-open');
+    const basis = fieldOf(detail, 'basis');
+    const chain = listField(basis, 'chain');
+    const results = chain.map((stage) => fieldOf(stage, 'result'));
+    // The chain really did enter the review pipeline and fail before requesting.
+    expect(results).toContain('error-escalate');
+    expect(
+      chain.some((stage) => fieldOf(stage, 'reason') === 'circuit_open'),
+    ).toBe(true);
+
+    // No model request was made, so nothing is reported as lost material.
+    expect(fieldOf(basis, 'reviewState')).toBe('none');
+    const missing = missingOf(detail);
+    expect(missing).not.toContain('snapshot-missing');
+    expect(missing).not.toContain('model-attempts-missing');
+    expect(listField(fieldOf(detail, 'raw'), 'modelAttempts')).toEqual([]);
+  });
+
+  test('a human-allow reached without a review does not claim a model request', async () => {
+    const harness = startHarness({
+      approval: () => Promise.resolve('allowed-once'),
+    });
+    expect(await run(harness, 'human-only', 'sudo ls')).toBe('allow');
+    await persisted(harness.host, 'human-only');
+
+    const detail = await detailOf(harness.host, 'human-only');
+    const basis = fieldOf(detail, 'basis');
+    const results = listField(basis, 'chain').map((stage) =>
+      fieldOf(stage, 'result'),
+    );
+    // `force-ask` went straight to the human: no review stage, no request.
+    expect(results).toContain('human-allow');
+    expect(results.some((result) => String(result).startsWith('review-'))).toBe(
+      false,
+    );
+    expect(fieldOf(basis, 'reviewState')).toBe('none');
+    expect(missingOf(detail)).not.toContain('model-attempts-missing');
+  });
+});
+
 describe('old records and endings', () => {
   test('a v1 row is shown with its absent columns unknown, not defaulted', async () => {
     const harness = startHarness();
