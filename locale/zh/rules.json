@@ -46,6 +46,7 @@
   "multi": "多值匹配",
   "caseInsensitive": "忽略大小写",
   "valueType": "值类型",
+  "valueTypeAfterInput": "填写表达式后可选择",
   "comment": "备注",
   "commentPlaceholder": "说明这条规则的用途",
   "advanced": "高级选项",

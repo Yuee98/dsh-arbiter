@@ -20,18 +20,16 @@ const VALUE_TYPES = ['string', 'number', 'boolean', 'null'] as const;
 
 type ValueType = (typeof VALUE_TYPES)[number];
 
-/** A pattern that carries no JSON type yet. */
+/**
+ * A pattern with no value yet.
+ *
+ * An empty exact pattern is stored as the empty string, so its JSON type is
+ * "string". The type selector is withheld until a value exists: choosing
+ * "number" for a blank field has nothing to convert and would otherwise either
+ * write a `0` nobody typed or claim a type the saved value does not have.
+ */
 function isBlank(pattern: MutableRuleCondition['pattern']): boolean {
-  return pattern === '';
-}
-
-/** The value a blank expression takes when a type is chosen explicitly. */
-function blankPattern(type: ValueType): MutableRuleCondition['pattern'] {
-  if (type === 'null') return null;
-  if (type === 'boolean') return false;
-  // `number` stays blank: there is no neutral number, and 0 would be a match
-  // expression the user never wrote.
-  return '';
+  return patternText(pattern).trim().length === 0;
 }
 
 const labelStyle = {
@@ -65,12 +63,6 @@ export function RuleConditionEditor(props: {
   const { condition, onChange } = props;
   const isArgument = condition.target === 'argument';
   const isExact = condition.kind === 'exact';
-  // An empty expression carries no JSON type. The chosen type is therefore kept
-  // locally until the user types a value; only then does it enter the draft.
-  const [blankType, setBlankType] = useState<ValueType>('string');
-  const valueType: ValueType = isBlank(condition.pattern)
-    ? blankType
-    : exactType(condition.pattern);
   return (
     <div
       role="group"
@@ -181,12 +173,12 @@ export function RuleConditionEditor(props: {
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {isExact ? (
+        {isExact && !isBlank(condition.pattern) ? (
           <div style={{ ...rowStyle, width: 110 }}>
             <span style={labelStyle}>{t('rules.valueType')}</span>
             <Select
               ariaLabel={t('rules.valueType')}
-              value={valueType}
+              value={exactType(condition.pattern)}
               options={VALUE_TYPES}
               labels={{
                 string: t('rules.valueTypeOption.string'),
@@ -195,20 +187,31 @@ export function RuleConditionEditor(props: {
                 null: t('rules.valueTypeOption.null'),
               }}
               onChange={(value) => {
-                setBlankType(value);
                 onChange((next) => {
-                  next.pattern = isBlank(next.pattern)
-                    ? blankPattern(value)
-                    : convertExactPattern(next.pattern, value);
+                  next.pattern = convertExactPattern(next.pattern, value);
                 });
               }}
             />
           </div>
         ) : null}
+        {isExact && isBlank(condition.pattern) ? (
+          <div style={{ ...rowStyle, width: 110 }}>
+            <span style={labelStyle}>{t('rules.valueType')}</span>
+            <span
+              style={{
+                ...labelStyle,
+                lineHeight: '30px',
+                color: 'var(--dsw-alias-label-tertiary)',
+              }}
+            >
+              {t('rules.valueTypeAfterInput')}
+            </span>
+          </div>
+        ) : null}
         <div style={{ ...rowStyle, flex: 1, minWidth: 240 }}>
           <span style={labelStyle}>{t('rules.pattern')}</span>
           <ExactValue
-            type={valueType}
+            type={isExact ? exactType(condition.pattern) : 'string'}
             condition={condition}
             onChange={onChange}
           />

@@ -342,16 +342,32 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
       '$.retries',
     );
+    const pattern = within(row(id)).getByRole('textbox', {
+      name: '表达式',
+    });
+    // The type selector appears once a value exists, so the number is typed as
+    // text and then declared numeric.
+    await user.type(pattern, '1.5');
     await user.selectOptions(
       within(row(id)).getByRole('combobox', { name: '值类型' }),
       'number',
     );
-    const pattern = within(row(id)).getByRole('textbox', {
+    expect(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+    ).toHaveValue('number');
+    // The number editor replaced the text field; it shows the same value.
+    const numberInput = within(row(id)).getByRole('textbox', {
       name: '表达式',
     });
-    // The intermediate `1.` must not be normalized back to `1`.
-    await user.type(pattern, '1.5');
-    expect(pattern).toHaveValue('1.5');
+    expect(numberInput).toHaveValue('1.5');
+    await user.clear(numberInput);
+    // While editing, the field may be empty...
+    expect(numberInput).toHaveValue('');
+    await user.tab();
+    // ...and leaving it shows the number the draft actually holds.
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('1.5');
 
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
@@ -388,6 +404,10 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
       '$.offset',
     );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      '-3',
+    );
     await user.selectOptions(
       within(row(id)).getByRole('combobox', { name: '值类型' }),
       'number',
@@ -395,6 +415,7 @@ describe('rule list header and inline editing', () => {
     const pattern = within(row(id)).getByRole('textbox', {
       name: '表达式',
     });
+    await user.clear(pattern);
     pattern.focus();
     // Type key by key so the intermediate `-` is really rendered.
     await user.keyboard('-');
@@ -574,7 +595,107 @@ describe('rule list header and inline editing', () => {
     expect(tools).toHaveValue('bash, deploy');
   });
 
-  test('switching a boolean exact value to another type keeps its meaning', async () => {
+  test('a blank exact pattern offers no value type, so nothing is invented', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.retries',
+    );
+
+    // No value yet, so there is nothing to type: the choice is withheld and the
+    // panel says why, rather than writing a 0 or a false nobody entered.
+    expect(
+      within(row(id)).queryByRole('combobox', { name: '值类型' }),
+    ).toBeNull();
+    expect(within(row(id)).getByText('填写表达式后可选择')).toBeInTheDocument();
+
+    // Saving a blank exact pattern keeps it blank rather than turning it into a
+    // typed value; the backend then rejects it as an empty expression.
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [{ id, conditions: [{ target: 'argument', pattern: '' }] }],
+      },
+    });
+  });
+
+  test('a whitespace-only pattern is not converted into a number', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.count',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      ' ',
+    );
+    // Whitespace has no numeric value, so the number choice is still withheld.
+    expect(
+      within(row(id)).queryByRole('combobox', { name: '值类型' }),
+    ).toBeNull();
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue(' ');
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    // The blank draft is sent as-is; nothing became 0.
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [{ id, conditions: [{ target: 'argument', pattern: ' ' }] }],
+      },
+    });
+  });
+
+  test('a deliberate exact empty string is kept as a value', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.label',
+    );
+    const pattern = within(row(id)).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.type(pattern, 'x');
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'string',
+    );
+    // Emptying a typed value keeps the field as text; only a value typed from
+    // scratch counts as "no value yet". Text is never auto-converted here.
+    await user.clear(pattern);
+    expect(
+      within(row(id)).queryByRole('combobox', { name: '值类型' }),
+    ).toBeNull();
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('');
+  });
+
+  test('a typed literal becomes the boolean it spells, and text again on a text target', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
@@ -586,18 +707,21 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
       '$.dryRun',
     );
-    const type = within(row(id)).getByRole('combobox', { name: '值类型' });
-    await user.selectOptions(type, 'string');
-    await user.clear(within(row(id)).getByRole('textbox', { name: '表达式' }));
+    // Type the literal as text first; the type selector needs a value.
     await user.type(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
       'true',
     );
     // Selecting the boolean type parses the literal; it does not force false.
-    await user.selectOptions(type, 'boolean');
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'boolean',
+    );
     expect(
       within(row(id)).getByRole('combobox', { name: '表达式' }),
     ).toHaveValue('true');
+
+    // `command` compares text, so the typed value becomes its JSON spelling.
     await user.selectOptions(
       within(row(id)).getByRole('combobox', { name: '匹配对象' }),
       'command',

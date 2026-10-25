@@ -93,9 +93,10 @@ export function convertExactPattern(
   type: 'string' | 'number' | 'boolean' | 'null',
 ): RuleCondition['pattern'] {
   if (type === 'null') return null;
-  // An empty expression has no spelling to convert; the editor keeps the value
-  // blank and records the chosen type locally until the user types a value.
-  if (pattern === '') return '';
+  // A blank or whitespace-only expression carries no value to convert. Writing
+  // `0`/`false` here would invent a match the user never entered, so the
+  // expression is left untouched and the editor withholds the type choice.
+  if (patternText(pattern).trim().length === 0) return pattern;
   if (type === 'boolean') {
     if (typeof pattern === 'boolean') return pattern;
     const text = patternText(pattern).trim();
