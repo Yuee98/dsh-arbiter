@@ -43,6 +43,8 @@ lint 自检包含真实 TSX 配置及结构、Hooks、可访问性、文案和�
 
 已有 R1–R9 复现脚本保持原样，由 `scripts/check-regressions.ts` 复制到相同目录深度的 `.local/regressions/run-*` 后运行，继续导入当前构建；本轮结果写入该目录，不覆盖历史 `validation` 报告。
 
+首版范围收敛（#20）移除离线建议的公开入口后，历史 R8 覆盖的接纳流程不再属于首版：脚本与 `results.json` 保持原样作为历史证据，其预期失败由 runner 显式列为已知例外，而不是改写脚本或删除用例。当前契约由独立的 `validation/first-release-scope/2026-10-25/reproduce.mjs`（S1–S3）验证：建议端点不存在、尝试接纳不改规则与候选状态、规则测试与日志仍可用且已有审计行保留。同一 runner 串联两组脚本，任何未列入已知例外的失败仍使检查退出非零。
+
 ## 分层测试
 
 | 层次 | 环境与入口 | 交付要求 |
@@ -137,7 +139,7 @@ GitHub 的 squash 默认值不能禁止人在页面或 API 中覆盖消息，因
 
 ## CI
 
-普通 PR／main CI 在 Ubuntu 24.04 上并行执行 `pnpm verify` 包含的检查，共 10 个独立入口：类型、源码 lint、Testing Library lint、格式、依赖边界、工作流／文案／peer 六组静态检查，unit／integration／UI 三层测试，以及构建／消费者／R1–R9 回归。各入口自行安装固定工具和冻结依赖，复用 mise 与 pnpm store 缓存，不经过共享的前置 setup job；同一组 matrix 的失败不取消其他入口。
+普通 PR／main CI 在 Ubuntu 24.04 上并行执行 `pnpm verify` 包含的检查，共 10 个独立入口：类型、源码 lint、Testing Library lint、格式、依赖边界、工作流／文案／peer 六组静态检查，unit／integration／UI 三层测试，以及构建／消费者／R1–R9 加首版范围回归。各入口自行安装固定工具和冻结依赖，复用 mise 与 pnpm store 缓存，不经过共享的前置 setup job；同一组 matrix 的失败不取消其他入口。
 
 三层测试各执行一次，同时输出含 coverage 的 Vitest blob。后续 coverage job 只依赖测试，检查三份 blob 均存在后合并生成全量 HTML／LCOV／JSON 报告，不重复运行测试，不设覆盖率门槛；报告保留 7 天。最终常驻 `Verify` job 无论前面成功、失败或跳过都会汇总，仅全部依赖成功时通过，供分支保护使用。汇总代码有实际子进程正反测试，覆盖失败、取消、跳过、未知和缺失结果。连同 coverage 与汇总，工作流共 12 个 job 实例；新提交取消同一 PR 的旧运行。
 

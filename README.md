@@ -8,7 +8,7 @@
 
 **首版默认值（2026-10-24 已确认）**：chat + 跟随会话模型、guarded、主会话 normal／子任务 strict、空命令规则表；安装不自动接管会话。预设规则留待实际使用后评估，正文与实施验收见[初始默认值](docs/configuration-and-audit.md#initial-defaults)。
 
-状态（2026-10-21，返修后）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，R8 复现的预期改为“接纳端点不存在且候选与规则不变”，原始 9/9 通过记录仍保留在 `validation/`）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
+状态（2026-10-21，返修后）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，历史 R1–R9 脚本与结果保持不变，R8 所覆盖的接纳流程不再属于首版，改由独立的 `validation/first-release-scope/` 回归验证当前契约）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
 
 后续已确认采用[同位置 arbiter 权限选择器](docs/architecture.md#permission-selector-contract)：菜单控制会话启停，trusted / guarded 在插件配置页选择。U1–U4 已验证基础接入与探针收尾。
 
@@ -139,8 +139,8 @@ mise exec -- pnpm verify
 | `pnpm test:e2e:dsh`                            | 构建后运行全部已实现的真实 DSH 场景                               |
 | `pnpm build`                                   | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
 | `pnpm check:build`                             | publint 检查 tarball，并由离线消费者验证类型、工厂与打包资源      |
-| `pnpm check:regressions`                       | 运行评审提供的 R1–R9 复现脚本（生命周期夹具，不启动 DSH）         |
-| `pnpm verify`                                  | 以上检查、peer 兼容性、i18n、构建与 R1–R9 回归                    |
+| `pnpm check:regressions`                       | 运行历史 R1–R9 与首版范围 S1–S3 复现脚本（夹具，不启动 DSH）      |
+| `pnpm verify`                                  | 以上检查、peer 兼容性、i18n、构建与 R1–R9／S1–S3 回归             |
 
 真实 DSH 集成证据：`validation/arbiter-integration/2026-10-21-arbiter-01/`（14 个用例，含真实 pre-execute、真实会话记录、真实 SQLite、模拟人工审批单独标注）。运行：
 
