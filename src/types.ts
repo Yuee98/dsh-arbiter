@@ -661,8 +661,50 @@ export interface RuleTestResult {
     readonly unresolved: readonly string[];
   };
   readonly argv: readonly string[];
+  /**
+   * Original command, matched text, per-word status and structural issues.
+   *
+   * Optional so a caller that only needs the verdict can ignore it; the host
+   * route always sends it so the tester can show why a word was not normalized.
+   */
+  readonly normalization?: NormalizationDetail | null;
   readonly shadowed: readonly string[];
   readonly error?: string;
+}
+
+/**
+ * How one command text was normalized for matching.
+ *
+ * `raw` is what the user wrote; each command's `text` is the canonical matching
+ * text; each word records whether its value was statically known and, if not, why.
+ * This travels with the tester result and the call explanation so both can show
+ * the same evidence the matcher used.
+ */
+export interface NormalizationWord {
+  readonly raw: string;
+  readonly text: string;
+  readonly status: 'static' | 'dynamic';
+  readonly reasons: readonly string[];
+  readonly value?: string;
+}
+
+export interface NormalizationCommand {
+  readonly text: string;
+  readonly raw: string;
+  readonly words: readonly NormalizationWord[];
+}
+
+export interface NormalizationIssue {
+  readonly kind: string;
+  readonly message: string;
+  readonly pos: number;
+}
+
+export interface NormalizationDetail {
+  readonly raw: string;
+  readonly completeness: 'complete' | 'partial' | 'none';
+  readonly issues: readonly NormalizationIssue[];
+  readonly commands: readonly NormalizationCommand[];
 }
 
 export interface RuleEvaluation {
@@ -671,6 +713,8 @@ export interface RuleEvaluation {
   readonly rules: readonly RuleResult[];
   readonly parse: ShellParse;
   readonly argv: readonly string[];
+  /** How the command text was normalized, for explanations and the tester. */
+  readonly normalization: NormalizationDetail | null;
   readonly facts: DerivedFacts | null;
   readonly shadowed: readonly string[];
 }

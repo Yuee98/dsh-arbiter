@@ -98,6 +98,26 @@ describe('prototype page after panel extraction', () => {
                 unresolved: [],
               },
               argv: ['pwd'],
+              normalization: {
+                raw: 'pwd',
+                completeness: 'complete',
+                issues: [],
+                commands: [
+                  {
+                    text: 'pwd',
+                    raw: 'pwd',
+                    words: [
+                      {
+                        raw: 'pwd',
+                        text: 'pwd',
+                        status: 'static',
+                        reasons: [],
+                        value: 'pwd',
+                      },
+                    ],
+                  },
+                ],
+              },
               shadowed: [],
             },
           ],
@@ -115,6 +135,13 @@ describe('prototype page after panel extraction', () => {
     expect(
       await screen.findByText('review(default)', { exact: true }),
     ).toBeInTheDocument();
+    // The expanded detail carries the normalization evidence the server sent: the
+    // raw command, the matched text and the per-word static status.
+    await user.click(screen.getByText('review(default)', { exact: true }));
+    const detail = await screen.findByText(/"normalization"/);
+    expect(detail).toBeInTheDocument();
+    expect(screen.getByText(/"text": "pwd"/)).toBeInTheDocument();
+    expect(screen.getByText(/"status": "static"/)).toBeInTheDocument();
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       inputs: ['pwd'],

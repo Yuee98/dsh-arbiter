@@ -1,4 +1,8 @@
 import type {
+  NormalizationCommand,
+  NormalizationDetail,
+  NormalizationIssue,
+  NormalizationWord,
   RuleConditionResult,
   RuleMatchDetail,
   RuleResult,
@@ -108,10 +112,59 @@ function ruleMatch(value: unknown): RuleMatchDetail {
   };
 }
 
+function normalizationWord(value: unknown): NormalizationWord {
+  const source = object(value);
+  const wordValue = field(source, 'value', optional(text));
+  return {
+    raw: field(source, 'raw', text),
+    text: field(source, 'text', text),
+    status: field(source, 'status', choice('static', 'dynamic')),
+    reasons: field(source, 'reasons', strings),
+    ...(wordValue === undefined ? {} : { value: wordValue }),
+  };
+}
+
+function normalizationCommand(value: unknown): NormalizationCommand {
+  const source = object(value);
+  return {
+    text: field(source, 'text', text),
+    raw: field(source, 'raw', text),
+    words: field(source, 'words', array(normalizationWord)),
+  };
+}
+
+function normalizationIssue(value: unknown): NormalizationIssue {
+  const source = object(value);
+  return {
+    kind: field(source, 'kind', text),
+    message: field(source, 'message', text),
+    pos: field(source, 'pos', number),
+  };
+}
+
+function normalization(value: unknown): NormalizationDetail {
+  const source = object(value);
+  return {
+    raw: field(source, 'raw', text),
+    completeness: field(
+      source,
+      'completeness',
+      choice('complete', 'partial', 'none'),
+    ),
+    issues: field(source, 'issues', array(normalizationIssue)),
+    commands: field(source, 'commands', array(normalizationCommand)),
+  };
+}
+
 function ruleTest(value: unknown): RuleTestResult {
   const source = object(value);
   const parse = field(source, 'parse', object);
   const error = field(source, 'error', optional(text));
+  const detail = field(
+    source,
+    'normalization',
+    optional(nullable(normalization)),
+  );
   return {
     input: field(source, 'input', text),
     tool: field(source, 'tool', text),
@@ -136,6 +189,9 @@ function ruleTest(value: unknown): RuleTestResult {
       unresolved: field(parse, 'unresolved', strings),
     },
     argv: field(source, 'argv', strings),
+    // Older responses do not carry normalization; absence is not an error, it
+    // only means the tester cannot show the word-level evidence.
+    ...(detail === undefined ? {} : { normalization: detail }),
     shadowed: field(source, 'shadowed', strings),
     ...(error === undefined ? {} : { error }),
   };
