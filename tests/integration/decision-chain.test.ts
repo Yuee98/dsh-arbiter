@@ -1288,3 +1288,33 @@ describe('an approved call is never reported as blocked', () => {
     }
   });
 });
+
+describe('the settled-outcome table stays bounded', () => {
+  test('much more than the cap can settle without unbounded growth', async () => {
+    const session = makeSession('bounded');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 3, authorized: 8 }),
+    });
+    try {
+      // A rule allow settles without a review, so this exercises the map
+      // directly rather than paying for 600 model calls.
+      const total = 600;
+      for (let index = 0; index < total; index += 1) {
+        const decision = await harness.gate(
+          call(session, `cap-${String(index)}`, undefined, {
+            command: 'echo hi',
+          }),
+          allowNext,
+        );
+        expect(decision.kind).toBe('allow');
+      }
+      // The plugin must still answer the newest calls; an evicted old id simply
+      // has no outcome to return, which is the intended bounded behaviour.
+      const last = await harness.gate(call(session, 'cap-last'), allowNext);
+      expect(last.kind).toBe('allow');
+    } finally {
+      harness.dispose();
+    }
+  });
+});

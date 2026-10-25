@@ -127,6 +127,16 @@ const PENDING_TTL_MS = 30 * 60 * 1000;
 /** How many unresolved entries may accumulate before the oldest are reaped. */
 const MAX_PENDING = 512;
 
+/**
+ * How many settled outcomes stay addressable.
+ *
+ * A settlement is one-shot, so an entry is only needed while a competing
+ * continuation for the same call could still arrive — at most one turn. Keeping
+ * a bounded tail preserves that guarantee without growing with every call the
+ * plugin ever handled.
+ */
+const MAX_SETTLED_OUTCOMES = 512;
+
 /** Drop entries that are stale or beyond the cap; unknown outcomes stay unknown. */
 function reapPending(pending: HostEnvironment['runtime']['pending']): void {
   const cutoff = Date.now() - PENDING_TTL_MS;
@@ -382,6 +392,17 @@ export class CallSettlement {
     this.outcomes.set(call.exec.callId, outcome);
     // The winner still owes the record; only a completed write clears this.
     this.unwritten.add(call.exec.callId);
+    // Keep the map bounded. Every entry exists so a competing continuation can
+    // find the winner; once enough later calls have settled, an older entry can
+    // no longer be reached by one, so the oldest are dropped exactly like the
+    // pending-call map.
+    while (this.outcomes.size > MAX_SETTLED_OUTCOMES) {
+      const oldest = this.outcomes.keys().next().value;
+      if (oldest === undefined) break;
+      if (oldest === call.exec.callId) break;
+      this.outcomes.delete(oldest);
+      this.unwritten.delete(oldest);
+    }
     return { won: true, outcome };
   }
 
