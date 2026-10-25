@@ -112,11 +112,15 @@ function context(value: unknown): ContextConfig {
 
 export function configuration(value: unknown): ArbiterConfig {
   const source = object(value);
+  // A declared format is optional; dropping it here would erase the declaration
+  // when the browser saves its draft back through the host.
+  const format = field(source, 'format', optional(text));
   const modes = field(source, 'modes', object);
   const policy = field(source, 'policy', object);
   const audit = field(source, 'audit', object);
   const breaker = field(source, 'breaker', object);
   return {
+    ...(format === undefined ? {} : { format }),
     enabled: field(source, 'enabled', boolean),
     modes: {
       main: field(modes, 'main', choice('normal', 'strict', 'progress')),

@@ -146,9 +146,11 @@ export function ConfigActions(props: ConfigActionsProps): ReactNode {
         style={{ fontSize: 12.5 }}
       >
         {statusText(props.status, props.dirty, t)}
-        {props.auditNotice === null
-          ? null
-          : ` · ${t('config.auditDegraded', { error: props.auditNotice })}`}
+        {/*
+          The page already localized this notice; translating it again would
+          repeat the explanatory sentence around a finished sentence.
+        */}
+        {props.auditNotice === null ? null : ` · ${props.auditNotice}`}
       </div>
     </div>
   );

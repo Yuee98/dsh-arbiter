@@ -9,7 +9,14 @@ import {
   DEFAULT_PROGRESS,
   POLICY_VERSION,
 } from './defaults.js';
-import { isRecord, asNumber, asInteger, asBoolean, asEnum } from './values.js';
+import {
+  asBoolean,
+  asEnum,
+  asInteger,
+  asNumber,
+  asObject,
+  isRecord,
+} from './values.js';
 
 function parseThresholds(
   value: unknown,
@@ -76,7 +83,7 @@ export function parsePolicy(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): PolicyConfig {
-  const policyValue = isRecord(raw['policy']) ? raw['policy'] : {};
+  const policyValue = asObject(raw['policy'], 'policy', errors);
   const policy: PolicyConfig = {
     version: POLICY_VERSION,
     normal: parseThresholds(

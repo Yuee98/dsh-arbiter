@@ -387,3 +387,116 @@ describe('format round-trip through a save payload', () => {
     expect(roundTripped.errors).toEqual([]);
   });
 });
+
+describe('malformed parent objects', () => {
+  test('a supplied non-object parent is an error instead of reverting silently', () => {
+    const parsed = parseConfig({
+      modes: 'strict',
+      reviewer: null,
+      policy: 7,
+      context: [],
+      audit: 'off',
+      breaker: false,
+    });
+    expect(parsed.errors.map((error) => error.path)).toEqual(
+      expect.arrayContaining([
+        'modes',
+        'reviewer',
+        'policy',
+        'context',
+        'audit',
+        'breaker',
+      ]),
+    );
+    expect(parsed.errors.every((error) => error.code === 'type.object')).toBe(
+      true,
+    );
+    // The normalized value still carries defaults, but the document is invalid,
+    // so the caller keeps the configuration that is already in effect.
+    expect(parsed.config.modes.main).toBe('normal');
+  });
+
+  test('absent parents still use defaults without errors', () => {
+    const parsed = parseConfig({ enabled: false });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.modes).toEqual({
+      main: 'normal',
+      subagent: 'strict',
+    });
+  });
+
+  test('a malformed nested reviewer section is reported at its own path', () => {
+    const parsed = parseConfig({ reviewer: { type: 'chat', chat: 'session' } });
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({
+        path: 'reviewer.chat',
+        code: 'type.object',
+      }),
+    ]);
+  });
+});
+
+describe('rule compiler issues carry localized parameters', () => {
+  test('an unanchored regex reports the raw sentence as a parameter', () => {
+    const parsed = parseConfig({
+      rules: [
+        {
+          id: 'unanchored',
+          match: { node: 'command', kind: 'regex', pattern: 'gh pr' },
+          verdict: 'allow',
+        },
+      ],
+    });
+    const issue = parsed.errors.find((error) => error.path === 'rules[0]');
+    expect(issue?.code).toBe('rule.invalid');
+    expect(issue?.params).toMatchObject({
+      id: 'unanchored',
+      message: 'regex patterns must be anchored with "^" or "(?:^"',
+    });
+  });
+
+  test('a duplicate id reports the duplicated identifier', () => {
+    const parsed = parseConfig({
+      rules: [
+        {
+          id: 'same',
+          match: { node: 'command', kind: 'exact', pattern: 'pwd' },
+          verdict: 'allow',
+        },
+        {
+          id: 'same',
+          match: { node: 'command', kind: 'exact', pattern: 'ls' },
+          verdict: 'allow',
+        },
+      ],
+    });
+    const issue = parsed.errors.find(
+      (error) => error.code === 'rule.duplicateId',
+    );
+    expect(issue?.params).toMatchObject({ id: 'same' });
+  });
+
+  test('a shadowing warning is localizable by code', () => {
+    const parsed = parseConfig({
+      rules: [
+        {
+          id: 'relay-trust',
+          match: { node: 'command', kind: 'regex', pattern: '^gpt-relay' },
+          verdict: 'allow',
+        },
+        {
+          id: 'relay-prod',
+          match: { node: 'command', kind: 'regex', pattern: '^gpt-relay send' },
+          verdict: 'force-review',
+        },
+      ],
+    });
+    const warning = parsed.warnings.find(
+      (item) => item.code === 'rule.shadowed',
+    );
+    expect(warning?.params).toEqual({
+      allow: 'relay-trust',
+      review: 'relay-prod',
+    });
+  });
+});

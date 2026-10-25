@@ -101,7 +101,9 @@ export function statePayload(
     warnings: runtime.warnings,
     autoPresetError: runtime.autoPresetError,
     configHistory: audit.history,
-    configHistoryComplete: runtime.auditError === null,
+    // SQLite reopening does not repair an activation row that was never written.
+    configHistoryComplete:
+      runtime.auditError === null && !runtime.historyIncomplete,
     audit: {
       health: audit.health,
       path: audit.path,

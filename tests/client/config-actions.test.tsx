@@ -118,15 +118,20 @@ describe('configuration actions', () => {
     );
   });
 
-  test('an audit failure is reported next to the effective configuration', () => {
+  test('a localized audit notice is shown unchanged instead of translated twice', () => {
+    const notice = '生效配置已切换，但审计历史未写入：database is locked';
     const { ui } = actions({
       dirty: false,
       status: 'saved',
-      auditNotice: 'database is locked',
+      auditNotice: notice,
     });
     renderClient(ui);
-    expect(saveStatus()).toHaveTextContent('database is locked');
-    expect(saveStatus()).toHaveTextContent('生效配置已切换，但审计历史未写入');
+    expect(saveStatus()).toHaveTextContent('已保存并生效。');
+    expect(saveStatus()).toHaveTextContent(notice);
+    // The explanatory sentence must appear exactly once.
+    expect(
+      (saveStatus().textContent.match(/审计历史未写入/gu) ?? []).length,
+    ).toBe(1);
   });
 
   test('busy actions are disabled and cannot issue another save', async () => {

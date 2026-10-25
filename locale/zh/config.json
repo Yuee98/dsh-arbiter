@@ -46,11 +46,12 @@
     "lengthCustomRules": "不得超过 {max} 个字符。",
     "relationWindowDenials": "不得超过 breaker.windowSize。",
     "relationParentEvidenceFloor": "不得超过 context.parentHumanItems。",
-    "ruleDuplicateId": "规则 ID 重复。",
+    "ruleDuplicateId": "规则 ID「{id}」重复。",
     "ruleInvalid": "规则无效：{message}",
     "reviewerUrlRequired": "decision 后端必须填写 URL。",
     "reviewerUrlScheme": "必须是 http(s) URL。",
     "reviewerCredentialRequired": "decision 后端必须填写凭据引用。",
-    "configUnknown": "配置无效。"
+    "configUnknown": "配置无效。",
+    "ruleShadowed": "规则「{allow}」可能被 force-review 规则「{review}」遮蔽。"
   }
 }

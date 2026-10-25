@@ -12,6 +12,24 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * fields such as `enabled` and a rule's agent scope, where a typo would
  * otherwise turn a restricted rule into a broader or active one.
  */
+/**
+ * Read a supplied parent object.
+ *
+ * An absent parent keeps its defaults; an explicitly supplied non-object is an
+ * error. Silently treating `modes: "strict"` as `{}` would revert to the default
+ * policy without telling the operator that the document was rejected.
+ */
+export function asObject(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (isRecord(value)) return value;
+  errors.push({ path, message: 'must be an object', code: 'type.object' });
+  return {};
+}
+
 export function asString(
   value: unknown,
   fallback: string,

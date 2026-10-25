@@ -155,12 +155,14 @@ export interface RuntimeState {
   configFormat: string;
   /** Whether that document declared its format instead of inheriting it. */
   configFormatExplicit: boolean;
-  /** Timestamp of a UI save awaiting its Loader reload, if any. */
-  pendingApplySource: number | null;
+  /** A UI save awaiting its Loader reload, keyed to the exact content. */
+  pendingApplySource: { readonly at: number; readonly content: string } | null;
   /** How many activation rows this runtime has written, including reloads. */
   configActivations: number;
   /** How many documents this runtime has applied, recorded or not. */
   configApplications: number;
+  /** True once an activation row could not be recorded for a real switch. */
+  historyIncomplete: boolean;
   invalidConfigError: string | null;
   loadErrors: readonly {
     readonly path: string;

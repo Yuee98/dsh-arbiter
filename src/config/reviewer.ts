@@ -5,7 +5,7 @@ import type {
   ConfigError,
   CostTier,
 } from '../types.js';
-import { isRecord, asString, asNumber, asInteger, asEnum } from './values.js';
+import { asObject, asString, asNumber, asInteger, asEnum } from './values.js';
 
 function parseChat(
   chatValue: Record<string, unknown>,
@@ -96,13 +96,13 @@ export function parseReviewer(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): ArbiterConfig['reviewer'] {
-  const reviewerValue = isRecord(raw['reviewer']) ? raw['reviewer'] : {};
-  const chatValue = isRecord(reviewerValue['chat'])
-    ? reviewerValue['chat']
-    : {};
-  const decisionValue = isRecord(reviewerValue['decision'])
-    ? reviewerValue['decision']
-    : {};
+  const reviewerValue = asObject(raw['reviewer'], 'reviewer', errors);
+  const chatValue = asObject(reviewerValue['chat'], 'reviewer.chat', errors);
+  const decisionValue = asObject(
+    reviewerValue['decision'],
+    'reviewer.decision',
+    errors,
+  );
   const chat = parseChat(chatValue, errors);
   const decision = parseDecision(decisionValue, errors);
   const reviewerType = asEnum<'chat' | 'decision'>(

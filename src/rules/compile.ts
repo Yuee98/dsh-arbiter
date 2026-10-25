@@ -164,7 +164,8 @@ export function compileRules(rules: readonly CommandRule[]): {
         id: rule.id,
         path: `rules[${String(index)}].id`,
         message: 'duplicate rule id',
-        code: 'rule.duplicate-id',
+        code: 'rule.duplicateId',
+        params: { id: rule.id },
       });
       return;
     }

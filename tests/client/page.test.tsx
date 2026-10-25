@@ -306,3 +306,53 @@ test('a warning without a known code keeps its backend sentence', async () => {
     'rules.legacy: legacy backend phrasing',
   );
 });
+
+test('an explicitly declared format survives decode, draft and the actual save request', async () => {
+  const bodies: unknown[] = [];
+  server.use(
+    http.get('*/api/arbiter/state', () =>
+      HttpResponse.json({
+        ...effectiveState(),
+        config: { ...effectiveState().config, format: 'arbiter-config-v1' },
+        configFormat: 'arbiter-config-v1',
+        configFormatExplicit: true,
+      }),
+    ),
+    http.post('*/api/arbiter/validate', async ({ request }) => {
+      bodies.push(await request.json());
+      return HttpResponse.json({ ok: true, errors: [], warnings: [] });
+    }),
+    http.post('*/api/arbiter/config/save', async ({ request }) => {
+      bodies.push(await request.json());
+      return HttpResponse.json({
+        ok: true,
+        saved: true,
+        changed: false,
+        effective: true,
+        effectiveRevision: 'effective-1',
+        configSnapshotId: 'snapshot-1',
+        activationRecorded: false,
+        configFormat: 'arbiter-config-v1',
+        configFormatExplicit: true,
+        auditError: null,
+        warnings: [],
+      });
+    }),
+  );
+  const { user } = renderClient(<ArbiterPage />);
+  const mode = await screen.findByLabelText('主会话审批模式', { exact: false });
+  await user.selectOptions(mode, 'strict');
+  await user.click(screen.getByRole('button', { name: '校验草稿' }));
+  await user.click(screen.getByRole('button', { name: '保存并应用' }));
+  await waitFor(() => {
+    expect(bodies).toHaveLength(2);
+  });
+  for (const body of bodies) {
+    expect(body).toMatchObject({
+      config: {
+        format: 'arbiter-config-v1',
+        modes: { main: 'strict' },
+      },
+    });
+  }
+});

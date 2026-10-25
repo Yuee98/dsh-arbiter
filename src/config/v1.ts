@@ -67,7 +67,8 @@ export function parseConfigV1(raw: Record<string, unknown>): ConfigParseResult {
       path: error.path,
       message: `${error.message} (rule "${error.id}")`,
       code: error.code ?? 'rule.invalid',
-      ...(error.params === undefined ? {} : { params: error.params }),
+      // `rule.invalid` renders `{message}`; the raw sentence stays the fallback.
+      params: { ...error.params, id: error.id, message: error.message },
     });
   }
   if (config.breaker.windowDenials > config.breaker.windowSize) {

@@ -544,3 +544,142 @@ describe('recovery data follows the committed configuration', () => {
     }
   });
 });
+
+describe('audit failure ordering', () => {
+  test('a snapshot write failure never reports the previous snapshot as current', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const before = harness.state();
+      expect(before['configSnapshotId']).toMatch(/^cfg-/);
+      // Fail the next snapshot insert while keeping the store readable.
+      const audit = harness.host.audit;
+      if (audit === null) throw new Error('missing audit');
+      const original = audit.saveConfigSnapshot.bind(audit);
+      audit.saveConfigSnapshot = () => {
+        throw new Error('snapshot insert failed');
+      };
+      const result = await save(harness, { enabled: true });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({
+        saved: true,
+        effective: true,
+        changed: true,
+        activationRecorded: false,
+      });
+      expect(harness.host.runtime.config.enabled).toBe(true);
+      const after = harness.state();
+      // The old id belongs to different content: it must not be reused.
+      expect(after['configSnapshotId']).toBe('cfg-unavailable');
+      expect(after['configHistoryComplete']).toBe(false);
+      expect(typeof after['effectiveRevision']).toBe('string');
+      audit.saveConfigSnapshot = original;
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an activation insert failure is not counted as recorded', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const before = harness.state();
+      const audit = harness.host.audit;
+      if (audit === null) throw new Error('missing audit');
+      audit.recordActivation = () => {
+        throw new Error('activation insert failed');
+      };
+      const result = await save(harness, { enabled: true });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({
+        effective: true,
+        activationRecorded: false,
+      });
+      // The snapshot itself was persisted, so the effective identity is real.
+      expect(harness.state()['configSnapshotId']).not.toBe(
+        before['configSnapshotId'],
+      );
+      expect(harness.state()['configHistoryComplete']).toBe(false);
+      expect(harness.host.runtime.configActivations).toBe(
+        before['configHistory'] === undefined ? 0 : 1,
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('reopening the audit store does not claim a lost activation was written', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const audit = harness.host.audit;
+      if (audit === null) throw new Error('missing audit');
+      audit.recordActivation = () => {
+        throw new Error('activation insert failed');
+      };
+      await save(harness, { enabled: true });
+      expect(harness.state()['configHistoryComplete']).toBe(false);
+      // A subsequent healthy write does not retroactively restore the row.
+      await save(harness, { enabled: false });
+      expect(harness.state()['configHistoryComplete']).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('cold restart recovery', () => {
+  test('the first accepted document is recoverable after a restart', async () => {
+    // A cold process with an existing valid custom document.
+    const first = await createHarness({ config: { enabled: false } });
+    const lastGood = join(first.home, 'arbiter', 'last-good');
+    try {
+      const entries = await readdir(lastGood);
+      expect(entries).toHaveLength(1);
+      expect(
+        JSON.parse(await readFile(join(lastGood, entries[0] ?? ''), 'utf8')),
+      ).toMatchObject({ enabled: false });
+    } finally {
+      first.dispose();
+    }
+
+    // A new process sees an invalid document and must fall back to that copy,
+    // not to the built-in defaults.
+    const cold = await createHarness({
+      config: { format: 'arbiter-config-v9' },
+    });
+    try {
+      expect(cold.state()['config']).toMatchObject({
+        enabled: false,
+        modes: { main: 'normal', subagent: 'strict' },
+      });
+      expect(cold.state()['invalidConfigError']).toContain('format');
+    } finally {
+      cold.dispose();
+    }
+  });
+});
+
+describe('UI attribution correlation', () => {
+  test('an unrelated external reload does not consume the pending UI save marker', async () => {
+    const harness = await createHarness({ config: { enabled: false } });
+    try {
+      const editor = harness.host.services.configEditor;
+      if (editor === undefined) throw new Error('missing editor');
+      // While the UI save waits for the write lock, a different document is
+      // applied by an external reload.
+      editor.edit = () => {
+        const external = harness.reread({
+          enabled: true,
+          modes: { main: 'progress' },
+        });
+        external.dispose();
+        return Promise.reject(new Error('revision changed'));
+      };
+      const result = await save(harness, { enabled: true });
+      expect(result.status).toBe(422);
+      // The external change is attributed to the file, not to this save.
+      expect(harness.history()[0]?.entry).toBe('file');
+      expect(harness.host.runtime.config.modes.main).toBe('progress');
+    } finally {
+      harness.dispose();
+    }
+  });
+});

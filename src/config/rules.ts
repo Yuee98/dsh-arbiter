@@ -208,6 +208,8 @@ export function ruleWarnings(rules: readonly CommandRule[]): ConfigWarning[] {
         warnings.push({
           path: `rules.${allow.id}`,
           message: `allow rule "${allow.id}" may be shadowed by force-review rule "${review.id}"`,
+          code: 'rule.shadowed',
+          params: { allow: allow.id, review: review.id },
         });
       }
     }

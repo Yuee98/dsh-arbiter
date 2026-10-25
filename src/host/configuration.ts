@@ -156,7 +156,7 @@ export class ConfigurationAccess {
     const { runtime } = this.host;
     const before = JSON.stringify(runtime.config);
     const activationsBefore = runtime.configActivations;
-    markUiApply(runtime);
+    markUiApply(runtime, prepared.parsed.config);
     try {
       await editor.edit(entry, () => {
         // Re-check under the editor's write lock: a competing save can win

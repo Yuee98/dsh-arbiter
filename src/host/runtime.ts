@@ -41,24 +41,38 @@ export interface ConfigActivation {
 }
 
 /**
- * A UI save can make the host reload the plugin before `save()` returns. This
- * marker keeps that reload attributed to the UI instead of a file change.
+ * A UI save can make the host reload the plugin before `save()` returns, so the
+ * reload must be attributed to the UI rather than to a file change. The marker
+ * therefore carries the exact normalized content of that save: only a reload of
+ * that candidate may consume it, and an unrelated external reload stays `file`.
  */
 const UI_APPLY_WINDOW_MS = 30_000;
 
-export function markUiApply(runtime: RuntimeState): void {
-  runtime.pendingApplySource = Date.now();
+export function markUiApply(
+  runtime: RuntimeState,
+  candidate: ArbiterConfig,
+): void {
+  runtime.pendingApplySource = {
+    at: Date.now(),
+    content: JSON.stringify(candidate),
+  };
 }
 
 export function clearUiApply(runtime: RuntimeState): void {
   runtime.pendingApplySource = null;
 }
 
-function consumeApplySource(runtime: RuntimeState): ConfigApplySource {
+function consumeApplySource(
+  runtime: RuntimeState,
+  candidate: ArbiterConfig,
+): ConfigApplySource {
   const pending = runtime.pendingApplySource;
   runtime.pendingApplySource = null;
-  if (pending !== null && Date.now() - pending <= UI_APPLY_WINDOW_MS)
-    return 'ui';
+  const matched =
+    pending !== null &&
+    Date.now() - pending.at <= UI_APPLY_WINDOW_MS &&
+    pending.content === JSON.stringify(candidate);
+  if (matched) return 'ui';
   // The first application in a profile is the startup load. Later ones come
   // from an external document change, including a reload after an unload that
   // temporarily dropped the instance count to zero.
@@ -168,7 +182,7 @@ export function applyConfig(
   const { runtime, ctx } = host;
   const previous = runtime.config;
   const changed = !sameContent(previous, candidate);
-  const firstActivation = runtime.configSnapshotId === 'cfg-unavailable';
+  const firstApplication = runtime.configApplications === 0;
   runtime.configApplications += 1;
   const revision = configHash(candidate);
   // The effective configuration commits only here, after validation succeeded
@@ -176,17 +190,19 @@ export function applyConfig(
   runtime.config = candidate;
   // Continuity data follows the committed configuration, never the candidate
   // that was merely parsed: a later application failure must not leave a
-  // recovery copy the runtime never actually ran.
-  if (changed)
+  // recovery copy the runtime never actually ran. The first accepted document
+  // also seeds it, so a cold restart can recover it even without a change.
+  if (changed || firstApplication)
     writeLastGood(lastGoodPath(profileHome(ctx), profileScope(ctx)), candidate);
   runtime.configFormat = candidate.format ?? 'arbiter-config-v1';
   runtime.configFormatExplicit = candidate.format !== undefined;
   const audit = ensureAudit(runtime, profileHome(ctx), ctx);
+  const record = changed || runtime.configSnapshotId === 'cfg-unavailable';
   if (audit === null) {
     runtime.effectiveRevision = revision;
-    // Without audit storage there is no verifiable snapshot: report the
-    // unavailable identity rather than the previous document's snapshot.
-    if (changed) runtime.configSnapshotId = 'cfg-unavailable';
+    // Without audit storage there is no verifiable snapshot for this content.
+    runtime.configSnapshotId = 'cfg-unavailable';
+    if (record) runtime.historyIncomplete = true;
     return {
       changed,
       revision,
@@ -197,22 +213,40 @@ export function applyConfig(
   }
   try {
     const snapshot = audit.saveConfigSnapshot(candidate);
-    const record = changed || firstActivation;
-    if (record) {
-      // `entry` names the entry that applied the configuration; `scope` keeps
-      // describing the owning profile layer.
-      runtime.configActivations += 1;
-      audit.recordActivation(
-        snapshot.snapshotId,
-        snapshot.revision,
-        source,
-        'profile',
-      );
-    }
+    // The snapshot becomes this content's identity only after it was persisted.
     runtime.configSnapshotId = snapshot.snapshotId;
     runtime.effectiveRevision = snapshot.revision;
-    audit.runRetention();
     runtime.auditError = null;
+    if (record) {
+      try {
+        // `entry` names the entry that applied the configuration; `scope` keeps
+        // describing the owning profile layer.
+        audit.recordActivation(
+          snapshot.snapshotId,
+          snapshot.revision,
+          source,
+          'profile',
+        );
+        // Counters move only after the row was actually inserted.
+        runtime.configActivations += 1;
+      } catch (error) {
+        runtime.auditError =
+          error instanceof Error ? error.message : String(error);
+        runtime.historyIncomplete = true;
+        ctx.logger.error(
+          'arbiter: activation record failed: %s',
+          runtime.auditError,
+        );
+        return {
+          changed,
+          revision: snapshot.revision,
+          snapshotId: snapshot.snapshotId,
+          recorded: false,
+          auditError: runtime.auditError,
+        };
+      }
+    }
+    audit.runRetention();
     return {
       changed,
       revision: snapshot.revision,
@@ -223,6 +257,10 @@ export function applyConfig(
   } catch (error) {
     runtime.auditError = error instanceof Error ? error.message : String(error);
     runtime.effectiveRevision = revision;
+    // The retained id belongs to previous content, so it must not be reported
+    // as the identity of what now runs.
+    runtime.configSnapshotId = 'cfg-unavailable';
+    runtime.historyIncomplete = true;
     ctx.logger.error('arbiter: audit snapshot failed: %s', runtime.auditError);
     return {
       changed,
@@ -246,6 +284,8 @@ function selectConfig(
   let config = parsed.config;
   let invalidConfigError: string | null = null;
   if (parsed.errors.length > 0) {
+    // Developer-facing continuity detail; the UI renders the structured
+    // `loadErrors` through the locale so no English sentence becomes UI copy.
     invalidConfigError = parsed.errors
       .map((error) => `${error.path}: ${error.message}`)
       .join('; ');
@@ -280,6 +320,7 @@ function acquireRuntime(
     pendingApplySource: null,
     configActivations: 0,
     configApplications: 0,
+    historyIncomplete: false,
     invalidConfigError,
     loadErrors: loadErrors,
     warnings: warnings,
@@ -404,7 +445,7 @@ export function initializeHost(
   };
   // An invalid document never replaces the configuration in effect: the
   // selected fallback equals the current content, so no activation is recorded.
-  applyConfig(host, config, consumeApplySource(runtime));
+  applyConfig(host, config, consumeApplySource(runtime, config));
   maintainRuntime(host, home);
   return host;
 }
