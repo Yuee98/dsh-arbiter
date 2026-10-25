@@ -521,7 +521,17 @@ export class CallSettlement {
         // A resolved request already produced its answer; the cancellation is
         // then a later event and does not rewrite the outcome.
         if (answered) return;
-        finish({ kind: 'cancelled' });
+        // A request that already resolved delivers its answer on the microtask
+        // queue; the abort listener runs synchronously. Waiting two microtask
+        // turns lets that queued continuation run first, so an answer that was
+        // already delivered wins, while a cancellation from an earlier turn has
+        // no pending continuation and still settles as cancelled.
+        queueMicrotask(() => {
+          queueMicrotask(() => {
+            if (answered) return;
+            finish({ kind: 'cancelled' });
+          });
+        });
       };
       if (isAborted(call.exec.signal)) {
         finish({ kind: 'cancelled' });
@@ -533,17 +543,28 @@ export class CallSettlement {
       // *classification* by one microtask lets a same-turn answer claim first,
       // while a cancellation from an earlier turn still wins because its
       // listener fired before the promise settled.
-      const answer = approval.request({
-        agent: call.agent,
-        toolName: call.exec.name,
-        callId: call.exec.callId,
-        reason,
-        displayReason: {
-          en: 'Arbiter needs a human decision for this call. Approve it only if its action, target and scope are intended.',
-          zh: 'Arbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。',
-        },
-        signal: call.exec.signal,
-      });
+      let answer: Promise<keyof typeof HUMAN_OUTCOMES>;
+      try {
+        answer = approval.request({
+          agent: call.agent,
+          toolName: call.exec.name,
+          callId: call.exec.callId,
+          reason,
+          displayReason: {
+            en: 'Arbiter needs a human decision for this call. Approve it only if its action, target and scope are intended.',
+            zh: 'Arbiter 需要人工决定此调用。仅当操作、目标与范围符合预期时才批准。',
+          },
+          signal: call.exec.signal,
+        });
+      } catch (error) {
+        // A service that throws before returning a promise is a channel
+        // failure, not an escaping exception: settle it as a fallback.
+        finish({
+          kind: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       answer.then(
         (outcome) => {
           answered = true;
@@ -610,6 +631,9 @@ export class CallSettlement {
       ? HUMAN_OUTCOMES.cancelled
       : HUMAN_OUTCOMES[first.outcome];
     const stageReason = cancelled ? 'approval_cancelled' : mapped.reason;
+    // Approval text comes from the same composer as every other outcome; the
+    // composer has a positive branch for `human-allow`, so it never reads as a
+    // blocked call.
     const text = humanText(extras, mapped.result, stageReason);
     const claim = this.claim(call, mapped.result, text);
     if (!claim.won) return dispositionOf(claim.outcome);

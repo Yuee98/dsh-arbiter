@@ -463,8 +463,10 @@ describe('one settlement per call', () => {
       ) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      // The user closes the prompt and the answer arrives in the same tick.
+      // The user closes the prompt; the answer arrives afterwards, so the
+      // cancellation is the earlier event and settles the call.
       controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       if (release === undefined)
         throw new Error('the approval was never asked');
       release('allowed-once');
@@ -883,6 +885,10 @@ describe('blocked outcomes carry the composed feedback', () => {
       expect(decision.kind).toBe('deny');
       expect(decision.reason).toContain('fallback-deny');
       expect(decision.reason).toContain('Cause:');
+      // The reviewer's own failure must survive into the agent-facing text: a
+      // broken review is not the same thing as an unavailable approval channel.
+      expect(decision.reason).toContain('the review failed');
+      expect(decision.reason).toContain('no text');
     } finally {
       harness.dispose();
     }
@@ -1033,12 +1039,11 @@ describe('cancellation and answer as competing events', () => {
       approval: {
         config: { policy: 'ask' },
         request: () => {
-          // The answer is delivered first; the cancellation happens in a later
-          // turn, which is the ordering this case is about.
+          // Resolve and cancel in the same turn: the answer is delivered first,
+          // so it must win even though the abort is observed before the
+          // promise continuation runs.
           const answered = Promise.resolve('allowed-once' as const);
-          setTimeout(() => {
-            controller.abort();
-          }, 0);
+          controller.abort();
           return answered;
         },
       },
@@ -1155,6 +1160,78 @@ describe('a configuration change during snapshot assembly', () => {
       // channel answered; the backend choice is what this case pins.
       expect(decision.kind).toBe('deny');
       expect(decision.reason).toContain('human-deny');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('an approval service that throws synchronously', () => {
+  test('the call settles as a fallback instead of escaping', async () => {
+    const session = makeSession('sync-throw');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        // The service fails before it can return a promise.
+        request: () => {
+          throw new Error('approval service is not ready');
+        },
+      },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'st1'), allowNext);
+      expect(decision.kind).toBe('deny');
+      expect(decision.reason).toContain('fallback-deny');
+      expect(decision.reason).toContain('approval_error');
+      // The call is settled in the audit chain, not lost with the exception.
+      expect(await storedTrace('st1')).toContain('fallback-deny');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('an approved call is never reported as blocked', () => {
+  test('human-allow keeps a positive reason', async () => {
+    const session = makeSession('allow-text');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorized: 2 }),
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('allowed-once' as const),
+      },
+    });
+    try {
+      const decision = await harness.gate(call(session, 'at1'), allowNext);
+      expect(decision.kind).toBe('allow');
+      const store = new AuditStore(
+        join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+        {
+          enabled: true,
+          retentionDays: 30,
+          retentionBytes: 1_073_741_824,
+          maxQueue: 500,
+        },
+      );
+      try {
+        let reason: unknown;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const row: unknown = store.getCall('at1');
+          if (row !== null && typeof row === 'object') {
+            reason = Reflect.get(row, 'reason');
+            if (typeof reason === 'string') break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(typeof reason).toBe('string');
+        expect(reason).not.toContain('Not executed');
+        expect(reason).toContain('approved');
+      } finally {
+        store.close();
+      }
     } finally {
       harness.dispose();
     }

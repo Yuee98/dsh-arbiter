@@ -508,7 +508,10 @@ export class CallGate {
       return this.settlement.human(
         this.humanCall(call),
         'Review circuit breaker is open for this session.',
-        call.extras,
+        {
+          ...call.extras,
+          reviewReason: 'the review circuit breaker is open for this session',
+        },
       );
     }
     let snapshot: { bundle: BuiltSnapshot; llm: LlmLike };
@@ -524,7 +527,10 @@ export class CallGate {
         configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
-      return this.settlement.human(this.humanCall(call), message, call.extras);
+      return this.settlement.human(this.humanCall(call), message, {
+        ...call.extras,
+        reviewReason: `the review could not be prepared: ${message}`,
+      });
     }
     if (
       snapshot.bundle.snapshot.budget.truncatedSegments.includes('OVER_BUDGET')
@@ -545,6 +551,7 @@ export class CallGate {
       return this.settlement.human(this.humanCall(call), message, {
         ...call.extras,
         snapshot: snapshot.bundle.snapshot,
+        reviewReason: message,
       });
     }
     this.noteReview(call.session.id ?? 'unknown');
@@ -653,9 +660,11 @@ export class CallGate {
         at: Date.now(),
       });
       return this.settlement.human(
-        current,
+        this.humanCall(current),
         `review failed: ${result.error}`,
-        extras,
+        // The failure *is* the reason: without it the agent sees only the
+        // channel outcome and cannot tell a broken reviewer from a decision.
+        { ...extras, reviewReason: `the review failed: ${result.error}` },
       );
     }
     const signals = reclassifySignals(

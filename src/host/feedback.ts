@@ -97,6 +97,15 @@ function contextParts(snapshot: ReviewSnapshot | null): readonly string[] {
  * deny does not borrow review language and a fallback never reads as a refusal.
  */
 export function decisionFeedback(input: FeedbackInput): string {
+  // An approval that let the call run is not a blocked outcome: it must never
+  // be reported as "not executed", which would contradict what the host did.
+  if (input.result === 'human-allow') {
+    const allowed =
+      input.outcomeReason === undefined || input.outcomeReason.length === 0
+        ? 'Arbiter: the user approved this call.'
+        : `Arbiter: the user approved this call (${input.outcomeReason}).`;
+    return allowed;
+  }
   const label = RESULT_LABELS[input.result] ?? 'this call was not executed';
   const sections: string[] = [];
   const rule = rulePart(input);
