@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import { templateIdOf } from '../src/audit/metadata.js';
+import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';
 
@@ -291,7 +292,7 @@ describe('audit store', () => {
     store.enqueue(record({ callId: 'call-1', result: 'review-deny' }));
     await store.flush();
     const snapshot = snapshotOf(store);
-    expect(store.clearCalls()).toBe(1);
+    expect(store.clearCalls()).toEqual({ ok: true, deleted: 1 });
     expect(store.listCalls({}).total).toBe(0);
     expect(store.listCandidates()).toEqual([]);
     expect(store.getCall('call-1')).toBeNull();
@@ -651,7 +652,7 @@ describe('retention references and ownership', () => {
     );
     store.enqueue(record({ callId: 'call-1', result: 'review-deny' }));
     await store.flush();
-    expect(store.clearCalls()).toBe(1);
+    expect(store.clearCalls()).toEqual({ ok: true, deleted: 1 });
     expect(store.configHistory(5)).toHaveLength(1);
     store.close();
   });
@@ -892,8 +893,8 @@ describe('clear coordinates with the asynchronous queue', () => {
     store.enqueue(record({ callId: 'pre-clear', result: 'review-allow' }));
     // Clear before the queue drains: the queued event must not be inserted
     // afterwards, or the user's clear would appear to undo itself.
-    const deleted = store.clearCalls();
-    expect(deleted).toBe(0);
+    const cleared = store.clearCalls();
+    expect(cleared).toEqual({ ok: true, deleted: 0 });
     await store.flush();
     expect(store.listCalls({}).total).toBe(0);
     // New events after the clear are kept.
@@ -916,7 +917,7 @@ describe('clear coordinates with the asynchronous queue', () => {
     );
     store.enqueue(record({ callId: 'denied', result: 'review-deny' }));
     await store.flush();
-    store.clearCalls();
+    expect(store.clearCalls().ok).toBe(true);
     expect(store.configHistory(5)).toHaveLength(1);
     store.close();
   });
@@ -1362,7 +1363,7 @@ describe('write containment covers every entry point', () => {
     );
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(reopened.clearCalls()).toBe(0);
+    expect(reopened.clearCalls()).toEqual({ ok: false, deleted: 0 });
     expect(reopened.health().state).toBe('degraded');
     expect(reopened.health().lastError).toContain('no delete');
     // The rows are still there and the store still serves.
@@ -1594,5 +1595,250 @@ describe('retention has one live policy and one executor', () => {
     follower.close();
     // After the owner closes, the path's policy is released cleanly.
     owner.close();
+  });
+});
+
+describe('structured-content format registries are independent', () => {
+  test('a snapshot marked with an unregistered format is not interpreted', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    const snapshot = snapshotOf(store);
+    store.enqueue(
+      record({
+        callId: 'snapshot-formats',
+        result: 'allow',
+        configSnapshotId: snapshot.snapshotId,
+        snapshot: PROBE_SNAPSHOT,
+      }),
+    );
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    // Record format 2 is readable, but no review/config snapshot format 2
+    // adapter exists; the two registries must not be conflated.
+    db.prepare('UPDATE snapshots SET format_version = 2').run();
+    db.prepare('UPDATE config_snapshots SET format_version = 2').run();
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const detail = reopened.getCall('snapshot-formats');
+    // The raw content is not presented under current semantics.
+    expect(recordField(detail, 'snapshot')).toBeNull();
+    expect(recordField(detail, 'snapshotUnreadable')).toBe(true);
+    expect(recordField(detail, 'config')).toBeNull();
+    expect(recordField(detail, 'configUnreadable')).toBe(true);
+    reopened.close();
+  });
+
+  test('a template marked with an unregistered format keeps no interpretation', async () => {
+    const { store } = await makeStore();
+    const system = 'REVIEW_POLICY\nTEMPLATE';
+    const templateId = templateIdOf(system);
+    store.enqueue(
+      record({
+        callId: 'template-format',
+        result: 'allow',
+        modelAttempts: [
+          {
+            requestId: 'template-format:model:1',
+            callId: 'template-format',
+            attempt: 1,
+            backend: 'chat',
+            protocol: 'arbiter-chat-json-v1',
+            request: { provider: 'p', model: 'm', system, messages: [] },
+            templateId,
+            responseText: '{}',
+            parsed: null,
+            error: null,
+            startedAt: 1,
+            durationMs: 2,
+            estimatedInputTokens: 3,
+            usage: null,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    db.prepare('UPDATE templates SET format_version = 2').run();
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const templates = listField(
+      reopened.getCall('template-format'),
+      'templates',
+    );
+    expect(recordField(templates[0], 'unreadable')).toBe(true);
+    expect(recordField(templates[0], 'content')).toBeNull();
+    reopened.close();
+  });
+});
+
+describe('clear failure is not an empty database', () => {
+  test('a failed clear reports failure rather than zero deletions', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(record({ callId: 'still-there', result: 'allow' }));
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    db.exec(
+      'CREATE TRIGGER deny_clear BEFORE DELETE ON calls BEGIN SELECT RAISE(ABORT, "denied clear"); END',
+    );
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const cleared = reopened.clearCalls();
+    // The store must not let a caller report "cleared, nothing deleted".
+    expect(cleared.ok).toBe(false);
+    expect(reopened.listCalls({}).total).toBe(1);
+    reopened.close();
+  });
+
+  test('a clear in one store drops a sibling store queued pre-clear event', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-clear-shared-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const first = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const second = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Queue on the store that will NOT serve the clear.
+    second.enqueue(record({ callId: 'pre-clear-sibling', result: 'allow' }));
+    // Wait long enough that the queued event's stamp precedes the cutoff.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(first.clearCalls().ok).toBe(true);
+    await second.flush();
+    // The event predated the user's clear, so it must not resurrect the history.
+    expect(first.listCalls({}).total).toBe(0);
+    second.close();
+    first.close();
+  });
+});
+
+describe('ownership survives the owner closing', () => {
+  test('an open follower inherits the policy instead of a new opener taking over', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-succession-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const owner = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    const follower = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 30,
+    });
+    owner.updateConfig({ ...DEFAULT_CONFIG.audit, retentionDays: 7 });
+    owner.close();
+    // A third store with a different policy must not displace the live follower.
+    const later = new AuditStore(path, {
+      ...DEFAULT_CONFIG.audit,
+      retentionDays: 1,
+    });
+    expect(later.health()).toMatchObject({ state: 'degraded' });
+    expect(later.retention.days).toBe(7);
+    follower.close();
+    later.close();
+  });
+});
+
+describe('retention reclaims and protects the right references', () => {
+  test('partial cleanup keeps more than the newest record', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 12; index += 1) {
+      store.enqueue(
+        record({
+          callId: `partial-${String(index)}`,
+          result: 'allow',
+          ts: Date.now() - index * 1_000,
+          arguments: { command: 'echo hi', padding: 'z'.repeat(3_000) },
+        }),
+      );
+    }
+    await store.flush();
+    const before = store.listCalls({}).total;
+    const target = Math.floor(store.databaseBytes * 0.5);
+    const outcome = store.runRetention(Date.now(), 365, target);
+    // Eviction is bounded by occupied space, so a small deletion plus compaction
+    // must be allowed to meet the target instead of deleting everything.
+    expect(outcome.deleted).toBeLessThan(before);
+    expect(store.listCalls({}).total).toBeGreaterThan(1);
+    store.close();
+  });
+
+  test('a configuration referenced only by a retained stage survives', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const historical = snapshotOf(store);
+    const current = snapshotOf(store);
+    store.enqueue(
+      record({
+        callId: 'stage-ref',
+        result: 'allow',
+        configSnapshotId: current.snapshotId,
+        ts: Date.now(),
+        trace: [
+          {
+            stage: 'review',
+            result: 'review-allow',
+            configRevision: historical.revision,
+            configSnapshotId: historical.snapshotId,
+            at: 1,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    store.runRetention();
+    const path = store.databasePath;
+    store.close();
+    const db = new DatabaseSync(path);
+    const kept = db
+      .prepare(
+        'SELECT COUNT(*) AS count FROM config_snapshots WHERE snapshot_id = ?',
+      )
+      .get(historical.snapshotId);
+    // The stage's historical configuration is what makes the record readable.
+    expect(numberField(kept, 'count')).toBe(1);
+    db.close();
+  });
+
+  test('an unreferenced template is reclaimed', async () => {
+    const { store } = await makeStore({ retentionDays: 1 });
+    const system = 'REVIEW_POLICY\nORPHAN';
+    const templateId = templateIdOf(system);
+    store.enqueue(
+      record({
+        callId: 'orphan-template',
+        result: 'allow',
+        ts: Date.now() - 5 * 24 * 60 * 60 * 1_000,
+        modelAttempts: [
+          {
+            requestId: 'orphan-template:model:1',
+            callId: 'orphan-template',
+            attempt: 1,
+            backend: 'chat',
+            protocol: 'arbiter-chat-json-v1',
+            request: { provider: 'p', model: 'm', system, messages: [] },
+            templateId,
+            responseText: '{}',
+            parsed: null,
+            error: null,
+            startedAt: 1,
+            durationMs: 2,
+            estimatedInputTokens: 3,
+            usage: null,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const path = store.databasePath;
+    store.runRetention();
+    expect(store.listCalls({}).total).toBe(0);
+    store.close();
+    const db = new DatabaseSync(path);
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS count FROM templates')
+      .get();
+    expect(numberField(remaining, 'count')).toBe(0);
+    db.close();
   });
 });

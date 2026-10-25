@@ -1,6 +1,6 @@
 import { fingerprintOf, type CallRecord } from '../audit.js';
 import { appendRecord } from '../records.js';
-import type { CallResult, PreToolDecision } from '../types.js';
+import type { CallResult, PreToolDecision, TraceStage } from '../types.js';
 import { deny, executionModeName, isAborted } from './common.js';
 import type { DecisionHistory } from './history.js';
 import type { AuditExtras, CallContext, HostEnvironment } from './types.js';
@@ -96,6 +96,30 @@ function reapPending(pending: HostEnvironment['runtime']['pending']): void {
     if (oldest === undefined) break;
     pending.delete(oldest);
   }
+}
+
+/**
+ * Append a settlement stage with the configuration identity in force now.
+ *
+ * Human and fallback stages happen after the review stages, and a configuration
+ * switch can land in between; each stage therefore records its own revision and
+ * snapshot instead of inheriting the call's final values.
+ */
+function pushStage(
+  host: HostEnvironment,
+  trace: TraceStage[],
+  stage: 'human' | 'fallback',
+  result: string,
+  reason: string,
+): void {
+  trace.push({
+    stage,
+    result,
+    reason,
+    configRevision: host.runtime.effectiveRevision,
+    configSnapshotId: host.runtime.configSnapshotId,
+    at: Date.now(),
+  });
 }
 
 /** Settles decisions independently of best-effort audit persistence. */
@@ -234,12 +258,7 @@ export class CallSettlement {
     text: string,
     extras: AuditExtras,
   ): PreToolDecision {
-    call.trace.push({
-      stage: 'fallback',
-      result: 'fallback-deny',
-      reason,
-      at: Date.now(),
-    });
+    pushStage(this.host, call.trace, 'fallback', 'fallback-deny', reason);
     this.finalize(call, 'fallback-deny', text, extras);
     return deny(text);
   }
@@ -284,12 +303,13 @@ export class CallSettlement {
       );
     }
     const mapped = HUMAN_OUTCOMES[outcome];
-    call.trace.push({
-      stage: mapped.stage,
-      result: mapped.result,
-      reason: mapped.reason,
-      at: Date.now(),
-    });
+    pushStage(
+      this.host,
+      call.trace,
+      mapped.stage,
+      mapped.result,
+      mapped.reason,
+    );
     this.finalize(call, mapped.result, mapped.text, extras);
     return mapped.result === 'human-allow'
       ? { kind: 'allow' }

@@ -39,6 +39,15 @@ import {
   updateCandidateStatus,
   recordAnalysis,
 } from './audit/metadata.js';
+import {
+  claimRetention,
+  clearCutoff,
+  markCleared,
+  ownsRetention,
+  releaseRetention,
+  retentionMemberId,
+  retentionPolicyOf,
+} from './audit/ownership.js';
 import { clearCalls, runRetention } from './audit/retention.js';
 
 /**
@@ -54,83 +63,6 @@ export interface AuditRetentionOutcome {
   readonly irreducible: boolean;
   readonly bytes: number;
 }
-/**
- * One effective retention policy and executor per resolved database path.
- *
- * Audit storage is per DSH data instance, not per profile, so two profiles that
- * point at the same file must not delete each other's rows under different
- * thresholds. The first store for a path publishes the policy; later stores
- * adopt it and report a conflict instead of overwriting it. A changed setting
- * from the owning profile is applied through {@link AuditStore.updateConfig},
- * which is the controlled update path.
- */
-interface RetentionOwnership {
-  retentionDays: number;
-  retentionBytes: number;
-  /** The store allowed to execute cleanup for this database. */
-  owner: AuditStore;
-}
-const RETENTION_OWNERS = new Map<string, RetentionOwnership>();
-
-function claimRetention(
-  path: string,
-  store: AuditStore,
-  config: ArbiterConfig['audit'],
-): {
-  readonly days: number;
-  readonly bytes: number;
-  readonly conflict: boolean;
-} {
-  const existing = RETENTION_OWNERS.get(path);
-  if (existing !== undefined && existing.owner !== store) {
-    return {
-      days: existing.retentionDays,
-      bytes: existing.retentionBytes,
-      conflict:
-        existing.retentionDays !== config.retentionDays ||
-        existing.retentionBytes !== config.retentionBytes,
-    };
-  }
-  if (existing === undefined || existing.owner === store) {
-    RETENTION_OWNERS.set(path, {
-      retentionDays: config.retentionDays,
-      retentionBytes: config.retentionBytes,
-      owner: store,
-    });
-    return {
-      days: config.retentionDays,
-      bytes: config.retentionBytes,
-      conflict: false,
-    };
-  }
-  return {
-    days: existing.retentionDays,
-    bytes: existing.retentionBytes,
-    conflict:
-      existing.retentionDays !== config.retentionDays ||
-      existing.retentionBytes !== config.retentionBytes,
-  };
-}
-
-/** The live policy for a path, so a follower always reads the owner's values. */
-function retentionPolicyOf(
-  path: string,
-): { readonly days: number; readonly bytes: number } | null {
-  const existing = RETENTION_OWNERS.get(path);
-  return existing === undefined
-    ? null
-    : { days: existing.retentionDays, bytes: existing.retentionBytes };
-}
-
-function releaseRetention(path: string, store: AuditStore): void {
-  const existing = RETENTION_OWNERS.get(path);
-  if (existing?.owner !== store) return;
-  // Ownership passes to another open store for the same path, if there is one;
-  // otherwise the path is free. A follower must not be left orphaned by the
-  // owner closing while it still holds the database.
-  RETENTION_OWNERS.delete(path);
-}
-
 export function fingerprintOf(tool: string, args: unknown): string {
   return `${tool}:${hash(json(args)).slice(0, 24)}`;
 }
@@ -138,8 +70,12 @@ export class AuditStore {
   private readonly db: DatabaseSync;
   private readonly path: string;
   private config: ArbiterConfig['audit'];
-  private queue: { readonly record: CallRecord; readonly attempt: number }[] =
-    [];
+  private queue: {
+    readonly record: CallRecord;
+    readonly attempt: number;
+    /** When this event entered the queue, used to honour a cross-store clear. */
+    readonly queuedAt: number;
+  }[] = [];
   private scheduled = false;
   private closedState = false;
   private dropped = 0;
@@ -153,6 +89,8 @@ export class AuditStore {
    * on storage. The value is surfaced through `health()`.
    */
   private pausedReason: string | null = null;
+  /** Identity used for the per-path retention registry. */
+  private readonly member = { id: retentionMemberId() };
   /** True once released; a replaced store must not reschedule maintenance. */
   private released = false;
 
@@ -180,7 +118,7 @@ export class AuditStore {
     // One effective retention policy per database path: a second store for the
     // same file adopts the owner's values instead of changing cleanup semantics
     // for rows the other profile also sees.
-    const claim = claimRetention(path, this, this.config);
+    const claim = claimRetention(path, this.member, this.config);
     this.config = {
       ...this.config,
       retentionDays: claim.days,
@@ -223,7 +161,7 @@ export class AuditStore {
    * stays in force; a later conflicting one is reported and ignored.
    */
   updateConfig(config: ArbiterConfig['audit']): void {
-    const claim = claimRetention(this.path, this, config);
+    const claim = claimRetention(this.path, this.member, config);
     if (claim.conflict) {
       // Another profile owns this database's policy. Report it and keep the
       // effective values, so two profiles cannot fight over deletions.
@@ -391,7 +329,7 @@ export class AuditStore {
       this.lastError = 'audit queue is full; oldest queued event was dropped';
       this.queue.shift();
     }
-    this.queue.push({ record, attempt: 0 });
+    this.queue.push({ record, attempt: 0, queuedAt: Date.now() });
     this.schedule();
   }
 
@@ -410,6 +348,13 @@ export class AuditStore {
       if (this.queue.length === 0) break;
       const item = this.queue[0];
       if (item === undefined) break;
+      const cutoff = clearCutoff(this.path);
+      if (cutoff !== null && item.queuedAt < cutoff) {
+        // This event predates a clear of the shared database: the user asked to
+        // remove that history, so it is dropped rather than written back.
+        this.queue.shift();
+        continue;
+      }
       try {
         this.write(item.record);
         this.queue.shift();
@@ -423,7 +368,11 @@ export class AuditStore {
         const attempt = item.attempt + 1;
         this.queue.shift();
         if (attempt < 3) {
-          this.queue.push({ record: item.record, attempt });
+          this.queue.push({
+            record: item.record,
+            attempt,
+            queuedAt: item.queuedAt,
+          });
         } else {
           this.dropped += 1;
         }
@@ -482,8 +431,33 @@ export class AuditStore {
     );
   }
 
+  /**
+   * Read one call.
+   *
+   * `unreadable` distinguishes a structure this build cannot read from a call
+   * that genuinely does not exist; a route must not report the first as 404.
+   */
+  /** One stored call, or null when it does not exist or cannot be read. */
   getCall(callId: string): StoredCall | null {
     return this.readGuard(() => getCall(this.db, callId), null);
+  }
+
+  /**
+   * Read one call, telling "cannot read this structure" from "no such call".
+   *
+   * A route must not report an incompatible database as a missing record.
+   */
+  readCall(callId: string): {
+    readonly record: StoredCall | null;
+    readonly unreadable: boolean;
+  } {
+    try {
+      return { record: getCall(this.db, callId), unreadable: false };
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.degraded = true;
+      return { record: null, unreadable: true };
+    }
   }
 
   stats(): unknown {
@@ -680,17 +654,21 @@ export class AuditStore {
    * to come back. Records enqueued after this point are new events and are kept.
    * Configuration history, activations and session records are out of scope.
    */
-  clearCalls(): number {
-    if (this.pausedReason !== null) return 0;
+  clearCalls(): { readonly ok: boolean; readonly deleted: number } {
+    if (this.pausedReason !== null) return { ok: false, deleted: 0 };
     // The queue is invalidated only together with a successful clear: dropping
     // queued events before the SQL result is known would lose them when the
     // delete fails, and keeping them after a successful clear would let them
     // reappear.
     const cleared = this.guard(() => clearCalls(this.db));
-    if (cleared === null) return 0;
+    if (cleared === null) return { ok: false, deleted: 0 };
     this.queue.splice(0);
     this.earlyResults.clear();
-    return cleared;
+    // A second store on the same database may hold events queued before this
+    // clear; they would be inserted afterwards and resurrect the cleared
+    // history. The cutoff makes them discardable by any store on this path.
+    markCleared(this.path, Date.now());
+    return { ok: true, deleted: cleared };
   }
 
   /** Drain synchronously, so a caller can rely on the queue being empty after. */
@@ -718,8 +696,7 @@ export class AuditStore {
     retentionDays?: number,
     retentionBytes?: number,
   ): AuditRetentionOutcome {
-    const ownership = RETENTION_OWNERS.get(this.path);
-    if (ownership !== undefined && ownership.owner !== this) {
+    if (!ownsRetention(this.path, this.member)) {
       // A follower reports the live footprint but never deletes.
       return { deleted: 0, irreducible: false, bytes: this.databaseBytes };
     }
@@ -747,7 +724,7 @@ export class AuditStore {
     if (this.closedState) return;
     this.closedState = true;
     this.released = true;
-    releaseRetention(this.path, this);
+    releaseRetention(this.path, this.member);
     try {
       this.db.close();
     } catch {

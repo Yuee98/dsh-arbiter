@@ -28,6 +28,23 @@ function compact(db: DatabaseSync): void {
     // Vacuum is a space optimization, never a permission or retention precondition.
   }
 }
+/**
+ * Logical occupied bytes: pages actually in use, excluding free pages.
+ *
+ * A DELETE does not shrink the file, so evicting on the physical size would keep
+ * deleting records while waiting for a VACUUM that never runs inside the loop.
+ * The eviction decision therefore uses occupied pages; the physical target is
+ * still reported and compacted towards after the loop.
+ */
+function occupiedBytes(db: DatabaseSync): number {
+  const page = asRow(db.prepare('PRAGMA page_count').get());
+  const free = asRow(db.prepare('PRAGMA freelist_count').get());
+  const size = asRow(db.prepare('PRAGMA page_size').get());
+  const used =
+    rowNumber(page['page_count']) - rowNumber(free['freelist_count']);
+  return Math.max(0, used) * rowNumber(size['page_size']);
+}
+
 export interface RetentionOutcome {
   readonly deleted: number;
   /**
@@ -57,10 +74,10 @@ export function runRetention(
     db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
   );
   let guard = 0;
-  // Eviction must see the same footprint the target is measured against,
-  // including migration backups; otherwise the database alone can look small
-  // while the audit directory is already over budget.
-  while (databaseBytes() > retentionBytes && guard < 40) {
+  // Auxiliary files (backups, sidecars) cannot be reclaimed by deleting rows, so
+  // they are accounted for but not chased: eviction targets occupied pages, and
+  // the loop stops as soon as the database itself no longer shrinks.
+  while (occupiedBytes(db) > retentionBytes && guard < 40) {
     guard += 1;
     const remaining = rowNumber(
       asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
@@ -76,7 +93,7 @@ export function runRetention(
         )
         .get(),
     );
-    const excess = databaseBytes() - retentionBytes;
+    const excess = occupiedBytes(db) - retentionBytes;
     const batch = Math.max(
       1,
       Math.min(
@@ -108,12 +125,23 @@ export function runRetention(
     `DELETE FROM config_snapshots
       WHERE snapshot_id NOT IN (SELECT snapshot_id FROM config_activations)
         AND snapshot_id NOT IN (SELECT config_snapshot_id FROM calls)
+        AND snapshot_id NOT IN (
+          SELECT config_snapshot_id FROM stages WHERE config_snapshot_id IS NOT NULL
+        )
         AND created_at < ?`,
   ).run(cutoff);
+  // Templates are referenced by model attempts; once no retained attempt points
+  // at one, its content is no longer needed to explain any stored decision.
+  db.prepare(
+    `DELETE FROM templates
+      WHERE template_id NOT IN (
+        SELECT template_id FROM model_calls WHERE template_id IS NOT NULL
+      )`,
+  ).run();
   if (deleted > 0 || databaseBytes() > retentionBytes) compact(db);
   // After compaction the physical footprint may still exceed the target because
   // the single newest call (or a sidecar/backup) is larger than it. Say so
   // rather than deleting the last record to satisfy a number.
-  const irreducible = databaseBytes() > retentionBytes;
+  const irreducible = occupiedBytes(db) > retentionBytes;
   return { deleted, irreducible, bytes: databaseBytes() };
 }

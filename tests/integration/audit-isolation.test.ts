@@ -246,7 +246,7 @@ describe('an unmigratable audit database', () => {
       false,
     );
     expect(store.runRetention().deleted).toBe(0);
-    expect(store.clearCalls()).toBe(0);
+    expect(store.clearCalls()).toEqual({ ok: false, deleted: 0 });
     store.close();
     expect(userVersion(path)).toBe(versionBefore);
   });
@@ -277,6 +277,45 @@ describe('an unmigratable audit database', () => {
     settle({ host, callId: 'fresh', ts: Date.now() });
     expect(pending.has('stale')).toBe(false);
     expect(pending.has('fresh')).toBe(true);
+  });
+
+  test('a settlement stage records the configuration in force when it ran', async () => {
+    const { host } = await startHost();
+    const session: SessionLike = { id: 'session' };
+    const call: CallContext = {
+      exec: {
+        callId: 'stage-config',
+        name: 'bash',
+        arguments: { command: 'echo hi' },
+        signal: new AbortController().signal,
+      },
+      agent: { session },
+      session,
+      sessionKind: 'main',
+      // A mode that cannot open an approval request makes settlement take the
+      // fallback path, which pushes the stage this test inspects.
+      mode: 'progress',
+      cwd: '/w',
+      trace: [],
+    };
+    const extras: AuditExtras = {
+      effect: null,
+      signals: null,
+      snapshot: null,
+      strategy: 'normal',
+      decisionRules: [],
+      modelAttempts: [],
+      ruleId: null,
+    };
+    const settlement = new CallSettlement(host, new DecisionHistory(host));
+    const decision = await settlement.human(call, 'needs approval', extras);
+    expect(decision.kind).toBe('deny');
+    const stage = call.trace.find((entry) => entry.stage === 'fallback');
+    expect(stage).toBeDefined();
+    // Every actual stage must identify the configuration that governed it; a
+    // configuration switch before settlement must not leave this stage bare.
+    expect(recordField(stage, 'configRevision')).toEqual(expect.any(String));
+    expect(recordField(stage, 'configSnapshotId')).toEqual(expect.any(String));
   });
 
   test('the payload keeps the effective revision while history is unavailable', async () => {

@@ -16,8 +16,20 @@ export const BACKUP_KEEP = 2;
 /** Record format this build writes and can fully interpret. */
 export const RECORD_FORMAT = 2;
 
-/** Record formats this build can still read, newest first. */
-export const READABLE_RECORD_FORMATS: readonly number[] = [2, 1];
+/**
+ * Supported formats per structured-content kind.
+ *
+ * These are independent registries: a record format 2 says nothing about
+ * whether a configuration snapshot, review snapshot or template format 2 can be
+ * interpreted, so each kind is validated against its own set.
+ */
+export const READABLE_CALL_FORMATS: readonly number[] = [2, 1];
+export const READABLE_CONFIG_SNAPSHOT_FORMATS: readonly number[] = [1];
+export const READABLE_REVIEW_SNAPSHOT_FORMATS: readonly number[] = [1];
+export const READABLE_TEMPLATE_FORMATS: readonly number[] = [1];
+
+/** The highest call-record format this build writes and reads. */
+export const LATEST_CALL_FORMAT = 2;
 
 const SCHEMA_SQL = `
         CREATE TABLE IF NOT EXISTS config_snapshots (

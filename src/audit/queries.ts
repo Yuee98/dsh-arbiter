@@ -5,7 +5,13 @@ import type {
   CandidateRecord,
   StoredCall,
 } from './types.js';
-import { READABLE_RECORD_FORMATS } from './schema.js';
+import {
+  LATEST_CALL_FORMAT,
+  READABLE_CALL_FORMATS,
+  READABLE_CONFIG_SNAPSHOT_FORMATS,
+  READABLE_REVIEW_SNAPSHOT_FORMATS,
+  READABLE_TEMPLATE_FORMATS,
+} from './schema.js';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   asRow,
@@ -65,7 +71,22 @@ function formatOf(row: Record<string, unknown>): number {
  * read path total instead of throwing on data it did not write.
  */
 function readableFormat(version: number): boolean {
-  return READABLE_RECORD_FORMATS.includes(version);
+  return READABLE_CALL_FORMATS.includes(version);
+}
+
+/** Whether a stored configuration snapshot's format can be interpreted. */
+function readableConfigSnapshot(version: number): boolean {
+  return READABLE_CONFIG_SNAPSHOT_FORMATS.includes(version);
+}
+
+/** Whether a stored review snapshot's format can be interpreted. */
+function readableReviewSnapshot(version: number): boolean {
+  return READABLE_REVIEW_SNAPSHOT_FORMATS.includes(version);
+}
+
+/** Whether a stored template's format can be interpreted. */
+function readableTemplate(version: number): boolean {
+  return READABLE_TEMPLATE_FORMATS.includes(version);
 }
 
 /** An absolute timestamp, or null when the record never recorded one. */
@@ -91,7 +112,7 @@ function versionFields(row: Record<string, unknown>): {
     unreadable: !readable,
     unreadableReason: readable
       ? null
-      : `record format ${String(version)} is newer than this plugin (${String(Math.max(...READABLE_RECORD_FORMATS))})`,
+      : `record format ${String(version)} is newer than this plugin (${String(LATEST_CALL_FORMAT)})`,
   };
 }
 
@@ -251,10 +272,10 @@ function templatesFor(
     const version = rowNumber(row['format_version'], 1);
     return {
       templateId: id,
-      content: readableFormat(version) ? rowText(row['content']) : null,
+      content: readableTemplate(version) ? rowText(row['content']) : null,
       formatVersion: version,
       rendererVersion: rowText(row['renderer_version']),
-      unreadable: !readableFormat(version),
+      unreadable: !readableTemplate(version),
     };
   });
 }
@@ -274,7 +295,7 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     .prepare('SELECT content, format_version FROM snapshots WHERE call_id = ?')
     .get(callId);
   const snapshot = asRow(snapshotValue);
-  const snapshotUnreadable = !readableFormat(
+  const snapshotUnreadable = !readableReviewSnapshot(
     rowNumber(snapshot['format_version'], 1),
   );
   const models = asRows(
@@ -288,7 +309,7 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     )
     .get(rowText(call['config_snapshot_id']));
   const config = asRow(configValue);
-  const configUnreadable = !readableFormat(
+  const configUnreadable = !readableConfigSnapshot(
     rowNumber(config['format_version'], 1),
   );
   const version = versionFields(call);

@@ -458,6 +458,8 @@ export class CallGate {
         stage: 'review',
         result: 'error-escalate',
         reason: 'circuit_open',
+        configRevision: this.host.runtime.effectiveRevision,
+        configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
       return this.settlement.human(
