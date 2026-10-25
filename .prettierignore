@@ -8,3 +8,7 @@ docs/
 design.md
 evidence.md
 validation/
+
+.local/
+playwright-report/
+test-results/

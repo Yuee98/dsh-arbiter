@@ -8,8 +8,9 @@
  * specific.
  */
 
-import picomatch from 'picomatch';
-import { RE2JS } from 're2js';
+import { compileRules } from './compile.js';
+import type { CompiledRule, RuleCompileError, Subject } from './compile.js';
+export type { RuleCompileError } from './compile.js';
 
 import {
   buildFacts,
@@ -22,7 +23,6 @@ import type {
   CommandRule,
   RuleEvaluation,
   RuleMatchDetail,
-  RuleNode,
   RulePath,
   RuleTestResult,
   RuleVerdict,
@@ -43,48 +43,6 @@ const SHELL_TOOLS = new Set([
   'pwsh',
   'powershell',
 ]);
-
-export interface RuleCompileError {
-  readonly id: string;
-  readonly path: string;
-  readonly message: string;
-}
-
-interface CompiledRule {
-  readonly rule: CommandRule;
-  readonly index: number;
-  readonly matches: (subject: Subject) => boolean;
-}
-
-interface Subject {
-  readonly node: RuleNode;
-  readonly text: string;
-  readonly tool: string;
-  readonly identity: SessionKind;
-  readonly selected: Readonly<Record<string, string>>;
-  readonly unresolved: boolean;
-  readonly nodeIndex: number;
-  readonly commandIndex: number;
-  readonly raw: string;
-}
-
-function anchorError(pattern: string): string | null {
-  if (pattern.startsWith('^') || pattern.startsWith('(?:^')) return null;
-  return 'regex patterns must be anchored with "^" or "(?:^"';
-}
-
-function hasParentSegment(pattern: string): boolean {
-  return pattern.split(/[\\/]/u).some((segment) => segment === '..');
-}
-
-function compileRegex(pattern: string): RE2JS {
-  return RE2JS.compile(pattern);
-}
-
-function compileGlob(pattern: string): (value: string) => boolean {
-  const matcher = picomatch(pattern, { dot: true, nocase: false });
-  return (value: string) => matcher(value);
-}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -108,124 +66,6 @@ function selectArgument(argumentsValue: unknown, selector: string): string[] {
     return current.filter((item): item is string => typeof item === 'string');
   }
   return [];
-}
-
-/**
- * Validate one rule and return a compiled matcher.
- *
- * Compilation is the only place that accepts a regex or glob; both the
- * configuration page and the runtime gate call it, so a rule that loads is a
- * rule the tester can match.
- */
-export function compileRule(rule: CommandRule, index: number): CompiledRule {
-  const { match } = rule;
-  if (rule.id.length === 0) throw new Error('rule id must not be empty');
-  if (match.pattern.length === 0) throw new Error('pattern must not be empty');
-  if (
-    match.node === 'tool' &&
-    (match.tool === undefined || match.tool.length === 0)
-  ) {
-    throw new Error('node "tool" requires an explicit tool name');
-  }
-  if (match.node !== 'tool' && match.tool !== undefined) {
-    throw new Error('tool is only valid for node "tool"');
-  }
-  if (match.selector !== undefined && match.node !== 'tool') {
-    throw new Error('selector is only valid for node "tool"');
-  }
-  if (match.node === 'file_redirect' && match.kind === 'regex') {
-    throw new Error('path targets use glob or exact matching, not regex');
-  }
-  if (match.node === 'command' && match.kind === 'glob') {
-    throw new Error('command nodes use exact or regex matching, not glob');
-  }
-  if (match.agents !== undefined) {
-    if (match.agents.length === 0)
-      throw new Error('agents must not be empty when present');
-    for (const agent of match.agents) {
-      if (
-        agent !== 'main' &&
-        agent !== 'subagent' &&
-        !agent.startsWith('preset:')
-      ) {
-        throw new Error(`unknown agent identity "${agent}"`);
-      }
-    }
-  }
-
-  let test: (value: string) => boolean;
-  if (match.kind === 'regex') {
-    const anchor = anchorError(match.pattern);
-    if (anchor !== null) throw new Error(anchor);
-    const regex = compileRegex(match.pattern);
-    test = (value: string) => regex.test(value);
-  } else if (match.kind === 'glob') {
-    if (hasParentSegment(match.pattern))
-      throw new Error('glob patterns must not contain ".." segments');
-    test = compileGlob(match.pattern);
-  } else {
-    const expected = match.pattern;
-    test = (value: string) => value === expected;
-  }
-
-  const toolMatcher =
-    match.tool === undefined
-      ? null
-      : match.tool.includes('*')
-        ? compileGlob(match.tool)
-        : (value: string) => value === match.tool;
-
-  return {
-    rule,
-    index,
-    matches: (subject: Subject): boolean => {
-      if (subject.unresolved) return false;
-      if (subject.node !== match.node) return false;
-      if (
-        match.agents !== undefined &&
-        !match.agents.includes(subject.identity)
-      ) {
-        // Unknown identities are represented only by main/subagent here; a
-        // `preset:<name>` rule cannot match until the host reports a preset.
-        return false;
-      }
-      if (match.node !== 'tool') return test(subject.text);
-      if (toolMatcher === null || !toolMatcher(subject.tool)) return false;
-      if (match.selector === undefined) return test(subject.tool);
-      const selected = subject.selected[match.selector];
-      return selected !== undefined && test(selected);
-    },
-  };
-}
-
-export function compileRules(rules: readonly CommandRule[]): {
-  readonly compiled: readonly CompiledRule[];
-  readonly errors: readonly RuleCompileError[];
-} {
-  const compiled: CompiledRule[] = [];
-  const errors: RuleCompileError[] = [];
-  const ids = new Set<string>();
-  rules.forEach((rule, index) => {
-    if (ids.has(rule.id)) {
-      errors.push({
-        id: rule.id,
-        path: `rules[${String(index)}].id`,
-        message: 'duplicate rule id',
-      });
-      return;
-    }
-    ids.add(rule.id);
-    try {
-      compiled.push(compileRule(rule, index));
-    } catch (error) {
-      errors.push({
-        id: rule.id,
-        path: `rules[${String(index)}]`,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-  return { compiled, errors };
 }
 
 function shellTextOf(argumentsValue: unknown): string | null {
@@ -343,38 +183,19 @@ export interface EvaluateOptions {
   readonly environment?: Readonly<Record<string, string>>;
 }
 
-export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
-  const commandText = SHELL_TOOLS.has(options.tool)
-    ? shellTextOf(options.arguments)
-    : null;
-  const parse =
-    commandText === null ? null : parseShell(commandText, options.cwd);
-  const selectors = [
-    ...new Set(
-      options.rules.flatMap((rule) =>
-        rule.match.node === 'tool' && rule.match.selector !== undefined
-          ? [rule.match.selector]
-          : [],
-      ),
-    ),
-  ];
-  const subjects = subjectsFor(
-    options.tool,
-    options.arguments,
-    parse,
-    options.identity,
-    selectors,
-    options.cwd,
-  );
+interface MatchEntry {
+  detail: RuleMatchDetail;
+  layer: number;
+  order: number;
+  subject: Subject;
+}
 
-  const compiled = compileRules(options.rules);
-  const matches: {
-    detail: RuleMatchDetail;
-    layer: number;
-    order: number;
-    subject: Subject;
-  }[] = [];
-  for (const rule of compiled.compiled) {
+function collectMatches(
+  compiled: readonly CompiledRule[],
+  subjects: readonly Subject[],
+): MatchEntry[] {
+  const matches: MatchEntry[] = [];
+  for (const rule of compiled) {
     for (const subject of subjects) {
       if (!rule.matches(subject)) continue;
       matches.push({
@@ -404,12 +225,52 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
   matches.sort(
     (left, right) => left.layer - right.layer || left.order - right.order,
   );
-  const winner = matches[0];
-  const details = matches.map((entry) => entry.detail);
-  if (winner !== undefined && details[0] !== undefined) {
-    details[0] = { ...details[0], effective: true };
-  }
+  return matches;
+}
 
+function allowCoverage(
+  compiled: readonly CompiledRule[],
+  subjects: readonly Subject[],
+  parse: ShellParse | null,
+): { readonly complete: boolean; readonly covered: boolean } {
+  const coverageSubjects =
+    parse !== null && subjects.some((subject) => subject.node !== 'tool')
+      ? subjects.filter((subject) => subject.node !== 'tool')
+      : subjects;
+  const allowCoverage = new Map<number, boolean>();
+  for (const subject of coverageSubjects)
+    allowCoverage.set(subject.nodeIndex, false);
+  for (const rule of compiled) {
+    if (rule.rule.verdict !== 'allow') continue;
+    for (const subject of coverageSubjects) {
+      if (!rule.matches(subject)) continue;
+      allowCoverage.set(subject.nodeIndex, true);
+    }
+  }
+  const toolSubject = subjects.find((subject) => subject.node === 'tool');
+  const wholeToolAllow =
+    toolSubject !== undefined &&
+    compiled.some(
+      (rule) =>
+        rule.rule.verdict === 'allow' &&
+        rule.rule.match.node === 'tool' &&
+        rule.rule.match.selector === undefined &&
+        rule.matches(toolSubject),
+    );
+  const complete = parse === null || parse.completeness === 'complete';
+  const covered =
+    wholeToolAllow ||
+    (coverageSubjects.length > 0 && [...allowCoverage.values()].every(Boolean));
+  return { complete, covered };
+}
+
+function evaluationRulePath(
+  matches: readonly MatchEntry[],
+  compiled: readonly CompiledRule[],
+  subjects: readonly Subject[],
+  parse: ShellParse | null,
+): RulePath {
+  const winner = matches[0];
   let path: RulePath;
   if (winner !== undefined && winner.detail.verdict !== 'allow') {
     path = {
@@ -419,35 +280,7 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
       ...(winner.detail.hint === undefined ? {} : { hint: winner.detail.hint }),
     };
   } else {
-    const coverageSubjects =
-      parse !== null && subjects.some((subject) => subject.node !== 'tool')
-        ? subjects.filter((subject) => subject.node !== 'tool')
-        : subjects;
-    const allowCoverage = new Map<number, boolean>();
-    for (const subject of coverageSubjects)
-      allowCoverage.set(subject.nodeIndex, false);
-    for (const rule of compiled.compiled) {
-      if (rule.rule.verdict !== 'allow') continue;
-      for (const subject of coverageSubjects) {
-        if (!rule.matches(subject)) continue;
-        allowCoverage.set(subject.nodeIndex, true);
-      }
-    }
-    const toolSubject = subjects.find((subject) => subject.node === 'tool');
-    const wholeToolAllow =
-      toolSubject !== undefined &&
-      compiled.compiled.some(
-        (rule) =>
-          rule.rule.verdict === 'allow' &&
-          rule.rule.match.node === 'tool' &&
-          rule.rule.match.selector === undefined &&
-          rule.matches(toolSubject),
-      );
-    const complete = parse === null || parse.completeness === 'complete';
-    const covered =
-      wholeToolAllow ||
-      (coverageSubjects.length > 0 &&
-        [...allowCoverage.values()].every(Boolean));
+    const { complete, covered } = allowCoverage(compiled, subjects, parse);
     if (matches.length > 0 && complete && covered) {
       const allow = matches.find((entry) => entry.detail.verdict === 'allow');
       if (allow !== undefined) {
@@ -463,6 +296,42 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
       path = { kind: 'review-default', reason: 'partial-allow' };
     }
   }
+
+  return path;
+}
+
+export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
+  const commandText = SHELL_TOOLS.has(options.tool)
+    ? shellTextOf(options.arguments)
+    : null;
+  const parse =
+    commandText === null ? null : parseShell(commandText, options.cwd);
+  const selectors = [
+    ...new Set(
+      options.rules.flatMap((rule) =>
+        rule.match.node === 'tool' && rule.match.selector !== undefined
+          ? [rule.match.selector]
+          : [],
+      ),
+    ),
+  ];
+  const subjects = subjectsFor(
+    options.tool,
+    options.arguments,
+    parse,
+    options.identity,
+    selectors,
+    options.cwd,
+  );
+
+  const compiled = compileRules(options.rules);
+  const matches = collectMatches(compiled.compiled, subjects);
+  const details = matches.map((entry) => entry.detail);
+  if (matches[0] !== undefined && details[0] !== undefined) {
+    details[0] = { ...details[0], effective: true };
+  }
+
+  const path = evaluationRulePath(matches, compiled.compiled, subjects, parse);
 
   const factsResult =
     parse === null

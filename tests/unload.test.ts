@@ -5,7 +5,15 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { apply } from '../src/index.js';
-import type { ContextLike } from '../src/index.js';
+import type {
+  ContextLike,
+  HostServices,
+  ProfileContextLike,
+  ConnectionLike,
+  ToolExecutionLike,
+  ApprovalServiceLike,
+} from '../src/host/types.js';
+import type { SessionEventLike } from '../src/snapshot/types.js';
 
 /**
  * Unload semantics, exercised against a stub context.
@@ -28,12 +36,12 @@ interface StubEvent {
 interface StubSession {
   readonly id: string;
   readonly header: { readonly cwd: string };
-  readonly snapshotEvents: () => readonly unknown[];
+  readonly snapshotEvents: () => readonly SessionEventLike[];
   readonly append: (type: string, data: unknown) => void;
 }
 
 type Gate = (
-  exec: unknown,
+  exec: ToolExecutionLike,
   next: () => Promise<{ kind: string }>,
 ) => Promise<{ kind: string }>;
 
@@ -46,57 +54,84 @@ function makeSession(
   return {
     id,
     header: { cwd: process.cwd() },
-    snapshotEvents: () => events,
+    snapshotEvents: () => events.map((event, seq) => ({ ...event, seq })),
     append(type: string, data: unknown) {
       events.push({ type, data });
     },
   };
 }
 
-/**
- * Assemble a stub context for `apply()`.
- *
- * `ContextLike.get` is a list of exact overloads, which a permissive test
- * double cannot satisfy structurally. This factory is the single documented
- * place where a plain services table is adapted to that interface; every
- * handler member is still checked by the object literal below.
- */
-type StubMembers = {
-  on: (event: string, handler: (...args: never[]) => unknown) => () => void;
-  effect: (fn: () => unknown) => void;
-  inject: () => undefined;
-  logger: { info: () => void; warn: () => void; error: () => void };
-};
+/** The registry is typed at construction and implements each public overload. */
+interface StubServices extends Partial<Omit<HostServices, 'presets'>> {
+  readonly profileContext?: ProfileContextLike;
+  readonly sandboxPolicy?: { readonly defaultMode?: string };
+  readonly connection?: ConnectionLike;
+  readonly permissionPresets?: HostServices['presets'];
+}
+
+type StubMembers = Pick<ContextLike, 'on' | 'effect' | 'inject' | 'logger'>;
 
 function stubContext(
   members: StubMembers,
-  services: Record<string, unknown>,
+  services: StubServices,
 ): ContextLike {
-  // The services table answers every overload of `get`; the plugin only reads
-  // the keys this test seeds.
-  const get = (key: string): unknown => services[key];
-  return { ...members, get } as unknown as ContextLike;
+  const registry: Readonly<Record<string, unknown>> = { ...services };
+  function get(key: 'profileContext'): StubServices['profileContext'];
+  function get(key: 'sandboxPolicy'): StubServices['sandboxPolicy'];
+  function get(key: 'sessions'): StubServices['sessions'];
+  function get(key: 'llm'): StubServices['llm'];
+  function get(key: 'approval'): StubServices['approval'];
+  function get(key: 'permissionPresets'): StubServices['permissionPresets'];
+  function get(key: 'workingDirectory'): StubServices['workingDirectory'];
+  function get(key: 'credentials'): StubServices['credentials'];
+  function get(key: 'configEditor'): StubServices['configEditor'];
+  function get(key: 'commands'): StubServices['commands'];
+  function get(key: 'connection'): StubServices['connection'];
+  function get(key: string): unknown;
+  function get(key: string): unknown {
+    return registry[key];
+  }
+  return { ...members, get };
 }
 
-function isGate(value: unknown): value is Gate {
-  return typeof value === 'function';
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isSessionEvent(value: unknown): value is SessionEvent {
-  return typeof value === 'function';
+/** Runtime dispatch preserves the generic host listener boundary without casts. */
+async function invokeGate(
+  handler: (...args: never[]) => unknown,
+  execution: ToolExecutionLike,
+  next: () => Promise<{ kind: string }>,
+): Promise<{ kind: string }> {
+  const decision: unknown = await Reflect.apply(handler, undefined, [
+    execution,
+    next,
+  ]);
+  if (!isRecord(decision) || typeof decision['kind'] !== 'string') {
+    throw new TypeError('Gate returned an invalid decision');
+  }
+  return { ...decision, kind: decision['kind'] };
 }
 
-function contextFor(session: StubSession): {
+function contextFor(
+  session: StubSession,
+  approvalRequest: ApprovalServiceLike['request'] = () =>
+    Promise.resolve('unavailable'),
+): {
   ctx: ContextLike;
   stub: { gate?: Gate; sessionEvent?: SessionEvent };
   disposers: (() => Promise<unknown>)[];
 } {
   const stub: { gate?: Gate; sessionEvent?: SessionEvent } = {};
   const disposers: (() => Promise<unknown>)[] = [];
-  const services: Record<string, unknown> = {
+  const services: StubServices = {
     sandboxPolicy: { defaultMode: 'workspace-write' },
-    sessions: { get: () => session, list: () => [session] },
-    approval: { config: { policy: 'ask' } },
+    sessions: { get: () => session },
+    approval: {
+      config: { policy: 'ask' },
+      request: approvalRequest,
+    },
     permissionPresets: { registerAuto: () => () => {} },
     workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
   };
@@ -107,10 +142,13 @@ function contextFor(session: StubSession): {
   const ctx = stubContext(
     {
       on(event: string, handler: Listener) {
-        if (event === 'tools/pre-execute' && isGate(handler))
-          stub.gate = handler;
-        if (event === 'session/event' && isSessionEvent(handler)) {
-          stub.sessionEvent = handler;
+        if (event === 'tools/pre-execute') {
+          stub.gate = (execution, next) => invokeGate(handler, execution, next);
+        }
+        if (event === 'session/event') {
+          stub.sessionEvent = (owner, sessionEvent) => {
+            Reflect.apply(handler, undefined, [owner, sessionEvent]);
+          };
         }
         return () => undefined;
       },
@@ -144,6 +182,21 @@ const exec = (session: StubSession, callId: string) => ({
   signal: new AbortController().signal,
   agent: { session },
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolver: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolver = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      if (resolver === undefined)
+        throw new Error('Promise resolver was not initialized');
+      resolver(value);
+    },
+  };
+}
 
 async function unload(disposers: (() => Promise<unknown>)[]): Promise<void> {
   for (const dispose of disposers) await dispose();
@@ -211,66 +264,78 @@ describe('unload rollback', () => {
   });
 
   test('permission is rolled back before the drain wait, not after', async () => {
-    // Regression for a real escape: with rollback after the drain, a call that
-    // arrived once admission stopped ran under the OLD permission (still
-    // danger-full-access) because no rollback had been written yet. The session
-    // log proves the order: the rollback event must be appended while an
-    // in-flight call is still active.
-    // The trace is the authoritative ordering witness: it is written by the
-    // production disposer itself, so this asserts the real sequence rather than
-    // a side effect that a differently-ordered implementation could mimic.
+    // Hold a real approval request inside the production gate. Waiting for the
+    // request, rather than a timer or the downstream next(), proves the active
+    // review is still pending when teardown narrows permission.
     const tracePath = join(
       tmpdir(),
       `arbiter-unload-order-${String(Date.now())}.jsonl`,
     );
+    const started = deferred<true>();
+    const answer = deferred<'unavailable'>();
+    let pending: Promise<{ kind: string }> | undefined;
+    let unloadStarted: Promise<unknown>[] = [];
     process.env['ARBITER_TRACE_PATH'] = tracePath;
     try {
       const events: StubEvent[] = [];
       const session = makeSession('s5', events);
-      const { ctx, stub, disposers } = contextFor(session);
+      const { ctx, stub, disposers } = contextFor(session, () => {
+        started.resolve(true);
+        return answer.promise;
+      });
       apply(ctx, { modes: { main: 'normal' } });
-
-      // Gate one call and hold it inside the gate, so `active` stays > 0
-      // while the unload disposer runs.
-      let releaseGate: (() => void) | undefined;
-      const holdingNext = new Promise<void>((resolve) => {
-        releaseGate = resolve;
-      });
-      const pending = stub.gate?.(exec(session, 'c5'), async () => {
-        await holdingNext;
-        return { kind: 'allow' };
-      });
+      const gate = stub.gate;
+      if (gate === undefined) throw new Error('Gate was not registered');
+      pending = gate(exec(session, 'c5'), allow);
+      await started.promise;
 
       events.push({
         type: 'sandbox/mode',
         data: { mode: 'danger-full-access' },
       });
       events.push({ type: 'approval/policy', data: { policy: 'never' } });
-      const unloadStarted = disposers.map((dispose) => dispose());
+      unloadStarted = disposers.map((dispose) => dispose());
 
-      // Let the disposer reach its first await.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const tracelines = readFileSync(tracePath, 'utf8')
+      // Teardown has reached its drain wait, while the held approval cannot
+      // settle until this test releases it. A new call must already be ungated
+      // and see the rolled-back host boundary.
+      expect(await gate(exec(session, 'c5-late'), allow)).toEqual({
+        kind: 'allow',
+      });
+      expect(
+        events.filter((event) => event.type === 'sandbox/mode').at(-1)?.data,
+      ).toEqual({ mode: 'workspace-write' });
+      const trace = readFileSync(tracePath, 'utf8')
         .split('\n')
         .filter(Boolean)
-        .map((line) => JSON.parse(line) as { event: string });
-      const names = tracelines.map((e) => e.event);
+        .map((line) => {
+          const record: unknown = JSON.parse(line);
+          if (!isRecord(record) || typeof record['event'] !== 'string') {
+            throw new TypeError('Invalid lifecycle trace');
+          }
+          return { event: record['event'], active: record['active'] };
+        });
+      const names = trace.map((record) => record.event);
       const stopAt = names.indexOf('unload/stop-admission');
       const rollbackAt = names.indexOf('unload/rollback');
-      const drainedAt = names.indexOf('unload/drained');
-      // The gate was entered, so the drain would have waited for it.
-      expect(names).toContain('gate/entered');
+      expect(names.filter((name) => name === 'gate/entered')).toHaveLength(1);
+      expect(
+        trace.find((record) => record.event === 'unload/stop-admission')
+          ?.active,
+      ).toBeGreaterThan(0);
       expect(stopAt).toBeGreaterThan(-1);
-      // The point: rollback happens while the call is still in flight, before
-      // the drain wait finishes.
       expect(rollbackAt).toBeGreaterThan(stopAt);
-      expect(drainedAt === -1 || drainedAt > rollbackAt).toBe(true);
+      expect(names).not.toContain('unload/drained');
+      expect(names).toContain('gate/skipped');
 
-      releaseGate?.();
+      answer.resolve('unavailable');
       await pending;
       await Promise.all(unloadStarted);
     } finally {
+      // Always release the gate, including after a failed assertion.
+      answer.resolve('unavailable');
+      await pending;
+      await Promise.all(unloadStarted);
       delete process.env['ARBITER_TRACE_PATH'];
       rmSync(tracePath, { force: true });
     }

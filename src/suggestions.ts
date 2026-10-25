@@ -86,6 +86,10 @@ function hardCategory(
   if (signals.destructive) return 'destructive effect';
   if (signals.egress) return 'network egress';
   if (signals.bulk) return 'bulk or unbounded effect';
+  return observedCategory(effect);
+}
+
+function observedCategory(effect: unknown): string | null {
   if (isRecord(effect)) {
     const observed = effect['observed'];
     if (isRecord(observed)) {
@@ -123,105 +127,135 @@ export function generateCandidates(
   store: AuditStore,
   options: SuggestionOptions,
 ): readonly CandidateProposal[] {
-  const calls = store.callsForAnalysis(options.windowStart, options.windowEnd);
   const groups = new Map<string, Group>();
-  for (const call of calls) {
-    if (call.tool !== 'bash' && call.tool !== 'terminal') continue;
-    const command = commandOf(call.arguments);
-    if (command === null) continue;
-    const parse = parseShell(command, '/');
-    if (parse.status !== 'ok' || parse.completeness !== 'complete') continue;
-    if (parse.commands.length !== 1) continue;
-    const argv = parse.commands[0]?.argv;
-    if (argv === undefined || argv.length === 0) continue;
-    const first = argv[0] ?? '';
-    if (first.length === 0) continue;
-    const second = argv[1];
-    const prefix =
-      second !== undefined && !second.startsWith('-')
-        ? `${first} ${second}`
-        : first;
-    const key = `${call.tool}:${prefix}`;
-    const existing = groups.get(key);
-    const group: Group = existing ?? {
-      key,
-      occurrences: 0,
-      approved: 0,
-      rejected: 0,
-      failed: 0,
-      callIds: [],
-      deniedCallIds: [],
-      commands: [],
-      skipped: [],
-    };
-    const category = hardCategory(call.signals, call.effect);
-    group.occurrences += 1;
-    if (ALLOWED_RESULTS.has(call.result)) {
-      if (category !== null) group.skipped.push(category);
-      else group.approved += 1;
-    } else {
-      group.rejected += 1;
-      if (group.deniedCallIds.length < 8) group.deniedCallIds.push(call.callId);
-    }
-    if (call.executionStatus === 'failed') group.failed += 1;
-    if (group.callIds.length < 8) group.callIds.push(call.callId);
-    if (group.commands.length < 5 && !group.commands.includes(command))
-      group.commands.push(command);
-    groups.set(key, group);
+  for (const call of store.callsForAnalysis(
+    options.windowStart,
+    options.windowEnd,
+  )) {
+    accumulateCall(groups, call);
   }
-
   const proposals: CandidateProposal[] = [];
   for (const group of [...groups.values()].sort(
     (left, right) => right.occurrences - left.occurrences,
   )) {
-    if (group.occurrences < options.minOccurrences) continue;
-    if (group.approved !== group.occurrences) continue;
-    if (group.rejected > 0) continue;
-    if (group.failed > 0) continue;
-    if (group.skipped.length > 0) continue;
-    const [tool, ...rest] = group.key.split(':');
-    const words = rest.join(':').trim();
-    if (words.length === 0) continue;
-    const pattern = `^${words
-      .split(/\s+/u)
-      .map(escapeRegex)
-      .join('\\s+')}(?:\\s|$)`;
-    const idBase = `auto-${slug(words)}`;
-    const hash = createHash('sha256')
-      .update(`${tool ?? ''}:${pattern}`)
-      .digest('hex')
-      .slice(0, 6);
-    const candidateId = `candidate-${idBase}-${hash}`;
-    proposals.push({
-      candidateId,
-      stats: {
-        occurrences: group.occurrences,
-        approved: group.approved,
-        rejected: group.rejected,
-        failed: group.failed,
-        window: `${new Date(options.windowStart).toISOString().slice(0, 10)}..${new Date(options.windowEnd).toISOString().slice(0, 10)}`,
-      },
-      rule: {
-        id: `${idBase}-${hash}`,
-        comment: `离线建议：${String(group.occurrences)} 次已放行、无可见失败的 ${words} 调用`,
-        match: {
-          node: 'command',
-          kind: 'regex',
-          pattern,
-          agents: ['main'],
-        },
-        verdict: 'allow',
-      },
-      evidence: {
-        callIds: group.callIds,
-        deniedCallIds: group.deniedCallIds,
-        commands: group.commands,
-        skipped: group.skipped,
-      },
-    });
+    if (!eligibleGroup(group, options.minOccurrences)) continue;
+    const proposal = proposalFor(group, options);
+    if (proposal === null) continue;
+    proposals.push(proposal);
     if (proposals.length >= options.maxCandidates) break;
   }
   return proposals;
+}
+
+type AnalysisCall = ReturnType<AuditStore['callsForAnalysis']>[number];
+
+function commandFamily(
+  call: AnalysisCall,
+): { key: string; command: string } | null {
+  if (call.tool !== 'bash' && call.tool !== 'terminal') return null;
+  const command = commandOf(call.arguments);
+  if (command === null) return null;
+  const parse = parseShell(command, '/');
+  if (parse.status !== 'ok' || parse.completeness !== 'complete') return null;
+  if (parse.commands.length !== 1) return null;
+  const argv = parse.commands[0]?.argv;
+  if (argv === undefined || argv.length === 0) return null;
+  const first = argv[0] ?? '';
+  if (first.length === 0) return null;
+  const second = argv[1];
+  const prefix =
+    second !== undefined && !second.startsWith('-')
+      ? `${first} ${second}`
+      : first;
+  return { key: `${call.tool}:${prefix}`, command };
+}
+
+function accumulateCall(groups: Map<string, Group>, call: AnalysisCall): void {
+  const family = commandFamily(call);
+  if (family === null) return;
+  const { key, command } = family;
+  const existing = groups.get(key);
+  const group: Group = existing ?? {
+    key,
+    occurrences: 0,
+    approved: 0,
+    rejected: 0,
+    failed: 0,
+    callIds: [],
+    deniedCallIds: [],
+    commands: [],
+    skipped: [],
+  };
+  const category = hardCategory(call.signals, call.effect);
+  group.occurrences += 1;
+  if (ALLOWED_RESULTS.has(call.result)) {
+    if (category !== null) group.skipped.push(category);
+    else group.approved += 1;
+  } else {
+    group.rejected += 1;
+    if (group.deniedCallIds.length < 8) group.deniedCallIds.push(call.callId);
+  }
+  if (call.executionStatus === 'failed') group.failed += 1;
+  if (group.callIds.length < 8) group.callIds.push(call.callId);
+  if (group.commands.length < 5 && !group.commands.includes(command))
+    group.commands.push(command);
+  groups.set(key, group);
+}
+
+function eligibleGroup(group: Group, minimum: number): boolean {
+  return (
+    group.occurrences >= minimum &&
+    group.approved === group.occurrences &&
+    group.rejected === 0 &&
+    group.failed === 0 &&
+    group.skipped.length === 0
+  );
+}
+
+function proposalFor(
+  group: Group,
+  options: SuggestionOptions,
+): CandidateProposal | null {
+  const [tool, ...rest] = group.key.split(':');
+  const words = rest.join(':').trim();
+  if (words.length === 0) return null;
+  const pattern = `^${words
+    .split(/\s+/u)
+    .map(escapeRegex)
+    .join('\\s+')}(?:\\s|$)`;
+  const idBase = `auto-${slug(words)}`;
+  const hash = createHash('sha256')
+    .update(`${tool ?? ''}:${pattern}`)
+    .digest('hex')
+    .slice(0, 6);
+  const candidateId = `candidate-${idBase}-${hash}`;
+  return {
+    candidateId,
+    stats: {
+      occurrences: group.occurrences,
+      approved: group.approved,
+      rejected: group.rejected,
+      failed: group.failed,
+      window: `${new Date(options.windowStart).toISOString().slice(0, 10)}..${new Date(options.windowEnd).toISOString().slice(0, 10)}`,
+    },
+    rule: {
+      id: `${idBase}-${hash}`,
+      comment: `离线建议：${String(group.occurrences)} 次已放行、无可见失败的 ${words} 调用`,
+      match: {
+        node: 'command',
+        kind: 'regex',
+        pattern,
+        agents: ['main'],
+      },
+      verdict: 'allow',
+    },
+    evidence: {
+      callIds: group.callIds,
+      deniedCallIds: group.deniedCallIds,
+      commands: group.commands,
+      skipped: group.skipped,
+    },
+  };
 }
 
 /** Persist proposals as pending candidates; existing rows keep their review status. */

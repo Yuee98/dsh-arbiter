@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { evaluateCall, testRules } from '../src/rules/match.js';
+import { evaluateCall, testRules, validateRules } from '../src/rules/match.js';
 import { parseShell } from '../src/shell/parse.js';
 import type { CommandRule } from '../src/types.js';
 
@@ -336,6 +336,34 @@ describe('rule priority and coverage', () => {
 });
 
 describe('rule tester', () => {
+  test('disabled allow rules cannot grant admission in the rule tester', () => {
+    const result = testRules(
+      'echo hi',
+      [rule({ id: 'disabled-allow', verdict: 'allow', enabled: false })],
+      { identity: 'main', workspaceRoot: '/w', cwd: '/w' },
+    );
+    expect(result).toMatchObject({
+      path: 'review(default)',
+      rule: null,
+      matches: [],
+    });
+  });
+
+  test('disabled rules still receive configuration validation', () => {
+    expect(
+      validateRules([
+        rule({
+          id: 'disabled-invalid',
+          verdict: 'allow',
+          enabled: false,
+          match: { node: 'command', kind: 'regex', pattern: '^(' },
+        }),
+      ]),
+    ).toEqual([
+      expect.objectContaining({ id: 'disabled-invalid', path: 'rules[0]' }),
+    ]);
+  });
+
   test('reports path, partial coverage and unresolved facts', () => {
     const result = testRules('bash: echo $UNKNOWN', [], {
       identity: 'main',

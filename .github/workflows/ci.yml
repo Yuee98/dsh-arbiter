@@ -14,8 +14,106 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify
+  checks:
+    name: Check (${{ matrix.check.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - name: types
+            command: pnpm typecheck
+            tools: node npm:pnpm
+          - name: code lint
+            command: pnpm lint:code
+            tools: node npm:pnpm
+          - name: Testing Library lint
+            command: pnpm lint:testing-library
+            tools: node npm:pnpm
+          - name: formatting
+            command: pnpm format:check
+            tools: node npm:pnpm
+          - name: dependency boundaries
+            command: pnpm check:unused && pnpm check:dependencies
+            tools: node npm:pnpm
+          - name: workflows, locales and peers
+            command: pnpm check:workflows && pnpm check:i18n && pnpm check:peers
+            tools: node npm:pnpm github:rhysd/actionlint github:zizmorcore/zizmor
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned tools
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          version: '2026.10.9'
+          install_args: ${{ matrix.check.tools }}
+      - name: Find dependency store
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Run check
+        env:
+          CHECK_COMMAND: ${{ matrix.check.command }}
+        run: bash -e -o pipefail -c "$CHECK_COMMAND"
+
+  tests:
+    name: Test (${{ matrix.project }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [unit, integration, ui]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned tools
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          version: '2026.10.9'
+          install_args: node npm:pnpm
+      - name: Find dependency store
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Run one test layer and collect coverage
+        env:
+          TEST_PROJECT: ${{ matrix.project }}
+        run: >-
+          pnpm exec vitest run --project "$TEST_PROJECT" --coverage
+          --reporter=default --reporter=blob --reporter=github-actions
+          --outputFile.blob=".local/ci/blobs/$TEST_PROJECT.json"
+          --coverage.reportsDirectory=".local/ci/coverage/$TEST_PROJECT"
+          --coverage.reporter=json-summary
+      - name: Save test and coverage blob
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-blob-${{ matrix.project }}
+          path: .local/ci/blobs/${{ matrix.project }}.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build, consumer and regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -27,7 +125,83 @@ jobs:
         uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           version: '2026.10.9'
+          install_args: node npm:pnpm
+      - name: Find dependency store
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
       - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Verify project
-        run: pnpm verify
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Build package
+        run: pnpm build
+      - name: Verify package consumer
+        run: pnpm check:build
+      - name: Run R1–R9 regressions
+        run: pnpm check:regressions
+
+  coverage:
+    name: Merge coverage reports
+    needs: tests
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned tools
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          version: '2026.10.9'
+          install_args: node npm:pnpm
+      - name: Find dependency store
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore dependency cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'mise.toml') }}
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Download all test layer blobs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: test-blob-*
+          path: .local/ci/blobs
+          merge-multiple: true
+      - name: Merge coverage without rerunning tests
+        run: |
+          test -f .local/ci/blobs/unit.json
+          test -f .local/ci/blobs/integration.json
+          test -f .local/ci/blobs/ui.json
+          pnpm exec vitest --merge-reports=.local/ci/blobs --coverage --reporter=default
+      - name: Save combined coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify
+    needs: [checks, tests, build, coverage]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require every job to succeed
+        env:
+          CI_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: node tooling/ci/check-results.mjs

@@ -4,8 +4,8 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
-  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,17 +13,28 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
+import * as react from 'react';
+import * as jsxRuntime from 'react/jsx-runtime';
+import { publint } from 'publint';
+import { formatMessage } from 'publint/utils';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const consumer = await mkdtemp(join(tmpdir(), 'dsh-arbiter-build-'));
+const temporary = await mkdtemp(join(tmpdir(), 'dsh-arbiter-build-'));
+const consumer = join(temporary, 'consumer');
+const tarball = join(temporary, 'dsh-arbiter.tgz');
 
-function runNode(args: string[]): void {
-  const result = spawnSync(process.execPath, args, {
-    cwd: consumer,
+function run(command: string, args: string[], cwd = consumer): void {
+  const result = spawnSync(command, args, {
+    cwd,
     stdio: 'inherit',
+    env: { ...process.env, CI: 'true' },
   });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, 'Build consumer verification failed.');
+}
+
+function runNode(args: string[]): void {
+  run(process.execPath, args);
 }
 
 interface LoadedClient {
@@ -36,8 +47,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 try {
-  await mkdir(join(consumer, 'node_modules'));
-  await symlink(root, join(consumer, 'node_modules/dsh-arbiter'), 'dir');
+  await mkdir(consumer);
+  // Exercise exactly the publishable files. A repo symlink can hide an omitted
+  // runtime dependency, declaration, locale, or bundle-patch file.
+  run('pnpm', ['pack', '--out', tarball], root);
+  const lintResult = await publint({
+    pack: { tarball: Uint8Array.from(await readFile(tarball)).buffer },
+    strict: true,
+  });
+  const packageErrors = lintResult.messages.filter(
+    (message) => message.type !== 'suggestion',
+  );
+  for (const message of packageErrors) {
+    process.stderr.write(
+      `${formatMessage(message, lintResult.pkg) ?? JSON.stringify(message)}\n`,
+    );
+  }
+  assert.equal(packageErrors.length, 0, 'Publint found package defects.');
+  await writeFile(
+    join(consumer, 'package.json'),
+    JSON.stringify({
+      name: 'arbiter-packed-consumer',
+      private: true,
+      type: 'module',
+      dependencies: { 'dsh-arbiter': `file:${tarball}` },
+    }),
+  );
+  // The preceding frozen repo install populates the store. This check must not
+  // fetch packages, run lifecycle scripts, or resolve through repo node_modules.
+  run('pnpm', ['install', '--offline', '--ignore-scripts']);
+  const packageRoot = join(consumer, 'node_modules/dsh-arbiter');
+  assert.ok(
+    (await realpath(packageRoot)).startsWith(`${await realpath(consumer)}/`),
+    'The consumer must resolve an installed tarball, not the repository.',
+  );
 
   runNode([
     '--input-type=module',
@@ -48,6 +91,8 @@ try {
       "assert.equal(name, 'arbiter');",
       "assert.deepEqual(inject, ['tools','sessions','llm','approval','permissionPresets','workingDirectory']);",
       "assert.equal(typeof apply, 'function');",
+      "assert.equal(import.meta.resolve('dsh-arbiter/package.json').includes('/consumer/'), true);",
+      "assert.equal(import.meta.resolve('dsh-arbiter/client').endsWith('/lib/client.cjs'), true);",
     ].join('\n'),
   ]);
 
@@ -88,7 +133,10 @@ try {
 
   // Verify the browser bundle is a loadable module factory with the expected
   // plugin exports. The component is not rendered here.
-  const clientCode = await readFile(join(root, 'lib/client.js'), 'utf8');
+  const clientCode = await readFile(
+    join(packageRoot, 'lib/client.cjs'),
+    'utf8',
+  );
   const holder: { value: LoadedClient | null } = { value: null };
   const context = createContext({
     window: {
@@ -106,22 +154,10 @@ try {
   }
   const registered: LoadedClient = holder.value;
   assert.equal(registered.id, 'dsh-arbiter');
-  const jsx = (): null => null;
-  const stub = (): null => null;
   const clientExports = registered.factory((specifier: string) => {
-    if (specifier === 'react/jsx-runtime') {
-      return { jsx, jsxs: jsx, Fragment: null };
-    }
-    if (specifier === 'react') {
-      return {
-        useState: stub,
-        useEffect: stub,
-        useCallback: stub,
-        useMemo: stub,
-        useRef: stub,
-      };
-    }
-    return {};
+    if (specifier === 'react/jsx-runtime') return jsxRuntime;
+    if (specifier === 'react') return react;
+    throw new Error(`Unexpected client external dependency: ${specifier}`);
   });
   assert.equal(
     isRecord(clientExports),
@@ -133,8 +169,20 @@ try {
     const injectValue = clientExports['inject'];
     assert.equal(Array.isArray(injectValue), true);
     if (Array.isArray(injectValue))
-      assert.equal(injectValue.join(','), 'slots');
+      assert.equal(injectValue.join(','), 'slots,locale');
   }
+  const patch = await readFile(join(packageRoot, 'cordis.patch.yml'), 'utf8');
+  assert.match(patch, /name: dsh-arbiter/);
+  for (const locale of ['zh', 'en']) {
+    const dictionary: unknown = JSON.parse(
+      await readFile(join(packageRoot, `locale/${locale}.json`), 'utf8'),
+    );
+    assert.ok(isRecord(dictionary), `Packaged ${locale} locale is invalid.`);
+    assert.equal(typeof dictionary['title'], 'string');
+  }
+  process.stdout.write(
+    'Packed consumer: runtime, types, client factory, patch and locales passed.\n',
+  );
 } finally {
-  await rm(consumer, { recursive: true, force: true });
+  await rm(temporary, { recursive: true, force: true });
 }

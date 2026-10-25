@@ -5,6 +5,7 @@ import {
   extractJsonObject,
   parseChatText,
   parseDecisionResponse,
+  signalsFromChat,
   runChatReviewer,
   runDecisionReviewer,
 } from '../src/reviewer.js';
@@ -19,6 +20,12 @@ describe('chat reviewer output', () => {
     );
     expect(parsed.ok).toBe(true);
     expect(parsed.raw?.risk).toBe(2);
+    if (parsed.raw === undefined) throw new Error('Missing parsed signals');
+    expect(signalsFromChat(parsed.raw, 0)).toMatchObject({
+      riskPoint: 2,
+      authPoint: 6,
+      source: 'chat',
+    });
   });
 
   test('extracts a fenced object with surrounding prose', () => {

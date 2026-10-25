@@ -24,15 +24,18 @@
     "checkJs": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
     "tests/**/*.ts",
+    "tests/**/*.tsx",
     "scripts/**/*.ts",
     "*.config.ts",
-    "*.config.mjs"
+    "*.config.mjs",
+    "tooling/**/*.mjs"
   ],
   "exclude": ["node_modules", "lib", "coverage", "validation"]
 }

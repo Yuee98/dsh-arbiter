@@ -186,17 +186,25 @@ function deny(
   };
 }
 
-/**
- * Apply one strategy to one set of signals.
- *
- * Order: fixed deny (R1, R2), conditions that require a human in every mode
- * (R3, R4, R5), then the mode-dependent rows (R6, R7), finally R8.
- */
-export function decideReview(
-  signals: ReviewSignals,
-  strategy: StrategyName,
-  thresholds: PolicyThresholds,
-): PolicyDecision {
+interface DecisionContext {
+  readonly signals: ReviewSignals;
+  readonly strategy: StrategyName;
+  readonly thresholds: PolicyThresholds;
+}
+
+function isCriticalRisk({ signals, thresholds }: DecisionContext): boolean {
+  const probability = probabilityAtLeast(signals.riskDist, 9);
+  return (
+    signals.riskClass === 'high' ||
+    (signals.riskPoint !== null && signals.riskPoint >= 9) ||
+    (signals.riskDist !== null &&
+      certainty(probability) &&
+      (probability ?? 0) >= thresholds.tauCritical)
+  );
+}
+
+function fixedDecision(context: DecisionContext): PolicyDecision | null {
+  const { signals, strategy, thresholds } = context;
   if (signals.secrets && signals.egress) {
     return deny(
       'R1',
@@ -206,14 +214,7 @@ export function decideReview(
       thresholds,
     );
   }
-
-  const critical =
-    signals.riskClass === 'high' ||
-    (signals.riskPoint !== null && signals.riskPoint >= 9) ||
-    (signals.riskDist !== null &&
-      certainty(probabilityAtLeast(signals.riskDist, 9)) &&
-      (probabilityAtLeast(signals.riskDist, 9) ?? 0) >= thresholds.tauCritical);
-  if (critical) {
+  if (isCriticalRisk(context)) {
     return deny(
       'R2',
       'critical risk of irreversible damage',
@@ -222,7 +223,6 @@ export function decideReview(
       thresholds,
     );
   }
-
   if (signals.destructive && signals.bulk) {
     return escalate(
       'R4',
@@ -232,70 +232,63 @@ export function decideReview(
       thresholds,
     );
   }
+  return null;
+}
 
-  const required: 'none' | 'implied' | 'explicit' =
-    signals.riskPoint !== null
-      ? signals.riskPoint >= thresholds.explicitFromRisk
-        ? 'explicit'
-        : 'none'
-      : signals.riskClass === 'low'
-        ? 'none'
-        : 'explicit';
-  const auth = authGate(signals, thresholds, required);
-  if (!auth.passed) {
+function requiredAuthorization(
+  signals: ReviewSignals,
+  thresholds: PolicyThresholds,
+): 'none' | 'explicit' {
+  if (signals.riskPoint !== null) {
+    return signals.riskPoint >= thresholds.explicitFromRisk
+      ? 'explicit'
+      : 'none';
+  }
+  return signals.riskClass === 'low' ? 'none' : 'explicit';
+}
+
+function bulkEgressDecision(context: DecisionContext): PolicyDecision {
+  const { signals, strategy, thresholds } = context;
+  if (!thresholds.allowBulkEgress) {
     return escalate(
-      'R3',
-      `authorization is insufficient (${auth.observed})`,
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-
-  if (
-    signals.bulk &&
-    signals.egress &&
-    !signals.secrets &&
-    !signals.destructive
-  ) {
-    if (!thresholds.allowBulkEgress) {
-      return escalate(
-        'R6',
-        'bulk external sending requires a human decision in this mode',
-        strategy,
-        signals,
-        thresholds,
-      );
-    }
-    const explicit = authGate(signals, thresholds, 'explicit');
-    if (!explicit.passed) {
-      return escalate(
-        'R6',
-        `bulk external sending requires explicit authorization (${explicit.observed})`,
-        strategy,
-        signals,
-        thresholds,
-      );
-    }
-    const gate = riskGate(signals, thresholds);
-    if (!gate.passed) {
-      return escalate(
-        'R6',
-        `bulk external sending exceeds the risk ceiling (${gate.observed})`,
-        strategy,
-        signals,
-        thresholds,
-      );
-    }
-    return allow(
       'R6',
-      'bulk external sending with explicit authorization',
+      'bulk external sending requires a human decision in this mode',
       strategy,
       signals,
       thresholds,
     );
   }
+  const explicit = authGate(signals, thresholds, 'explicit');
+  if (!explicit.passed) {
+    return escalate(
+      'R6',
+      `bulk external sending requires explicit authorization (${explicit.observed})`,
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+  const gate = riskGate(signals, thresholds);
+  if (!gate.passed) {
+    return escalate(
+      'R6',
+      `bulk external sending exceeds the risk ceiling (${gate.observed})`,
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+  return allow(
+    'R6',
+    'bulk external sending with explicit authorization',
+    strategy,
+    signals,
+    thresholds,
+  );
+}
 
+function riskDecision(context: DecisionContext): PolicyDecision {
+  const { signals, strategy, thresholds } = context;
   if (signals.riskClass === 'low' && !signals.destructive && !signals.secrets) {
     return allow(
       'R7',
@@ -305,7 +298,6 @@ export function decideReview(
       thresholds,
     );
   }
-
   const gate = riskGate(signals, thresholds);
   if (!gate.passed) {
     return escalate(
@@ -316,10 +308,8 @@ export function decideReview(
       thresholds,
     );
   }
-
-  // A destructive action that is not bulk may still be allowed with explicit
-  // authorization, but only inside the regular risk ceiling. This keeps R4
-  // meaningful without turning every deletion into a human-only action.
+  // Non-bulk destruction still needs explicit authorization and the regular
+  // risk ceiling; deleting one item is not automatically human-only.
   if (
     signals.destructive &&
     signals.riskPoint !== null &&
@@ -333,7 +323,6 @@ export function decideReview(
       thresholds,
     );
   }
-
   return allow(
     'R7',
     'explicitly authorized action within the selected risk ceiling',
@@ -341,6 +330,43 @@ export function decideReview(
     signals,
     thresholds,
   );
+}
+
+/**
+ * Apply fixed denials (R1, R2), mandatory escalation (R4, R3), mode-dependent
+ * bulk egress (R6), and finally the regular risk ceiling (R5, R7).
+ */
+export function decideReview(
+  signals: ReviewSignals,
+  strategy: StrategyName,
+  thresholds: PolicyThresholds,
+): PolicyDecision {
+  const context = { signals, strategy, thresholds };
+  const fixed = fixedDecision(context);
+  if (fixed !== null) return fixed;
+  const auth = authGate(
+    signals,
+    thresholds,
+    requiredAuthorization(signals, thresholds),
+  );
+  if (!auth.passed) {
+    return escalate(
+      'R3',
+      `authorization is insufficient (${auth.observed})`,
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
+  if (
+    signals.bulk &&
+    signals.egress &&
+    !signals.secrets &&
+    !signals.destructive
+  ) {
+    return bulkEgressDecision(context);
+  }
+  return riskDecision(context);
 }
 
 /**
