@@ -533,6 +533,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       facts: null,
       priorVerdicts: [],
       sessionRecordGap: null,
+      configRevision: 'verify',
     });
     const snapshot = built.snapshot;
 
@@ -639,6 +640,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       facts: null,
       priorVerdicts: [],
       sessionRecordGap: null,
+      configRevision: 'verify',
     });
     check(
       'V9',
@@ -691,6 +693,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       facts: null,
       priorVerdicts: [],
       sessionRecordGap: null,
+      configRevision: 'verify',
     });
     const inner = await buildReviewSnapshot({
       agent: { session: outerSession },
@@ -702,6 +705,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       facts: null,
       priorVerdicts: [],
       sessionRecordGap: null,
+      configRevision: 'verify',
     });
     check(
       'V12',

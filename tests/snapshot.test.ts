@@ -123,6 +123,7 @@ const base = {
   facts: null,
   priorVerdicts: [],
   sessionRecordGap: null as string | null,
+  configRevision: 'test',
 };
 
 describe('authorization evidence sources', () => {

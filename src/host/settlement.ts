@@ -23,6 +23,13 @@ interface HumanOutcome {
   readonly text: string;
 }
 
+/**
+ * The single mapping from a host approval answer to a settled outcome.
+ *
+ * `unavailable` is a *fallback*, not a human answer: no one was asked, so it
+ * must never be reported as a rejection. `cancelled` means the question ended
+ * without an answer, which is an abort rather than a denial.
+ */
 const HUMAN_OUTCOMES = {
   'allowed-once': {
     result: 'human-allow',
@@ -53,7 +60,12 @@ const HUMAN_OUTCOMES = {
 function humanUnavailable(
   call: CallContext,
   host: HostEnvironment,
+  approvalOpen: boolean,
 ): { code: string; text: string } | null {
+  // An approval that is already on screen keeps waiting: switching to strict
+  // must not withdraw a question the user is looking at. Only a decision that
+  // has not been asked yet consults the currently effective mode.
+  if (approvalOpen) return null;
   if (call.mode !== 'normal')
     return {
       code: 'automatic_mode_no_human',
@@ -147,12 +159,74 @@ function pushStage(
 }
 
 /** Settles decisions independently of best-effort audit persistence. */
+/** The disposition a settled outcome hands back to the host. */
+export type SettledDisposition = 'allow' | 'deny' | 'cancel';
+
+/** One call's terminal outcome, claimed exactly once. */
+export interface SettledOutcome {
+  readonly result: CallResult;
+  readonly disposition: SettledDisposition;
+  readonly text: string;
+}
+
+const TERMINAL_DISPOSITIONS: Readonly<Record<string, SettledDisposition>> = {
+  allow: 'allow',
+  'review-allow': 'allow',
+  'human-allow': 'allow',
+};
+
+/** The host answer a previously settled outcome dictates. */
+function dispositionOf(outcome: SettledOutcome): PreToolDecision {
+  if (outcome.disposition === 'allow') return { kind: 'allow' };
+  if (outcome.disposition === 'cancel') return { kind: 'cancel' };
+  return deny(outcome.text);
+}
+
+/** What the caller knows about the human question before asking it. */
+export interface HumanAsk {
+  /**
+   * True when an approval is already outstanding for this call.
+   *
+   * A review that escalated before a configuration change has already put a
+   * question on screen. Switching to `strict` afterwards must not withdraw it,
+   * so the mode and channel are not re-evaluated; the user's answer still
+   * settles the call. A decision that has not asked yet passes `false` and
+   * consults the currently effective mode.
+   */
+  readonly approvalOpen?: boolean;
+}
+
 export class CallSettlement {
   private readonly host: HostEnvironment;
   private readonly history: DecisionHistory;
+  /**
+   * The one terminal outcome per call.
+   *
+   * A review and a human answer, an answer and a close, or two failures can all
+   * reach for the same call's ending. The first claim wins; every later claim
+   * gets the winner back instead of appending a second terminal stage or
+   * returning a different disposition to the host.
+   */
+  private readonly outcomes = new Map<string, SettledOutcome>();
   constructor(host: HostEnvironment, history: DecisionHistory) {
     this.host = host;
     this.history = history;
+  }
+
+  /**
+   * Whether this call already reached its final outcome.
+   *
+   * Settlement is one-shot: two paths can observe the same ending (an answer
+   * and a close, a review and a cancel), and a second write would both corrupt
+   * the audit chain and re-run the denial bookkeeping.
+   */
+  isSettled(callId: string): boolean {
+    return this.outcomes.has(callId);
+  }
+
+  /** The outcome that already won this call, if any. */
+  settledOutcome(callId: string): SettledOutcome | undefined {
+    return this.outcomes.get(callId);
   }
 
   /**
@@ -266,12 +340,61 @@ export class CallSettlement {
     };
   }
 
+  /**
+   * Claim the terminal outcome for this call, without writing anything yet.
+   *
+   * Claiming first is what makes the ending one-shot: the winner appends its
+   * terminal stage and writes the record, while a competing path learns it lost
+   * before it mutates the trace. The claim is released only if the write throws,
+   * so a genuine failure can still be retried by the caller's own path.
+   */
+  claim(
+    call: CallContext,
+    result: CallResult,
+    reason: string,
+  ): { readonly won: boolean; readonly outcome: SettledOutcome } {
+    const existing = this.outcomes.get(call.exec.callId);
+    if (existing !== undefined) return { won: false, outcome: existing };
+    const outcome: SettledOutcome = {
+      result,
+      disposition: TERMINAL_DISPOSITIONS[result] ?? 'deny',
+      text: reason,
+    };
+    this.outcomes.set(call.exec.callId, outcome);
+    // The winner still owes the record; only a completed write clears this.
+    this.unwritten.add(call.exec.callId);
+    return { won: true, outcome };
+  }
+
+  /**
+   * Claim for this path, remembering that the winner still has to write.
+   *
+   * `claim()` alone cannot tell "I won and owe a write" from "someone else
+   * already wrote"; the pending-write set carries that distinction so a path
+   * that claimed before appending its terminal stage is not mistaken for a
+   * duplicate.
+   */
+  private readonly unwritten = new Set<string>();
+
+  /**
+   * Write the outcome this path already claimed, or claim it now.
+   *
+   * A caller that appended its terminal stage only after winning must pass the
+   * same result so the write is not mistaken for a duplicate claim.
+   */
   finalize(
     call: CallContext,
     result: CallResult,
     reason: string,
     extras: AuditExtras,
-  ): void {
+  ): SettledOutcome {
+    const existing = this.outcomes.get(call.exec.callId);
+    if (existing !== undefined && !this.unwritten.has(call.exec.callId)) {
+      // This call's ending is already written; nothing to add.
+      return existing;
+    }
+    const outcome = existing ?? this.claim(call, result, reason).outcome;
+    this.unwritten.delete(call.exec.callId);
     const record = this.createRecord(call, result, reason, extras);
     this.host.currentAudit()?.enqueue(record);
     if (record.executionStatus === 'pending') {
@@ -308,6 +431,7 @@ export class CallSettlement {
     } else if (result === 'review-allow' || result === 'human-allow') {
       this.history.resetBreaker(record.sessionId);
     }
+    return outcome;
   }
 
   private fallback(
@@ -316,8 +440,11 @@ export class CallSettlement {
     text: string,
     extras: AuditExtras,
   ): PreToolDecision {
-    // A fallback decided now is governed by the configuration now: it begins and
-    // ends inside this call, with no pending window in between.
+    // Claim first: a competing path may already own this call's ending, and the
+    // trace must show one terminal stage, not two. A fallback decided now is
+    // governed by the configuration now, so its stage carries the live identity.
+    const claim = this.claim(call, 'fallback-deny', text);
+    if (!claim.won) return dispositionOf(claim.outcome);
     pushStage(
       call.trace,
       'fallback',
@@ -325,17 +452,37 @@ export class CallSettlement {
       reason,
       currentIdentity(this.host),
     );
-    this.finalize(call, 'fallback-deny', text, extras);
-    return deny(text);
+    const settled = this.finalize(call, 'fallback-deny', text, extras);
+    return dispositionOf(settled);
   }
 
+  /**
+   * Ask a human, then settle exactly once.
+   *
+   * `approvalOpen` is false for a decision this call is about to ask about; the
+   * currently effective mode decides whether asking is allowed at all. It is
+   * true when the question is already outstanding — for example a review that
+   * escalated before a configuration change — and then mode and channel are no
+   * longer re-evaluated, so the user's answer still settles it.
+   */
   async human(
     call: CallContext,
     reason: string,
     extras: AuditExtras,
+    ask: HumanAsk = {},
   ): Promise<PreToolDecision> {
+    const existing = this.outcomes.get(call.exec.callId);
+    if (existing !== undefined) {
+      // A competing path already settled this call; hand back its outcome
+      // rather than writing a second record or a different disposition.
+      return dispositionOf(existing);
+    }
     if (isAborted(call.exec.signal)) return { kind: 'cancel' };
-    const unavailable = humanUnavailable(call, this.host);
+    const unavailable = humanUnavailable(
+      call,
+      this.host,
+      ask.approvalOpen === true,
+    );
     if (unavailable !== null)
       return this.fallback(call, unavailable.code, unavailable.text, extras);
     // humanUnavailable checks the channel before this point.
@@ -373,17 +520,27 @@ export class CallSettlement {
         extras,
       );
     }
-    const mapped = HUMAN_OUTCOMES[outcome];
+    // A close or cancel that definitively happened before the answer arrived
+    // wins: the approval ended without the user deciding, so it must not be
+    // upgraded to a grant. An answer that already arrived first keeps its
+    // outcome, which is why the claim decides rather than the check alone.
+    const cancelled =
+      outcome === 'allowed-once' && isAborted(call.exec.signal)
+        ? HUMAN_OUTCOMES.cancelled
+        : null;
+    const mapped = cancelled ?? HUMAN_OUTCOMES[outcome];
+    const claim = this.claim(call, mapped.result, mapped.text);
+    if (!claim.won) return dispositionOf(claim.outcome);
+    // The question was asked under the configuration captured when it opened,
+    // so its stage keeps that identity even after a later switch.
     pushStage(
       call.trace,
       mapped.stage,
       mapped.result,
-      mapped.reason,
+      cancelled === null ? mapped.reason : 'cancelled_after_answer',
       requestIdentity,
     );
-    this.finalize(call, mapped.result, mapped.text, extras);
-    return mapped.result === 'human-allow'
-      ? { kind: 'allow' }
-      : deny(mapped.text);
+    const settled = this.finalize(call, mapped.result, mapped.text, extras);
+    return dispositionOf(settled);
   }
 }
