@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/dsh-e2e.yml'
+      - '.github/dependabot.yml'
+      - 'tooling/ci/dsh-platforms.mjs'
+      - 'tests/tooling/dsh-platforms.test.ts'
       - 'src/**'
       - 'locale/**'
       - 'tests/e2e/**'
@@ -34,14 +37,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  platforms:
+    name: Select DSH platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      platforms: ${{ steps.select.outputs.platforms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select platforms from actual PR changes or manual input
+        id: select
+        env:
+          DSH_E2E_EVENT: ${{ github.event_name }}
+          DSH_E2E_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DSH_E2E_PLATFORMS: ${{ inputs.platforms }}
+        run: node tooling/ci/dsh-platforms.mjs
+
   dsh-e2e:
     name: Real DSH smoke (${{ matrix.os }})
+    needs: platforms
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.platforms == 'all' && '["ubuntu-24.04", "macos-15", "windows-2025"]' || inputs.platforms == 'macos-15' && '["macos-15"]' || inputs.platforms == 'windows-2025' && '["windows-2025"]' || '["ubuntu-24.04"]') }}
+        os: ${{ fromJSON(needs.platforms.outputs.platforms) }}
     defaults:
       run:
         shell: bash
