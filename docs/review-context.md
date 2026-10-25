@@ -8,6 +8,8 @@
 
 实现状态（2026-10-21）：ReviewSnapshot、EVIDENCE／CONTEXT／PRIOR_VERDICTS、项目规则读取、token 预算与截断已实现；快照随每次调用保存，供审计和详情复用。实现与剩余验证见[首轮实施报告](implementation-report.md)。
 
+实现状态（2026-10-25，CONTEXT／#11）：证据按来源分层选取并带 `sourcePriority`，ask 的前台答复与 timed `user-question-reply` 连同问题一起进入证据，`PROJECT_RULES` 开关不读取文件时以 `materials` 记录“已关闭”而非“缺失”，父会话不可读时 `parent_authorization_present` 为 `null`；当前动作只在可选材料都裁掉后按预算截断，并记录 `action.truncated` 与 `missing` 输入事实。`truncationFeedback()` 提供不含因果断言的补充提示，供 DECISION 组合最终 reason。
+
 ## 本文导航
 
 - [结构化事实的完整性闸门](#design-5-2-2)
@@ -170,19 +172,31 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 {
   "evidence": [
     { "ts": 1234567890, "source": { "kind": "session-human", "sessionId": "child" },
-      "role": "human-instruction",
+      "sourcePriority": 1, "role": "human-instruction",
       "evidence": "explicit", "text": "删掉 build 目录" },
     { "ts": 1234567880, "source": { "kind": "parent-relay", "sessionId": "parent" },
-      "role": "direct-parent-instruction",
+      "sourcePriority": 5, "role": "direct-parent-instruction",
       "evidence": "implied",  "text": "用户批准了删除 build" },
     { "ts": 1234567800, "source": { "kind": "parent-human", "sessionId": "parent" },
-      "role": "human-instruction",
-      "evidence": "explicit", "text": "同意让子任务删除 /workspace/app/build，保留其他目录" }
+      "sourcePriority": 2, "role": "human-instruction",
+      "evidence": "explicit", "text": "同意让子任务删除 /workspace/app/build，保留其他目录" },
+    { "ts": 1234567790, "source": { "kind": "session-human", "sessionId": "child" },
+      "sourcePriority": 1, "role": "human-instruction", "evidence": "explicit",
+      "text": "Question: 可以删除 /workspace/app/build 吗？\nAnswer: 同意",
+      "question": "可以删除 /workspace/app/build 吗？", "askCallId": "call-ask-1" }
   ],
   "evidence_truncated": false,
-  "parent_authorization_present": true
+  "parent_authorization_present": true,
+  "materials": [
+    { "id": "project-rules", "enabled": true, "present": true, "chars": 412,
+      "limit": 2000, "truncated": false, "path": ".dsh/arbiter.md" },
+    { "id": "custom-rules", "enabled": true, "present": false, "chars": 0,
+      "limit": 2000, "truncated": false }
+  ]
 }
 ```
+
+`sourcePriority`（1 本会话人类 / 2 直接父会话人类 / 5 父 agent 转述）只表达冲突优先级，不改变 `evidence` 上限；数组本身仍按 `ts` 从新到旧展示，两种顺序不互相取代。`question` 与 `askCallId` 保留短答复所回答的具体问题或操作。`materials` 记录两个指引来源是否关闭、是否真的读到，以及**实际提交**的字符数与截断状态：单来源上限和两者合计上限的裁剪都会反映在 `chars` / `truncated` 上。合计上限属于配置材料裁剪，不写入 `missing`，也不占用输入预算的 `truncatedSegments`。
 
 **两个字段职责不同**：
 
@@ -210,11 +224,15 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 
 **短答复的上下文**：人类只说“同意”“可以”时，应保留它回答的具体问题或待执行操作，避免脱离范围解释。若授权来自 ask 工具，需关联宿主保存的真实答复与对应提问；普通工具结果仍不作为授权。本机源码已确认：前台答复进入 ask 的工具结果，timed 的迟到答复是 source.kind 为 `user-question-reply` 的用户消息，并自带 callId、questions 与 answers，详见[源码核对](../evidence.md#ask-timing)。实际采集与截断效果仍需验证。
 
-**排序与截断**：按 `ts` 从新到旧，受 `evidence.maxItems`（20）与 token 预算约束，超出置 `evidence_truncated: true`。
+**已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``tests/e2e/context-sources.spec.ts`` 记录真实 Session 验证（隔离 profile、无模型请求），并用宿主自身的 `ToolRuntime` 实际执行一次含 `tools.bash` 的 `run_code`：外层 `run_code` 与内层 `bash` 分别通过 `tools/pre-execute`（`dispatch-outer-1` 与 `dispatch-outer-1:ptc:1`），执行参数保持完整，不受送审截断影响。ask 答复与压缩摘要仍由真实 `Session` API 注入宿主合法事件，验证的是采集器对这些事件形状的处理，而非宿主交互流程本身。
+
+短答复只绑定**紧邻的上一条** assistant 回合：若该回合不是问句，或中间夹了另一条人类消息、压缩摘要，或任何 `tool/call`／`tool/result`（包括已经作答的 ask 结果），问题即视为陈旧，答案保留原文但不带 `question`。这样已被拒绝的操作不会经由后来的“继续／同意”重新变成明确授权。
+
+**排序与截断**：展示顺序按 `ts` 从新到旧，受 `evidence.maxItems`（20）与 token 预算约束，超出置 `evidence_truncated: true`。**选取顺序不是纯时间序**：先保留父人类保底，其余名额按来源层依次填充（本会话人类 → 父会话人类 → 父 agent 转述），同层内较新者优先；否则子会话说话多时会把父原话挤掉。
 
 **父证据保底**：`parent-human` 至少保留 1 条（最近的），不参与竞争——否则子会话说话多时，父的授权证据会被完全挤掉。
 
-**`parent_authorization_present`**：布尔，表示父会话里**是否存在**人类消息。若存在但因截断未进入 `evidence`，reviewer 仍知道"有证据但没看到"，从而倾向 ask。非子 agent 时为 `null`。
+**`parent_authorization_present`**：布尔，表示父会话里**是否存在**人类消息。若存在但因截断未进入 `evidence`，reviewer 仍知道"有证据但没看到"，从而倾向 ask。非子 agent 时为 `null`；**父会话存在但当前读不到（不在 live、`sessions.get` 取不到对象）时同样为 `null`**，不能用 `false` 冒充"父会话没有人类消息"。
 
 **读取实现**：
 
@@ -488,7 +506,15 @@ for (const item of candidates) {          // 已按 ts 降序
 
 截断是输入完整性信息，不直接决定权限结论，也不单独算审查故障。模型基于已知输入提供正常信号，判定引擎应用审查策略；首版不增加 truncated／输入充分性 noul 或独立硬闸门。真正的请求失败或后端错误仍按 error-escalate 处理。此约定不取消 shell 规则对完整 AST 覆盖的要求，也不把未知程序行为标成已检查。
 
+**实现（2026-10-25）**：裁剪顺序固定为 `CONTEXT` 工具调用 → checkpoint 摘要 → `PRIOR_VERDICTS` → `EVIDENCE`（保留至少 1 条）→ `PROJECT_RULES` → `DERIVED_FACTS` → `ACTION`，即可选上下文先让位、当前动作最后裁。每一步都必须真正减少送审内容，否则状态机会停在已经缩小的状态上（`DERIVED_FACTS` 第二次直接整体移除，不再反复返回同一对象）。动作裁剪对 `{code|program|command}` 字符串字段反复减半直到进入预算，其余形状退化为序列化头部；`action.programText` 与裁剪后的 `arguments` 同步，不允许保留未截断副本。结果写入 `action.truncated = { originalChars, retainedChars, field, omittedFrom, omittedTo }`，并在 `missing` 与 `budget.truncatedSegments` 标记 `ACTION`。
+
+`checkpointMaxItems = 0` 明确表示不选任何摘要（`slice(-0)` 等于 `slice(0)` 的边界按 0 处理）。预算是否达标以**最终稳定文本**为准而非估算前的候选：候选写回 `estimatedInputTokens` 后会改变渲染长度，若按候选判断会把本可继续裁剪的请求误报为无法组装。
+
+**预算按两个后端的真实负载估算**：Chat 用 `system + user`，Decision 用 `renderDecisionState(state) + questions`，取较大值写入 `budget.estimatedInputTokens`；写入后又重新渲染直到数字稳定，因此持久化快照与模型实际收到的内容一致。固定策略本身超过预算、无法合法组装请求时标 `OVER_BUDGET`，按真实请求准备错误处理，不假装成功。可合法构造的截断**不抛异常**，`gate` 因此不会因截断产生 `error-escalate` 阶段。
+
 最终返回给执行 agent 的反馈由插件组合实际裁决原因与补充提示。运行时知道送审有截断，可以附“本次送审程序因输入预算被截断”；不能仅据此断言“因截断而拒绝”。review chain 保持阶段序列，截断元数据不成为新阶段或阶段标签后缀。相关定义见[最终反馈](reviewer.md#final-feedback-composition)。
+
+`truncationFeedback(snapshot)` 是 CONTEXT 提供的窄接口：有动作截断或证据裁剪时返回一段客观说明（含原始长度、保留长度与“可缩短或分批”）的建议，否则返回 `null`。它不判断裁决、不读取会话、不写 trace；何时拼接由 DECISION 决定。
 
 ### 硬兜底
 

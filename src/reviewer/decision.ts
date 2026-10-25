@@ -98,7 +98,7 @@ function decisionResponseResult(
 
 export async function runDecisionReviewer(
   ctx: DecisionRunContext,
-  snapshot: ReviewSnapshot,
+  _snapshot: ReviewSnapshot,
   request: { readonly user: string; readonly estimatedInputTokens: number },
   callId: string,
 ): Promise<ModelResult> {
@@ -125,7 +125,7 @@ export async function runDecisionReviewer(
   }
   const body = {
     model: ctx.decision.model,
-    state: renderDecisionState(snapshot, request.user),
+    state: renderDecisionState(request.user),
     questions: buildQuestions(),
   };
   const timeout = AbortSignal.timeout(ctx.decision.timeoutMs);

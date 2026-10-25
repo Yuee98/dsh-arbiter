@@ -561,6 +561,8 @@ driver = invariantTriggered      ? "invariant"        // secrets∧egress / dest
 
 运行时已知送审程序被截断时，最终反馈可附客观提示；截断事实不等于本次拒绝原因，不据此自动拼成“因截断而拒绝”，也不在 review chain 后附加 insufficient-input／input-truncated 标签。agent 的简短执行指引可以说明：根据实际结果与提示，酌情缩短单次程序、分批调用、补充证据或等待服务恢复；这不改变命令禁止、人工拒绝及既有授权范围。
 
+CONTEXT 提供 `truncationFeedback(snapshot)` 作为该提示的输入：有动作截断或证据裁剪时返回一段不含因果断言、不含工具输出文本的客观说明，末尾提示“可缩短或分批”，否则返回 `null`。是否附加、附在哪个终态由 DECISION 组合；CONTEXT 不改变终态、不新增阶段。
+
 以下为旧稿的拒绝原因模板；询问用户属于模型可选择的恢复方式，需结合宿主通道与缺失证据，不能作为每次兜底拒绝的强制动作：
 
 ```

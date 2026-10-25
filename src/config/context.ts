@@ -1,23 +1,39 @@
 import type { ConfigError, ContextConfig } from '../types.js';
 import { isRecord, asString, asInteger, asBoolean } from './values.js';
 
+/** The only files that may supply PROJECT_RULES, in preference order. */
+export const PROJECT_RULE_FILES = ['.dsh/arbiter.md', '.arbiter.md'] as const;
+
 function parseProjectRules(
   contextValue: Record<string, unknown>,
+  errors: ConfigError[],
 ): ContextConfig['projectRules'] {
   const projectValue = isRecord(contextValue['projectRules'])
     ? contextValue['projectRules']
     : {};
-  const projectFiles = Array.isArray(projectValue['files'])
+  const requested = Array.isArray(projectValue['files'])
     ? projectValue['files'].filter(
         (file): file is string => typeof file === 'string',
       )
-    : ['.dsh/arbiter.md', '.arbiter.md'];
+    : PROJECT_RULE_FILES;
+  // Only the two documented workspace-root files can carry PROJECT_RULES; a
+  // configured relative path such as ../outside.md must not become guidance.
+  const allowed = requested.filter((file) =>
+    (PROJECT_RULE_FILES as readonly string[]).includes(file),
+  );
+  if (
+    requested.some(
+      (file) => !(PROJECT_RULE_FILES as readonly string[]).includes(file),
+    )
+  ) {
+    errors.push({
+      path: 'context.projectRules.files',
+      message: `must be one of ${PROJECT_RULE_FILES.join(', ')}`,
+    });
+  }
   return {
     enabled: asBoolean(projectValue['enabled'], true),
-    files:
-      projectFiles.length > 0
-        ? projectFiles
-        : ['.dsh/arbiter.md', '.arbiter.md'],
+    files: allowed.length > 0 ? allowed : PROJECT_RULE_FILES,
   };
 }
 
@@ -110,7 +126,7 @@ export function parseContext(
       errors,
     ),
     customRules,
-    projectRules: parseProjectRules(contextValue),
+    projectRules: parseProjectRules(contextValue, errors),
   };
 
   return context;
