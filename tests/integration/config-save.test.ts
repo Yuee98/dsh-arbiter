@@ -558,9 +558,9 @@ describe('audit failure ordering', () => {
       const audit = harness.host.audit;
       if (audit === null) throw new Error('missing audit');
       const original = audit.saveConfigSnapshot.bind(audit);
-      audit.saveConfigSnapshot = () => {
-        throw new Error('snapshot insert failed');
-      };
+      // The store contains write failures, so a failed persist is reported as
+      // "not persisted" rather than thrown into configuration apply.
+      audit.saveConfigSnapshot = () => null;
       const result = await save(harness, { enabled: true });
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({
@@ -587,9 +587,7 @@ describe('audit failure ordering', () => {
       const before = harness.state();
       const audit = harness.host.audit;
       if (audit === null) throw new Error('missing audit');
-      audit.recordActivation = () => {
-        throw new Error('activation insert failed');
-      };
+      audit.recordActivation = () => false;
       const result = await save(harness, { enabled: true });
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({
@@ -614,9 +612,7 @@ describe('audit failure ordering', () => {
     try {
       const audit = harness.host.audit;
       if (audit === null) throw new Error('missing audit');
-      audit.recordActivation = () => {
-        throw new Error('activation insert failed');
-      };
+      audit.recordActivation = () => false;
       await save(harness, { enabled: true });
       expect(harness.state()['configHistoryComplete']).toBe(false);
       // A subsequent healthy write does not retroactively restore the row.

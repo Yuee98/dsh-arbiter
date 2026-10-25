@@ -36,13 +36,25 @@ function compact(db: DatabaseSync): void {
     // Vacuum is a space optimization, never a permission or retention precondition.
   }
 }
+export interface RetentionOutcome {
+  readonly deleted: number;
+  /**
+   * True when the target cannot be met because the newest remaining call alone
+   * exceeds it. Reported instead of deleting the last record: an audit that
+   * keeps nothing is worse than one that states its constraint.
+   */
+  readonly irreducible: boolean;
+  /** Total bytes the target applies to, including sidecars and backups. */
+  readonly bytes: number;
+}
+
 export function runRetention(
   db: DatabaseSync,
   now: number,
   retentionDays: number,
   retentionBytes: number,
   databaseBytes: () => number,
-): number {
+): RetentionOutcome {
   try {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } catch {
@@ -89,10 +101,21 @@ export function runRetention(
     if (changes === 0) break;
     deleted += changes;
   }
-  // Shared snapshots without a referencing call are no longer useful.
+  // Orphaned review snapshots go with their call. Configuration snapshots are
+  // different: an activation row is itself a reference, so a snapshot that no
+  // current call points at is still needed to explain configuration history.
   db.prepare(
     'DELETE FROM snapshots WHERE call_id NOT IN (SELECT call_id FROM calls)',
   ).run();
+  db.prepare(
+    `DELETE FROM config_snapshots
+      WHERE snapshot_id NOT IN (SELECT snapshot_id FROM config_activations)
+        AND created_at < ?`,
+  ).run(cutoff);
   if (deleted > 0 || databaseBytes() > retentionBytes) compact(db);
-  return deleted;
+  // After compaction the physical footprint may still exceed the target because
+  // the single newest call (or a sidecar/backup) is larger than it. Say so
+  // rather than deleting the last record to satisfy a number.
+  const irreducible = databaseBytes() > retentionBytes;
+  return { deleted, irreducible, bytes: databaseBytes() };
 }

@@ -69,6 +69,9 @@ function humanUnavailable(
     : null;
 }
 
+/** How many session-record failures stay addressable for diagnostics. */
+const MAX_SESSION_RECORD_ERRORS = 200;
+
 /** Settles decisions independently of best-effort audit persistence. */
 export class CallSettlement {
   private readonly host: HostEnvironment;
@@ -105,8 +108,16 @@ export class CallSettlement {
         ts: Date.now(),
       },
     );
-    if (sessionRecordState !== 'written')
+    if (sessionRecordState !== 'written') {
       runtime.sessionRecordErrors.set(exec.callId, sessionRecordState);
+      // The map is diagnostic state, not history: keep the newest entries so a
+      // session with a persistent write failure cannot grow it without bound.
+      while (runtime.sessionRecordErrors.size > MAX_SESSION_RECORD_ERRORS) {
+        const oldest = runtime.sessionRecordErrors.keys().next().value;
+        if (oldest === undefined) break;
+        runtime.sessionRecordErrors.delete(oldest);
+      }
+    }
     return {
       callId: exec.callId,
       ts: Date.now(),
@@ -117,6 +128,9 @@ export class CallSettlement {
       workspace: cwd,
       tool: exec.name,
       arguments: exec.arguments,
+      // The schema the host exposed for this call, kept as evidence; absent
+      // means the host declared none, which the reader reports as null.
+      ...(exec.schema === undefined ? {} : { argumentsSchema: exec.schema }),
       cwd,
       fingerprint,
       configRevision: runtime.effectiveRevision,
@@ -133,9 +147,14 @@ export class CallSettlement {
       signals: extras.signals,
       policyStrategy: extras.strategy,
       decisionRules: extras.decisionRules,
+      // A permission verdict is not an execution result: an approved call is
+      // `pending` until the host reports what happened, and a denied one never
+      // started. `executionStartedAt`/`FinishedAt` stay absent until then.
       executionStatus: ['allow', 'review-allow', 'human-allow'].includes(result)
         ? 'pending'
         : 'not-started',
+      executionStartedAt: null,
+      executionFinishedAt: null,
     };
   }
 

@@ -47,10 +47,11 @@ async function decisionCredential(
       ctx.preResolved !== undefined
         ? ctx.preResolved.value
         : (await ctx.credentials?.resolve(ctx.decision.apiKeyRef))?.value;
-  } catch (error) {
+  } catch {
+    // The resolver's own message may quote the stored value; the failure is the
+    // stage, and the stage is all a record needs.
     throw new Error(
-      `credential lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
+      `credential "${ctx.decision.apiKeyRef}" could not be resolved`,
     );
   }
   if (credential === undefined) {
@@ -69,7 +70,10 @@ function decisionResponseResult(
   if (!response.ok) {
     attempts.push({
       ...recordBase,
-      responseText: text.slice(0, 8_000),
+      // The agreed local-retention contract keeps the complete model-visible
+      // body: a clipped response cannot be re-read later, and the audit record
+      // size bound decides explicitly when material is too large to store.
+      responseText: text,
       parsed: null,
       error: `HTTP ${String(response.status)}`,
     });
@@ -86,7 +90,7 @@ function decisionResponseResult(
   } catch (error) {
     attempts.push({
       ...recordBase,
-      responseText: text.slice(0, 8_000),
+      responseText: text,
       parsed: null,
       error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
     });
@@ -100,7 +104,7 @@ function decisionResponseResult(
   const parsed = parseDecisionResponse(parsedBody, thresholds);
   attempts.push({
     ...recordBase,
-    responseText: text.slice(0, 32_000),
+    responseText: text,
     parsed: parsed.ok ? parsed.signals : null,
     error: parsed.ok ? null : parsed.error,
   });
@@ -186,8 +190,14 @@ export async function runDecisionReviewer(
       attempts,
       ctx.thresholds,
     );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch (caught) {
+    const raw = caught instanceof Error ? caught.message : String(caught);
+    // A transport error is arbitrary text from below this layer, and it may
+    // quote the header the request used. This is the one place the credential
+    // is known, so the known value is removed here rather than trusting the
+    // transport's phrasing.
+    const message =
+      credential === undefined ? raw : raw.split(credential).join('[redacted]');
     attempts.push({
       requestId: `${callId}:model:1`,
       callId,

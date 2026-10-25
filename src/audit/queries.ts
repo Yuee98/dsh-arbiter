@@ -1,5 +1,11 @@
 import type { ReviewSignals } from '../types.js';
-import type { CallFilter, CallSummary, CandidateRecord } from './types.js';
+import type {
+  CallFilter,
+  CallSummary,
+  CandidateRecord,
+  StoredCall,
+} from './types.js';
+import { READABLE_RECORD_FORMATS } from './schema.js';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   asRow,
@@ -41,6 +47,52 @@ export function configHistory(
     scope: rowText(row['scope']),
     snapshotId: rowText(row['snapshot_id']),
   }));
+}
+
+/** The format a row was written with; a v1 database has no such column yet. */
+function formatOf(row: Record<string, unknown>): number {
+  const raw = row['record_format_version'];
+  const value = typeof raw === 'bigint' ? Number(raw) : Number(raw ?? 1);
+  return Number.isFinite(value) ? value : 1;
+}
+
+/**
+ * Whether this build can interpret a stored record.
+ *
+ * An unknown (newer) format is not an error and not a reason to rewrite the
+ * row: the caller can still show the identifying fields, and the operator is
+ * told the record needs a newer plugin. Expressing that as a flag keeps the
+ * read path total instead of throwing on data it did not write.
+ */
+function readableFormat(version: number): boolean {
+  return READABLE_RECORD_FORMATS.includes(version);
+}
+
+/** An absolute timestamp, or null when the record never recorded one. */
+function optionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The version marker every detail/list reader attaches.
+ *
+ * Absent columns stay `null`: a v1 row genuinely has no execution timestamps,
+ * and reporting `0` would claim an execution that never happened.
+ */
+function versionFields(row: Record<string, unknown>): {
+  readonly recordFormatVersion: number;
+  readonly unreadable: boolean;
+  readonly unreadableReason: string | null;
+} {
+  const version = formatOf(row);
+  const readable = readableFormat(version);
+  return {
+    recordFormatVersion: version,
+    unreadable: !readable,
+    unreadableReason: readable
+      ? null
+      : `record format ${String(version)} is newer than this plugin (${String(Math.max(...READABLE_RECORD_FORMATS))})`,
+  };
 }
 
 export function listCalls(
@@ -87,7 +139,8 @@ export function listCalls(
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, ts, session_id, session_kind, tool, arguments, result, reason, approval_mode, decision_rules
+        `SELECT call_id, ts, session_id, session_kind, tool, arguments, result, reason, approval_mode, decision_rules,
+                trace, record_format_version, execution_status, execution_started_at, execution_finished_at
            FROM calls ${where} ORDER BY ts DESC LIMIT ? OFFSET ?`,
       )
       .all(...values, limit, offset),
@@ -115,14 +168,65 @@ export function listCalls(
         result: rowText(row['result']),
         reason: rowText(row['reason']),
         ruleId: rule?.ruleId ?? null,
+        // The historical name is carried with the row; it is not re-read from
+        // whatever the rule list contains today.
+        ruleName: rule?.ruleName ?? null,
         approvalMode: rowText(row['approval_mode']),
         decisionRules: rowStrings(row['decision_rules']),
+        executionStatus: rowText(row['execution_status']),
+        executionStartedAt: optionalNumber(row['execution_started_at']),
+        executionFinishedAt: optionalNumber(row['execution_finished_at']),
+        ...versionFields(row),
       };
     }),
   };
 }
 
-export function getCall(db: DatabaseSync, callId: string): unknown {
+/** One stored stage row as the detail view presents it. */
+function stageRow(stage: Record<string, unknown>): Record<string, unknown> {
+  return {
+    seq: rowNumber(stage['seq']),
+    stage: rowText(stage['stage']),
+    result: rowText(stage['result']),
+    reason: typeof stage['reason'] === 'string' ? stage['reason'] : null,
+    ruleId: typeof stage['rule_id'] === 'string' ? stage['rule_id'] : null,
+    ruleName:
+      typeof stage['rule_name'] === 'string' ? stage['rule_name'] : null,
+    decisionRules: rowStrings(stage['decision_rules']),
+    configRevision:
+      typeof stage['config_revision'] === 'string'
+        ? stage['config_revision']
+        : null,
+    configSnapshotId:
+      typeof stage['config_snapshot_id'] === 'string'
+        ? stage['config_snapshot_id']
+        : null,
+    ts: rowNumber(stage['ts']),
+  };
+}
+
+/** One stored model attempt as the detail view presents it. */
+function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
+  return {
+    requestId: rowText(model['id']),
+    attempt: rowNumber(model['attempt']),
+    backend: rowText(model['backend']),
+    protocol: rowText(model['protocol']),
+    request: rowJson(model['request']),
+    responseText:
+      typeof model['response_text'] === 'string'
+        ? model['response_text']
+        : null,
+    parsed: rowJson(model['parsed']),
+    error: typeof model['error'] === 'string' ? model['error'] : null,
+    startedAt: rowNumber(model['started_at']),
+    durationMs: rowNumber(model['duration_ms']),
+    estimatedInputTokens: rowNumber(model['estimated_input_tokens']),
+    usage: rowJson(model['usage']),
+  };
+}
+
+export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
   const callValue = db
     .prepare('SELECT * FROM calls WHERE call_id = ?')
     .get(callId);
@@ -146,7 +250,26 @@ export function getCall(db: DatabaseSync, callId: string): unknown {
     .prepare('SELECT content FROM config_snapshots WHERE snapshot_id = ?')
     .get(rowText(call['config_snapshot_id']));
   const config = asRow(configValue);
+  const version = versionFields(call);
+  // A record this build cannot interpret is returned with its raw identifying
+  // fields and the marker; the adapter never guesses at the current shape.
+  if (version.unreadable) {
+    return {
+      ...version,
+      callId: rowText(call['call_id']),
+      ts: rowNumber(call['ts']),
+      tool: rowText(call['tool']),
+      result: null,
+      raw: Object.fromEntries(
+        Object.entries(call).map(([key, value]) => [
+          key,
+          typeof value === 'bigint' ? Number(value) : value,
+        ]),
+      ),
+    };
+  }
   return {
+    ...version,
     callId: rowText(call['call_id']),
     ts: rowNumber(call['ts']),
     sessionId: rowText(call['session_id']),
@@ -159,6 +282,12 @@ export function getCall(db: DatabaseSync, callId: string): unknown {
     workspace: typeof call['workspace'] === 'string' ? call['workspace'] : null,
     tool: rowText(call['tool']),
     arguments: rowJson(call['arguments']),
+    // Absent stays null: a v1 row recorded no schema, and inventing one would
+    // claim the host declared something it did not.
+    argumentsSchema:
+      typeof call['arguments_schema'] === 'string'
+        ? rowJson(call['arguments_schema'])
+        : null,
     cwd: rowText(call['cwd']),
     fingerprint: rowText(call['fingerprint']),
     configRevision: rowText(call['config_revision']),
@@ -176,37 +305,11 @@ export function getCall(db: DatabaseSync, callId: string): unknown {
         : null,
     decisionRules: rowStrings(call['decision_rules']),
     executionStatus: rowText(call['execution_status']),
-    stages: stages.map((stage) => ({
-      seq: rowNumber(stage['seq']),
-      stage: rowText(stage['stage']),
-      result: rowText(stage['result']),
-      reason: typeof stage['reason'] === 'string' ? stage['reason'] : null,
-      ruleId: typeof stage['rule_id'] === 'string' ? stage['rule_id'] : null,
-      decisionRules: rowStrings(stage['decision_rules']),
-      configRevision:
-        typeof stage['config_revision'] === 'string'
-          ? stage['config_revision']
-          : null,
-      ts: rowNumber(stage['ts']),
-    })),
+    executionStartedAt: optionalNumber(call['execution_started_at']),
+    executionFinishedAt: optionalNumber(call['execution_finished_at']),
+    stages: stages.map(stageRow),
     snapshot: rowJson(snapshot['content']),
-    modelCalls: models.map((model) => ({
-      requestId: rowText(model['id']),
-      attempt: rowNumber(model['attempt']),
-      backend: rowText(model['backend']),
-      protocol: rowText(model['protocol']),
-      request: rowJson(model['request']),
-      responseText:
-        typeof model['response_text'] === 'string'
-          ? model['response_text']
-          : null,
-      parsed: rowJson(model['parsed']),
-      error: typeof model['error'] === 'string' ? model['error'] : null,
-      startedAt: rowNumber(model['started_at']),
-      durationMs: rowNumber(model['duration_ms']),
-      estimatedInputTokens: rowNumber(model['estimated_input_tokens']),
-      usage: rowJson(model['usage']),
-    })),
+    modelCalls: models.map(modelCallRow),
     config: rowJson(config['content']),
   };
 }
@@ -266,22 +369,30 @@ export function callsForAnalysis(
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, ts, tool, arguments, result, execution_status, signals, effect, fingerprint
+        `SELECT call_id, ts, tool, arguments, result, execution_status, signals, effect, fingerprint,
+                record_format_version
            FROM calls WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?`,
       )
       .all(from, to, limit),
   );
-  return rows.map((row) => ({
-    callId: rowText(row['call_id']),
-    ts: rowNumber(row['ts']),
-    tool: rowText(row['tool']),
-    arguments: rowJson(row['arguments']),
-    result: rowText(row['result']),
-    executionStatus: rowText(row['execution_status']),
-    signals: rowSignals(row['signals']),
-    effect: rowJson(row['effect']),
-    fingerprint: rowText(row['fingerprint']),
-  }));
+  return rows.flatMap((row) => {
+    // An analysis pass needs semantics this build can interpret; an unknown
+    // format is skipped rather than guessed at. The row itself stays stored.
+    if (!readableFormat(formatOf(row))) return [];
+    return [
+      {
+        callId: rowText(row['call_id']),
+        ts: rowNumber(row['ts']),
+        tool: rowText(row['tool']),
+        arguments: rowJson(row['arguments']),
+        result: rowText(row['result']),
+        executionStatus: rowText(row['execution_status']),
+        signals: rowSignals(row['signals']),
+        effect: rowJson(row['effect']),
+        fingerprint: rowText(row['fingerprint']),
+      },
+    ];
+  });
 }
 
 export function priorVerdictsForSession(
@@ -342,12 +453,13 @@ export function recentForReplay(
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, tool, signals, result, policy_strategy FROM calls
-           WHERE signals IS NOT NULL ORDER BY ts DESC LIMIT ?`,
+        `SELECT call_id, tool, signals, result, policy_strategy, record_format_version
+           FROM calls WHERE signals IS NOT NULL ORDER BY ts DESC LIMIT ?`,
       )
       .all(limit),
   );
   return rows.flatMap((row) => {
+    if (!readableFormat(formatOf(row))) return [];
     const signals = rowSignals(row['signals']);
     if (signals === null) return [];
     return [

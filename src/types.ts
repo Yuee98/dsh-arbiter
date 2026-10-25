@@ -251,8 +251,24 @@ export interface TraceStage {
   readonly result: string;
   readonly reason?: string;
   readonly ruleId?: string;
+  /**
+   * The rule's display name as it stood when this decision ran.
+   *
+   * A rule can be renamed or deleted later, so the audit row must carry the
+   * name it used: re-reading the live configuration to render history would
+   * silently rewrite what the record says happened.
+   */
+  readonly ruleName?: string;
   readonly decisionRules?: readonly string[];
   readonly configRevision?: string;
+  /**
+   * The configuration content snapshot that governed this stage.
+   *
+   * Each stage records its own identity because a configuration can change
+   * while one call is in flight; the record must explain each stage by the
+   * configuration that was in effect for it, not by whatever runs last.
+   */
+  readonly configSnapshotId?: string;
   readonly at: number;
 }
 

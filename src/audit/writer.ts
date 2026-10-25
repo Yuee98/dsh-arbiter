@@ -1,14 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CallRecord } from './types.js';
 import { json, hash } from './rows.js';
+import { RECORD_FORMAT } from './schema.js';
 function insertCall(db: DatabaseSync, record: CallRecord): void {
   db.prepare(
     `INSERT OR REPLACE INTO calls(
             call_id, ts, session_id, session_kind, parent_session, profile, workspace, tool, arguments,
-            cwd, fingerprint, config_revision, config_snapshot_id, approval_mode, execution_mode,
-            result, reason, trace, effect, session_record_state, signals, policy_strategy,
-            decision_rules, execution_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+            execution_mode, result, reason, trace, effect, session_record_state, signals,
+            policy_strategy, decision_rules, execution_status, record_format_version,
+            execution_started_at, execution_finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     record.callId,
     record.ts,
@@ -19,6 +21,7 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     record.workspace,
     record.tool,
     json(record.arguments),
+    record.argumentsSchema === undefined ? null : json(record.argumentsSchema),
     record.cwd,
     record.fingerprint,
     record.configRevision,
@@ -34,12 +37,15 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     record.policyStrategy,
     json(record.decisionRules),
     record.executionStatus,
+    RECORD_FORMAT,
+    record.executionStartedAt ?? null,
+    record.executionFinishedAt ?? null,
   );
 }
 function insertStages(db: DatabaseSync, record: CallRecord): void {
   db.prepare('DELETE FROM stages WHERE call_id = ?').run(record.callId);
   const stageStatement = db.prepare(
-    'INSERT INTO stages(call_id, seq, stage, result, reason, rule_id, decision_rules, config_revision, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO stages(call_id, seq, stage, result, reason, rule_id, rule_name, decision_rules, config_revision, config_snapshot_id, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   record.trace.forEach((stage, index) => {
     stageStatement.run(
@@ -49,8 +55,10 @@ function insertStages(db: DatabaseSync, record: CallRecord): void {
       stage.result,
       stage.reason ?? null,
       stage.ruleId ?? null,
+      stage.ruleName ?? null,
       stage.decisionRules === undefined ? null : json(stage.decisionRules),
       stage.configRevision ?? null,
+      stage.configSnapshotId ?? null,
       stage.at,
     );
   });
