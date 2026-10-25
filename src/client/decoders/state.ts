@@ -2,6 +2,7 @@ import type { ConfigError } from '../../types.js';
 import type {
   AuditHealthView,
   AuditStats,
+  SaveResponse,
   StateResponse,
 } from '../view-types.js';
 import { configuration } from './config.js';
@@ -31,6 +32,23 @@ export function validationResponse(value: unknown) {
   return {
     ok: field(source, 'ok', boolean),
     errors: field(source, 'errors', array(configIssue)),
+    warnings: field(source, 'warnings', array(configIssue)),
+  };
+}
+
+export function saveResponse(value: unknown): SaveResponse {
+  const source = object(value);
+  return {
+    ok: field(source, 'ok', boolean),
+    saved: field(source, 'saved', boolean),
+    changed: field(source, 'changed', boolean),
+    effective: field(source, 'effective', boolean),
+    effectiveRevision: field(source, 'effectiveRevision', text),
+    configSnapshotId: field(source, 'configSnapshotId', text),
+    activationRecorded: field(source, 'activationRecorded', boolean),
+    configFormat: field(source, 'configFormat', text),
+    configFormatExplicit: field(source, 'configFormatExplicit', boolean),
+    auditError: field(source, 'auditError', nullable(text)),
     warnings: field(source, 'warnings', array(configIssue)),
   };
 }
@@ -88,6 +106,8 @@ export function stateResponse(value: unknown): StateResponse {
     sourceConfig: field(source, 'sourceConfig', unknownValue),
     effectiveRevision: field(source, 'effectiveRevision', text),
     configSnapshotId: field(source, 'configSnapshotId', text),
+    configFormat: field(source, 'configFormat', text),
+    configFormatExplicit: field(source, 'configFormatExplicit', boolean),
     fileRevision: field(source, 'fileRevision', nullable(text)),
     documentPath: field(source, 'documentPath', nullable(text)),
     invalidConfigError: field(source, 'invalidConfigError', nullable(text)),

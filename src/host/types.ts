@@ -151,6 +151,16 @@ export interface RuntimeState {
   config: ArbiterConfig;
   effectiveRevision: string;
   configSnapshotId: string;
+  /** The format of the document currently in effect. */
+  configFormat: string;
+  /** Whether that document declared its format instead of inheriting it. */
+  configFormatExplicit: boolean;
+  /** Timestamp of a UI save awaiting its Loader reload, if any. */
+  pendingApplySource: number | null;
+  /** How many activation rows this runtime has written, including reloads. */
+  configActivations: number;
+  /** How many documents this runtime has applied, recorded or not. */
+  configApplications: number;
   invalidConfigError: string | null;
   loadErrors: readonly {
     readonly path: string;

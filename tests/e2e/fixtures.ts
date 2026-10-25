@@ -7,15 +7,23 @@ import { dismissGettingStarted } from './dsh/ui.js';
 interface DshFixtures {
   readonly dsh: DshHost;
   readonly dshPage: Page;
+  /**
+   * `true` omits the `arbiter` config row so the plugin must apply the
+   * first-install defaults. The default keeps the explicit empty object that
+   * the existing smoke cases assume.
+   */
+  readonly firstInstall: boolean;
 }
 
 export const test = base.extend<DshFixtures>({
-  dsh: async ({ browserName }, use, testInfo) => {
+  firstInstall: [false, { option: true }],
+  dsh: async ({ browserName, firstInstall }, use, testInfo) => {
     const artifacts = testInfo.outputPath('dsh', browserName);
     try {
       const host = await startDshHost(
         fileURLToPath(new URL('../../', import.meta.url)),
         artifacts,
+        firstInstall ? { arbiterConfig: 'unset' } : {},
       );
       try {
         await use(host);

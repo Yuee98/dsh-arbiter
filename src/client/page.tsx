@@ -1,14 +1,24 @@
-import { stateResponse, validationResponse } from './decoders/state.js';
+import {
+  saveResponse,
+  stateResponse,
+  validationResponse,
+} from './decoders/state.js';
 import { PageTabs } from './components/page-tabs.js';
 import type { TabId } from './components/page-tabs.js';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, getJson, postJson } from './api.js';
 import { ConfigActions } from './components/config-actions.js';
+import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
 import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
-import type { Draft, StateResponse, SlotProps } from './view-types.js';
+import type {
+  Draft,
+  SaveResponse,
+  StateResponse,
+  SlotProps,
+} from './view-types.js';
 import type { ConfigError, ConfigWarning } from '../types.js';
 import { StatusPanel } from './panels/status.js';
 import { RulesPanel } from './panels/rules.js';
@@ -16,6 +26,26 @@ import { ReviewerPanel } from './panels/reviewer.js';
 import { AdvancedPanel } from './panels/advanced.js';
 import { LogsPanel } from './panels/logs.js';
 import { AboutPanel } from './panels/about.js';
+
+interface SaveFailure {
+  readonly status: number;
+  readonly code: string;
+  readonly message: string;
+}
+
+function draftErrors(payload: unknown): readonly ConfigError[] {
+  return configErrors(payload);
+}
+
+function failureOf(error: unknown): SaveFailure {
+  if (error instanceof ApiError)
+    return { status: error.status, code: error.code, message: error.message };
+  return {
+    status: 0,
+    code: 'request-failed',
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
 
 export function ArbiterPage(_props: SlotProps): ReactNode {
   const t = useArbiterTranslation();
@@ -26,6 +56,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [auditNotice, setAuditNotice] = useState<string | null>(null);
   const [validation, setValidation] = useState<{
     readonly errors: readonly ConfigError[];
     readonly warnings: readonly ConfigWarning[];
@@ -46,6 +78,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       setState(value);
       setDraft(cloneDraft(value.config));
       setDirty(false);
+      setSaveStatus('idle');
+      setAuditNotice(null);
       setValidation({ errors: value.loadErrors, warnings: value.warnings });
     } catch (errorValue) {
       if (generation.current === ticket) setError(errorText(errorValue));
@@ -82,39 +116,57 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     }
   }, [draft]);
 
-  const save = async (): Promise<void> => {
+  const save = useCallback(async (): Promise<void> => {
     if (state === null || draft === null) return;
     setBusy(true);
     setError(null);
     setNotice(null);
+    setSaveStatus('idle');
+    setAuditNotice(null);
     try {
-      await postJson('/config/save', {
-        revision: state.fileRevision,
-        config: draft,
-      });
-      setNotice(t('config.saved'));
+      const response = await postJson<SaveResponse>(
+        '/config/save',
+        { revision: state.fileRevision, config: draft },
+        saveResponse,
+      );
+      // Reload first: the reload clears transient state, so the saved-and-
+      // effective feedback is published after the fresh identities arrive.
       await load();
+      // Saved and effective are reported separately: the API only returns this
+      // payload after the candidate was written and applied.
+      setSaveStatus(response.changed ? 'saved' : 'unchanged');
+      setAuditNotice(
+        response.auditError === null
+          ? null
+          : t('config.auditDegraded', { error: response.auditError }),
+      );
     } catch (errorValue) {
-      setError(errorText(errorValue));
-      if (errorValue instanceof ApiError && errorValue.status === 409) {
-        setNotice(t('page.conflict'));
+      const failure = failureOf(errorValue);
+      setSaveStatus('failed');
+      if (failure.status === 409 && failure.code === 'config-conflict') {
+        // The draft is kept: the user merges it against the changed file.
+        setNotice(t('config.conflict'));
+        return;
       }
-      if (errorValue instanceof ApiError && errorValue.status === 422) {
-        const payload = errorValue.payload;
-        if (payload !== null && typeof payload === 'object') {
-          const errors = configErrors(payload);
-          setValidation((current) => ({ ...current, errors }));
-        }
+      if (failure.status === 422 && failure.code === 'config-invalid') {
+        const errors = draftErrors(
+          errorValue instanceof ApiError ? errorValue.payload : null,
+        );
+        setValidation((current) => ({ ...current, errors }));
+        setError(
+          t('config.invalid', {
+            errors: errors
+              .map((item) => `${item.path}: ${item.message}`)
+              .join('; '),
+          }),
+        );
+        return;
       }
+      setError(t('config.rejected', { error: failure.message }));
     } finally {
       setBusy(false);
     }
-  };
-
-  const publicKey = useMemo(
-    () => (state === null ? '' : state.effectiveRevision),
-    [state],
-  );
+  }, [draft, load, state, t]);
 
   if (state === null || draft === null) {
     return (
@@ -138,11 +190,17 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
     >
       <ConfigActions
-        revision={publicKey}
+        fileRevision={state.fileRevision}
+        effectiveRevision={state.effectiveRevision}
+        snapshotId={state.configSnapshotId}
+        format={state.configFormat}
+        formatExplicit={state.configFormatExplicit}
         documentPath={state.documentPath}
         dirty={dirty}
         busy={busy}
         canSave={state.fileRevision !== null}
+        status={saveStatus}
+        auditNotice={auditNotice}
         onValidate={() => {
           validate().catch(onFailure);
         }}

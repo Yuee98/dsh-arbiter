@@ -26,7 +26,13 @@ export interface DshHost {
   readonly cookie: { readonly name: string; readonly value: string };
   readonly home: string;
   readonly workspace: string;
+  /** The profile patch the plugin and the settings UI share. */
+  readonly documentPath: string;
   readonly stop: () => Promise<void>;
+}
+
+export interface HostOptions {
+  readonly arbiterConfig?: 'empty' | 'unset';
 }
 
 async function buildFingerprint(
@@ -85,11 +91,16 @@ async function authenticate(url: string): Promise<DshHost['cookie']> {
 export async function startDshHost(
   repoRoot: string,
   artifacts: string,
+  options: HostOptions = {},
 ): Promise<DshHost> {
   await mkdir(artifacts, { recursive: true });
   const fingerprint = await buildFingerprint(repoRoot);
   const command = await resolveDshCommand();
-  const profile = await createIsolatedProfile(repoRoot);
+  const profile = await createIsolatedProfile(repoRoot, {
+    ...(options.arbiterConfig === undefined
+      ? {}
+      : { arbiterConfig: options.arbiterConfig }),
+  });
   const env = isolatedEnv(profile.home);
   let host: ReturnType<typeof launchHost> | undefined;
   const stop = async (): Promise<void> => {
@@ -183,6 +194,7 @@ export async function startDshHost(
       cookie,
       home: profile.home,
       workspace: profile.workspace,
+      documentPath: profile.documentPath,
       stop,
     };
   } catch (error) {

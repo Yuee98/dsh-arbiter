@@ -124,6 +124,12 @@ export interface BreakerConfig {
 }
 
 export interface ArbiterConfig {
+  /**
+   * Optional declared document format. Absent means the implicit current format
+   * (`arbiter-config-v1`); a declaration is preserved so content identity
+   * distinguishes it from the implicit legacy document.
+   */
+  readonly format?: string;
   readonly enabled: boolean;
   readonly modes: {
     readonly main: ApprovalMode;

@@ -17,6 +17,16 @@ export interface IsolatedProfile {
   readonly root: string;
   readonly home: string;
   readonly workspace: string;
+  /** The profile patch the plugin and the settings UI share. */
+  readonly documentPath: string;
+}
+
+export interface ProfileOptions {
+  /**
+   * `empty` writes an explicit empty object, while `unset` omits the user
+   * config entirely so the plugin must apply the first-install defaults.
+   */
+  readonly arbiterConfig?: 'empty' | 'unset';
 }
 
 /** Never inherit the user's selected profile, credentials or model settings. */
@@ -81,6 +91,7 @@ export async function resolveDshCommand(): Promise<DshCommand> {
 /** The same public link: profile format as `dsh plugin add`, without downloads. */
 export async function createIsolatedProfile(
   repoRoot: string,
+  options: ProfileOptions = {},
 ): Promise<IsolatedProfile> {
   const root = await mkdtemp(join(tmpdir(), 'arbiter-e2e-'));
   const home = join(root, 'home');
@@ -116,11 +127,14 @@ export async function createIsolatedProfile(
   );
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages: []\n');
   await writeFile(join(profile, 'cordis.yml'), '[]\n');
+  const arbiterRow =
+    options.arbiterConfig === 'unset'
+      ? { id: 'arbiter', name: 'dsh-arbiter' }
+      : { id: 'arbiter', name: 'dsh-arbiter', config: {} };
   await writeFile(
     join(profile, 'cordis.patch.yml'),
     JSON.stringify([
-      // The prototype parser expects an object even when using all defaults.
-      { id: 'arbiter', name: 'dsh-arbiter', config: {} },
+      arbiterRow,
       {
         id: 'sandbox-policy',
         name: '@deepseek-ai/dsh-sandbox-policy',
@@ -133,5 +147,10 @@ export async function createIsolatedProfile(
       },
     ]),
   );
-  return { root, home, workspace };
+  return {
+    root,
+    home,
+    workspace,
+    documentPath: join(profile, 'cordis.patch.yml'),
+  };
 }

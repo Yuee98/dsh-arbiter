@@ -29,6 +29,8 @@ export function statePayload(
     sourceConfig: entry?.options.config ?? null,
     effectiveRevision: runtime.effectiveRevision,
     configSnapshotId: runtime.configSnapshotId,
+    configFormat: runtime.configFormat,
+    configFormatExplicit: runtime.configFormatExplicit,
     fileRevision: configuration.fileRevision(),
     documentPath: configEditor?.documentPath ?? null,
     invalidConfigError: runtime.invalidConfigError,

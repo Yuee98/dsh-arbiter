@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'vitest';
 
-import { DEFAULT_CONFIG, parseConfig } from '../src/config.js';
+import {
+  DEFAULT_CONFIG,
+  parseConfig,
+  registerConfigFormat,
+  registeredConfigFormats,
+} from '../src/config.js';
+import { evaluateCall } from '../src/rules/match.js';
 
 describe('configuration', () => {
   test('defaults are complete and valid', () => {
@@ -108,5 +114,170 @@ describe('configuration', () => {
   test('default configuration remains the fallback shape', () => {
     expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v1');
     expect(DEFAULT_CONFIG.rules).toEqual([]);
+  });
+});
+
+describe('first install defaults', () => {
+  test('a missing document yields the confirmed first-release defaults', () => {
+    for (const raw of [undefined, null]) {
+      const parsed = parseConfig(raw);
+      expect(parsed.errors).toEqual([]);
+      expect(parsed.warnings).toEqual([]);
+      expect(parsed.config).toMatchObject({
+        enabled: true,
+        modes: { main: 'normal', subagent: 'strict' },
+        rules: [],
+        reviewer: { type: 'chat', chat: { provider: 'session' } },
+        audit: {
+          enabled: true,
+          retentionDays: 30,
+          retentionBytes: 1024 * 1024 * 1024,
+        },
+      });
+      expect(parsed.config.format).toBeUndefined();
+    }
+  });
+
+  test('an existing document keeps its values instead of being overwritten by defaults', () => {
+    const parsed = parseConfig({
+      enabled: false,
+      modes: { main: 'strict', subagent: 'progress' },
+      audit: { retentionDays: 7, retentionBytes: 1024 * 1024 },
+      reviewer: {
+        type: 'decision',
+        decision: { url: 'https://example.test/review', apiKeyRef: 'TEST_KEY' },
+      },
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.enabled).toBe(false);
+    expect(parsed.config.modes).toEqual({
+      main: 'strict',
+      subagent: 'progress',
+    });
+    expect(parsed.config.audit).toMatchObject({
+      retentionDays: 7,
+      retentionBytes: 1024 * 1024,
+    });
+    expect(parsed.config.reviewer.type).toBe('decision');
+  });
+
+  test('a non-object document is still a configuration error', () => {
+    const parsed = parseConfig('[]');
+    expect(parsed.errors).toEqual([
+      { path: '', message: 'configuration must be an object' },
+    ]);
+    expect(parsed.config).toBe(DEFAULT_CONFIG);
+  });
+});
+
+describe('configuration format identification', () => {
+  test('an undeclared document keeps the legacy format and warns only when rules exist', () => {
+    const empty = parseConfig({ enabled: false });
+    expect(empty.config.format).toBeUndefined();
+    expect(empty.warnings.some((warning) => warning.path === 'format')).toBe(
+      false,
+    );
+
+    const withRules = parseConfig({
+      rules: [
+        {
+          id: 'legacy-prefix',
+          match: { node: 'command', kind: 'regex', pattern: '^gh pr view' },
+          verdict: 'allow',
+        },
+      ],
+    });
+    expect(withRules.errors).toEqual([]);
+    expect(withRules.config.format).toBeUndefined();
+    expect(withRules.warnings.map((warning) => warning.path)).toContain(
+      'format',
+    );
+    expect(
+      withRules.warnings.some((warning) => warning.message.includes('legacy')),
+    ).toBe(true);
+  });
+
+  test('a declared format is preserved in the normalized content', () => {
+    const parsed = parseConfig({ format: 'arbiter-config-v1', enabled: false });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.format).toBe('arbiter-config-v1');
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  test('an unknown or malformed format is rejected instead of reinterpreted', () => {
+    const unknown = parseConfig({ format: 'arbiter-config-v2' });
+    expect(unknown.errors).toEqual([
+      {
+        path: 'format',
+        message:
+          'unknown configuration format "arbiter-config-v2"; supported: arbiter-config-v1',
+      },
+    ]);
+    expect(unknown.config).toBe(DEFAULT_CONFIG);
+
+    const malformed = parseConfig({ format: '' });
+    expect(malformed.errors.map((error) => error.path)).toEqual(['format']);
+  });
+
+  test('a later format can register its own parser and validation', () => {
+    const unregister = registerConfigFormat({
+      id: 'arbiter-config-test',
+      parse: () => ({
+        config: { ...DEFAULT_CONFIG, enabled: false },
+        errors: [{ path: 'rules[0]', message: 'complete matching required' }],
+        warnings: [],
+      }),
+    });
+    try {
+      expect(registeredConfigFormats()).toContain('arbiter-config-test');
+      const parsed = parseConfig({ format: 'arbiter-config-test' });
+      expect(parsed.errors).toEqual([
+        { path: 'rules[0]', message: 'complete matching required' },
+      ]);
+      expect(parsed.config.enabled).toBe(false);
+      // The registry is explicit: an unregistered id stays an error.
+      expect(
+        parseConfig({ format: 'arbiter-config-missing' }).errors,
+      ).toHaveLength(1);
+      expect(() =>
+        registerConfigFormat({
+          id: 'arbiter-config-test',
+          parse: () => ({
+            config: DEFAULT_CONFIG,
+            errors: [],
+            warnings: [],
+          }),
+        }),
+      ).toThrow(/already registered/);
+    } finally {
+      unregister();
+    }
+    expect(registeredConfigFormats()).not.toContain('arbiter-config-test');
+  });
+
+  test('legacy prefix rules keep their current behavior', () => {
+    const parsed = parseConfig({
+      rules: [
+        {
+          id: 'prefix',
+          match: { node: 'command', kind: 'regex', pattern: '^gh pr view' },
+          verdict: 'allow',
+        },
+      ],
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.rules).toHaveLength(1);
+    const evaluated = evaluateCall({
+      rules: parsed.config.rules,
+      tool: 'bash',
+      arguments: { command: 'gh pr view 42 --comments' },
+      identity: 'main',
+      workspaceRoot: '/workspace',
+      cwd: '/workspace',
+      parentAuthorizationPresent: null,
+      historyTruncated: false,
+      overlapsDeniedEffect: false,
+    });
+    expect(evaluated.path).toMatchObject({ kind: 'rule', verdict: 'allow' });
   });
 });

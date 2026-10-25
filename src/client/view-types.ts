@@ -42,6 +42,8 @@ export interface StateResponse {
   readonly sourceConfig: unknown;
   readonly effectiveRevision: string;
   readonly configSnapshotId: string;
+  readonly configFormat: string;
+  readonly configFormatExplicit: boolean;
   readonly fileRevision: string | null;
   readonly documentPath: string | null;
   readonly invalidConfigError: string | null;
@@ -71,6 +73,21 @@ export interface StateResponse {
   readonly executionMode: string;
   readonly reviewerType: string;
   readonly sessionRecordErrors: readonly (readonly [string, string])[];
+}
+
+/** The API result of one save; `saved` and effective identity are separate. */
+export interface SaveResponse {
+  readonly ok: boolean;
+  readonly saved: boolean;
+  readonly changed: boolean;
+  readonly effective: boolean;
+  readonly effectiveRevision: string;
+  readonly configSnapshotId: string;
+  readonly activationRecorded: boolean;
+  readonly configFormat: string;
+  readonly configFormatExplicit: boolean;
+  readonly auditError: string | null;
+  readonly warnings: readonly ConfigWarning[];
 }
 
 export interface LogRow {

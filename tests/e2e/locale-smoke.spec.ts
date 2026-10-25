@@ -17,7 +17,7 @@ test(
     // English has only common messages: the whole missing config module falls back.
     const actionsLabel = config.actions.label;
     const validateLabel = config.validate;
-    const revisionTemplate = config.revision;
+    const revisionTemplate = config.effectiveRevision;
     const state = await page.request.get(`${dsh.origin}/api/arbiter/state`);
     const body: unknown = await state.json();
     if (

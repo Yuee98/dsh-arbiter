@@ -24,6 +24,46 @@ import type {
 
 const RUNTIMES = new Map<string, RuntimeState>();
 
+/** Which entry asked for one applied configuration. */
+export type ConfigApplySource = 'startup' | 'file' | 'ui';
+
+export interface ConfigActivation {
+  /** False when the effective content is unchanged: no new activation row. */
+  readonly changed: boolean;
+  /** Identity of the content that is now in effect. */
+  readonly revision: string;
+  readonly snapshotId: string;
+  /** True only when a new activation row was written. */
+  readonly recorded: boolean;
+  /** Audit failure, which never prevents the configuration from taking effect. */
+  readonly auditError: string | null;
+}
+
+/**
+ * A UI save can make the host reload the plugin before `save()` returns. This
+ * marker keeps that reload attributed to the UI instead of a file change.
+ */
+const UI_APPLY_WINDOW_MS = 30_000;
+
+export function markUiApply(runtime: RuntimeState): void {
+  runtime.pendingApplySource = Date.now();
+}
+
+export function clearUiApply(runtime: RuntimeState): void {
+  runtime.pendingApplySource = null;
+}
+
+function consumeApplySource(runtime: RuntimeState): ConfigApplySource {
+  const pending = runtime.pendingApplySource;
+  runtime.pendingApplySource = null;
+  if (pending !== null && Date.now() - pending <= UI_APPLY_WINDOW_MS)
+    return 'ui';
+  // The first application in a profile is the startup load. Later ones come
+  // from an external document change, including a reload after an unload that
+  // temporarily dropped the instance count to zero.
+  return runtime.configApplications === 0 ? 'startup' : 'file';
+}
+
 export function releaseRuntime(runtime: RuntimeState): void {
   if (runtime.instances > 0 || runtime.active > 0) return;
   runtime.audit?.close();
@@ -55,6 +95,17 @@ function ensureAudit(
   }
 }
 
+/**
+ * The per-profile continuity copy. It is a fallback only: the profile patch
+ * stays the single editable source, and a deleted copy is not an error.
+ */
+export function lastGoodPath(
+  home: string,
+  scope: { readonly key: string },
+): string {
+  return join(home, 'arbiter', 'last-good', `${scope.key}.json`);
+}
+
 function readLastGood(path: string): ArbiterConfig | null {
   try {
     const text = readFileSync(path, 'utf8');
@@ -81,10 +132,10 @@ function profileHome(ctx: ContextLike): string {
 
 /**
  * A profile-scoped identity separates last-good configuration and in-memory
- * runtime runtime. Audit storage stays shared per DSH data instance; approval
+ * runtime state. Audit storage stays shared per DSH data instance; approval
  * policy must not leak between profiles in the same home.
  */
-function profileScope(ctx: ContextLike): {
+export function profileScope(ctx: ContextLike): {
   readonly name: string;
   readonly key: string;
 } {
@@ -94,14 +145,94 @@ function profileScope(ctx: ContextLike): {
   return { name, key: `${name}-${stableHash(identity).slice(0, 8)}` };
 }
 
-function lastGoodPath(home: string, scope: { readonly key: string }): string {
-  return join(home, 'arbiter', 'last-good', `${scope.key}.json`);
+function sameContent(left: ArbiterConfig, right: ArbiterConfig): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function selectConfig(ctx: ContextLike, rawConfig: unknown) {
+/**
+ * Apply one validated configuration and record the activation.
+ *
+ * Content identity decides everything: identical content reuses the snapshot and
+ * adds no activation row for a later reload, while every real switch (including
+ * restoring an old document) reuses or creates the matching snapshot and writes
+ * one activation row for the entry that applied it. The very first application
+ * of a profile records its activation even when it is the unchanged default.
+ * Audit failures are reported and never block activation.
+ */
+export function applyConfig(
+  host: HostEnvironment,
+  candidate: ArbiterConfig,
+  source: ConfigApplySource,
+): ConfigActivation {
+  const { runtime, ctx } = host;
+  const changed = !sameContent(runtime.config, candidate);
+  const firstActivation = runtime.configSnapshotId === 'cfg-unavailable';
+  runtime.configApplications += 1;
+  const revision = configHash(candidate);
+  if (changed) {
+    runtime.config = candidate;
+    writeLastGood(lastGoodPath(profileHome(ctx), profileScope(ctx)), candidate);
+  }
+  runtime.configFormat = candidate.format ?? 'arbiter-config-v1';
+  runtime.configFormatExplicit = candidate.format !== undefined;
+  const audit = ensureAudit(runtime, profileHome(ctx), ctx);
+  if (audit === null) {
+    runtime.effectiveRevision = revision;
+    return {
+      changed,
+      revision,
+      snapshotId: runtime.configSnapshotId,
+      recorded: false,
+      auditError: runtime.auditError,
+    };
+  }
+  try {
+    const snapshot = audit.saveConfigSnapshot(candidate);
+    const record = changed || firstActivation;
+    if (record) {
+      // `entry` names the entry that applied the configuration; `scope` keeps
+      // describing the owning profile layer.
+      runtime.configActivations += 1;
+      audit.recordActivation(
+        snapshot.snapshotId,
+        snapshot.revision,
+        source,
+        'profile',
+      );
+    }
+    runtime.configSnapshotId = snapshot.snapshotId;
+    runtime.effectiveRevision = snapshot.revision;
+    audit.runRetention();
+    runtime.auditError = null;
+    return {
+      changed,
+      revision: snapshot.revision,
+      snapshotId: snapshot.snapshotId,
+      recorded: record,
+      auditError: null,
+    };
+  } catch (error) {
+    runtime.auditError = error instanceof Error ? error.message : String(error);
+    runtime.effectiveRevision = revision;
+    ctx.logger.error('arbiter: audit snapshot failed: %s', runtime.auditError);
+    return {
+      changed,
+      revision,
+      snapshotId: runtime.configSnapshotId,
+      recorded: false,
+      auditError: runtime.auditError,
+    };
+  }
+}
+
+/** Parse and select the document in effect, keeping the current one when invalid. */
+function selectConfig(
+  ctx: ContextLike,
+  rawConfig: unknown,
+  runtime: RuntimeState | undefined,
+) {
   const home = profileHome(ctx);
   const scope = profileScope(ctx);
-  const lastGood = lastGoodPath(home, scope);
   const parsed = parseConfig(rawConfig);
   let config = parsed.config;
   let invalidConfigError: string | null = null;
@@ -109,17 +240,18 @@ function selectConfig(ctx: ContextLike, rawConfig: unknown) {
     invalidConfigError = parsed.errors
       .map((error) => `${error.path}: ${error.message}`)
       .join('; ');
-    const previous = readLastGood(lastGood);
-    config = previous ?? DEFAULT_CONFIG;
+    // Keep the configuration already in effect, then this profile's previous
+    // document, and only then the confirmed defaults.
+    config =
+      runtime?.config ??
+      readLastGood(lastGoodPath(home, scope)) ??
+      DEFAULT_CONFIG;
     ctx.logger.error(
       'arbiter: configuration is invalid; using the last effective configuration: %s',
       invalidConfigError,
     );
-  } else {
-    writeLastGood(lastGood, config);
   }
-
-  return { home, scope, config, invalidConfigError, parsed };
+  return { home, config, invalidConfigError, parsed };
 }
 
 function acquireRuntime(
@@ -134,6 +266,11 @@ function acquireRuntime(
     config,
     effectiveRevision: configHash(config),
     configSnapshotId: 'cfg-unavailable',
+    configFormat: config.format ?? 'arbiter-config-v1',
+    configFormatExplicit: config.format !== undefined,
+    pendingApplySource: null,
+    configActivations: 0,
+    configApplications: 0,
     invalidConfigError,
     loadErrors: loadErrors,
     warnings: warnings,
@@ -152,49 +289,13 @@ function acquireRuntime(
     accepting: true,
   };
   if (existing === undefined) RUNTIMES.set(scopeKey, runtime);
-  runtime.config = config;
   runtime.invalidConfigError = invalidConfigError;
   runtime.loadErrors = loadErrors;
   runtime.warnings = warnings;
   runtime.autoPresetError = null;
   runtime.accepting = true;
   runtime.instances += 1;
-
   return runtime;
-}
-
-function initializeAudit(
-  runtime: RuntimeState,
-  home: string,
-  ctx: ContextLike,
-): AuditStore | null {
-  const audit = ensureAudit(runtime, home, ctx);
-  if (audit !== null) {
-    try {
-      const snapshot = audit.saveConfigSnapshot(runtime.config);
-      runtime.configSnapshotId = snapshot.snapshotId;
-      runtime.effectiveRevision = snapshot.revision;
-      audit.recordActivation(
-        snapshot.snapshotId,
-        snapshot.revision,
-        'arbiter',
-        'profile',
-      );
-      audit.runRetention();
-    } catch (error) {
-      runtime.auditError =
-        error instanceof Error ? error.message : String(error);
-      ctx.logger.error(
-        'arbiter: audit snapshot failed: %s',
-        runtime.auditError,
-      );
-    }
-  } else {
-    runtime.configSnapshotId = 'cfg-unavailable';
-    runtime.effectiveRevision = configHash(runtime.config);
-  }
-
-  return audit;
 }
 
 function traceLifecycle(): HostEnvironment['lifecycle'] {
@@ -269,9 +370,12 @@ export function initializeHost(
   ctx: ContextLike,
   rawConfig: unknown,
 ): HostEnvironment {
-  const { home, scope, config, invalidConfigError, parsed } = selectConfig(
+  const scope = profileScope(ctx);
+  const previous = RUNTIMES.get(scope.key);
+  const { home, config, invalidConfigError, parsed } = selectConfig(
     ctx,
     rawConfig,
+    previous,
   );
   const runtime = acquireRuntime(
     scope.key,
@@ -280,16 +384,18 @@ export function initializeHost(
     parsed.errors,
     parsed.warnings,
   );
-  const audit = initializeAudit(runtime, home, ctx);
   const host: HostEnvironment = {
     ctx,
     runtime,
-    audit,
+    audit: ensureAudit(runtime, home, ctx),
     currentAudit: () =>
       runtime.config.audit.enabled ? ensureAudit(runtime, home, ctx) : null,
     services: connectServices(ctx),
     lifecycle: traceLifecycle(),
   };
+  // An invalid document never replaces the configuration in effect: the
+  // selected fallback equals the current content, so no activation is recorded.
+  applyConfig(host, config, consumeApplySource(runtime));
   maintainRuntime(host, home);
   return host;
 }

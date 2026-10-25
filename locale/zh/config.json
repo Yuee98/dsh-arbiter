@@ -2,7 +2,12 @@
   "actions": {
     "label": "配置操作"
   },
-  "revision": "配置修订 {revision}",
+  "fileRevision": "文件修订 {revision}",
+  "fileRevisionUnavailable": "文件修订不可用",
+  "effectiveRevision": "生效修订 {revision}",
+  "snapshot": "内容快照 {snapshot}",
+  "format": "格式 {format}",
+  "formatImplicit": "（未声明，沿用旧前缀语义）",
   "unsavedDraft": " · 有未保存草稿",
   "validate": "校验草稿",
   "reload": "重新读取",
@@ -10,5 +15,16 @@
   "busy": "处理中…",
   "loading": "正在读取 Arbiter 配置…",
   "loadFailed": "无法读取 Arbiter 配置：{error}",
-  "saved": "配置已保存并应用。"
+  "saved": "配置已保存并生效。",
+  "auditDegraded": "生效配置已切换，但审计历史未写入：{error}",
+  "status": {
+    "dirty": "草稿未保存；当前生效配置未改变。",
+    "saved": "已保存并生效。",
+    "unchanged": "已保存；内容与当前生效配置相同，未新增生效记录。",
+    "synced": "当前草稿与生效配置一致。",
+    "failed": "保存或应用失败；当前生效配置未改变。"
+  },
+  "conflict": "配置文件已被外部修改。请重新读取后合并草稿；草稿与当前生效配置均未被覆盖。",
+  "invalid": "配置校验失败，未保存：{errors}",
+  "rejected": "配置应用失败，未生效：{error}"
 }
