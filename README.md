@@ -4,9 +4,11 @@
 
 **首版范围更新（2026-10-23）**：聚焦审批、会话启停与执行边界、规则管理和测试、配置、日志与恢复。离线规则建议及其入口、生成、验证和审核流程移到后续版本，待真实日志积累后重新设计。下文首轮报告中的相关功能是已有原型记录，不作为当前首版交付要求，见[产品范围](docs/requirements.md#first-release-scope)。
 
+**首版入口收敛（2026-10-25 已实现）**：配置页不再注册“离线建议”页签，也不提供生成候选、批量审核或确认接纳的按钮；对应的公开路由 `/api/arbiter/suggestions`、`/api/arbiter/analyze`、`/api/arbiter/replay` 与 `/api/arbiter/suggestions/act` 均已移除，宿主不再返回处理结果，因此没有任何入口能启动分析或让候选改动生效配置。`src/suggestions.ts` 及候选存储表保留为原型参考与历史数据，不构成首版产品承诺；已有调用日志、规则、候选行与 `validation/` 原始验证证据都不因本次收敛被删除。首版内仍完整提供规则管理、规则测试、Reviewer 配置、日志与完整数据采集。
+
 **首版默认值（2026-10-24 已确认）**：chat + 跟随会话模型、guarded、主会话 normal／子任务 strict、空命令规则表；安装不自动接管会话。预设规则留待实际使用后评估，正文与实施验收见[初始默认值](docs/configuration-and-audit.md#initial-defaults)。
 
-状态（2026-10-21，返修后）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
+状态（2026-10-21，返修后）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，R8 复现的预期改为“接纳端点不存在且候选与规则不变”，原始 9/9 通过记录仍保留在 `validation/`）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
 
 后续已确认采用[同位置 arbiter 权限选择器](docs/architecture.md#permission-selector-contract)：菜单控制会话启停，trusted / guarded 在插件配置页选择。U1–U4 已验证基础接入与探针收尾。
 
@@ -61,8 +63,8 @@
 | 审批与生命周期       | 主会话 normal／strict／progress、子任务 strict／progress；人工审批、human-abort、fallback-deny 与 error-escalate 分开记录                 |
 | 配置                 | 配置页“保存并应用”，文件为唯一可编辑来源，并发冲突拒绝，内容快照与生效记录，无效配置回退到上一份有效配置                                  |
 | 审计与恢复           | 内存裁决、DSH 会话 `plugin:arbiter/decision` 最小记录、SQLite 完整审计、异步有界队列、恢复、默认 30 天／1 GiB 清理                        |
-| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情、离线建议审核                                            |
-| 离线建议原型（延期） | 已有本地历史聚合、确定性候选、统计与代表案例、修改／拒绝／确认添加；该原型保留为参考，相关首版任务和验收已移出                            |
+| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情（首版不提供离线建议页签与操作）                          |
+| 离线建议原型（延期） | 仅有原型参考代码与历史候选数据；首版不暴露页签、生成入口、审核／接纳操作及其公开路由，重新设计前不可从产品界面或 API 触发                 |
 
 ## 本地安装与试用
 
@@ -86,7 +88,7 @@ ELECTRON_RUN_AS_NODE=1 "$DSH_BIN" "$DSH_CLI" --profile arbiter --no-open --port 
 
 如果环境里已有可用的 `dsh` 命令，等价于 `dsh plugin --profile arbiter add <path>` 与 `dsh --profile arbiter`。安装的其他方式：在 Web 的 **Plugins → Add plugin** 中选择本地路径；本包尚未发布到 npm，不要求公开发布才能试用。
 
-3. 打开终端输出的带 token URL，登录后进入 **Plugins → dsh-arbiter**。配置页提供状态、规则、reviewer、策略与高级设置、日志；已有原型中的离线建议入口需随首版范围收敛，暂不作为试用与验收目标。
+3. 打开终端输出的带 token URL，登录后进入 **Plugins → dsh-arbiter**。配置页提供状态、规则、reviewer、策略与高级设置、日志六个页签；离线建议页签与生成／接纳操作已按首版范围移除，不是试用与验收目标。
 
 4. 第一次试用建议：
 
