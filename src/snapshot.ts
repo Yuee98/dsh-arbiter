@@ -230,6 +230,8 @@ export interface SnapshotOptions {
    * a gap that was never observed.
    */
   readonly historyStatus?: HistoryStatus;
+  /** The revision this request is assembled under; recorded with the snapshot. */
+  readonly configRevision: string;
 }
 
 export interface BuiltSnapshot {
@@ -551,6 +553,7 @@ export async function buildReviewSnapshot(
   const base: Omit<ReviewSnapshot, 'budget'> = {
     version: 1,
     createdAt: Date.now(),
+    configRevision: options.configRevision,
     callId: options.callId,
     sessionId: session.id ?? 'unknown',
     sessionKind,

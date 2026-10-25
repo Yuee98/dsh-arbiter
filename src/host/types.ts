@@ -252,6 +252,8 @@ export interface HostEnvironment {
 
 export interface AuditExtras {
   readonly effect: unknown;
+  /** The review's own reason, when the review produced one. */
+  readonly reviewReason: string | null;
   readonly signals: ReviewSignals | null;
   readonly snapshot: ReviewSnapshot | null;
   readonly strategy: string | null;

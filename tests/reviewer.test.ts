@@ -115,6 +115,7 @@ describe('decision reviewer output', () => {
 const snapshot: ReviewSnapshot = {
   version: 1,
   createdAt: 0,
+  configRevision: 'test',
   callId: 'call-1',
   sessionId: 'session-1',
   sessionKind: 'main',

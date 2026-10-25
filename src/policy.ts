@@ -19,6 +19,18 @@ import type {
 
 export type StrategyName = 'normal' | 'progress';
 
+/**
+ * The review strategy a session's mode selects.
+ *
+ * `normal` and `strict` deliberately share one strategy: the only difference
+ * between those modes is whether the plugin opens a human approval, which is a
+ * settlement decision, not a review one. Keeping the mapping here is what makes
+ * that identity checkable instead of an inline ternary repeated per call site.
+ */
+export function strategyFor(mode: string): StrategyName {
+  return mode === 'progress' ? 'progress' : 'normal';
+}
+
 function probabilityAtLeast(
   distribution: Readonly<Record<string, number>> | null,
   minimum: number,

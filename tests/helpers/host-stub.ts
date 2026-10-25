@@ -93,3 +93,63 @@ export function stubEditor(options: {
     },
   };
 }
+
+/** One pre-execute decision, as the host's own type describes it. */
+export interface GateDecision {
+  readonly kind: string;
+  readonly reason?: string;
+}
+
+/** A callable form of the plugin's registered `tools/pre-execute` listener. */
+export type Gate = (
+  execution: {
+    readonly callId: string;
+    readonly name: string;
+    readonly arguments: unknown;
+    readonly signal: AbortSignal;
+    readonly agent?: { readonly session: unknown };
+  },
+  next: () => Promise<GateDecision>,
+) => Promise<GateDecision>;
+
+/**
+ * Capture the plugin's `tools/pre-execute` listener as a callable gate.
+ *
+ * Pass the returned `on` as the `on` override of {@link createStubContext}: the
+ * plugin registers through it, and the test drives the registered listener with
+ * the host's own parameter shape. Other events keep the default no-op
+ * registration.
+ */
+export function capturingGate(): {
+  readonly on: ContextLike['on'];
+  readonly gate: () => Gate;
+} {
+  let gate: Gate | undefined;
+  type Listener = (...args: never[]) => unknown;
+  return {
+    on(event: string, listener: Listener) {
+      if (event !== 'tools/pre-execute') return () => undefined;
+      gate = async (execution, next) => {
+        const decision: unknown = await Reflect.apply(listener, undefined, [
+          execution,
+          next,
+        ]);
+        if (decision === null || typeof decision !== 'object')
+          throw new TypeError('gate returned an invalid decision');
+        const kind: unknown = Reflect.get(decision, 'kind');
+        if (typeof kind !== 'string')
+          throw new TypeError('gate returned an invalid decision');
+        const reason: unknown = Reflect.get(decision, 'reason');
+        return {
+          kind,
+          ...(typeof reason === 'string' ? { reason } : {}),
+        };
+      };
+      return () => undefined;
+    },
+    gate: () => {
+      if (gate === undefined) throw new Error('gate was not registered');
+      return gate;
+    },
+  };
+}

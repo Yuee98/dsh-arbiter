@@ -1,4 +1,3 @@
-import { modeForSession } from '../config.js';
 import {
   applyProbeOverrides,
   decideReview,
@@ -9,6 +8,9 @@ import {
   runDecisionReviewer,
   type LlmLike,
 } from '../reviewer.js';
+import { modeForSession } from '../config.js';
+import { stageView, type StageView } from './stage.js';
+import { decisionFeedback, modelReasonFor } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
 import type { HistoryStatus } from '../types.js';
 import {
@@ -43,29 +45,13 @@ interface PreparedCall extends CallContext {
   readonly prior: PriorVerdictItem[];
   /** The facts about `prior`, read at the same moment so they cannot disagree. */
   readonly historyStatus: HistoryStatus;
+  /** The configuration this evaluation actually used, captured after the wait. */
+  readonly view: StageView;
   readonly thresholds: PolicyThresholds;
   readonly extras: AuditExtras;
 }
 
 type ModelResult = Awaited<ReturnType<typeof runChatReviewer>>;
-
-function modelReasonFor(decision: {
-  readonly decisionRules: readonly string[];
-}): string {
-  const reasons: Record<string, string> = {
-    R1: 'sensitive material would leave the machine',
-    R2: 'critical risk of irreversible damage',
-    R3: 'no sufficient authorization was found',
-    R4: 'bulk irreversible destruction requires a human decision',
-    R5: 'the risk exceeds the selected policy ceiling',
-    R6: 'bulk external sending exceeds the selected policy ceiling',
-    R8: 'the available signals are insufficient',
-  };
-  return (
-    reasons[decision.decisionRules[0] ?? ''] ??
-    'the review did not approve this action'
-  );
-}
 
 /** The trace field for a resolved historical rule name, or nothing. */
 function ruleNameStage(name: string | null): { readonly ruleName?: string } {
@@ -275,6 +261,22 @@ export class CallGate {
     return deny(reason);
   }
 
+  /**
+   * The call as it stands when a human question is about to be asked.
+   *
+   * Nothing has been shown yet, so eligibility belongs to the configuration
+   * effective now — not to the mode captured before the snapshot took time. An
+   * approval that is already on screen is a different path: it keeps waiting
+   * and passes `approvalOpen`.
+   */
+  private humanCall(call: CallContext): CallContext {
+    const { runtime } = this.host;
+    return {
+      ...call,
+      mode: modeForSession(runtime.config, call.sessionKind),
+    };
+  }
+
   private async ensureCwd(
     agent: AgentLike,
     signal: AbortSignal,
@@ -296,25 +298,29 @@ export class CallGate {
     const { runtime } = this.host;
     const session = agent.session;
     const sessionKind = sessionKindOf(agent);
-    const mode = modeForSession(runtime.config, sessionKind);
-    const strategy = mode === 'progress' ? 'progress' : 'normal';
-    const thresholds =
-      strategy === 'progress'
-        ? runtime.config.policy.progress
-        : runtime.config.policy.normal;
     let cwd = process.cwd();
     try {
       cwd = await this.ensureCwd(agent, exec.signal);
     } catch {
       /* Keep process cwd; the snapshot records the actual value. */
     }
+    // Capture the configuration *after* the await: rules, mode and the recorded
+    // revision must all describe the moment the evaluation actually runs, not
+    // the moment the call entered the gate.
+    const view = stageView(
+      runtime.config,
+      runtime.effectiveRevision,
+      runtime.configSnapshotId,
+      sessionKind,
+    );
+    const { mode, strategy, thresholds } = view;
     // Entries and the facts about them are read together, so an in-flight call
     // cannot pair one observation's window with another's completeness claim.
     const history = this.history.windowFor(session.id ?? 'unknown');
     const prior = history.items;
     // The evaluated set is what the matcher indexes into, so it is also what the
     // historical rule name must be resolved against.
-    const evaluatedRules = runtime.config.rules.filter(
+    const evaluatedRules = view.config.rules.filter(
       (rule) => rule.enabled !== false,
     );
     const evaluation = evaluateCall({
@@ -354,17 +360,19 @@ export class CallGate {
               }
             : {}),
           ...(path.kind === 'review-default' ? { reason: path.reason } : {}),
-          // The revision that decided this stage, captured now. A config
-          // switch later in the same call must not relabel it.
-          configRevision: runtime.effectiveRevision,
-          configSnapshotId: runtime.configSnapshotId,
+          // The revision that decided this stage, from the same view the
+          // evaluation used, so a later switch cannot relabel it.
+          configRevision: view.revision,
+          configSnapshotId: view.snapshotId,
           at: Date.now(),
         },
       ],
+      view,
       extras: {
         effect: evaluation.facts === null ? null : { ...evaluation.facts },
         signals: null,
         snapshot: null,
+        reviewReason: null,
         strategy,
         decisionRules: [],
         modelAttempts: [],
@@ -412,8 +420,13 @@ export class CallGate {
       );
     }
     if (path.verdict === 'deny') {
-      const reason =
-        'Not executed [deny-rule]: a deny command rule matched this call.';
+      const reason = decisionFeedback({
+        result: 'deny',
+        ruleId: path.ruleId,
+        decisionRules: [],
+        reviewReason: null,
+        snapshot: null,
+      });
       this.settlement.finalize(call, 'deny', reason, call.extras);
       return deny(reason);
     }
@@ -449,13 +462,17 @@ export class CallGate {
       arguments: call.exec.arguments,
       callId: call.exec.callId,
       cwd: call.cwd,
-      config: runtime.config,
+      // The snapshot must describe the configuration the rule evaluation used,
+      // so a change landing while the snapshot is being built cannot make the
+      // submitted request and the recorded revision disagree.
+      config: call.view.config,
       facts: call.evaluation.facts,
       ...(hint === undefined ? {} : { hint }),
       priorVerdicts: call.prior,
       historyStatus: call.historyStatus,
       sessionRecordGap:
         runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
+      configRevision: call.view.revision,
     });
     return { bundle, llm };
   }
@@ -471,9 +488,12 @@ export class CallGate {
         at: Date.now(),
       });
       return this.settlement.human(
-        call,
+        this.humanCall(call),
         'Review circuit breaker is open for this session.',
-        call.extras,
+        {
+          ...call.extras,
+          reviewReason: 'the review circuit breaker is open for this session',
+        },
       );
     }
     let snapshot: { bundle: BuiltSnapshot; llm: LlmLike };
@@ -489,7 +509,10 @@ export class CallGate {
         configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
-      return this.settlement.human(call, message, call.extras);
+      return this.settlement.human(this.humanCall(call), message, {
+        ...call.extras,
+        reviewReason: `the review could not be prepared: ${message}`,
+      });
     }
     if (
       snapshot.bundle.snapshot.budget.truncatedSegments.includes('OVER_BUDGET')
@@ -507,9 +530,10 @@ export class CallGate {
         configSnapshotId: this.host.runtime.configSnapshotId,
         at: Date.now(),
       });
-      return this.settlement.human(call, message, {
+      return this.settlement.human(this.humanCall(call), message, {
         ...call.extras,
         snapshot: snapshot.bundle.snapshot,
+        reviewReason: message,
       });
     }
     this.noteReview(call.session.id ?? 'unknown');
@@ -538,9 +562,14 @@ export class CallGate {
     bundle: BuiltSnapshot,
     llm: LlmLike,
   ): Promise<ModelResult> {
-    const { runtime, lifecycle, services } = this.host;
+    const { lifecycle, services } = this.host;
     const thresholds = call.thresholds;
-    if (runtime.config.reviewer.type === 'chat') {
+    // A NEW request uses the configuration effective at dispatch, not the one
+    // captured before the snapshot was assembled; the response is then parsed by
+    // this same frozen protocol even if the configuration changes again while
+    // the request is out.
+    const reviewer = this.host.runtime.config.reviewer;
+    if (reviewer.type === 'chat') {
       lifecycle('review/start', {
         callId: call.exec.callId,
         sessionId: call.session.id ?? 'unknown',
@@ -549,7 +578,7 @@ export class CallGate {
         {
           llm,
           session: call.session,
-          chat: runtime.config.reviewer.chat,
+          chat: reviewer.chat,
           thresholds,
           signal: call.exec.signal,
         },
@@ -567,7 +596,7 @@ export class CallGate {
       {
         fetch: globalThis.fetch,
         credentials: services.credentials,
-        decision: runtime.config.reviewer.decision,
+        decision: reviewer.decision,
         thresholds,
         signal: call.exec.signal,
       },
@@ -583,14 +612,20 @@ export class CallGate {
     result: ModelResult,
   ): Promise<PreToolDecision> {
     const { runtime } = this.host;
-    // Responses retain their original protocol; decisions use the policy now effective.
-    const mode = modeForSession(runtime.config, call.sessionKind);
+    // The response keeps the protocol that produced it (it was parsed before it
+    // reached here), while the decision itself uses the configuration effective
+    // when it forms. Capture that as one view so the mode, thresholds and the
+    // revision written to the trace cannot disagree.
+    const view = stageView(
+      runtime.config,
+      runtime.effectiveRevision,
+      runtime.configSnapshotId,
+      call.sessionKind,
+    );
+    const mode = view.mode;
     const current = { ...call, mode };
-    const strategy = mode === 'progress' ? 'progress' : 'normal';
-    const thresholds =
-      strategy === 'progress'
-        ? runtime.config.policy.progress
-        : runtime.config.policy.normal;
+    const strategy = view.strategy;
+    const thresholds = view.thresholds;
     const extras = {
       ...call.extras,
       snapshot: bundle.snapshot,
@@ -607,9 +642,11 @@ export class CallGate {
         at: Date.now(),
       });
       return this.settlement.human(
-        current,
+        this.humanCall(current),
         `review failed: ${result.error}`,
-        extras,
+        // The failure *is* the reason: without it the agent sees only the
+        // channel outcome and cannot tell a broken reviewer from a decision.
+        { ...extras, reviewReason: `the review failed: ${result.error}` },
       );
     }
     const signals = reclassifySignals(
@@ -634,6 +671,7 @@ export class CallGate {
       ...extras,
       signals,
       decisionRules: policy.decisionRules,
+      reviewReason: policy.reason,
     };
     if (policy.verdict === 'review-allow') {
       this.settlement.finalize(
@@ -645,12 +683,18 @@ export class CallGate {
       return { kind: 'allow' };
     }
     if (policy.verdict === 'review-deny') {
-      const text = `Not executed [review-deny]: ${modelReasonFor(policy)}.`;
+      const text = decisionFeedback({
+        result: 'review-deny',
+        ruleId: null,
+        decisionRules: policy.decisionRules,
+        reviewReason: modelReasonFor(policy),
+        snapshot: bundle.snapshot,
+      });
       this.settlement.finalize(current, 'review-deny', text, reviewedExtras);
       return deny(text);
     }
     return this.settlement.human(
-      current,
+      this.humanCall(current),
       `review requires a human decision: ${modelReasonFor(policy)}`,
       reviewedExtras,
     );

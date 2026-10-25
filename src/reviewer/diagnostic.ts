@@ -21,6 +21,9 @@ import { renderRequest, renderUser } from './prompt.js';
 export const PROBE_SNAPSHOT: ReviewSnapshot = {
   version: 1,
   createdAt: 0,
+  // The probe is not part of any call's decision chain; the revision is only
+  // present so the snapshot shape stays one shape.
+  configRevision: 'reviewer-probe',
   callId: 'reviewer-probe',
   sessionId: 'reviewer-probe',
   sessionKind: 'main',

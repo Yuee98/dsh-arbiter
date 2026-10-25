@@ -5,6 +5,7 @@ import {
   applyProbeOverrides,
   compareStrategies,
   decideReview,
+  strategyFor,
 } from '../src/policy.js';
 import type { ReviewSignals } from '../src/types.js';
 
@@ -219,5 +220,147 @@ describe('probe overrides', () => {
       'override',
     );
     expect(alreadyClean.egress).toBe(false);
+  });
+});
+
+describe('mode to strategy mapping', () => {
+  test('normal and strict share one strategy, progress does not', () => {
+    expect(strategyFor('normal')).toBe('normal');
+    expect(strategyFor('strict')).toBe('normal');
+    expect(strategyFor('progress')).toBe('progress');
+  });
+
+  test('the same signals decide identically under normal and strict', () => {
+    // Representative signals for every rule row, including the boundary values
+    // where a stricter mode would have differed in the retired design.
+    const grid: readonly ReviewSignals[] = [
+      signals(),
+      signals({
+        riskPoint: 4,
+        riskClass: 'medium',
+        authPoint: 8,
+        authClass: 'explicit',
+      }),
+      signals({
+        riskPoint: 6,
+        riskClass: 'medium',
+        authPoint: 8,
+        authClass: 'explicit',
+      }),
+      signals({
+        riskPoint: 6,
+        riskClass: 'medium',
+        authPoint: 2,
+        authClass: 'none',
+      }),
+      signals({ riskPoint: 9, riskClass: 'high' }),
+      signals({ secrets: true, egress: true, riskPoint: 5 }),
+      signals({ destructive: true, bulk: true, riskPoint: 8 }),
+      signals({
+        bulk: true,
+        egress: true,
+        riskPoint: 7,
+        authPoint: 9,
+        authClass: 'explicit',
+      }),
+      signals({
+        riskPoint: null,
+        riskDist: { '1': 0.2, '5': 0.5, '9': 0.3 },
+        riskClass: 'medium',
+      }),
+    ];
+    for (const input of grid) {
+      expect(decideReview(input, strategyFor('strict'), normal)).toEqual(
+        decideReview(input, strategyFor('normal'), normal),
+      );
+    }
+  });
+
+  test('automatic allow range is normal = strict and a subset of progress', () => {
+    const allows: Record<string, Set<string>> = {
+      normal: new Set(),
+      strict: new Set(),
+      progress: new Set(),
+    };
+    for (const risk of [1, 4, 6, 8, 9]) {
+      for (const auth of [0, 5, 8, 10]) {
+        for (const bulk of [false, true]) {
+          for (const egress of [false, true]) {
+            const input = signals({
+              riskPoint: risk,
+              riskClass: risk <= 3 ? 'low' : risk <= 8 ? 'medium' : 'high',
+              authPoint: auth,
+              authClass:
+                auth >= 8 ? 'explicit' : auth >= 5 ? 'implied' : 'none',
+              bulk,
+              egress,
+            });
+            const key = `${String(risk)}/${String(auth)}/${String(bulk)}/${String(egress)}`;
+            for (const [mode, thresholds] of [
+              ['normal', normal],
+              ['strict', normal],
+              ['progress', progress],
+            ] as const) {
+              if (
+                decideReview(input, strategyFor(mode), thresholds).verdict ===
+                'review-allow'
+              )
+                allows[mode]?.add(key);
+            }
+          }
+        }
+      }
+    }
+    expect([...(allows['strict'] ?? [])].sort()).toEqual(
+      [...(allows['normal'] ?? [])].sort(),
+    );
+    for (const key of allows['normal'] ?? []) {
+      expect(allows['progress']?.has(key)).toBe(true);
+    }
+  });
+
+  test('chat and decision share one authorization standard', () => {
+    // Same authorization level *and* the same risk facts, in each protocol's
+    // own shape: the authorization standard must agree on both.
+    const chatExplicit = signals({
+      riskPoint: 3,
+      riskClass: 'low',
+      authPoint: 8,
+      authClass: 'explicit',
+    });
+    const decisionExplicit = signals({
+      riskPoint: null,
+      riskDist: { '1': 0.8, '3': 0.15, '9': 0.05 },
+      riskClass: 'low',
+      authPoint: null,
+      authDist: { '8': 0.85, '9': 0.1, '1': 0.05 },
+      authClass: 'explicit',
+      source: 'decision',
+    });
+    expect(decideReview(chatExplicit, 'normal', normal).verdict).toBe(
+      decideReview(decisionExplicit, 'normal', normal).verdict,
+    );
+    // A medium-risk call without authorization: both protocols escalate, and
+    // through the same rule, because the authorization standard is shared.
+    const chatNone = signals({
+      riskPoint: 5,
+      riskClass: 'medium',
+      authPoint: 1,
+      authClass: 'none',
+    });
+    const decisionNone = signals({
+      riskPoint: null,
+      riskDist: { '1': 0.1, '5': 0.8, '7': 0.1 },
+      riskClass: 'medium',
+      authPoint: null,
+      authDist: { '1': 0.9, '8': 0.1 },
+      authClass: 'none',
+      source: 'decision',
+    });
+    const chat = decideReview(chatNone, 'normal', normal);
+    const decided = decideReview(decisionNone, 'normal', normal);
+    expect(chat.verdict).toBe('review-escalate');
+    expect(decided.verdict).toBe(chat.verdict);
+    expect(chat.decisionRules).toEqual(decided.decisionRules);
   });
 });

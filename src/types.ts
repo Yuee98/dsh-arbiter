@@ -465,6 +465,14 @@ export interface HistoryStatus {
 export interface ReviewSnapshot {
   readonly version: 1;
   readonly createdAt: number;
+  /**
+   * The effective configuration revision this request was assembled under.
+   *
+   * The response is parsed by the protocol asked here and decided later under
+   * whatever is effective then, so the audit needs to name both revisions; this
+   * is the request-side one.
+   */
+  readonly configRevision: string;
   readonly callId: string;
   readonly sessionId: string;
   readonly sessionKind: SessionKind;
