@@ -39,7 +39,6 @@ function flagParam(url: URL, name: string): boolean | undefined {
 function filterOf(url: URL): CallFilter {
   const filter: {
     limit?: number;
-    offset?: number;
     result?: string;
     tool?: string;
     sessionId?: string;
@@ -53,8 +52,6 @@ function filterOf(url: URL): CallFilter {
   } = {};
   const limit = integerParam(url, 'limit');
   if (limit !== undefined) filter.limit = limit;
-  const offset = integerParam(url, 'offset');
-  if (offset !== undefined) filter.offset = offset;
   const result = textParam(url, 'result');
   if (result !== undefined) filter.result = result;
   const tool = textParam(url, 'tool');
@@ -79,18 +76,36 @@ function filterOf(url: URL): CallFilter {
 }
 
 /**
- * The traversal anchor, when the caller supplied one.
+ * A keyset cursor, when the caller supplied one.
  *
- * An anchor is a pair, so a half-supplied one is treated as absent: silently
- * starting a fresh traversal would move a reader's window, which is the failure
- * the anchor exists to prevent.
+ * A cursor is a pair. A half-supplied one is treated as absent: silently
+ * starting a fresh traversal would move the reader's window, which is exactly
+ * what the cursor exists to prevent.
  */
-function anchorParam(url: URL): CallAnchor | undefined {
-  const ts = integerParam(url, 'anchorTs');
-  const callId = textParam(url, 'anchorCallId');
+function cursorParam(
+  url: URL,
+  tsName: string,
+  callIdName: string,
+): CallAnchor | undefined {
+  const ts = integerParam(url, tsName);
+  const callId = textParam(url, callIdName);
   if (ts === undefined || callId === undefined || callId.length === 0)
     return undefined;
   return { ts, callId };
+}
+
+/** The list filter plus the cursors one logs request asked for. */
+function requestOf(url: URL): CallFilter {
+  const after = cursorParam(url, 'afterTs', 'afterCallId');
+  const before = cursorParam(url, 'beforeTs', 'beforeCallId');
+  const anchor = cursorParam(url, 'anchorTs', 'anchorCallId');
+  return {
+    ...filterOf(url),
+    ...(url.searchParams.get('tail') === '1' ? { tail: true } : {}),
+    ...(after === undefined ? {} : { after }),
+    ...(before === undefined ? {} : { before }),
+    ...(anchor === undefined ? {} : { anchor }),
+  };
 }
 
 export function logsRoute(host: HostEnvironment): FetchRouteLike {
@@ -108,7 +123,10 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
             rows: [],
             total: 0,
             limit: 0,
-            offset: 0,
+            nextCursor: null,
+            prevCursor: null,
+            anchor: null,
+            newer: 0,
             health: {
               state: 'unavailable',
               lastError: runtime.auditError,
@@ -118,12 +136,7 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
           }),
         );
       }
-      const url = new URL(request.url);
-      const filter = filterOf(url);
-      const anchor = anchorParam(url);
-      const listed = audit.listCalls(
-        anchor === undefined ? filter : { ...filter, anchor },
-      );
+      const listed = audit.listCalls(requestOf(new URL(request.url)));
       // A database this build cannot interpret is an unreadable page, not an
       // empty history. Reporting it as a successful zero-row page would tell the
       // operator the records do not exist.
@@ -136,7 +149,8 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
               rows: [],
               total: 0,
               limit: listed.limit,
-              offset: listed.offset,
+              nextCursor: null,
+              prevCursor: null,
               anchor: listed.anchor,
               newer: 0,
               health: audit.health(),
@@ -151,7 +165,8 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
           rows: listed.rows,
           total: listed.total,
           limit: listed.limit,
-          offset: listed.offset,
+          nextCursor: listed.nextCursor,
+          prevCursor: listed.prevCursor,
           anchor: listed.anchor,
           newer: listed.newer,
         }),

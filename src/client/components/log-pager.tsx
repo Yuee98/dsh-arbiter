@@ -10,22 +10,33 @@ import type { LogQuery } from '../log-list.js';
  * A page is only ever moved by this control, so a new record arriving can never
  * change what the reader is looking at. Both buttons disable at their boundary
  * instead of clamping a click into a no-op request.
+ *
+ * `index` is how many rows the reader has passed. With keyset paging the server
+ * does not report an offset — the position is derived from the rows actually
+ * read, so a cleanup that shrinks the total cannot claim the reader is on a page
+ * that no longer exists.
  */
 export function LogPager({
   query,
+  index,
   total,
+  hasNext,
+  hasPrevious,
   busy,
-  onOffset,
+  onNext,
+  onPrevious,
 }: {
   readonly query: LogQuery;
+  readonly index: number;
   readonly total: number;
+  readonly hasNext: boolean;
+  readonly hasPrevious: boolean;
   readonly busy: boolean;
-  readonly onOffset: (offset: number) => void;
+  readonly onNext: () => void;
+  readonly onPrevious: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const info = pageInfo(query.offset, query.limit, total);
-  const atStart = query.offset <= 0;
-  const atEnd = info.pages === 0 || info.page >= info.pages;
+  const info = pageInfo(index, query.limit, total);
   return (
     <nav
       aria-label={t('logs.pager.label')}
@@ -37,20 +48,10 @@ export function LogPager({
         fontSize: 12,
       }}
     >
-      <Button
-        onClick={() => {
-          onOffset(Math.max(query.offset - query.limit, 0));
-        }}
-        disabled={busy || atStart}
-      >
+      <Button onClick={onPrevious} disabled={busy || !hasPrevious}>
         {t('logs.pager.previous')}
       </Button>
-      <Button
-        onClick={() => {
-          onOffset(query.offset + query.limit);
-        }}
-        disabled={busy || atEnd}
-      >
+      <Button onClick={onNext} disabled={busy || !hasNext}>
         {t('logs.pager.next')}
       </Button>
       <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>

@@ -79,26 +79,35 @@ export const DENIED_RESULTS: readonly string[] = [
   'human-abort',
 ];
 
-/** The newest record a traversal is anchored at. */
+/** One position in the newest-first order. */
 export interface CallAnchor {
   readonly ts: number;
   readonly callId: string;
 }
 
 /**
- * One page of list rows.
+ * One page of list rows, read with a keyset cursor.
  *
- * `anchor` says which records this traversal is allowed to see: rows newer than
- * the anchor are outside it, so inserting a call cannot shift a page window and
- * make the reader see one row twice. `newer` counts the matching rows outside
- * the anchor, which is what "N new records" means — a count that cleanup cannot
- * fake the way a `total` delta could.
+ * `after`/`before` bound the window by the reader's own position in the order,
+ * not by a count of skipped rows. That is what makes the traversal stable: a
+ * call inserted anywhere — above the window, below it, or inside a timestamp
+ * that ties with the cursor — cannot shift which rows come next, because the
+ * window is "everything after this exact row", not "skip N rows".
+ *
+ * `total` is the size of the whole filtered set, for the pager and the total
+ * label. `newer` counts the matching rows above the traversal head, which is
+ * what "N new records" means: a total delta cannot answer it, because cleanup
+ * can delete as many rows as arrive.
  */
 export interface CallPage {
   readonly rows: readonly CallSummary[];
   readonly total: number;
   readonly limit: number;
-  readonly offset: number;
+  /** The continuation cursor: pass it back as `after` for the next page. */
+  readonly nextCursor: CallAnchor | null;
+  /** The cursor that would return this page again: pass it as `before`. */
+  readonly prevCursor: CallAnchor | null;
+  /** The traversal head, echoed so the arrival count stays comparable. */
   readonly anchor: CallAnchor | null;
   readonly newer: number;
 }
@@ -125,11 +134,28 @@ export interface CallFilter {
   /** `main` or `subagent`; separates subtask calls from the main session. */
   readonly sessionKind?: string;
   /**
-   * The traversal's upper bound.
+   * The continuation cursor: the last row of the previous page.
+   *
+   * The window is then every row strictly after that position in the
+   * newest-first order, which stays correct no matter what is inserted.
+   */
+  readonly after?: CallAnchor;
+  /** Read the page immediately before this position (used for "previous"). */
+  readonly before?: CallAnchor;
+  /**
+   * Read the oldest page instead of a cursor-relative one.
+   *
+   * The end of a traversal is the only page a reader cannot reach by following a
+   * cursor after the rows they were on were deleted; this names it directly
+   * instead of asking for a row count that no longer exists.
+   */
+  readonly tail?: boolean;
+  /**
+   * The traversal head, used only to count records that arrived above it.
    *
    * A request without one starts a traversal at the newest matching record and
-   * receives the anchor it was given. Every later page repeats it, so a call
-   * that arrives in between stays outside the window instead of shifting it.
+   * receives the head it was given, so the arrival count stays comparable
+   * across pages.
    */
   readonly anchor?: CallAnchor;
   readonly query?: string;

@@ -115,12 +115,12 @@ export interface LogAnchor {
 }
 
 /**
- * One decoded list page and the window the host actually read.
+ * One decoded list page and the cursors that continue it.
  *
- * `anchor` is the traversal's fixed upper bound: while the reader holds it, a
- * call arriving above it cannot shift the pages under the reader. `newer`
- * counts the matching records above the anchor, so the "new records" notice
- * reports arrivals rather than a total that cleanup can cancel out.
+ * Paging is keyed to a row, not to a row count: `nextCursor` is the last row of
+ * this page, and the next request asks for what follows it. A call arriving
+ * anywhere in the order therefore cannot shift the rows under the reader.
+ * `newer` counts arrivals above the traversal head, which a total delta cannot.
  */
 export interface LogPage {
   /** False when the host could not read the audit store at all. */
@@ -128,7 +128,8 @@ export interface LogPage {
   readonly rows: readonly LogRow[];
   readonly total: number;
   readonly limit: number;
-  readonly offset: number;
+  readonly nextCursor: LogAnchor | null;
+  readonly prevCursor: LogAnchor | null;
   readonly anchor: LogAnchor | null;
   readonly newer: number;
   readonly code: string | undefined;

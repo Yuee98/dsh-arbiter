@@ -20,7 +20,7 @@ export type {
   StoredCall,
 } from './audit/types.js';
 import { hash, json, rowChanges } from './audit/rows.js';
-import { clampOffset, clampPageSize } from './audit/call-list.js';
+import { clampPageSize } from './audit/call-list.js';
 import { migrateAudit } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
 import {
@@ -458,10 +458,10 @@ export class AuditStore {
   }
 
   /**
-   * One page of the call list, plus the window that was actually read.
+   * One page of the call list, plus the cursors that continue it.
    *
-   * Reporting the clamped window lets a client compute page numbers from the
-   * rows it received instead of from a window that never ran.
+   * A degraded read answers with no rows and no cursor, so a caller cannot
+   * mistake "storage failed" for "this traversal ended".
    */
   listCalls(
     filter: CallFilter = {},
@@ -472,7 +472,8 @@ export class AuditStore {
         rows: [],
         total: 0,
         limit: clampPageSize(filter.limit),
-        offset: clampOffset(filter.offset),
+        nextCursor: null,
+        prevCursor: null,
         anchor: filter.anchor ?? null,
         newer: 0,
         unreadable: true,

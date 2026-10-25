@@ -49,29 +49,6 @@ export function clampPageSize(value: number | undefined): number {
   return Math.min(Math.max(Math.trunc(value), MIN_PAGE_SIZE), MAX_PAGE_SIZE);
 }
 
-/** A non-negative integer offset; fractions and negatives fall back to zero. */
-export function clampOffset(value: number | undefined): number {
-  if (value === undefined || !Number.isFinite(value)) return 0;
-  return Math.max(Math.trunc(value), 0);
-}
-
-/**
- * The last page that still contains a row.
- *
- * Used when a window outlives the rows it showed — the page was cleared,
- * retention ran, or a filter narrowed the set: the reader is moved to the last
- * non-empty page instead of being shown an empty tail with a valid total.
- */
-export function clampToLastPage(
-  offset: number,
-  total: number,
-  limit: number,
-): number {
-  if (total <= 0) return 0;
-  const page = clampPageSize(limit);
-  return Math.min(clampOffset(offset), Math.floor((total - 1) / page) * page);
-}
-
 /** A predicate plus the values it binds, in placeholder order. */
 interface Predicate {
   readonly sql: string;
@@ -97,16 +74,40 @@ function bound(
 }
 
 /**
- * The anchor predicate: this traversal's rows are at or below it.
+ * The row's position in the newest-first order is strictly after `cursor`.
  *
- * Both halves are needed for a total bound. `<=` on `ts` alone would let a call
- * sharing the anchor's timestamp but sorting above it enter the set, which is
- * exactly the drift the anchor exists to prevent.
+ * The tie-break on `call_id` is what makes this a keyset rather than a
+ * heuristic: the pair is unique, so "after this row" names an exact boundary no
+ * insertion can move. A call inserted with a later timestamp, an earlier one, or
+ * one sharing this timestamp and sorting above it all land on one side or the
+ * other without shifting the rows already returned.
  */
-function anchorPredicate(anchor: CallAnchor): Predicate {
+function afterCursor(cursor: CallAnchor): Predicate {
+  return {
+    sql: '(ts < ? OR (ts = ? AND call_id < ?))',
+    values: [cursor.ts, cursor.ts, cursor.callId],
+  };
+}
+
+/**
+ * The traversal's upper bound: rows at or below its head.
+ *
+ * Used only for the total, so the pager counts the set the reader started with
+ * rather than the rows still ahead of the cursor. Rows above the head are
+ * arrivals, and they are reported separately as `newer`.
+ */
+function headBound(head: CallAnchor): Predicate {
   return {
     sql: '(ts < ? OR (ts = ? AND call_id <= ?))',
-    values: [anchor.ts, anchor.ts, anchor.callId],
+    values: [head.ts, head.ts, head.callId],
+  };
+}
+
+/** The rows strictly before `cursor` in the same order (the "previous" read). */
+function beforeCursor(cursor: CallAnchor): Predicate {
+  return {
+    sql: '(ts > ? OR (ts = ? AND call_id > ?))',
+    values: [cursor.ts, cursor.ts, cursor.callId],
   };
 }
 
@@ -170,7 +171,7 @@ function searchPredicate(query: string): Predicate {
  */
 function whereOf(
   filter: CallFilter,
-  anchor: CallAnchor | null,
+  extra: Predicate | null = null,
 ): {
   readonly where: string;
   readonly values: (string | number)[];
@@ -190,7 +191,7 @@ function whereOf(
     filter.query === undefined || filter.query.length === 0
       ? null
       : searchPredicate(filter.query),
-    anchor === null ? null : anchorPredicate(anchor),
+    extra,
   ];
   const applied = candidates.filter((item): item is Predicate => item !== null);
   return {
@@ -267,13 +268,13 @@ function summaryOf(row: Record<string, unknown>): CallSummary {
   };
 }
 
-/** `WHERE` plus the anchor's extra condition, without the anchor predicate. */
-function scopeOf(filter: CallFilter): {
-  readonly scope: string;
-  readonly values: (string | number)[];
-} {
-  const { where, values } = whereOf(filter, null);
-  return { scope: where.length > 0 ? `${where} AND` : 'WHERE', values };
+/** `WHERE` plus one extra condition, for the counts that need a cursor bound. */
+function scopeOf(
+  filter: CallFilter,
+  extra: Predicate,
+): { readonly scope: string; readonly values: (string | number)[] } {
+  const { where, values } = whereOf(filter, extra);
+  return { scope: where, values };
 }
 
 /**
@@ -287,7 +288,7 @@ export function newestAnchor(
   db: DatabaseSync,
   filter: CallFilter,
 ): CallAnchor | null {
-  const { where, values } = whereOf(filter, null);
+  const { where, values } = whereOf(filter);
   const row = asRow(
     db
       .prepare(
@@ -312,43 +313,100 @@ function newerCount(
   filter: CallFilter,
   anchor: CallAnchor,
 ): number {
-  const { scope, values } = scopeOf(filter);
+  const { scope, values } = scopeOf(filter, beforeCursor(anchor));
   const row = asRow(
-    db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM calls ${scope}
-          (ts > ? OR (ts = ? AND call_id > ?))`,
-      )
-      .get(...values, anchor.ts, anchor.ts, anchor.callId),
+    db.prepare(`SELECT COUNT(*) AS count FROM calls ${scope}`).get(...values),
   );
   return rowNumber(row['count']);
 }
 
-/** One page of calls, newest first, within a fixed traversal anchor. */
+/** Which side of the cursor a read covers, and the predicate that selects it. */
+function windowOf(filter: CallFilter): {
+  readonly backward: boolean;
+  readonly tail: boolean;
+  readonly extra: Predicate | null;
+} {
+  // `tail` names the oldest page without a cursor; it reads backwards from the
+  // end of the traversal.
+  const tail = filter.tail === true;
+  const backward =
+    tail || (filter.before !== undefined && filter.after === undefined);
+  const cursor = tail ? null : (filter.before ?? filter.after ?? null);
+  return {
+    backward,
+    tail,
+    extra:
+      cursor === null
+        ? null
+        : backward
+          ? beforeCursor(cursor)
+          : afterCursor(cursor),
+  };
+}
+
+/**
+ * One page of calls, newest first, read from a keyset cursor.
+ *
+ * Two readers exist, and both are bounded by a row rather than a row count:
+ *
+ * - forward (`after`) returns the next page of a traversal;
+ * - backward (`before`) returns the page before a cursor, reversed back into
+ *   newest-first order for display.
+ *
+ * `total` and `newer` are counted against the whole filtered set and the
+ * traversal head respectively, so neither is affected by which page was read.
+ */
 export function callPage(db: DatabaseSync, filter: CallFilter = {}): CallPage {
-  // The anchor is resolved before the page read so the page and the "newer"
-  // count describe the same traversal even if a write lands between them.
+  // The head is resolved before the page read so the page and the arrival count
+  // describe the same traversal even if a write lands between the two queries.
   const anchor = filter.anchor ?? newestAnchor(db, filter);
-  const { where, values } = whereOf(filter, anchor);
-  const limit = clampPageSize(filter.limit);
-  const offset = clampOffset(filter.offset);
-  const totalRow = asRow(
-    db.prepare(`SELECT COUNT(*) AS count FROM calls ${where}`).get(...values),
+  const window = windowOf(filter);
+  const { where, values } = whereOf(filter, window.extra);
+  // The total is counted against the traversal, not the remaining window: the
+  // pager needs a stable denominator, and a reader on page two must still see
+  // the size of the set they started with.
+  const totalScope = whereOf(
+    filter,
+    anchor === null ? null : headBound(anchor),
   );
-  const rows = asRows(
+  const limit = clampPageSize(filter.limit);
+  const totalRow = asRow(
+    db
+      .prepare(`SELECT COUNT(*) AS count FROM calls ${totalScope.where}`)
+      .get(...totalScope.values),
+  );
+  const total = rowNumber(totalRow['count']);
+  // The backward read walks the order in reverse so LIMIT takes the rows
+  // adjacent to the cursor; the reverse afterwards restores display order.
+  const order = window.backward ? 'ASC' : 'DESC';
+  // Reading backwards from the end takes the oldest rows; how many of them form
+  // the last page depends on the total, not on the page size alone. The count is
+  // derived here so `tail` names one exact page rather than a reversed window.
+  const readCount = window.tail
+    ? total - Math.floor(Math.max(total - 1, 0) / limit) * limit
+    : limit;
+  const read = asRows(
     db
       .prepare(
         `SELECT ${ROW_COLUMNS} FROM calls ${where}
-          ORDER BY ts DESC, call_id DESC LIMIT ? OFFSET ?`,
+          ORDER BY ts ${order}, call_id ${order} LIMIT ?`,
       )
-      .all(...values, limit, offset),
+      .all(...values, readCount),
   );
+  const rows = (window.backward ? [...read].reverse() : read).map(summaryOf);
+  const first = rows[0];
+  const last = rows[rows.length - 1];
   return {
-    total: rowNumber(totalRow['count']),
+    total,
     limit,
-    offset,
+    rows,
+    // A cursor exists only when the page has a row to continue from; the
+    // presence of further rows is what the pager checks against `total`.
+    nextCursor:
+      last === undefined ? null : { ts: last.ts, callId: last.callId },
+    prevCursor:
+      first === undefined ? null : { ts: first.ts, callId: first.callId },
     anchor,
     newer: anchor === null ? 0 : newerCount(db, filter, anchor),
-    rows: rows.map(summaryOf),
   };
 }

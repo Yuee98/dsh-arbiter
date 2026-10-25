@@ -190,7 +190,7 @@ async function readPage(
 }
 
 describe('logs route paging contract', () => {
-  test('reports the window it read and the traversal anchor', async () => {
+  test('reports the window it read, its cursors and the traversal head', async () => {
     const { routes } = await startHost(async (store) => {
       // Recent timestamps: the store applies its retention policy when the
       // plugin opens the database, and a 1970 row would be deleted before the
@@ -206,52 +206,77 @@ describe('logs route paging contract', () => {
       await store.flush();
     });
     const route = logsRouteOf(routes);
-    const first = await readPage(route, 'limit=15&offset=0');
-    expect(first).toMatchObject({ ok: true, total: 40, limit: 15, offset: 0 });
+    const first = await readPage(route, 'limit=15');
+    expect(first).toMatchObject({ ok: true, total: 40, limit: 15 });
     expect(memberOf(first, 'anchor')).not.toBeNull();
-    const anchor = memberOf(first, 'anchor');
-    const anchorTs = memberOf(anchor, 'ts');
-    const anchorCallId = memberOf(anchor, 'callId');
+    const cursor = memberOf(first, 'nextCursor');
+    expect(cursor).not.toBeNull();
+    // The second page continues after the first page's last row, not from a
+    // row count, so it is exactly the following window.
     const second = await readPage(
       route,
-      `limit=15&offset=15&anchorTs=${String(anchorTs)}&anchorCallId=${String(anchorCallId)}`,
+      `limit=15&afterTs=${String(memberOf(cursor, 'ts'))}&afterCallId=${String(memberOf(cursor, 'callId'))}`,
     );
-    // The second page continues the same traversal and carries the anchor on.
-    expect(second).toMatchObject({
-      ok: true,
-      total: 40,
-      limit: 15,
-      offset: 15,
-    });
-    expect(memberOf(second, 'anchor')).toEqual(anchor);
+    expect(second).toMatchObject({ ok: true, total: 40, limit: 15 });
+    expect(memberOf(second, 'anchor')).toEqual(memberOf(first, 'anchor'));
     const firstRows = rowsOf(first);
     const secondRows = rowsOf(second);
     expect(firstRows).toHaveLength(15);
     expect(secondRows).toHaveLength(15);
     expect(secondRows[0]).not.toEqual(firstRows[0]);
+    // Reading backwards from the second page returns the first page's rows.
+    const back = memberOf(second, 'prevCursor');
+    const previous = await readPage(
+      route,
+      `limit=15&beforeTs=${String(memberOf(back, 'ts'))}&beforeCallId=${String(memberOf(back, 'callId'))}`,
+    );
+    expect(rowsOf(previous).map((row) => memberOf(row, 'callId'))).toEqual(
+      firstRows.map((row) => memberOf(row, 'callId')),
+    );
   });
 
   test('clamps unusable numeric parameters instead of failing the read', async () => {
     const { routes } = await startHost(async (store) => {
-      store.enqueue(recordOf('only'));
+      store.enqueue(recordOf('only', { ts: Date.now() }));
       await store.flush();
     });
     const route = logsRouteOf(routes);
-    expect(await readPage(route, 'limit=abc&offset=xyz')).toMatchObject({
+    expect(await readPage(route, 'limit=abc')).toMatchObject({
       ok: true,
       limit: 25,
-      offset: 0,
       total: 1,
     });
-    expect(await readPage(route, 'limit=0&offset=-4')).toMatchObject({
+    expect(await readPage(route, 'limit=0')).toMatchObject({
       ok: true,
       limit: 1,
-      offset: 0,
     });
     expect(await readPage(route, 'limit=100000')).toMatchObject({
       ok: true,
       limit: 200,
     });
+    // A half cursor is not a position: it starts a traversal rather than moving
+    // the reader into an unbounded window.
+    const half = await readPage(route, 'afterTs=12345');
+    expect(half).toMatchObject({ ok: true, total: 1 });
+    expect(rowsOf(half)).toHaveLength(1);
+  });
+
+  test('a tail request returns the oldest page for last-page recovery', async () => {
+    const { routes } = await startHost(async (store) => {
+      const base = Date.now();
+      for (let index = 0; index < 12; index += 1) {
+        store.enqueue(
+          recordOf(`row-${String(index).padStart(2, '0')}`, {
+            ts: base - index * 1_000,
+          }),
+        );
+      }
+      await store.flush();
+    });
+    const page = await readPage(logsRouteOf(routes), 'limit=5&tail=1');
+    expect(page).toMatchObject({ ok: true, total: 12 });
+    expect(rowsOf(page)).toHaveLength(2);
+    expect(memberOf(rowsOf(page)[0], 'callId')).toBe('row-10');
   });
 
   test('passes the confirmed filters through and omits the rest', async () => {

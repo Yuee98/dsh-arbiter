@@ -54,9 +54,10 @@ export function logsResponse(value: unknown): LogPage {
     rows: field(source, 'rows', array(logRow)),
     total: field(source, 'total', number),
     limit: field(source, 'limit', optional(number)) ?? LOG_PAGE_SIZE,
-    offset: field(source, 'offset', optional(number)) ?? 0,
-    // An unavailable store answers before any traversal started, so it carries
-    // no anchor. Absence means "no traversal", not a malformed page.
+    // A page with no row has no cursor to continue from, so absence and null
+    // mean the same thing here; the pager checks the row count as well.
+    nextCursor: field(source, 'nextCursor', optional(anchor)) ?? null,
+    prevCursor: field(source, 'prevCursor', optional(anchor)) ?? null,
     anchor: field(source, 'anchor', optional(anchor)) ?? null,
     newer: field(source, 'newer', optional(number)) ?? 0,
     code: field(source, 'code', optional(text)),

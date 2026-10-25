@@ -1,23 +1,32 @@
 /**
  * The call list's query state and paging arithmetic.
  *
- * Kept free of React and fetch so the two contracts the issue names can be
- * tested directly:
+ * Kept free of React and fetch so the contracts the issue names can be tested
+ * directly:
  *
- * - **A filter change starts a new result set.** It resets the window to the
- *   first page, because page 3 of the old filter says nothing about page 3 of
- *   the new one.
- * - **Reading position belongs to the reader.** Nothing in this module moves the
- *   window on its own; only an explicit interaction or a correction to a window
- *   that no longer has rows changes it.
+ * - **A page is keyed to a row, not to a row count.** A traversal continues from
+ *   the last row it read, so a call inserted anywhere — above the window, below
+ *   it, or between two rows sharing a timestamp — cannot shift what the next
+ *   page contains. Counting skipped rows could.
+ * - **A filter change starts a new result set.** It drops the cursor, because a
+ *   position in the old result set says nothing about the new one.
+ * - **Reading position belongs to the reader.** Nothing here moves the cursor on
+ *   its own; only an explicit interaction, or a correction after the rows under
+ *   the reader were deleted, changes it.
  */
+import type { LogAnchor } from './view-types.js';
 import type { Translate } from './i18n.js';
 import { LOG_PAGE_SIZE } from './decoders/logs.js';
 
-/** One list query: the window plus every confirmed filter. */
+/**
+ * One list query: the filters and the page size.
+ *
+ * The cursor is not part of it. A cursor is where this particular read continues
+ * from, not a property of the filter, and keeping it out means a filter edit
+ * cannot accidentally carry a position into a different result set.
+ */
 export interface LogQuery {
   readonly limit: number;
-  readonly offset: number;
   readonly result: string;
   readonly tool: string;
   readonly session: string;
@@ -31,8 +40,19 @@ export interface LogQuery {
   readonly reviewFailureOnly: boolean;
 }
 
-/** The filter fields, i.e. everything a filter edit may change. */
-export type LogFilterPatch = Partial<Omit<LogQuery, 'offset' | 'limit'>>;
+/** Where a read continues from: after this row, the page before it, or the end. */
+export interface LogCursor {
+  readonly after: LogAnchor | null;
+  readonly before: LogAnchor | null;
+  /** True when the read should return the oldest page of the set. */
+  readonly tail: boolean;
+}
+
+/** The first read: no cursor, no filter. */
+export const FIRST_PAGE: LogCursor = { after: null, before: null, tail: false };
+
+/** The oldest page: what a reader is moved to when their page lost its rows. */
+export const LAST_PAGE: LogCursor = { after: null, before: null, tail: true };
 
 /** The verdicts the result filter offers, in a stable operator-facing order. */
 export const RESULT_OPTIONS = [
@@ -76,7 +96,6 @@ export function verdictLabel(translate: Translate, result: string): string {
 export function initialQuery(): LogQuery {
   return {
     limit: LOG_PAGE_SIZE,
-    offset: 0,
     result: '',
     tool: '',
     session: '',
@@ -89,30 +108,16 @@ export function initialQuery(): LogQuery {
   };
 }
 
-/** Apply a filter edit and start over at the first page. */
-export function withFilters(query: LogQuery, patch: LogFilterPatch): LogQuery {
-  return { ...query, ...patch, offset: 0 };
-}
-
 /**
- * The last page that still has a row.
+ * Page numbers for a pager that reads by cursor.
  *
- * A window can outlive its rows: the newest page was cleared, retention ran, or
- * the filter narrowed the set. Moving to this offset shows the reader the last
- * real page instead of an empty tail with a valid total.
+ * `index` is how many rows the reader has passed, derived from the rows actually
+ * read rather than from a server-reported offset: with keyset paging there is no
+ * offset, and a position computed from a total that cleanup can change would
+ * claim a page the reader never saw.
  */
-export function clampToLastPage(
-  offset: number,
-  total: number,
-  limit: number,
-): number {
-  if (total <= 0 || limit <= 0) return 0;
-  return Math.min(Math.max(offset, 0), Math.floor((total - 1) / limit) * limit);
-}
-
-/** Page numbers for the pager; a request for the first page of nothing is 0/0. */
 export function pageInfo(
-  offset: number,
+  index: number,
   limit: number,
   total: number,
 ): {
@@ -122,11 +127,13 @@ export function pageInfo(
   readonly last: number;
 } {
   if (total <= 0 || limit <= 0) return { page: 0, pages: 0, first: 0, last: 0 };
+  const pages = Math.ceil(total / limit);
+  const page = Math.min(Math.floor(Math.max(index, 0) / limit) + 1, pages);
   return {
-    page: Math.floor(offset / limit) + 1,
-    pages: Math.ceil(total / limit),
-    first: offset + 1,
-    last: Math.min(offset + limit, total),
+    page,
+    pages,
+    first: (page - 1) * limit + 1,
+    last: Math.min(page * limit, total),
   };
 }
 
@@ -166,14 +173,24 @@ export function epochOfDate(
  * One page request's query string.
  *
  * Blank filters are omitted rather than sent as empty text: an empty equality
- * would be a filter the operator did not ask for, and the route treats an empty
- * value as "no filter" only by convention.
+ * would be a filter the operator did not ask for. A half cursor is never sent;
+ * the host treats an incomplete pair as "start a traversal", which would move
+ * the reader.
  */
-export function paramsOf(query: LogQuery): URLSearchParams {
-  const params = new URLSearchParams({
-    limit: String(query.limit),
-    offset: String(query.offset),
-  });
+export function paramsOf(
+  query: LogQuery,
+  cursor: LogCursor = FIRST_PAGE,
+): URLSearchParams {
+  const params = new URLSearchParams({ limit: String(query.limit) });
+  if (cursor.tail) {
+    params.set('tail', '1');
+  } else if (cursor.before !== null) {
+    params.set('beforeTs', String(cursor.before.ts));
+    params.set('beforeCallId', cursor.before.callId);
+  } else if (cursor.after !== null) {
+    params.set('afterTs', String(cursor.after.ts));
+    params.set('afterCallId', cursor.after.callId);
+  }
   if (query.result.length > 0) params.set('result', query.result);
   if (query.tool.trim().length > 0) params.set('tool', query.tool.trim());
   if (query.session.trim().length > 0)

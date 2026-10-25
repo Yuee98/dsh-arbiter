@@ -39,39 +39,74 @@ function row(spec: RowSpec): Record<string, unknown> {
 }
 
 /**
+ * One page of a fixed set, computed the way the host computes it.
+ *
+ * Newest first, tie-broken by `callId` descending, and bounded by a cursor row
+ * rather than by a row count.
+ */
+function pageOf(
+  matched: readonly RowSpec[],
+  url: URL,
+): Record<string, unknown> {
+  const limit = Number(url.searchParams.get('limit') ?? '25');
+  const ordered = [...matched].sort((left, right) =>
+    right.ts === left.ts
+      ? right.callId.localeCompare(left.callId)
+      : right.ts - left.ts,
+  );
+  const afterTs = url.searchParams.get('afterTs');
+  const afterCallId = url.searchParams.get('afterCallId');
+  const beforeTs = url.searchParams.get('beforeTs');
+  const beforeCallId = url.searchParams.get('beforeCallId');
+  const tail = url.searchParams.get('tail') === '1';
+  const indexOf = (ts: number, callId: string): number =>
+    ordered.findIndex((item) => item.ts === ts && item.callId === callId);
+  let start = 0;
+  if (tail) {
+    start = Math.max(ordered.length - limit, 0);
+  } else if (afterTs !== null && afterCallId !== null) {
+    const cursor = indexOf(Number(afterTs), afterCallId);
+    start = cursor < 0 ? 0 : cursor + 1;
+  } else if (beforeTs !== null && beforeCallId !== null) {
+    const cursor = indexOf(Number(beforeTs), beforeCallId);
+    start = cursor < 0 ? 0 : Math.max(cursor - limit, 0);
+  }
+  const rows = ordered.slice(start, start + limit);
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  return {
+    ok: true,
+    rows: rows.map(row),
+    total: ordered.length,
+    limit,
+    nextCursor:
+      last === undefined ? null : { ts: last.ts, callId: last.callId },
+    prevCursor:
+      first === undefined ? null : { ts: first.ts, callId: first.callId },
+    anchor:
+      ordered.length === 0
+        ? null
+        : { ts: ordered[0]?.ts ?? 0, callId: ordered[0]?.callId ?? '' },
+    newer: 0,
+  };
+}
+
+/**
  * A list route backed by a fixed set of rows plus the paging contract.
  *
  * The handler is the real decoding path: it returns the same shape the host
- * route produces, including the window it read and the traversal anchor, so the
- * panel is exercised against the contract rather than a stub of it.
+ * route produces, including the cursors and the traversal head, so the panel is
+ * exercised against the contract rather than a stub of it.
  */
 function listHandler(specs: readonly RowSpec[]) {
   return http.get('*/api/arbiter/logs', ({ request }) => {
     const url = new URL(request.url);
-    const limit = Number(url.searchParams.get('limit') ?? '25');
-    const offset = Number(url.searchParams.get('offset') ?? '0');
     const query = url.searchParams.get('q');
     const matched =
       query === null
         ? specs
         : specs.filter((item) => (item.command ?? '').includes(query));
-    const anchorTs = url.searchParams.get('anchorTs');
-    const anchorCallId = url.searchParams.get('anchorCallId');
-    const anchor =
-      anchorTs === null || anchorCallId === null
-        ? matched.length === 0
-          ? null
-          : { ts: matched[0]?.ts ?? 0, callId: matched[0]?.callId ?? '' }
-        : { ts: Number(anchorTs), callId: anchorCallId };
-    return HttpResponse.json({
-      ok: true,
-      rows: matched.slice(offset, offset + limit).map(row),
-      total: matched.length,
-      limit,
-      offset,
-      anchor,
-      newer: 0,
-    });
+    return HttpResponse.json(pageOf(matched, url));
   });
 }
 
@@ -92,39 +127,24 @@ function rowButtonFor(summary: string): HTMLElement {
 }
 
 describe('log list paging', () => {
-  test('shows the first page, its total, and walks forward', async () => {
-    const offsets: number[] = [];
-    server.use(
-      http.get('*/api/arbiter/logs', ({ request }) => {
-        const url = new URL(request.url);
-        const offset = Number(url.searchParams.get('offset') ?? '0');
-        offsets.push(offset);
-        return HttpResponse.json({
-          ok: true,
-          rows: SEEDED.slice(offset, offset + 25).map(row),
-          total: SEEDED.length,
-          limit: 25,
-          offset,
-          anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
-          newer: 0,
-        });
-      }),
-    );
+  test('shows the first page, its total, and walks forward and back', async () => {
+    server.use(listHandler(SEEDED));
     const { user } = renderClient(<LogsPanel />);
     expect(await screen.findByText('共 60 条')).toBeInTheDocument();
     expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
     expect(screen.getByText('第 1–25 条')).toBeInTheDocument();
+    // Page one starts at the newest row.
+    expect(rowButtonFor('echo 0')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '下一页' }));
     await waitFor(() => {
       expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
     });
-    expect(offsets).toEqual([0, 25]);
     expect(screen.getByText('第 26–50 条')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '上一页' }));
     await waitFor(() => {
       expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
     });
-    expect(offsets).toEqual([0, 25, 0]);
+    expect(screen.getByText('第 1–25 条')).toBeInTheDocument();
   });
 
   test('disables the boundary moves instead of requesting past them', async () => {
@@ -146,7 +166,7 @@ describe('log list paging', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  test('renders a failed read as an error, never as an empty history', async () => {
+  test('renders an unavailable store as an error, never as an empty history', async () => {
     server.use(
       http.get('*/api/arbiter/logs', () =>
         HttpResponse.json(
@@ -156,10 +176,14 @@ describe('log list paging', () => {
       ),
     );
     renderClient(<LogsPanel />);
+    // A 503 reaches the panel as a rejected promise, not as a decoded page, so
+    // this is the transport path the storage-unavailable message must cover.
     const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent('读取调用记录失败');
-    // The empty-state sentence would claim the records do not exist.
+    expect(status).toHaveTextContent('审计存储不可用');
+    // The empty-state sentence would claim the records do not exist, and the
+    // raw transport message is not an explanation the operator can act on.
     expect(screen.queryByText('没有记录。')).toBeNull();
+    expect(status).not.toHaveTextContent('Arbiter request failed');
   });
 
   test('a filter change starts over at the first page', async () => {
@@ -168,23 +192,14 @@ describe('log list paging', () => {
       http.get('*/api/arbiter/logs', ({ request }) => {
         const url = new URL(request.url);
         requests.push(
-          `${String(url.searchParams.get('offset'))}:${String(url.searchParams.get('q'))}`,
+          `${url.searchParams.get('afterCallId') === null ? 'first' : 'cursor'}:${String(url.searchParams.get('q'))}`,
         );
         const query = url.searchParams.get('q');
         const matched =
           query === null
             ? SEEDED
             : SEEDED.filter((item) => (item.command ?? '').includes(query));
-        const offset = Number(url.searchParams.get('offset') ?? '0');
-        return HttpResponse.json({
-          ok: true,
-          rows: matched.slice(offset, offset + 25).map(row),
-          total: matched.length,
-          limit: 25,
-          offset,
-          anchor: { ts: 1_000, callId: 'anchor' },
-          newer: 0,
-        });
+        return HttpResponse.json(pageOf(matched, url));
       }),
     );
     const { user } = renderClient(<LogsPanel />);
@@ -194,32 +209,22 @@ describe('log list paging', () => {
     const search = screen.getByRole('textbox', { name: '搜索' });
     await user.type(search, 'echo 1');
     await user.click(screen.getByRole('button', { name: '应用筛选' }));
+    // The new filter's first read must not carry the old page's cursor.
     await waitFor(() => {
-      expect(requests.at(-1)).toBe('0:echo 1');
+      expect(requests.at(-1)).toBe('first:echo 1');
     });
-    // The new filter has a single page, and the window restarted at the top.
     expect(await screen.findByText('第 1 / 1 页')).toBeInTheDocument();
   });
 
   test('the reader stays on a historical page while new records arrive', async () => {
-    let newest = 0;
-    let total = 60;
+    let arrived = 0;
     server.use(
       http.get('*/api/arbiter/logs', ({ request }) => {
         const url = new URL(request.url);
-        const offset = Number(url.searchParams.get('offset') ?? '0');
-        // Call 61 lands after the traversal started; because the reader holds an
-        // anchor, the rows under them must not move.
-        const rows = SEEDED.slice(offset, offset + 25).map(row);
-        return HttpResponse.json({
-          ok: true,
-          rows,
-          total,
-          limit: 25,
-          offset,
-          anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
-          newer: newest,
-        });
+        const page = pageOf(SEEDED, url);
+        // A call lands above the traversal head: the rows under the reader must
+        // not move, and the arrival is only reported when asked for.
+        return HttpResponse.json({ ...page, newer: arrived });
       }),
     );
     const { user } = renderClient(<LogsPanel />);
@@ -227,14 +232,12 @@ describe('log list paging', () => {
     await user.click(screen.getByRole('button', { name: '下一页' }));
     await screen.findByText('第 2 / 3 页');
     // A new call arrives; nothing polls, so the table still shows page two.
-    newest = 1;
-    total = 61;
+    arrived = 1;
     expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
-    expect(screen.getByText('echo 25', { exact: false })).toBeInTheDocument();
+    expect(rowButtonFor('echo 25')).toBeInTheDocument();
     // The explicit refresh reports the arrivals and offers the jump back.
     await user.click(screen.getByRole('button', { name: '刷新' }));
-    const notice = await screen.findByText(/有 1 条新记录/);
-    expect(notice).toBeInTheDocument();
+    expect(await screen.findByText(/有 1 条新记录/)).toBeInTheDocument();
     expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '回到最新一页' }));
     await waitFor(() => {
@@ -242,42 +245,50 @@ describe('log list paging', () => {
     });
   });
 
-  test('a cleared last page is corrected to the page that still has rows', async () => {
+  test('a page whose rows were cleared is corrected to a page that has rows', async () => {
     const requests: string[] = [];
+    let remaining = SEEDED.length;
     server.use(
       http.get('*/api/arbiter/logs', ({ request }) => {
         const url = new URL(request.url);
-        const offset = Number(url.searchParams.get('offset') ?? '0');
-        requests.push(String(offset));
-        // Page three (offset 50) was cleared while the reader was on it: the
-        // remaining rows occupy offsets 0–14 only.
-        const remaining = 15;
-        return HttpResponse.json({
-          ok: true,
-          rows: SEEDED.slice(offset, offset + 25)
-            .map(row)
-            .slice(0, Math.max(remaining - offset, 0)),
-          total: remaining,
-          limit: 25,
-          offset,
-          anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
-          newer: 0,
-        });
+        const afterTs = url.searchParams.get('afterTs');
+        const tail = url.searchParams.get('tail') === '1';
+        // The tail was deleted after the reader advanced: the cursor points past
+        // the last surviving row, so the read comes back empty with a total.
+        if (afterTs !== null && !tail && remaining < 30) {
+          requests.push('stale');
+          return HttpResponse.json({
+            ok: true,
+            rows: [],
+            total: remaining,
+            limit: 25,
+            nextCursor: null,
+            prevCursor: null,
+            anchor: { ts: SEEDED[0]?.ts ?? 0, callId: SEEDED[0]?.callId ?? '' },
+            newer: 0,
+          });
+        }
+        requests.push(tail ? 'tail' : 'page');
+        return HttpResponse.json(pageOf(SEEDED.slice(0, remaining), url));
       }),
     );
     const { user } = renderClient(<LogsPanel />);
-    await screen.findByText('第 1 / 1 页');
-    // Force the stale window the cleanup creates, then read again through the
-    // same correction path the panel uses.
+    await screen.findByText('第 1 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 2 / 3 页');
+    remaining = 15;
     requests.length = 0;
     await user.click(screen.getByRole('button', { name: '刷新' }));
+    // Exactly one correction follows the empty read, and it lands on real rows.
     await waitFor(() => {
       expect(screen.getByText('共 15 条')).toBeInTheDocument();
     });
-    expect(
-      screen.queryByText('这一页没有记录，已跳到有内容的最后一页。'),
-    ).toBeNull();
+    // Exactly one correction follows the empty read, and it lands on the last
+    // page that still has rows — not on the first page, which would move the
+    // reader somewhere they never asked to be.
+    expect(requests).toEqual(['stale', 'tail']);
     expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
+    expect(rowButtonFor('echo 0')).toBeInTheDocument();
   });
 
   test('a filter that matches nothing explains the filter, not an empty audit', async () => {
@@ -429,7 +440,8 @@ describe('log list stale responses', () => {
             rows: [row({ callId: 'stale', ts: 1, command: 'stale row' })],
             total: 1,
             limit: 25,
-            offset: 0,
+            nextCursor: { ts: 1, callId: 'stale' },
+            prevCursor: { ts: 1, callId: 'stale' },
             anchor: { ts: 1, callId: 'stale' },
             newer: 0,
           });
@@ -439,7 +451,8 @@ describe('log list stale responses', () => {
           rows: [row({ callId: 'fresh', ts: 2, command: 'fresh row' })],
           total: 1,
           limit: 25,
-          offset: 0,
+          nextCursor: { ts: 2, callId: 'fresh' },
+          prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
         });
@@ -486,7 +499,8 @@ describe('log list stale responses', () => {
           rows: [row({ callId: 'fresh', ts: 2, command: 'fresh row' })],
           total: 1,
           limit: 25,
-          offset: 0,
+          nextCursor: { ts: 2, callId: 'fresh' },
+          prevCursor: { ts: 2, callId: 'fresh' },
           anchor: { ts: 2, callId: 'fresh' },
           newer: 0,
         });
