@@ -60,15 +60,14 @@ export interface LoadOptions {
 /**
  * One page the reader has already seen, kept so "previous" is a restore.
  *
- * `remaining` is the traversal's row count at the time the page was committed,
- * which is what the pager showed then; replaying the page must replay its
- * position label too, not recompute it from a total that has since changed.
+ * The committed page carries its own total and remaining count, so replaying it
+ * also replays the position and count the reader saw at that moment rather than
+ * recomputing them from a set that has since changed.
  */
 interface VisitedPage {
   readonly page: LoadedPage;
   readonly cursor: LogCursor;
   readonly anchor: LogAnchor | null;
-  readonly total: number;
 }
 
 export interface LogPages {
@@ -301,7 +300,6 @@ function historyOf(refs: HistoryRefs): {
         page,
         cursor: refs.openedWith.current,
         anchor: refs.anchor,
-        total: page.total,
       };
     },
     remember: (moved) => {
