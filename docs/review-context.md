@@ -224,7 +224,7 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 
 **短答复的上下文**：人类只说“同意”“可以”时，应保留它回答的具体问题或待执行操作，避免脱离范围解释。若授权来自 ask 工具，需关联宿主保存的真实答复与对应提问；普通工具结果仍不作为授权。本机源码已确认：前台答复进入 ask 的工具结果，timed 的迟到答复是 source.kind 为 `user-question-reply` 的用户消息，并自带 callId、questions 与 answers，详见[源码核对](../evidence.md#ask-timing)。实际采集与截断效果仍需验证。
 
-**已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``scripts/verify-context-sources.mjs`` 记录 10 项真实 Session 验证。
+**已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``tests/e2e/context-sources.spec.ts`` 记录真实 Session 验证（隔离 profile、无模型请求）。
 
 **排序与截断**：展示顺序按 `ts` 从新到旧，受 `evidence.maxItems`（20）与 token 预算约束，超出置 `evidence_truncated: true`。**选取顺序不是纯时间序**：先保留父人类保底，其余名额按来源层依次填充（本会话人类 → 父会话人类 → 父 agent 转述），同层内较新者优先；否则子会话说话多时会把父原话挤掉。
 
