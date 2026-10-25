@@ -9,8 +9,30 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, '.local', 'regressions');
 await mkdir(artifacts, { recursive: true });
 
-interface Report {
-  readonly results: readonly { readonly id: string; readonly passes: boolean }[];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Failed case ids from a runner's `results.json`; null when unreadable. */
+function failedIds(path: string): readonly string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  const results = parsed['results'];
+  if (!Array.isArray(results)) return null;
+  const failed: string[] = [];
+  for (const entry of results) {
+    if (!isRecord(entry)) return null;
+    const id = entry['id'];
+    const passes = entry['passes'];
+    if (typeof id !== 'string' || typeof passes !== 'boolean') return null;
+    if (!passes) failed.push(id);
+  }
+  return failed;
 }
 
 /**
@@ -34,7 +56,7 @@ const runs = [
   {
     name: 'S1–S3',
     source: 'validation/first-release-scope/2026-10-25/reproduce.mjs',
-    allowedFailures: [] as string[],
+    allowedFailures: [] as readonly string[],
   },
 ];
 
@@ -43,26 +65,21 @@ for (const run of runs) {
   const directory = await mkdtemp(join(artifacts, 'run-'));
   const script = join(directory, 'reproduce.mjs');
   await copyFile(join(root, run.source), script);
+  // Capture output so an expected historical failure reads as a documented
+  // exception instead of an alarming FAIL line in the verify log.
   const result = spawnSync(process.execPath, [script], {
     cwd: root,
-    stdio: 'inherit',
+    encoding: 'utf8',
   });
   if (result.error !== undefined) throw result.error;
   if (result.signal !== null) {
     throw new Error(`${run.name} runner terminated with ${result.signal}.`);
   }
+  process.stdout.write(result.stdout);
+  if (result.stderr.length > 0) process.stderr.write(result.stderr);
 
   const reportPath = join(directory, 'results.json');
-  let report: Report | null = null;
-  try {
-    report = JSON.parse(readFileSync(reportPath, 'utf8')) as Report;
-  } catch {
-    report = null;
-  }
-  const failed =
-    report === null
-      ? null
-      : report.results.filter((entry) => !entry.passes).map((entry) => entry.id);
+  const failed = failedIds(reportPath);
   const unexpected =
     failed === null
       ? result.status === 0
@@ -75,14 +92,14 @@ for (const run of runs) {
       `${run.name} failed unexpectedly: ${unexpected.join(', ')}\n`,
     );
   }
-  for (const id of run.allowedFailures.filter((value) => failed?.includes(value))) {
-    process.stdout.write(
-      `${run.name}: ${id} covers a prototype flow removed from the first release (documented historical evidence)\n`,
-    );
+  for (const id of run.allowedFailures) {
+    if (failed?.includes(id) === true) {
+      process.stdout.write(
+        `${run.name}: ${id} covers a prototype flow removed from the first release (documented historical evidence)\n`,
+      );
+    }
   }
-  process.stdout.write(
-    `Regression evidence (${run.name}): ${reportPath}\n`,
-  );
+  process.stdout.write(`Regression evidence (${run.name}): ${reportPath}\n`);
 }
 
 process.exitCode = failedRuns === 0 ? 0 : 1;

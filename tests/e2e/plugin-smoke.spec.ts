@@ -192,7 +192,10 @@ test(
       const response = await page.request.fetch(
         `${dsh.origin}${path}`,
         method === 'POST'
-          ? { method, data: { candidateId: 'smoke-candidate', action: 'accept' } }
+          ? {
+              method,
+              data: { candidateId: 'smoke-candidate', action: 'accept' },
+            }
           : { method },
       );
       expect(response.status(), path).toBe(404);
