@@ -154,9 +154,10 @@ interface FetchInput {
   readonly setNotice: (notice: { readonly count: number } | null) => void;
   readonly unavailable: string;
   readonly failed: string;
-  /** Keep the page the reader is leaving; applied only after the move commits. */
-  /** Push the staged page, if the move committed. */
-  readonly remember: () => void;
+  /** Push a staged page; `moved` is false when the read did not change pages. */
+  readonly remember: (moved: boolean) => void;
+  /** Drop a staged entry whose navigation failed. */
+  readonly discard: () => void;
   /** Invalidate remembered pages when a correction replaces the traversal. */
   readonly forget: () => void;
 }
@@ -202,6 +203,9 @@ async function fetchPage(input: FetchInput): Promise<void> {
     // arrives as a rejected promise instead, so both paths must name the same
     // condition rather than showing the ordinary empty-state sentence.
     if (!response.ok || response.code === 'audit-unavailable') {
+      // The navigation these pages staged did not happen: discarding keeps a
+      // later, unrelated success from committing an abandoned move.
+      input.discard();
       input.setError(input.unavailable);
       return;
     }
@@ -247,12 +251,13 @@ async function fetchPage(input: FetchInput): Promise<void> {
         : null,
     );
     // Only now is the move complete, so the page the reader left can join the
-    // history. A failed read leaves them where they were, and a correction is an
-    // involuntary jump whose superseded pages cannot be restored.
+    // history. A refresh did not move them, and a correction is an involuntary
+    // jump whose superseded pages cannot be restored.
     if (input.options.corrected === true) input.forget();
-    else input.remember();
+    else input.remember(input.where.before === null && !input.where.tail);
   } catch (errorValue) {
     if (input.generation.current !== current) return;
+    input.discard();
     input.setError(
       isUnavailable(errorValue)
         ? input.unavailable
@@ -283,7 +288,8 @@ interface HistoryRefs {
  */
 function historyOf(refs: HistoryRefs): {
   readonly stage: () => void;
-  readonly remember: () => void;
+  readonly remember: (moved: boolean) => void;
+  readonly discard: () => void;
   readonly restore: () => void;
   readonly forget: () => void;
 } {
@@ -298,14 +304,19 @@ function historyOf(refs: HistoryRefs): {
         total: page.total,
       };
     },
-    remember: () => {
+    remember: (moved) => {
       const entry = refs.staged.current;
+      // Always consumed: whether or not this request may commit it, a later
+      // request must not inherit it.
       refs.staged.current = null;
-      if (entry === null) return;
+      if (entry === null || !moved) return;
       refs.history.current = [
         ...refs.history.current.slice(-(HISTORY_LIMIT - 1)),
         entry,
       ];
+    },
+    discard: () => {
+      refs.staged.current = null;
     },
     restore: () => {
       const visited = refs.history.current.at(-1);
@@ -360,7 +371,7 @@ export function useLogPages(): LogPages {
   /** The page and cursor the reader is leaving, staged until the move commits. */
   const staged = useRef<VisitedPage | null>(null);
 
-  const { stage, remember, restore, forget } = historyOf({
+  const { stage, remember, discard, restore, forget } = historyOf({
     history,
     staged,
     committed,
@@ -395,6 +406,7 @@ export function useLogPages(): LogPages {
         unavailable: t('logs.auditUnavailable'),
         failed: t('logs.loadFailed'),
         remember,
+        discard,
         forget,
       }),
     [t, commit],
@@ -441,6 +453,7 @@ export function useLogPages(): LogPages {
     run,
     stage,
     remember,
+    discard,
     restore,
     forget,
   });
@@ -470,7 +483,8 @@ function composePages(input: {
     options: LoadOptions,
   ) => void;
   readonly stage: () => void;
-  readonly remember: () => void;
+  readonly remember: (moved: boolean) => void;
+  readonly discard: () => void;
   readonly restore: () => void;
   readonly forget: () => void;
 }): LogPages {

@@ -438,6 +438,83 @@ describe('log list paging', () => {
     expect(rowButtonFor('echo 0')).toBeInTheDocument();
   });
 
+  test('a failed navigation stays failed through a later successful refresh', async () => {
+    // Page one succeeds, Next fails, and then Refresh succeeds. The abandoned
+    // move must not be committed by that unrelated success: Previous has to stay
+    // disabled because the reader never left page one.
+    let failNext = true;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        if (failNext && url.searchParams.get('afterCallId') !== null) {
+          return HttpResponse.json(
+            { ok: false, code: 'audit-unavailable', rows: [], total: 0 },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(pageOf(SEEDED, url));
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('第 1 / 3 页');
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '审计存储不可用',
+    );
+    expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    // The refresh re-reads page one; it is not the navigation that failed.
+    failNext = false;
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+    expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+  });
+
+  test('a failed navigation from page two still lets Previous reach page one', async () => {
+    let failNext = false;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        const afterCallId = url.searchParams.get('afterCallId');
+        if (
+          failNext &&
+          afterCallId !== null &&
+          afterCallId !== (SEEDED[24]?.callId ?? '')
+        ) {
+          return HttpResponse.json(
+            { ok: false, code: 'audit-unavailable', rows: [], total: 0 },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(pageOf(SEEDED, url));
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('第 1 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 2 / 3 页');
+    failNext = true;
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '审计存储不可用',
+    );
+    expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
+    failNext = false;
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+    // One Previous lands on page one, not on page two again.
+    await user.click(screen.getByRole('button', { name: '上一页' }));
+    await waitFor(() => {
+      expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+  });
+
   test('the pager never advertises a page it cannot reach', async () => {
     // Five matching rows, page size five, but the host reports that no row
     // follows: the traversal ends at page one even though the total suggests a
