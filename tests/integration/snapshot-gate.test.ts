@@ -235,9 +235,13 @@ function isReviewSnapshot(value: unknown): value is ReviewSnapshot {
 }
 
 /** The persisted trace stages of one call, in order. */
-function isStageList(
-  value: unknown,
-): value is readonly { readonly stage: string; readonly result: string }[] {
+interface StageRecord {
+  readonly stage: string;
+  readonly result: string;
+  readonly reason?: string;
+}
+
+function isStageList(value: unknown): value is readonly StageRecord[] {
   return (
     Array.isArray(value) &&
     value.every(
@@ -300,10 +304,7 @@ async function reviewCall(options: RunOptions): Promise<{
   readonly decision: { readonly kind: string };
   readonly captured: Captured[];
   readonly snapshot: ReviewSnapshot;
-  readonly trace: readonly {
-    readonly stage: string;
-    readonly result: string;
-  }[];
+  readonly trace: readonly StageRecord[];
 }> {
   const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
   const { ctx, gate } = stubContext({
@@ -437,6 +438,33 @@ describe('gate review input', () => {
     expect(large.trace.some((stage) => stage.result === 'error-escalate')).toBe(
       false,
     );
+  });
+
+  test('an unsatisfiable request never reaches the reviewer', async () => {
+    const events = [human(1, 1, 'clean the build')];
+    const run = await reviewCall({
+      session: makeSession('tight', events),
+      sessions: {},
+      // The fixed review contract alone exceeds this budget.
+      maxInputTokens: 1_000,
+      name: 'tight-profile',
+      callId: 'call-tight',
+      tool: 'bash',
+      args: { command: 'echo hi' },
+    });
+    expect(run.snapshot.budget.truncatedSegments).toContain('OVER_BUDGET');
+    // No model call: a request that cannot be assembled is a preparation
+    // failure, not a decision.
+    expect(run.captured).toHaveLength(0);
+    expect(
+      run.trace.some(
+        (stage) =>
+          stage.stage === 'review' &&
+          stage.result === 'error-escalate' &&
+          stage.reason === 'input_budget_exceeded',
+      ),
+    ).toBe(true);
+    expect(run.decision.kind).not.toBe('allow');
   });
 
   test('the persisted snapshot is the submitted structure', async () => {

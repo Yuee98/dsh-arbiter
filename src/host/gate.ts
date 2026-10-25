@@ -301,6 +301,26 @@ export class CallGate {
       });
       return this.settlement.human(call, message, call.extras);
     }
+    if (
+      snapshot.bundle.snapshot.budget.truncatedSegments.includes('OVER_BUDGET')
+    ) {
+      // A legal truncation is a normal review; a request that cannot be
+      // assembled within the declared budget is a request-preparation failure,
+      // not a decision. Recording it as error-escalate keeps the chain honest.
+      const message =
+        'the review request cannot be assembled within the configured input budget';
+      call.trace.push({
+        stage: 'review',
+        result: 'error-escalate',
+        reason: 'input_budget_exceeded',
+        configRevision: this.host.runtime.effectiveRevision,
+        at: Date.now(),
+      });
+      return this.settlement.human(call, message, {
+        ...call.extras,
+        snapshot: snapshot.bundle.snapshot,
+      });
+    }
     this.noteReview(call.session.id ?? 'unknown');
     const result = await this.requestModel(call, snapshot.bundle, snapshot.llm);
     if (isAborted(call.exec.signal)) return { kind: 'cancel' };

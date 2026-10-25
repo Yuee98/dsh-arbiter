@@ -306,14 +306,19 @@ function precedingQuestion(
 ): string | null {
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
     const event = events[cursor];
-    if (event === undefined) continue;
-    if (event.type === 'tool/call') continue;
+    if (event === undefined) return null;
+    // Another user message or a compaction summary starts a separate exchange:
+    // an answer after either cannot be attributed to a question beyond it.
+    if (event.type === 'user/message') return null;
     if (event.type !== 'assistant/message' || !isRecord(event.data)) continue;
     const message = event.data['message'];
     if (!isRecord(message)) continue;
     const text = messageText(message['content']).trim();
-    if (!text.endsWith('?') && !text.endsWith('？')) continue;
-    return text.slice(0, CHECKPOINT_TEXT_LIMIT);
+    // Only the assistant turn that immediately precedes the answer can own it;
+    // an intervening statement means the question is stale.
+    return text.endsWith('?') || text.endsWith('？')
+      ? text.slice(0, CHECKPOINT_TEXT_LIMIT)
+      : null;
   }
   return null;
 }
@@ -506,7 +511,10 @@ export function mergeEvidence(
   const slots = Math.max(0, maxItems - reserved.length);
   const selected = [...reserved, ...rest.slice(0, slots)];
   selected.sort((left, right) => right.ts - left.ts);
-  const considered = sessionHuman.length + parentRecent.length + relay.length;
+  // Compare against the whole population, not only the pre-sliced candidates:
+  // `parentHumanItems` itself can hide parent originals, and that loss must be
+  // visible as incomplete evidence rather than a complete-looking stream.
+  const considered = sessionHuman.length + parentHuman.length + relay.length;
   return {
     evidence: selected,
     truncated:

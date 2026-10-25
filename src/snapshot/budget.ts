@@ -365,7 +365,20 @@ export function truncateSnapshot(
     missing: new Set(base.missing),
     truncatedSegments: new Set(),
   };
-  for (let guard = 0; guard < 500; guard += 1) {
+  // The loop is bounded by removable material, not by a fixed iteration count:
+  // legal configurations can hold far more than 500 candidate items, and a
+  // premature stop would report a fit that was never reached. Each successful
+  // trim removes exactly one item or shrinks the action, so the total work is
+  // O(items + action halvings).
+  const maxSteps =
+    base.evidence.length +
+    base.context.length +
+    base.checkpoints.length +
+    base.priorVerdicts.length +
+    4 +
+    // Enough halvings for the action to reach its minimum floor.
+    64;
+  for (let step = 0; step < maxSteps; step += 1) {
     if (!overBudget(base, state, maxInputTokens)) {
       return renderedSnapshot(candidateSnapshot(base, state, maxInputTokens));
     }

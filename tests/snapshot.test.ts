@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -994,5 +994,271 @@ describe('budget and configuration edges', () => {
     ).toBeLessThanOrEqual(3_000);
     expect(built.snapshot.customRules.length).toBe(2_000);
     expect(project.length).toBe(1_000);
+  });
+});
+
+describe('reopened review findings', () => {
+  test('parentHumanItems loss is reported as truncated evidence', async () => {
+    const cwd = await workspace();
+    const parent = session('parent', [
+      ...Array.from({ length: 30 }, (_, index) =>
+        human(index + 1, index + 1, `parent original ${String(index)}`),
+      ),
+    ]);
+    const child = session('child', [human(1, 500, 'child task')], 'parent');
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: child },
+      sessions: { get: (id) => (id === 'parent' ? parent : undefined) },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    // Far below evidenceMaxItems, yet 25 parent originals were dropped by the
+    // parentHumanItems cap: the reviewer must know the stream is incomplete.
+    expect(built.snapshot.evidence.length).toBeLessThan(
+      DEFAULT_CONFIG.context.evidenceMaxItems,
+    );
+    expect(built.snapshot.evidenceTruncated).toBe(true);
+  });
+
+  test('a short answer after an intervening statement is not tied to a stale question', async () => {
+    const cwd = await workspace();
+    const main = session('main', [
+      {
+        seq: 1,
+        time: 5,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '是否删除生产数据库？' }],
+          },
+        },
+      },
+      human(2, 10, '不要删除。'),
+      {
+        seq: 3,
+        time: 15,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '好，改用备份验证方案。' }],
+          },
+        },
+      },
+      human(4, 20, '同意'),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    const agree = built.snapshot.evidence.find((item) => item.text === '同意');
+    // The stale database question must not be attached to the later agreement.
+    expect(agree?.question).toBeUndefined();
+  });
+
+  test('the reported English repro sequence keeps the answer unscoped', async () => {
+    const cwd = await workspace();
+    const assistant = (seq: number, time: number, text: string) => ({
+      seq,
+      time,
+      type: 'assistant/message',
+      data: {
+        message: { role: 'assistant', content: [{ type: 'text', text }] },
+      },
+    });
+    const main = session('main', [
+      assistant(1, 1, 'May I delete /workspace/data?'),
+      human(2, 2, 'No. Instead fix the README typo.'),
+      assistant(3, 3, 'The typo is fixed; I can continue with documentation.'),
+      human(4, 4, 'continue'),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    const answer = built.snapshot.evidence.find(
+      (item) => item.text === 'continue',
+    );
+    // The refused deletion must not come back as explicit authorization via a
+    // later "continue" that answered a different, unrelated exchange.
+    expect(answer?.question).toBeUndefined();
+  });
+
+  test('an assistant reply without a question stops the search', async () => {
+    const cwd = await workspace();
+    const main = session('main', [
+      {
+        seq: 1,
+        time: 5,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '是否删除 /workspace/app/build？' },
+            ],
+          },
+        },
+      },
+      {
+        seq: 2,
+        time: 6,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '先做别的事情。' }],
+          },
+        },
+      },
+      human(3, 7, '同意'),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    // Only the immediately preceding assistant turn can own the answer.
+    expect(built.snapshot.evidence[0]?.question).toBeUndefined();
+  });
+
+  test('a short answer directly following a question keeps it', async () => {
+    const cwd = await workspace();
+    const main = session('main', [
+      {
+        seq: 1,
+        time: 5,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '是否删除 /workspace/app/build？' },
+            ],
+          },
+        },
+      },
+      human(2, 10, '同意'),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    expect(built.snapshot.evidence[0]?.question).toContain(
+      '/workspace/app/build',
+    );
+  });
+
+  test('an unreadable first candidate is not replaced by the second file', async () => {
+    const cwd = await workspace({
+      '.dsh/arbiter.md': 'SENTINEL_PRIMARY_RULES',
+      '.arbiter.md': 'SENTINEL_FALLBACK_RULES',
+    });
+    // Make the primary file unreadable while the fallback stays readable.
+    await chmod(join(cwd, '.dsh', 'arbiter.md'), 0o000);
+    try {
+      const main = session('main', [human(1, 1, 'clean the build')]);
+      const built = await buildReviewSnapshot({
+        ...base,
+        agent: { session: main },
+        cwd,
+        config: DEFAULT_CONFIG,
+      });
+      expect(built.snapshot.projectRules).toBeNull();
+      expect(built.user).not.toContain('SENTINEL_FALLBACK_RULES');
+      expect(built.snapshot.missing.join(' ')).toContain('could not be read');
+      expect(built.snapshot.materials[0]).toMatchObject({
+        present: false,
+        path: '.dsh/arbiter.md',
+      });
+    } finally {
+      await chmod(join(cwd, '.dsh', 'arbiter.md'), 0o600);
+    }
+  });
+
+  test('the shared ceiling is reflected in the project-rules material', async () => {
+    const cwd = await workspace({ '.dsh/arbiter.md': 'p'.repeat(2_000) });
+    const main = session('main', [human(1, 1, 'clean the build')]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, customRules: 'c'.repeat(2_000) },
+      },
+    });
+    const material = built.snapshot.materials.find(
+      (entry) => entry.id === 'project-rules',
+    );
+    // chars/truncated describe the submitted text, not the 2,000-char file.
+    expect(material?.chars).toBe(1_000);
+    expect(material?.truncated).toBe(true);
+    expect((built.snapshot.projectRules ?? '').length).toBe(1_000);
+    // Both backends and the audit copy read the same structure, so the metadata
+    // cannot drift between the rendered request and the persisted snapshot.
+    const request = renderRequest(built.snapshot);
+    const state = renderDecisionState(request.user);
+    for (const text of [request.user, state]) {
+      expect(text).toContain('"chars": 1000');
+      expect(text).toContain('"truncated": true');
+    }
+    // The reduction is a configuration-material cut, not lost input: it is not
+    // reported as a missing authorization source or as an input-budget trim.
+    expect(built.snapshot.missing.join(' ')).not.toContain('PROJECT_RULES');
+    expect(built.snapshot.budget.truncatedSegments).not.toContain(
+      'PROJECT_RULES',
+    );
+  });
+
+  test('more than 500 candidates still trim to a fitting request', async () => {
+    const cwd = await workspace();
+    // Legal maxima: 200 evidence items plus a large context/history window.
+    const events = [human(1, 1, 'clean the build')];
+    const main = session('main', events);
+    const toolCalls = Array.from({ length: 400 }, (_, index) => ({
+      ts: index,
+      tool: 'bash',
+      arguments: 'echo step',
+    }));
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: {
+          ...DEFAULT_CONFIG.context,
+          historyMaxItems: 400,
+          evidenceMaxItems: 200,
+          maxInputTokens: 40_000,
+        },
+      },
+      priorVerdicts: toolCalls.map((call) => ({
+        ts: call.ts,
+        callId: `c-${String(call.ts)}`,
+        configRevision: 'r',
+        tool: 'bash',
+        fingerprint: `f-${String(call.ts)}`,
+        trace: ['rule', 'review'],
+        result: 'review-deny' as const,
+      })),
+    });
+    // The loop bound must follow available material, not a fixed 500.
+    expect(built.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
+      40_000,
+    );
+    expect(built.snapshot.budget.truncatedSegments).not.toContain(
+      'OVER_BUDGET',
+    );
   });
 });

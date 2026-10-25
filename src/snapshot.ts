@@ -52,9 +52,43 @@ interface ProjectRulesResult {
   readonly missing: string | null;
 }
 
+function absentProjectRules(
+  enabled: boolean,
+  path: string | undefined,
+  chars: number,
+  truncated: boolean,
+): ProjectRulesResult {
+  return {
+    text: null,
+    material: {
+      id: 'project-rules',
+      enabled,
+      present: false,
+      chars,
+      limit: PROJECT_RULES_LIMIT,
+      truncated,
+      ...(path === undefined ? {} : { path }),
+    },
+    missing: null,
+  };
+}
+
+/** A missing file is normal; any other read error means that source failed. */
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
+}
+
 /**
- * Read the first present candidate file. A disabled switch prevents the read
- * entirely, so its absence is reported as switched off rather than missing.
+ * Read the first *existing* candidate file.
+ *
+ * Candidates are tried in the documented order. A file that exists but cannot be
+ * read is reported as that source being unavailable — the plugin does not fall
+ * through to a different file's guidance, because that would silently attribute
+ * one preference order to text the user did not put first.
  */
 async function readProjectRules(
   cwd: string,
@@ -62,26 +96,27 @@ async function readProjectRules(
 ): Promise<ProjectRulesResult> {
   const first = config.files[0];
   if (!config.enabled) {
-    return {
-      text: null,
-      material: {
-        id: 'project-rules',
-        enabled: false,
-        present: false,
-        chars: 0,
-        limit: PROJECT_RULES_LIMIT,
-        truncated: false,
-      },
-      missing: null,
-    };
+    return absentProjectRules(false, undefined, 0, false);
   }
   for (const file of config.files) {
     let text: string;
     try {
       text = await readFile(join(cwd, file), 'utf8');
-    } catch {
-      // Missing candidate is expected; try the next one.
-      continue;
+    } catch (error: unknown) {
+      if (isMissingFile(error)) continue;
+      return {
+        text: null,
+        material: {
+          id: 'project-rules',
+          enabled: true,
+          present: false,
+          chars: 0,
+          limit: PROJECT_RULES_LIMIT,
+          truncated: false,
+          path: file,
+        },
+        missing: `PROJECT_RULES file "${file}" exists but could not be read; this source is unavailable and no other project file is substituted`,
+      };
     }
     const truncated = text.length > PROJECT_RULES_LIMIT;
     return {
@@ -99,29 +134,78 @@ async function readProjectRules(
     };
   }
   return {
-    text: null,
-    material: {
-      id: 'project-rules',
-      enabled: true,
-      present: false,
-      chars: 0,
-      limit: PROJECT_RULES_LIMIT,
-      truncated: false,
-      ...(first === undefined ? {} : { path: first }),
-    },
+    ...absentProjectRules(true, first, 0, false),
     missing:
       'PROJECT_RULES is enabled but none of the configured files could be read',
   };
 }
 
-function customRulesMaterial(customRules: string): SnapshotMaterial {
+interface GuidanceResult {
+  readonly customRules: string;
+  readonly projectText: string | null;
+  readonly materials: readonly SnapshotMaterial[];
+}
+
+function customRulesMaterial(
+  submittedChars: number,
+  truncated: boolean,
+): SnapshotMaterial {
   return {
     id: 'custom-rules',
     enabled: true,
-    present: customRules.length > 0,
-    chars: customRules.length,
+    present: submittedChars > 0,
+    chars: submittedChars,
     limit: CUSTOM_RULES_LIMIT,
-    truncated: customRules.length > CUSTOM_RULES_LIMIT,
+    truncated,
+  };
+}
+
+function projectMaterial(
+  material: SnapshotMaterial,
+  submittedChars: number,
+  truncated: boolean,
+): SnapshotMaterial {
+  return {
+    ...material,
+    present: material.present && submittedChars > 0,
+    chars: submittedChars,
+    truncated: material.truncated || truncated,
+  };
+}
+
+/**
+ * Apply the per-source caps and the shared guidance ceiling.
+ *
+ * Every reduction is reflected in `materials`, so the snapshot describes the
+ * text that was submitted rather than the text that was read.
+ */
+function guidanceMaterials(
+  customRulesRaw: string,
+  project: ProjectRulesResult,
+): GuidanceResult {
+  const customCut = customRulesRaw.length > CUSTOM_RULES_LIMIT;
+  const customRules = customRulesRaw.slice(0, CUSTOM_RULES_LIMIT);
+  const projectSource = project.text;
+  if (projectSource === null) {
+    return {
+      customRules,
+      projectText: null,
+      materials: [
+        project.material,
+        customRulesMaterial(customRules.length, customCut),
+      ],
+    };
+  }
+  const room = Math.max(0, GUIDANCE_LIMIT - customRules.length);
+  const ceilingCut = projectSource.length > room;
+  const projectText = ceilingCut ? projectSource.slice(0, room) : projectSource;
+  return {
+    customRules,
+    projectText: projectText.length === 0 ? null : projectText,
+    materials: [
+      projectMaterial(project.material, projectText.length, ceilingCut),
+      customRulesMaterial(customRules.length, customCut),
+    ],
   };
 }
 
@@ -386,18 +470,10 @@ export async function buildReviewSnapshot(
 
   // The two guidance sources share one 3,000-character ceiling, so CUSTOM_RULES
   // yields first (it is user-global) rather than letting both reach 4,000.
-  const trimmedCustomRules = contextConfig.customRules.slice(
-    0,
-    CUSTOM_RULES_LIMIT,
-  );
-  const projectText = projectRules.text;
-  const projectBudget =
-    projectText === null
-      ? null
-      : projectText.slice(
-          0,
-          Math.max(0, GUIDANCE_LIMIT - trimmedCustomRules.length),
-        );
+  // The materials record the text that is actually submitted, so a cut made for
+  // the shared ceiling is visible as truncation rather than hidden behind the
+  // per-file cap.
+  const guidance = guidanceMaterials(contextConfig.customRules, projectRules);
   const base: Omit<ReviewSnapshot, 'budget'> = {
     version: 1,
     createdAt: Date.now(),
@@ -417,12 +493,9 @@ export async function buildReviewSnapshot(
     },
     facts,
     ...(options.hint === undefined ? {} : { hint: options.hint }),
-    projectRules: projectBudget,
-    customRules: trimmedCustomRules,
-    materials: [
-      projectRules.material,
-      customRulesMaterial(contextConfig.customRules),
-    ],
+    projectRules: guidance.projectText,
+    customRules: guidance.customRules,
+    materials: guidance.materials,
     evidence: merged.evidence,
     evidenceTruncated: merged.truncated,
     parentAuthorizationPresent,
