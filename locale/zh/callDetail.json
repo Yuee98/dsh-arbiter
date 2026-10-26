@@ -118,6 +118,7 @@
   "close": "关闭详情",
   "retry": "重试",
   "loading": "读取详情…",
+  "loadFailed": "读取调用详情失败。",
   "recordUnavailable": "没有找到这条调用：可用的来源（审计、内存与会话记录）都没有对应记录。",
   "auditUnavailable": "审计库结构无法读取，且内存与会话记录中没有这条调用的裁决。",
   "overview": "调用概览",

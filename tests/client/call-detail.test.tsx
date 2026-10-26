@@ -547,6 +547,7 @@ describe('the log list entry', () => {
         HttpResponse.json({
           ok: true,
           total: 1,
+          limit: 25,
           rows: [
             {
               callId: 'row-1',
@@ -556,12 +557,15 @@ describe('the log list entry', () => {
               tool: 'bash',
               command: 'rm -rf build',
               result: 'deny',
-              reason: 'blocked by a rule',
               ruleId: 'no-rm',
-              approvalMode: 'normal',
-              decisionRules: [],
+              unreadable: false,
             },
           ],
+          nextCursor: null,
+          prevCursor: null,
+          anchor: { ts: 1_700_000_000_000, callId: 'row-1' },
+          newer: 0,
+          remaining: 0,
         }),
       ),
       http.get('*/api/arbiter/log', ({ request }) => {
@@ -575,7 +579,11 @@ describe('the log list entry', () => {
       }),
     );
     const { user } = renderClient(<LogsPanel />);
-    await user.click(await screen.findByRole('button', { name: '查看详情' }));
+    // A row is one button whose accessible name is its time, tool, summary and
+    // verdict; the whole row opens the detail, so the summary locates it.
+    await user.click(
+      await screen.findByRole('button', { name: /rm -rf build/u }),
+    );
 
     expect(requested).toEqual(['row-1']);
     expect(

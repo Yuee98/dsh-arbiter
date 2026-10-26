@@ -46,7 +46,10 @@ function AbsentState({
     case 'failed':
       return (
         <div data-call-detail-state="failed">
-          <Notice kind="error" text={state.message} />
+          <Notice
+            kind="error"
+            text={`${t('callDetail.loadFailed')} ${state.message}`}
+          />
           <Button onClick={onRetry}>{t('callDetail.retry')}</Button>
         </div>
       );

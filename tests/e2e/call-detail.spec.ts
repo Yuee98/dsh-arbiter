@@ -98,7 +98,9 @@ test(
     ).toBeVisible();
     await plugin.getByRole('button', { name: '刷新', exact: true }).click();
 
-    const row = plugin.getByRole('row', { name: /echo e2e-detail/u });
+    // The row is one button whose accessible name is its time, tool, summary
+    // and verdict; opening it hands the row's `callId` to the shared detail.
+    const row = plugin.getByRole('button', { name: /echo e2e-detail/u });
     await expect(row).toBeVisible();
 
     const [detailResponse] = await Promise.all([
@@ -107,7 +109,7 @@ test(
           return false;
         return new URL(response.url()).searchParams.get('callId') === CALL_ID;
       }),
-      row.getByRole('button', { name: '查看详情', exact: true }).click(),
+      row.click(),
     ]);
     expect(detailResponse.status()).toBe(200);
 
