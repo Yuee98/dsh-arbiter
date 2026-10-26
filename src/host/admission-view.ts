@@ -44,9 +44,9 @@ export function sessionView(
     seq: folded?.seq ?? null,
     at: folded?.at ?? null,
     // A refused resume means coverage is deliberately not in force, however the
-    // retained record reads; the view reports what is effective.
-    reason:
-      source.refused() && !scope.managed ? 'coverage-refused' : scope.reason,
+    // retained record reads: reporting `session-enabled` there would claim a
+    // takeover the conflict forbade.
+    reason: source.refused() ? 'coverage-refused' : scope.reason,
     managed: scope.managed && !source.refused(),
   };
 }

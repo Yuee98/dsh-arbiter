@@ -1300,3 +1300,37 @@ describe('a refusal recovers once the sandbox is safe', () => {
     }
   });
 });
+
+describe('the admission view reports a refused coverage as refused', () => {
+  test('a restored session is not shown as managed while the refusal stands', async () => {
+    const session = makeSession('s-view-refused');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-view-refused',
+      rootSessionId: 's-view-refused',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      harness.addSession(session);
+      // The first call refuses coverage; the view must say so rather than
+      // claiming the retained enabled record is a running gate.
+      await harness.gate(call(session), allow);
+      const view = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-view-refused',
+      );
+      expect(view.status).toBe(200);
+      expect(view.body['admission']).toMatchObject({
+        enabled: true,
+        managed: false,
+        reason: 'coverage-refused',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
