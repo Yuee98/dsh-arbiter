@@ -413,6 +413,35 @@ describe('redirects, assignments and cwd', () => {
     ).toMatchObject({ cwd: '/tmp', unresolved: false });
   });
 
+  test('a short-circuited list does not restore an earlier directory', () => {
+    // `false` fails, so the second `cd /workspace` never runs and the list stops in
+    // /tmp. Taking the syntactically last command's directory would report the
+    // entry directory instead.
+    const stopped = parseShell(
+      'cd /tmp && false && cd /workspace\necho hi > out.txt',
+      '/workspace',
+    );
+    expect(stopped.redirects[0]?.cwd).not.toBe('/workspace');
+    expect(stopped.redirects[0]?.unresolved).toBe(true);
+    // An `&&` list that may stop anywhere cannot confirm the directory.
+    expect(
+      parseShell('cd /tmp && echo hi > o.txt', '/workspace').redirects[0]?.cwd,
+    ).toBe('/tmp');
+  });
+
+  test('a loop body write is not one known path', () => {
+    // The structural subject is unconfirmed, and the facts layer must not report a
+    // single confirmed path for it either.
+    expect(
+      factsOf('for i in 1 2; do echo hi > out.txt; cd /tmp; done', '/workspace')
+        .facts.observed.writes,
+    ).toEqual(['out.txt']);
+    expect(
+      factsOf('for i in 1 2; do echo hi > /tmp/abs.txt; done', '/workspace')
+        .facts.observed.writes,
+    ).toEqual(['/tmp/abs.txt']);
+  });
+
   test('a repeated condition is as uncertain as the body it guards', () => {
     // The clause runs on every pass, so its relative write resolves against a
     // different directory on the second pass.
@@ -672,6 +701,28 @@ describe('effect facts', () => {
         exec: factsOf(source).facts.observed.pipelineExec,
       }).toEqual({ source, exec: [] });
     }
+  });
+
+  test('a pipe needs stdout on the sending side and stdin on the receiving side', () => {
+    // `1>&2` moves curl's stdout onto stderr, so the pipe carries nothing.
+    expect(
+      factsOf('curl https://example.test 1>&2 | sh').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+    // The receiver reading a file instead of the pipe breaks the relation.
+    expect(
+      factsOf('curl https://example.test | sh < /tmp/script.sh').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+    expect(
+      factsOf('curl https://example.test | sh 0< /tmp/script.sh').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+    // A here-string on the receiver's stdin replaces it too.
+    expect(
+      factsOf('curl https://example.test | sh <<< data').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
   });
 
   test('a compound stage does not inherit an inner command', () => {

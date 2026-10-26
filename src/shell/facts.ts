@@ -82,14 +82,32 @@ function writeTargetAt(
  * Whether this command's stdout still reaches the pipe it writes to.
  *
  * A redirect on stdout — the default descriptor for an output operator — sends the
- * bytes to a file instead. A descriptor duplication such as `2>&1` moves stderr
- * onto stdout and does not take stdout away, so only real file redirects count.
+ * bytes to a file instead, and a duplication `1>&2` moves stdout onto stderr. A
+ * duplication `2>&1` moves stderr *onto* stdout and leaves stdout on the pipe.
  */
 function pipeReceivesStdout(command: ShellCommand): boolean {
   for (const redirect of command.redirects) {
-    if (redirect.kind !== 'file') continue;
     if (!redirect.op.includes('>')) continue;
-    if (redirect.descriptor === null || redirect.descriptor === 1) return false;
+    if (redirect.descriptor !== null && redirect.descriptor !== 1) continue;
+    if (redirect.kind === 'file') return false;
+    // `1>&2`, `1>&-` and `>&2` take stdout away from the pipe too.
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Whether the receiving command still reads its stdin from the pipe.
+ *
+ * `curl … | sh < script` builds the pipe, but `sh` reads the file instead of the
+ * download. A here-string or here-doc on stdin replaces it the same way.
+ */
+function pipeFeedsStdin(command: ShellCommand): boolean {
+  for (const redirect of command.redirects) {
+    if (redirect.op.startsWith('<<')) return false;
+    // An input redirect on the default descriptor (stdin) or on 0 replaces it.
+    if (redirect.op.includes('<') && !redirect.op.includes('>')) return false;
+    if (redirect.descriptor === 0) return false;
   }
   return true;
 }
@@ -187,7 +205,9 @@ class FactCollector {
     const receiver = this.parse.commands.find(
       (other) => other.index === command.pipeTarget,
     );
-    const name = receiver?.words[0]?.value ?? '';
+    if (receiver === undefined) return null;
+    if (!pipeFeedsStdin(receiver)) return null;
+    const name = receiver.words[0]?.value ?? '';
     return INTERPRETERS.has(name) ? name : null;
   }
 
@@ -254,9 +274,9 @@ class FactCollector {
       if (!redirect.op.includes('>')) continue;
       this.writeTarget({
         target: redirect.target,
-        // Only a dynamic word is an unresolved expansion; an unknown directory is
-        // a different gap and is reported as such in `writeTarget`.
-        dynamic: redirect.dynamic,
+        // A repeated body or an unknown directory means a relative target may
+        // resolve elsewhere on a later pass, so it is not a single known path.
+        dynamic: redirect.dynamic || redirect.unresolved,
         cwd: redirect.cwd,
       });
     }

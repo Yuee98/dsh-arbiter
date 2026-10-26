@@ -38,7 +38,7 @@ import type { Frame, WalkResult } from './collected.js';
 export type { WalkResult } from './collected.js';
 import { visitArithmetic, visitParts, visitTest } from './expansions.js';
 import type { ExpansionSink, WordPartSink } from './expansions.js';
-import { walkCase, walkIf } from './branches.js';
+import { joinOutcomes, walkCase, walkIf } from './branches.js';
 import { unconsumed } from './source.js';
 import { readShellWord } from './words.js';
 import type {
@@ -512,9 +512,11 @@ class AstVisitor implements ExpansionSink {
     frame: Frame,
   ): void {
     // The right side of a conditional operator may not run at all, so the
-    // directory the caller is in afterwards is the join of every path through the
-    // list. Only a value all paths agree on survives.
+    // directory the caller is in afterwards is the join of every prefix the list
+    // can stop at. `cd /tmp && false && cd /workspace` stops at `false`, leaving
+    // `/tmp` — not the entry directory the last, skipped `cd` would restore.
     const entry = frame.cwd;
+    const outcomes: (string | null)[] = [entry];
     for (const [index, command] of nodes.entries()) {
       if (operators[index - 1] === '||') {
         // The right side runs only after a failure, so the state the left side
@@ -522,8 +524,10 @@ class AstVisitor implements ExpansionSink {
         frame.cwd = null;
       }
       this.node(command, frame);
+      // The list can stop after this command when the next operator short-circuits.
+      outcomes.push(frame.cwd);
     }
-    if (operators.length > 0 && frame.cwd !== entry) frame.cwd = null;
+    frame.cwd = joinOutcomes(outcomes);
   }
 
   private redirected(
