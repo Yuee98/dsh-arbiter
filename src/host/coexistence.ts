@@ -358,7 +358,10 @@ export class CoexistenceMonitor {
   providerState(): ProviderState {
     const view = this.refresh('provider-state');
     if (view.blocked || view.official.running) return 'running';
-    if (view.detection === 'complete') return 'stopped';
+    // The official provider is a Loader entry, so only the Loader's own
+    // completeness can establish that it stopped. An unreadable *listener*
+    // registry degrades warning detection, but says nothing about the provider.
+    if (!view.missing.includes('loader')) return 'stopped';
     // An unreadable surface is only *unknown* about a provider this runtime has
     // actually seen. On a host that never exposed that surface there is no
     // established restriction for `unknown` to protect, and refusing every

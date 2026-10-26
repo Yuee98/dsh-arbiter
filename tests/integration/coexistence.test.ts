@@ -423,6 +423,22 @@ async function enable(harness: Harness, sessionId: string) {
   });
 }
 
+async function disable(harness: Harness, sessionId: string) {
+  return harness.request('/api/arbiter/sessions', {
+    method: 'POST',
+    body: { sessionId, action: 'disable' },
+  });
+}
+
+/** One object field, or an empty record when absent. */
+function record(
+  body: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const value = body[key];
+  return isRecord(value) ? value : {};
+}
+
 describe('blocked takeover before any write', () => {
   test('the official plugin running refuses enable and grants nothing', async () => {
     const session = makeSession('s-blocked');
@@ -1329,6 +1345,104 @@ describe('the admission view reports a refused coverage as refused', () => {
         managed: false,
         reason: 'coverage-refused',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('an unreadable provider blocks new activation too', () => {
+  test('a fresh enable is refused while the state is unknown', async () => {
+    const session = makeSession('s-unknown-new');
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      // Establish the conflict first, then lose the Loader.
+      harness.official.activate();
+      const view = coexistenceOf(
+        (await harness.request('/api/arbiter/state')).body,
+      );
+      expect(view['blocked']).toBe(true);
+      harness.setLoaderUnreadable(true);
+      // A *new* takeover must not proceed on missing evidence.
+      const response = await enable(harness, 's-unknown-new');
+      expect(response.status).toBe(409);
+      expect(admissions(session)).toEqual([]);
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an unheld cold-restore widening is withheld while unknown', async () => {
+    const session = makeSession('s-unknown-cold');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-unknown-cold',
+      rootSessionId: 's-unknown-cold',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      // Observe the conflict first: `unknown` only protects a provider this
+      // runtime has actually seen running.
+      harness.official.activate();
+      await harness.request('/api/arbiter/state');
+      harness.setLoaderUnreadable(true);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a readable Loader that shows the provider stopped restores activation', async () => {
+    const session = makeSession('s-unknown-recover');
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      harness.official.activate();
+      await harness.request('/api/arbiter/state');
+      harness.setLoaderUnreadable(true);
+      expect((await enable(harness, 's-unknown-recover')).status).toBe(409);
+      // The Loader returns and proves the provider stopped.
+      harness.setLoaderUnreadable(false);
+      harness.official.remove();
+      expect((await enable(harness, 's-unknown-recover')).status).toBe(200);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('the admission view keeps the persisted identity', () => {
+  test('an enabled admission reports a revision that changes on disable', async () => {
+    const session = makeSession('s-revision');
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      expect((await enable(harness, 's-revision')).status).toBe(200);
+      const enabled = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-revision',
+      );
+      const first = record(enabled.body, 'admission')['admissionRevision'];
+      expect(first).toEqual(expect.any(String));
+      expect((await disable(harness, 's-revision')).status).toBe(200);
+      const disabled = await harness.request(
+        '/api/arbiter/sessions?sessionId=s-revision',
+      );
+      const second = record(disabled.body, 'admission')['admissionRevision'];
+      expect(second).toEqual(expect.any(String));
+      // The identity changes with the record, and stays distinct from the
+      // configuration revision the same payload carries.
+      expect(second).not.toBe(first);
+      expect(disabled.body['revision']).not.toBe(second);
     } finally {
       harness.dispose();
     }

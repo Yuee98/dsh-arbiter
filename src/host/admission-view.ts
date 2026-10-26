@@ -6,7 +6,7 @@
  * deliberately not in force there, so the view must not claim it is.
  */
 
-import { resolveScope } from './admission.js';
+import { admissionRevision, resolveScope } from './admission.js';
 import type { FoldedAdmission, ScopeLookup } from './admission.js';
 import type { ExecutionBoundary, SessionAdmissionView } from '../types.js';
 
@@ -40,7 +40,9 @@ export function sessionView(
     enabled: folded?.enabled ?? false,
     boundary: folded?.boundary ?? source.boundary(),
     revision,
-    admissionRevision: null,
+    // The identity of the persisted admission, distinct from the effective
+    // configuration revision; `null` only when there is no record at all.
+    admissionRevision: folded === null ? null : admissionRevision(id, folded),
     seq: folded?.seq ?? null,
     at: folded?.at ?? null,
     // A refused resume means coverage is deliberately not in force, however the

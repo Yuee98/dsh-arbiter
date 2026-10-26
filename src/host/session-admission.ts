@@ -51,7 +51,7 @@ import type { AdmissionAdapters } from './admission-adapters.js';
 import { narrowWithRetry } from './narrow-retry.js';
 import { CoverageHold } from './coverage-hold.js';
 import { admissionSummary } from './admission-summary.js';
-import { refuseEnable } from './admission-veto.js';
+import { refuseEnable, unprovableVeto } from './admission-veto.js';
 import type { ProviderState } from './coexistence.js';
 import type { AdmissionFailure, EnableGuard } from './admission-veto.js';
 import type { HostEnvironment, KnobWrite } from './types.js';
@@ -242,7 +242,7 @@ export class SessionAdmissions {
     return scope;
   }
 
-  /** Whether this session's withheld widening still applies. */
+  /** Whether one session's withheld widening still applies. */
   private holdStill(
     id: string,
     recorded: ExecutionBoundary,
@@ -273,11 +273,14 @@ export class SessionAdmissions {
     if (this.holdStill(id, folded.boundary, boundary)) return true;
     // A cold restore is an activation too, so it uses the same decision as
     // `enable()`: no widening under a conflict, narrowing recorded as applied.
+    // A withheld widening is governed by the hold below; a *new* one must not
+    // be granted on an unreadable provider either, so both the veto and the
+    // tri-state feed the decision.
     const activation = activationOf(
       session,
       boundary,
       folded.boundary,
-      this.conflictPresent(),
+      this.conflictPresent() || this.startUnprovable(),
       true,
     );
     if (activation.writes.length === 0 && !narrow) return true;
@@ -401,8 +404,12 @@ export class SessionAdmissions {
     const wasManaged =
       admitted !== null && admitted.enabled && !this.hold.refusalStands;
     if (!wasManaged) {
+      // A confirmed provider whose state is now unreadable is not a cleared
+      // conflict: a *new* takeover waits for a readable observation.
       const veto = this.enableGuard?.() ?? null;
       if (veto !== null) return refuseEnable(this.host, id, veto);
+      if (this.startUnprovable())
+        return refuseEnable(this.host, id, unprovableVeto());
     }
     if (!this.host.runtime.config.enabled)
       return {
@@ -718,12 +725,10 @@ export class SessionAdmissions {
   markFailingClosed(sessionId: string, byRefusal = false): void {
     this.hold.mark(sessionId, byRefusal);
   }
-  isFailingClosed(sessionId: string | undefined): boolean {
-    return this.hold.isMarked(sessionId);
-  }
-  isRefusalMarked(sessionId: string | undefined): boolean {
-    return this.hold.isRefusalMarked(sessionId);
-  }
+  isFailingClosed = (sessionId: string | undefined): boolean =>
+    this.hold.isMarked(sessionId);
+  isRefusalMarked = (sessionId: string | undefined): boolean =>
+    this.hold.isRefusalMarked(sessionId);
 
   /** Summary projection for the state payload. */
   summary(): unknown {

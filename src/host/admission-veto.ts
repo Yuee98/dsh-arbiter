@@ -30,6 +30,21 @@ export interface AdmissionFailure {
  */
 export type EnableGuard = () => Omit<AdmissionFailure, 'ok'> | null;
 
+/**
+ * The veto used when another provider may be running but could not be read.
+ *
+ * Treated exactly like a confirmed conflict for a *new* takeover: the contract
+ * forbids beginning coverage it cannot show to be safe, and an unreadable
+ * surface is missing evidence rather than proof of resolution.
+ */
+export function unprovableVeto(): Omit<AdmissionFailure, 'ok'> {
+  return {
+    code: 'coexistence-blocked',
+    message:
+      'another approval provider may be running and could not be ruled out',
+  };
+}
+
 /** Refuse a takeover: the lifecycle records it and nothing was written. */
 export function refuseEnable(
   host: HostEnvironment,
