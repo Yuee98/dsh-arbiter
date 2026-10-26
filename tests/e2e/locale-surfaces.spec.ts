@@ -33,12 +33,19 @@ import zhLogs from '../../locale/zh/logs.json' with { type: 'json' };
 import enLogs from '../../locale/en/logs.json' with { type: 'json' };
 import zhCallDetail from '../../locale/zh/callDetail.json' with { type: 'json' };
 import enCallDetail from '../../locale/en/callDetail.json' with { type: 'json' };
-import zhCoexistence from '../../locale/zh/coexistence.json' with { type: 'json' };
-import enCoexistence from '../../locale/en/coexistence.json' with { type: 'json' };
 import zhDenials from '../../locale/zh/denials.json' with { type: 'json' };
 import enDenials from '../../locale/en/denials.json' with { type: 'json' };
 
 const FORMAT = 'arbiter-config-v2';
+
+/** A declared route with no server behind it: the probe fails, fast and free. */
+const MODEL_GROUPS = [
+  {
+    provider: 'locale-probe',
+    displayName: 'Locale probe',
+    models: [{ id: 'locale-probe-model', name: 'Locale Probe Model' }],
+  },
+] as const;
 
 /** A rule whose English name is long enough to wrap or overflow a narrow cell. */
 const LONG_RULE = {
@@ -165,6 +172,44 @@ async function clippedText(
   }, selector);
 }
 
+/**
+ * The persisted raw payloads a call detail renders, without their labels.
+ *
+ * Only the `<pre>` blocks are returned: they hold the stored JSON exactly as it
+ * was written. The surrounding labels are UI copy and legitimately translate, so
+ * including them would make a "nothing changed" comparison meaningless. Each
+ * material group is collapsed by default, so the helper expands them the way a
+ * reader would.
+ */
+async function rawDetailText(page: Page): Promise<readonly string[]> {
+  const root = page.locator('[data-arbiter-root]');
+  const raw = root.locator('[data-call-detail-raw]');
+  await expect(raw).toBeVisible();
+  // Every disclosure in this panel is a `<button aria-expanded>`; open the
+  // collapsed ones in reading order so the payload blocks are in the DOM.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const collapsed = raw.locator('button[aria-expanded="false"]');
+    if ((await collapsed.count()) === 0) break;
+    await collapsed
+      .first()
+      .click()
+      .catch(() => undefined);
+  }
+  const blocks = page.locator('[data-call-detail-raw] pre');
+  await expect(blocks.first()).toBeVisible();
+  return (await blocks.allInnerTexts()).map((text) => text.trim());
+}
+
+/** The recorded verdict reason a detail shows, without its translated labels. */
+async function verdictText(page: Page, regionName: string): Promise<string> {
+  const region = page.getByRole('region', { name: regionName, exact: true });
+  await expect(region).toBeVisible();
+  // The heading and the verdict word are UI copy and legitimately translate; the
+  // reason below them is the persisted agent-facing text, which must not.
+  const lines = (await region.innerText()).trim().split('\n');
+  return lines.slice(2).join('\n').trim();
+}
+
 /** No raw key, no unresolved placeholder and no `undefined` in the given text. */
 function expectNoLeak(text: string): void {
   expect(text).not.toMatch(
@@ -183,6 +228,10 @@ test('every plugin surface switches between the released Chinese and English cop
     join(testInfo.outputPath('locale-surfaces')),
     {
       arbiterRowConfig: { format: FORMAT, rules: [LONG_RULE] },
+      // A real catalog entry for the Reviewer picker. The route points at a
+      // closed local port, so the probe fails fast: this case asserts the
+      // dialog's English state, not a model reply, and needs no credential.
+      modelGroups: MODEL_GROUPS,
     },
   );
   try {
@@ -239,9 +288,12 @@ test('every plugin surface switches between the released Chinese and English cop
     ).toBeVisible();
     const ruleRow = plugin.locator('[data-rule-row]');
     await expect(ruleRow).toHaveCount(1);
-    await ruleRow
-      .getByRole('textbox', { name: zhRules.name, exact: true })
-      .fill(LONG_RULE.name);
+    // The saved value is what a language switch must preserve. A host language
+    // change reloads the client, so an unsaved draft is not expected to survive
+    // it and this case does not claim that; see the comment at the assertion.
+    await expect(
+      ruleRow.getByRole('textbox', { name: zhRules.name, exact: true }),
+    ).toHaveValue(LONG_RULE.name);
     // The tester entry is the same control the editor owns.
     await ruleRow
       .getByRole('button', { name: zhRules.test, exact: true })
@@ -281,7 +333,9 @@ test('every plugin surface switches between the released Chinese and English cop
     ).toBeVisible();
     const englishRow = english.locator('[data-rule-row]');
     await expect(englishRow).toHaveCount(1);
-    // The values the user typed are not translated, only the chrome is.
+    // The saved user content survives the language switch verbatim: only the
+    // chrome is translated, never the user's own text. (A host language change
+    // reloads the client, so unsaved drafts are out of scope here.)
     await expect(
       englishRow.getByRole('textbox', { name: enRules.name, exact: true }),
     ).toHaveValue(LONG_RULE.name);
@@ -300,8 +354,9 @@ test('every plugin surface switches between the released Chinese and English cop
     expect(await clippedText(page, '[data-arbiter-root]')).toEqual([]);
     expectNoLeak(await english.innerText());
 
-    // The Reviewer tab and its dialog: the cost notice and the dialog title are
-    // the two surfaces the issue names explicitly.
+    // The Reviewer surface: following the session disables the entry and says
+    // so; choosing a concrete route enables it and the real dialog opens, runs
+    // against the seeded local provider and renders its material in English.
     await english
       .getByRole('button', { name: enPage.reviewer, exact: true })
       .click();
@@ -312,12 +367,74 @@ test('every plugin surface switches between the released Chinese and English cop
       name: enReviewer.test.open,
       exact: true,
     });
-    // The default follows the session model, so the entry explains itself in
-    // English rather than opening a dialog with no route.
     await expect(openTest).toBeDisabled();
     await expect(
       english.getByText(enReviewer.test.sessionDisabled, { exact: true }),
     ).toBeVisible();
+
+    // A concrete model route enables the entry. The seeded provider points at a
+    // closed local port, so the probe fails fast without a credential or a paid
+    // request — the point is the real route, the real dialog and its English
+    // material, not a successful model reply.
+    await english
+      .getByRole('combobox', { name: enReviewer.model.label, exact: true })
+      .selectOption({
+        label: 'Locale probe / locale-probe-model（Locale Probe Model）',
+      });
+    await expect(openTest).toBeEnabled();
+    await expect(
+      english.getByText(enReviewer.test.costNotice, { exact: true }),
+    ).toBeVisible();
+    const [probeResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/arbiter/reviewer-test',
+      ),
+      openTest.click(),
+    ]);
+    expect(probeResponse.status()).toBe(200);
+    const dialog = english.getByRole('dialog', {
+      name: enReviewer.test.title,
+      exact: true,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole('button', { name: enReviewer.test.close, exact: true }),
+    ).toBeVisible();
+    // The run started on open, so the terminal state is English, not a
+    // placeholder and not the source text.
+    await expect(dialog.locator('[data-arbiter-probe-status]')).toBeVisible();
+    await expect(
+      dialog.locator('[data-arbiter-probe-status="failed"]'),
+    ).toBeVisible();
+    expect(await dialog.innerText()).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(await dialog.innerText()).not.toMatch(
+      /reviewer\.|\{\w+\}|undefined/u,
+    );
+    // The seeded route declares no credential, and the OpenAI-compatible
+    // protocol refuses to dispatch without one, so the classified stage is the
+    // credential. Asserting the stable code ties this to the stage; asserting
+    // the sentence proves the classification is rendered in English.
+    await expect(
+      dialog.locator('[data-arbiter-probe-failure="credential-missing"]'),
+    ).toBeVisible();
+    expect(await dialog.innerText()).toContain(
+      enReviewer.test.failure.credentialMissing,
+    );
+    expect(
+      await clippedText(page, '[aria-label="Reviewer connection test"]'),
+    ).toEqual([]);
+    // The failure material is expandable and stays inside the dialog.
+    await dialog.getByText(enReviewer.test.details, { exact: true }).click();
+    await expect(
+      dialog.getByText(enReviewer.test.attempt.replace('{n}', '1'), {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await dialog
+      .getByRole('button', { name: enReviewer.test.close, exact: true })
+      .click();
+    await expect(dialog).toBeHidden();
     expect(await clippedText(page, '[data-arbiter-root]')).toEqual([]);
 
     // The log list and the shared call detail.
@@ -351,15 +468,19 @@ test('every plugin surface switches between the released Chinese and English cop
       }),
     ).toBeVisible();
     expectNoLeak(await english.innerText());
+    // ---- AC6: switching the language rewrites no stored raw data ---------
+    // Read the detail's own raw material in English, then again after switching
+    // back, and compare: the tool input and the recorded decision text are
+    // persisted values, so they must be byte-identical in both languages.
+    const rawInEnglish = await rawDetailText(page);
+    const verdictInEnglish = await verdictText(page, enCallDetail.finalVerdict);
+    expect(rawInEnglish.length).toBeGreaterThan(0);
+    // The tool input the plugin stored is in there; it is a persisted value.
+    expect(rawInEnglish.join('\n')).toContain('locale-denied-one');
 
-    // ---- The coexistence notice, in both languages -----------------------
-    // The notice only appears with a real conflicting provider, which this
-    // profile does not compose; the copy is asserted from the catalog the
-    // running page actually renders instead of injecting a fake conflict.
-    expect(zhCoexistence.notice.blockingTitle).toBe('存在冲突的审批提供者');
-    expect(enCoexistence.notice.blockingTitle).toBe(
-      'A conflicting approval provider exists',
-    );
+    // The coexistence alert needs a real conflicting provider, so its bilingual
+    // rendering is asserted where that composition exists: `coexistence.spec.ts`
+    // switches the host language with the official Auto Review actually running.
 
     // ---- Session denial feedback in the conversation ---------------------
     await page
@@ -436,6 +557,13 @@ test('every plugin surface switches between the released Chinese and English cop
         exact: true,
       }),
     ).toBeVisible();
+    // The same call's persisted material, read in Chinese, equals what the
+    // English view showed: only the labels changed.
+    expect(await rawDetailText(page)).toEqual(rawInEnglish);
+    expect(await verdictText(page, zhCallDetail.finalVerdict)).toEqual(
+      verdictInEnglish,
+    );
+    expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
     await openConfiguration(page);
     const back = page.locator('[data-arbiter-root]');
     await back

@@ -19,6 +19,7 @@
  *   - It is not an `@smoke` case: a cross-process restart belongs in the full
  *     suite, not in the daily smoke budget.
  */
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -40,13 +41,15 @@ const DENY_RULE = {
   name: '拒绝旅程探针命令',
   scope: { tools: ['bash'] },
   conditions: [
-    // RE2 matches the whole value, so the expression covers the command prefix
-    // rather than the word alone.
+    // `touch` is one command node whose own text creates the file, so the
+    // denied command's only effect is observable on disk. A regression that
+    // executed the body and then reported a denial cannot pass. The path is
+    // absolute because a session's working directory is not the workspace root.
     {
       target: 'argument',
       path: '$.command',
       kind: 'regex',
-      pattern: 'echo journey-deny-.*',
+      pattern: 'touch .*journey-denied-(?:probe|restart)\\.txt',
     },
   ],
   verdict: 'deny',
@@ -462,7 +465,12 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
     // the refused call. The composer is the host's own, so the turn is a real
     // one issued by the session that was just configured and enabled.
     await openExistingSession(page, 'JOURNEY-WARM');
-    await sendPrompt(page, 'JOURNEY-DENY RUN echo journey-deny-probe');
+    // The command's only effect is creating a file inside the isolated
+    // workspace, so the denial is proven by the file's absence rather than by
+    // the absence of output (an implementation could execute first and then
+    // replace the result with a denial, which "no output" would not catch).
+    const deniedTarget = join(host.workspace, 'journey-denied-probe.txt');
+    await sendPrompt(page, `JOURNEY-DENY RUN touch ${deniedTarget}`);
     const denied = await waitForSession(
       host.home,
       (candidate) =>
@@ -486,7 +494,9 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
       (result) => recordedCallId(result) === denial.callId,
     );
     expect(deniedResult).toBeDefined();
-    expect(resultText(deniedResult ?? {})).not.toContain('journey-deny-probe');
+    // The refused command created no file: this is an execution effect, not a
+    // text check on the plugin's own verdict.
+    await expect(readFile(deniedTarget, 'utf8')).rejects.toThrow();
     // The decision record for that exact call id says the rule decided it, so
     // the refusal is attributed rather than guessed.
     const ruleDecision = decisionsFor(deniedSession, denial.callId);
@@ -498,6 +508,22 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
       decision: ruleDecision[0],
     });
 
+    // A positive control for the same effect: a command of the same shape that
+    // no rule covers does create its file, so "no file" is evidence about this
+    // refused command rather than about a workspace that could not be written.
+    const allowedTarget = join(host.workspace, 'journey-allowed-probe.txt');
+    await sendPrompt(page, `JOURNEY-CONTROL RUN touch ${allowedTarget}`);
+    const control = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.events.filter((event) => event.type === 'turn/end').length >=
+          3,
+      120_000,
+    );
+    expect(control).not.toBeNull();
+    expect(await readFile(allowedTarget, 'utf8')).toBe('');
+
     // ---- 4. The model review path on the next real call --------------------
     // The fixture Reviewer answers a fixed low-risk, authorized verdict, so a
     // call that no rule covers reaches model review and settles as
@@ -508,7 +534,12 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
       host.home,
       (candidate) => {
         if (candidate.sessionId !== sessionId) return false;
+        // The call is identified by its own output as well as its verdict: the
+        // earlier positive control also settled as `review-allow`, so waiting on
+        // the verdict alone would return before this turn had been read.
         return toolResults(candidate).some((result) => {
+          if (!resultText(result).includes('journey-review-allowed'))
+            return false;
           const callId = recordedCallId(result);
           if (callId === null) return false;
           return decisionsFor(candidate, callId).some(
@@ -518,16 +549,32 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
       },
       120_000,
     );
-    expect(reviewed).not.toBeNull();
-    const reviewedSession = reviewed ?? deniedSession;
+    if (reviewed === null) {
+      const dump = (
+        await waitForSession(host.home, (c) => c.sessionId === sessionId, 5_000)
+      )?.events
+        .filter((e) => e.type === 'tool/result' || e.type === 'tool/call')
+        .map((e) => `${e.type}: ${JSON.stringify(e.data).slice(0, 300)}`);
+      throw new Error(
+        `no review-allow for the review probe: ${JSON.stringify(dump, null, 2)}`,
+      );
+    }
+    const reviewedSession = reviewed;
+    // Select the review-path call by both its own output and its verdict: the
+    // positive-control call above also settles as `review-allow` and produces no
+    // output, so matching on the verdict alone would pick the wrong result.
     const reviewedCall = toolResults(reviewedSession)
-      .filter((result) => {
-        const callId = recordedCallId(result);
-        if (callId === null) return false;
-        return decisionsFor(reviewedSession, callId).some(
-          (entry) => entry['result'] === 'review-allow',
-        );
-      })
+      .filter(
+        (result) =>
+          resultText(result).includes('journey-review-allowed') &&
+          (() => {
+            const callId = recordedCallId(result);
+            if (callId === null) return false;
+            return decisionsFor(reviewedSession, callId).some(
+              (entry) => entry['result'] === 'review-allow',
+            );
+          })(),
+      )
       .at(-1);
     expect(reviewedCall).toBeDefined();
     const reviewedCallId = recordedCallId(reviewedCall ?? {});
@@ -590,10 +637,11 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
     });
 
     // And the restored admission still decides: the same rule refuses again.
-    await sendPrompt(
-      page,
-      'JOURNEY-AFTER-RESTART RUN echo journey-deny-restart',
-    );
+    // The same observable effect as the first refusal: a new marker file that
+    // must not exist afterwards, so a post-restart denial that silently
+    // executed would fail here.
+    const restartTarget = join(host.workspace, 'journey-denied-restart.txt');
+    await sendPrompt(page, `JOURNEY-AFTER-RESTART RUN touch ${restartTarget}`);
     const deniedAgain = await waitForSession(
       restarted.home,
       (candidate) =>
@@ -615,6 +663,7 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
     if (second === undefined) throw new Error('no post-restart denial');
     expect(second.callId).not.toBe(denial.callId);
     expect(second.reason).toContain('deny-rule');
+    await expect(readFile(restartTarget, 'utf8')).rejects.toThrow();
     // The post-restart refusal is attributed to the restored configuration.
     expect(decisionsFor(recoveredSession, second.callId)).toHaveLength(1);
     // The permission the plugin applied is the guarded boundary it reported,
@@ -649,10 +698,25 @@ test.describe('installation does not take over', () => {
     test.setTimeout(300_000);
     const caseHost: CaseHost = await createCaseHost(
       join(testInfo.outputPath('bare-install')),
-      {},
+      // `unset` omits the user configuration entirely: a real first install has
+      // no `config` field on the plugin row, so seeding `{}` would only prove
+      // that an explicit empty document works.
+      { arbiterConfig: 'unset' },
     );
     try {
       const host = caseHost.current();
+      // The profile document must really lack the configuration, otherwise the
+      // rest of this case would be testing the wrong composition.
+      const patch = await readFile(host.documentPath, 'utf8');
+      expect(patch.trimStart().startsWith('[')).toBe(true);
+      const parsed: unknown = JSON.parse(patch);
+      expect(Array.isArray(parsed)).toBe(true);
+      const rows: readonly unknown[] = Array.isArray(parsed) ? parsed : [];
+      const arbiterRow = rows.find(
+        (row: unknown) => isRecord(row) && row['id'] === 'arbiter',
+      );
+      expect(arbiterRow).toBeDefined();
+      expect(isRecord(arbiterRow) && 'config' in arbiterRow).toBe(false);
       const state = await readState(host);
       expect(state.rules).toEqual([]);
       expect(state.invalidConfigError).toBeNull();

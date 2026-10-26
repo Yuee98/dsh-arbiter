@@ -3,7 +3,6 @@ import {
   access,
   mkdir,
   mkdtemp,
-  readFile,
   realpath,
   rm,
   stat,
@@ -62,7 +61,18 @@ export interface ProfileOptions {
    * home. Used by the restart cases: the session log, the audit database and
    * the profile patch must be the same ones the previous process wrote.
    */
-  readonly reuse?: { readonly root: string; readonly home: string };
+  readonly reuse?: {
+    readonly root: string;
+    readonly home: string;
+    /**
+     * A reuse that expects the plugin to be gone.
+     *
+     * An uninstall case removes the bundle row and the dependency through the
+     * host's own manager; the next start must observe exactly that state, so the
+     * plugin link is allowed to be absent instead of being treated as damage.
+     */
+    readonly pluginRemoved?: boolean;
+  };
   /**
    * Extra rows appended to the profile patch (for example a deterministic
    * model adapter for a lifecycle case). They are written on every create, so a
@@ -182,6 +192,29 @@ export async function createIsolatedProfile(
   const home = options.reuse?.home ?? join(root, 'home');
   const workspace = join(root, 'workspace');
   const profile = join(home, 'profiles', profileName);
+  const documentPath = join(profile, 'cordis.patch.yml');
+  /**
+   * A reused profile is observed, never re-provisioned.
+   *
+   * A restart case is a cold restore of the durable state under test: the
+   * install manifest, the plugin link, the profile files and the settings
+   * document are all part of what the previous process left behind. Rebuilding
+   * any of them here would let the fixture repair state the product may have
+   * damaged, which would make every recovery assertion vacuous. So a reuse
+   * *validates* the files and fails when one is missing instead of writing it.
+   */
+  if (options.reuse !== undefined) {
+    const required = [
+      join(profile, 'package.json'),
+      documentPath,
+      ...(options.reuse.pluginRemoved === true
+        ? []
+        : [join(profile, 'node_modules', 'dsh-arbiter')]),
+    ];
+    for (const file of required) await access(file, constants.F_OK);
+    await mkdir(workspace, { recursive: true });
+    return { root, home, workspace, documentPath };
+  }
   await mkdir(join(profile, 'node_modules'), { recursive: true });
   await mkdir(workspace, { recursive: true });
   await writeFile(
@@ -218,19 +251,6 @@ export async function createIsolatedProfile(
   );
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages: []\n');
   await writeFile(join(profile, 'cordis.yml'), '[]\n');
-  /**
-   * A reused profile keeps the document the previous process left behind.
-   *
-   * A restart case is a cold restore, not a re-install: the plugin settings are
-   * part of the durable state under test. Rewriting the patch from the case
-   * options would silently discard a save the running host performed, which is
-   * exactly the state a recovery assertion has to observe.
-   */
-  const documentPath = join(profile, 'cordis.patch.yml');
-  if (options.reuse !== undefined) {
-    const existing = await readFile(documentPath, 'utf8').catch(() => null);
-    if (existing !== null) return { root, home, workspace, documentPath };
-  }
   const arbiterRow =
     options.arbiterConfig === 'unset'
       ? { id: 'arbiter', name: 'dsh-arbiter' }
