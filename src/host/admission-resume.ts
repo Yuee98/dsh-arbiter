@@ -13,7 +13,7 @@
  * still owns `covered`, the fold and every other transition.
  */
 
-import { boundaryWrites, narrowWrites } from './boundary-writes.js';
+import { restrictedWrites } from './admission-narrow.js';
 import type { RecordState } from '../records.js';
 import type { AdmissionFailure } from './admission-veto.js';
 import type { ExecutionBoundary } from '../types.js';
@@ -32,8 +32,8 @@ export interface ResumeTargets {
   ): RecordState;
   /** Write knob events for one session. */
   writeSessionKnobs(session: SessionLike, writes: readonly KnobWrite[]): void;
-  /** Whether the session is back at a value this plugin can call safe. */
-  atSafeBoundary(session: SessionLike): boolean;
+  /** Whether the session's sandbox is at a value this plugin calls safe. */
+  atSafeSandbox(session: SessionLike): boolean;
   /** Mark a session whose rollback could not be confirmed. */
   markFailingClosed(sessionId: string): void;
   /** Drop a session from coverage. */
@@ -41,11 +41,19 @@ export interface ResumeTargets {
 }
 
 /**
- * Refuse a resume: narrow what this plugin widened, then close the records.
+ * Refuse a resume: take back what this plugin widened, then close the records.
+ *
+ * The cleanup is monotonic in the restrictive direction. It never applies the
+ * `guarded` boundary unconditionally: a session the host confined more strictly
+ * (read-only, an approval policy tighter than ask) must not be widened by a
+ * refusal that only meant "do not take over". So the approval policy is left
+ * alone entirely, and the sandbox only moves when it is the value this plugin
+ * itself grants.
  *
  * Order matters for the same reason teardown has one: withdrawing gate
  * protection first would leave a wide session ungated. The record is written
- * last and says `disabled`, so a cold reader cannot believe coverage resumed.
+ * last, and a record that does not commit leaves the session fail-closed rather
+ * than silently covered.
  */
 export function refuseResume(
   host: HostEnvironment,
@@ -53,12 +61,11 @@ export function refuseResume(
   veto: Omit<AdmissionFailure, 'ok'>,
 ): void {
   for (const [id, session] of targets.resumeTargets()) {
-    const delegated = session.header?.parentSession !== undefined;
-    targets.writeSessionKnobs(
-      session,
-      delegated ? narrowWrites(session) : boundaryWrites(session, 'guarded'),
-    );
-    if (!targets.atSafeBoundary(session)) {
+    // Restrictive only: this removes a sandbox this plugin granted and leaves a
+    // stricter host choice — read-only, or an approval policy tighter than ask —
+    // exactly as the user left it.
+    targets.writeSessionKnobs(session, restrictedWrites(session));
+    if (!targets.atSafeSandbox(session)) {
       targets.markFailingClosed(id);
       host.ctx.logger.error(
         'arbiter: session %s could not be narrowed while another approval provider runs',
@@ -66,6 +73,17 @@ export function refuseResume(
       );
     }
     const state = targets.writeAdmission(session, false, 'guarded');
+    if (state !== 'written') {
+      // The old enabled record is still authoritative, so coverage must not be
+      // treated as retired: keep it fail-closed and let a later read retry.
+      targets.markFailingClosed(id);
+      host.ctx.logger.error(
+        'arbiter: coverage for session %s could not be marked refused (%s)',
+        id,
+        state,
+      );
+      continue;
+    }
     targets.dropCoverage(id);
     host.ctx.logger.warn(
       'arbiter: coverage for session %s was not resumed (%s, record %s)',

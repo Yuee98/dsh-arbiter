@@ -346,3 +346,26 @@ describe('period lifecycle across an unreadable surface', () => {
     expect(resolved.conflicts).toEqual([]);
   });
 });
+
+describe('a retired reminder stays retired', () => {
+  test('a later period does not make the earlier notice actionable again', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    const first = test_.monitor.read('active');
+    // Period A opens N1 and the user never dismisses it.
+    expect(first.notices).toHaveLength(1);
+    expect(first.notices[0]?.acknowledged).toBe(false);
+    // Confirmed resolution ends period A.
+    test_.setOfficial(null);
+    const resolved = test_.monitor.read('resolved');
+    expect(resolved.notices[0]?.acknowledged).toBe(true);
+    expect(resolved.notices[0]?.retired).toBe(true);
+    // Period B opens N2; N1 must not become pending again just because the
+    // conflict id is the same.
+    test_.setOfficial('active');
+    const again = test_.monitor.read('again');
+    const pending = again.notices.filter((notice) => !notice.acknowledged);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).not.toBe(first.notices[0]?.id);
+  });
+});

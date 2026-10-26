@@ -56,6 +56,8 @@ export interface CoexistenceNoticeView {
   readonly at: number;
   /** True once the user closed it; the conflict itself still stands. */
   readonly acknowledged: boolean;
+  /** Whether the period that produced this notice has already ended. */
+  readonly retired?: boolean;
 }
 
 /**

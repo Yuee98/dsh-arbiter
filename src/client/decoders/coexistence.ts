@@ -48,6 +48,7 @@ const notice = (value: unknown): CoexistenceNoticeView => {
     capability: field(source, 'capability', text),
     at: field(source, 'at', number),
     acknowledged: field(source, 'acknowledged', boolean),
+    retired: field(source, 'retired', optional(boolean)) ?? false,
   };
 };
 

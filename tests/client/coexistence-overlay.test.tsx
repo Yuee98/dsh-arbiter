@@ -219,3 +219,51 @@ describe('the reminder never gates work', () => {
     expect(alert.style.bottom).not.toBe('');
   });
 });
+
+describe('acknowledgement ordering', () => {
+  test('a GET that reaches the host before the POST cannot undo the acknowledgement', async () => {
+    let postPending: (() => void) | undefined;
+    let acknowledge = false;
+    let gets = 0;
+    const view = (): CoexistenceView =>
+      blocking({
+        notices: blocking().notices.map((notice) => ({
+          ...notice,
+          acknowledged: acknowledge,
+        })),
+      });
+    server.use(
+      http.get('*/api/arbiter/coexistence', () => {
+        gets += 1;
+        return HttpResponse.json({ ok: true, coexistence: view() });
+      }),
+      http.post('*/api/arbiter/coexistence', async () => {
+        // The POST is in flight but the host has not committed it yet, which is
+        // the window a background read must not fill.
+        await new Promise<void>((resolve) => {
+          postPending = resolve;
+        });
+        acknowledge = true;
+        return HttpResponse.json({ ok: true, coexistence: view() });
+      }),
+    );
+    const { user } = renderClient(<CoexistenceOverlay />);
+    const alert = await screen.findByRole('alertdialog', {
+      name: '存在冲突的审批提供者',
+    });
+    const before = gets;
+    await user.click(within(alert).getByRole('button', { name: '知道了' }));
+    // A refresh while the POST is pending must be skipped, not raced.
+    await act(async () => {
+      requestCoexistenceRefresh();
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(gets).toBe(before);
+    await act(async () => {
+      postPending?.();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+});

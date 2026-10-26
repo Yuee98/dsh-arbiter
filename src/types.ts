@@ -701,6 +701,8 @@ export type AdmissionScopeReason =
   | 'parent-session-enabled'
   | 'no-admission'
   | 'session-disabled'
+  /** Coverage was refused because another approval provider was running. */
+  | 'coverage-refused'
   | 'parent-not-admitted'
   | 'parent-unresolved'
   | 'parent-cycle';

@@ -49,6 +49,13 @@ export interface CoexistenceNotice {
   readonly capability: string;
   readonly at: number;
   readonly acknowledged: boolean;
+  /**
+   * Whether the period that produced this notice has already ended.
+   *
+   * A retired notice is history: it stays readable, but it can never become
+   * actionable again if a later period happens to reuse the same conflict id.
+   */
+  readonly retired?: boolean;
 }
 
 /**
@@ -182,6 +189,14 @@ export class CoexistenceMonitor {
       if (present.has(id)) continue;
       if (!complete && this.dependsOnMissing(id, observation.missing)) continue;
       this.activeConflictIds.delete(id);
+      // The period is over: retire its reminder permanently. Marking it
+      // acknowledged only in the returned view would let a later period with the
+      // same id make the old notice actionable again.
+      this.notices = this.notices.map((notice) =>
+        notice.conflictId === id && !notice.acknowledged
+          ? { ...notice, acknowledged: true, retired: true }
+          : notice,
+      );
     }
     this.observations += 1;
     this.view = {
@@ -193,13 +208,7 @@ export class CoexistenceMonitor {
       autoSlot: assessment.autoSlot,
       autoSlotProblem: this.autoSlotProblem(assessment.autoSlot),
       conflicts: assessment.conflicts,
-      // A reminder is only current if its period is still open: a resolved
-      // conflict keeps its history for reading but must not raise a dialog.
-      notices: this.notices.map((notice) =>
-        notice.acknowledged || present.has(notice.conflictId)
-          ? notice
-          : { ...notice, acknowledged: true },
-      ),
+      notices: this.notices,
       observations: this.observations,
       updatedAt: Date.now(),
     };

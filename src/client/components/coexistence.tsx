@@ -198,7 +198,11 @@ export function CoexistenceAlert({
 }): ReactNode {
   const t = useArbiterTranslation();
   if (coexistence === null) return null;
-  const pending = coexistence.notices.filter((notice) => !notice.acknowledged);
+  // A retired notice belongs to a period that already ended, so it can never
+  // become actionable again even if a later period reuses the conflict id.
+  const pending = coexistence.notices.filter(
+    (notice) => !notice.acknowledged && notice.retired !== true,
+  );
   if (pending.length === 0) return null;
   const blocking = pending.find((notice) => notice.severity === 'blocking');
   if (blocking !== undefined)

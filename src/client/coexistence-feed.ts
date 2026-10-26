@@ -57,6 +57,16 @@ export function useCoexistenceFeed(
    */
   const accepted = useRef(0);
   /**
+   * Whether an acknowledgement is in flight.
+   *
+   * A background GET that starts while a POST is pending can reach the host
+   * first and legitimately return the pre-acknowledgement view. Ordering by
+   * request start cannot tell which of those two reflects the newer host state,
+   * so the read is skipped instead of guessed: one refresh runs when the POST
+   * settles, and that response is authoritative.
+   */
+  const pendingAck = useRef(false);
+  /**
    * Reserve a ticket when the request starts, not when it answers.
    *
    * Reserving at allocation is what makes the rule "an older request can never
@@ -83,6 +93,7 @@ export function useCoexistenceFeed(
 
   useEffect(() => {
     const refresh = (): void => {
+      if (pendingAck.current) return;
       const ticket = nextTicket();
       getJson('/coexistence', coexistenceResponse)
         .then((response) => {
@@ -108,12 +119,18 @@ export function useCoexistenceFeed(
 
   const acknowledge = useCallback(
     (ids: readonly string[]): void => {
+      if (pendingAck.current) return;
+      pendingAck.current = true;
       const ticket = nextTicket();
       postJson('/coexistence', { noticeIds: ids }, coexistenceResponse)
         .then((response) => {
+          pendingAck.current = false;
           accept(ticket, response.coexistence);
         })
-        .catch(onError);
+        .catch((failure: unknown) => {
+          pendingAck.current = false;
+          onError(failure);
+        });
     },
     [accept, nextTicket, onError],
   );

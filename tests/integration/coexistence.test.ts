@@ -114,6 +114,8 @@ interface Harness {
     next: () => Promise<{ kind: string; reason?: string }>,
   ) => Promise<{ kind: string; reason?: string }>;
   readonly dispose: () => void;
+  /** Make one more session live, as reopening a stored session does. */
+  readonly addSession: (session: StubSession) => void;
   /** Activate a new configuration through the production activation path. */
   readonly reconfigure: (config: unknown) => void;
   /** Add a foreign approval-capable pre-execute listener to the load-time view. */
@@ -141,10 +143,13 @@ const ALLOW_ECHO = {
 type Listener = (...args: never[]) => unknown;
 
 function createHarness(
-  sessions: readonly StubSession[],
+  initialSessions: readonly StubSession[],
   config: unknown,
   options: { readonly autoSlotTaken?: boolean } = {},
 ): Harness {
+  // A live list, so a case can restore a session after the plugin started —
+  // the path a refused resume has to keep refusing.
+  const sessions = [...initialSessions];
   const routes = new Map<string, FetchRouteLike>();
   const disposers: (() => unknown)[] = [];
   let gate:
@@ -328,6 +333,9 @@ function createHarness(
     dispose: () => {
       for (const dispose of disposers) dispose();
     },
+    addSession: (session) => {
+      sessions.push(session);
+    },
     reconfigure: (next) => {
       // Same path a UI save or file reload takes: parse, commit, notify.
       const parsed = parseDocument(next);
@@ -365,6 +373,12 @@ function decisions(session: StubSession): readonly Record<string, unknown>[] {
 function modeEvents(session: StubSession): readonly unknown[] {
   return session.events
     .filter((event) => event.type === 'sandbox/mode')
+    .map((event) => event.data);
+}
+
+function approvalEvents(session: StubSession): readonly unknown[] {
+  return session.events
+    .filter((event) => event.type === 'approval/policy')
     .map((event) => event.data);
 }
 
@@ -797,6 +811,175 @@ describe('recovery after the conflict clears', () => {
         (await harness.request('/api/arbiter/state')).body,
       );
       expect(view).toMatchObject({ blocked: false, conflicts: [] });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a withheld widening stays withheld', () => {
+  test('the lazy boundary sync does not grant what enable() withheld', async () => {
+    const session = makeSession('s-held');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-held',
+      rootSessionId: 's-held',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'workspace-write' });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      // Confirming an already-managed session under a conflict withholds the
+      // widening, and the record must keep describing the host.
+      expect((await enable(harness, 's-held')).status).toBe(200);
+      expect(admissions(session).at(-1)).toMatchObject({
+        enabled: true,
+        boundary: 'guarded',
+      });
+      // The very next ordinary call is the lazy sync that would otherwise grant
+      // it: no sandbox write may follow, and the call is still decided.
+      expect((await harness.gate(call(session, 'held'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('the hold is released once the conflict clears', async () => {
+    const session = makeSession('s-released');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-released',
+      rootSessionId: 's-released',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'workspace-write' });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      expect((await enable(harness, 's-released')).status).toBe(200);
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      harness.official.remove();
+      // The next call applies the configured boundary again; withholding was
+      // never a permanent decision.
+      expect((await harness.gate(call(session, 'released'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a withheld widening still writes the approval policy it needed', async () => {
+    const session = makeSession('s-policy');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-policy',
+      rootSessionId: 's-policy',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'workspace-write' });
+    session.append('approval/policy', { policy: 'never' });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      expect((await enable(harness, 's-policy')).status).toBe(200);
+      // The sandbox widening is withheld, the approval policy is not: the
+      // record still says guarded, which is what the host actually has.
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'ask' });
+      const boundaries = admissions(session).map((item) => item['boundary']);
+      expect(boundaries).not.toContain('trusted');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a refused resume covers sessions restored later', () => {
+  test('a session reopened after the refusal is not gated', async () => {
+    const session = makeSession('s-late-restore');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-late-restore',
+      rootSessionId: 's-late-restore',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    // The plugin starts disabled, so the session is not yet live in the list.
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      // Reopening the session after the refusal must not begin coverage.
+      harness.addSession(session);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(decisions(session)).toEqual([]);
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('refusal never widens a stricter host choice', () => {
+  test('a read-only session stays read-only when the resume is refused', () => {
+    const session = makeSession('s-readonly');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-readonly',
+      rootSessionId: 's-readonly',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'read-only' });
+    session.append('approval/policy', { policy: 'never' });
+    const harness = createHarness([session], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      // Neither knob may move after the fixture's own history: the refusal only
+      // withdraws what this plugin granted, and a stricter host choice was never
+      // its to change.
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'read-only' });
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'never' });
+      // Nothing was appended at all, so the initial values are still the latest.
+      expect(modeEvents(session)).toEqual([
+        { mode: 'workspace-write' },
+        { mode: 'read-only' },
+      ]);
+      expect(approvalEvents(session)).toEqual([
+        { policy: 'ask' },
+        { policy: 'never' },
+      ]);
     } finally {
       harness.dispose();
     }
