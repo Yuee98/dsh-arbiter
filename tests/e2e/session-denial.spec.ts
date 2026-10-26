@@ -271,6 +271,16 @@ function denialOf(
   };
 }
 
+/** The turn that carried an Arbiter refusal, if the log already holds one. */
+function refusalTurnOf(session: LoggedSession): number | null {
+  for (const result of toolResults(session)) {
+    if (denialOf(result) === null) continue;
+    const turn = result['turn'];
+    if (typeof turn === 'number') return turn;
+  }
+  return null;
+}
+
 /** Enable Arbiter for one session exactly as the permission selector will. */
 async function enableSession(host: DshHost, sessionId: string): Promise<void> {
   const response = await fetch(`${host.origin}/api/arbiter/sessions`, {
@@ -313,15 +323,26 @@ test.describe('session denial feedback', () => {
       );
       await page.keyboard.press('Enter');
 
+      // Wait for the refusal *and* the end of the turn that carried it: a log
+      // read between the flushed result and the follow-up response would
+      // otherwise be asserted against a turn the host has not closed yet.
       const gated = await waitForSession(
         host.home,
-        (candidate) =>
-          candidate.sessionId === first.sessionId &&
-          candidate.events.some(
-            (event) =>
-              event.type === 'tool/result' &&
-              JSON.stringify(event.data).includes('ARBITER_DENIED'),
-          ),
+        (candidate) => {
+          if (candidate.sessionId !== first.sessionId) return false;
+          const refusedTurn = refusalTurnOf(candidate);
+          return (
+            refusedTurn !== null &&
+            candidate.events.some(
+              (event) =>
+                event.type === 'turn/end' &&
+                (typeof event.data === 'object' &&
+                event.data !== null
+                  ? Reflect.get(event.data, 'turn')
+                  : null) === refusedTurn,
+            )
+          );
+        },
         120_000,
       );
       expect(gated).not.toBeNull();
@@ -423,17 +444,30 @@ test.describe('session denial feedback', () => {
           // One step holding both a refused call and an executed one: the
           // denial and the surviving call are in the same assistant step, so no
           // earlier warm-up turn can satisfy this predicate.
-          return placed.some((refused) => {
-            if (denialOf(refused.result) === null) return false;
+          const refusedInStep = placed.filter((entry) => {
+            if (denialOf(entry.result) === null) return false;
             return placed.some(
               (executed) =>
                 denialOf(executed.result) === null &&
                 !isFailedResult(executed.result) &&
-                executed.turn === refused.turn &&
-                executed.step === refused.step &&
-                executed.callId !== refused.callId,
+                executed.turn === entry.turn &&
+                executed.step === entry.step &&
+                executed.callId !== entry.callId,
             );
           });
+          // The turn that carried the refusal must also be closed in this read,
+          // so the later completion assertion never inspects a half-written log.
+          return refusedInStep.some(
+            (entry) =>
+              entry.turn !== null &&
+              candidate.events.some(
+                (event) =>
+                  event.type === 'turn/end' &&
+                  (typeof event.data === 'object' && event.data !== null
+                    ? Reflect.get(event.data, 'turn')
+                    : null) === entry.turn,
+              ),
+          );
         },
         120_000,
       );
