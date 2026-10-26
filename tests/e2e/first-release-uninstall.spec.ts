@@ -98,11 +98,32 @@ function auditRowFor(host: DshHost, callId: string | null): number {
   }
 }
 
+/**
+ * The rule ids the user's settings document currently holds.
+ *
+ * Compared across the uninstall: the file existing is not the same fact as the
+ * saved rule surviving, and only the content can tell them apart.
+ */
+async function settingsRuleIds(host: DshHost): Promise<readonly string[]> {
+  // The settings document is YAML (`cordis.patch.yml`), not JSON. Only the rule
+  // ids matter here, so they are read textually instead of pulling a parser
+  // dependency into the E2E harness. Any rewrite of the saved rule changes this
+  // list, which is the fact the comparison is after.
+  const text = await readFile(host.documentPath, 'utf8');
+  const ids: string[] = [];
+  for (const match of text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gmu)) {
+    const id = match[1];
+    if (id !== undefined && id.length > 0) ids.push(id);
+  }
+  return ids;
+}
+
 /** The three places a profile install is recorded. */
 async function installState(host: DshHost): Promise<{
   readonly dependencies: string;
   readonly bundles: string;
   readonly linked: boolean;
+  readonly ruleIds: readonly string[];
 }> {
   const profileDir = join(host.home, 'profiles', 'arbiter-e2e');
   const parsed: unknown = JSON.parse(
@@ -125,6 +146,7 @@ async function installState(host: DshHost): Promise<{
     linked: await access(join(profileDir, 'node_modules', 'dsh-arbiter'))
       .then(() => true)
       .catch(() => false),
+    ruleIds: await settingsRuleIds(host),
   };
 }
 
@@ -190,11 +212,15 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
 
     // ---- The "before" state must be a real refusal ------------------------
     // A removal is only meaningful if the gate was actually deciding calls.
-    // This call matches the deny rule, so it must be refused with an Arbiter
-    // verdict on its own callId, and its file effect must not exist.
+    // The command names the file by ABSOLUTE path: a session's working
+    // directory is not necessarily `host.workspace`, so a relative target could
+    // land elsewhere and make "the file is absent" prove nothing about the
+    // refusal. An unmatched call below proves this directory is writable.
     const deniedFile = join(host.workspace, 'uninstall-denied.txt');
+    const allowedFile = join(host.workspace, 'uninstall-allowed.txt');
     await expect(access(deniedFile)).rejects.toThrow();
-    await sendPrompt(page, 'UNINSTALL-DENY RUN touch uninstall-denied.txt');
+    await expect(access(allowedFile)).rejects.toThrow();
+    await sendPrompt(page, `UNINSTALL-DENY RUN touch ${deniedFile}`);
     const beforeRemoval = await waitForSession(
       host.home,
       (candidate) =>
@@ -219,6 +245,20 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     // A refusal whose command still ran would be indistinguishable from an
     // execution that merely failed, so the absent effect is the evidence.
     await expect(access(deniedFile)).rejects.toThrow();
+
+    // Positive control in the SAME directory with the same shape: an allowed
+    // call really does create its file. Without this, "the denied file is
+    // absent" could be explained by the directory being unwritable.
+    await sendPrompt(page, `UNINSTALL-ALLOW RUN touch ${allowedFile}`);
+    const allowedTurn = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.events.filter((event) => event.type === 'turn/end').length >=
+          3 && candidate.events.some((event) => event.type === 'turn/end'),
+      120_000,
+    );
+    expect(allowedTurn).not.toBeNull();
+    await expect(access(allowedFile)).resolves.toBeUndefined();
 
     // The settings file and the audit database exist before removal, so the
     // "state is preserved" assertion afterwards is about preservation and not
@@ -271,10 +311,32 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     expect(installAfter.bundles).not.toContain('dsh-arbiter');
     expect(installAfter.linked).toBe(false);
 
+    // ---- A NEW call after removal ----------------------------------------
+    // Recorded limitation: after removal the plugin page is gone, and driving a
+    // further model turn from this fixture no longer produces a committed
+    // `turn/end` (the reload returns to a fresh conversation whose turns the
+    // fixture's scripted model does not serve). The requirement "a call made
+    // after removal is not decided by Arbiter" is therefore asserted through
+    // the two facts this harness CAN observe, and the rest is reported as not
+    // verified rather than claimed:
+    //   1. no Arbiter route remains (`/api/arbiter/state` and `/sessions` 404)
+    //   2. no plugin code remains installed (all three records gone), so there
+    //      is no gate left that could decide anything
+    // The in-flight/uninstall-window behaviour is owned by
+    // `session-admission.spec.ts`, which drives a real uninstall with a live
+    // barrier; that case is the evidence for the ordering requirement.
+    await page.reload();
+    await expect(page.locator('[contenteditable="true"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+
     // The files it did not own are preserved: an uninstall must not delete the
-    // user's settings document or the audit database behind their back.
+    // user's settings document or the audit database behind their back. File
+    // existence alone would not prove the saved rule survived, so the settings
+    // content is compared as well.
     await expect(access(host.documentPath)).resolves.toBeUndefined();
     await expect(access(auditPath)).resolves.toBeUndefined();
+    expect(await settingsRuleIds(host)).toEqual(installBefore.ruleIds);
     // The refusal recorded before removal is still readable: removal stopped
     // deciding, it did not rewrite history.
     expect(auditRowFor(host, deniedCallId)).toBe(1);

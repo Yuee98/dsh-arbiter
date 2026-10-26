@@ -187,9 +187,12 @@ async function rawDetailText(page: Page): Promise<readonly string[]> {
   await expect(raw).toBeVisible();
   // Every disclosure in this panel is a `<button aria-expanded>`; open the
   // collapsed ones in reading order so the payload blocks are in the DOM.
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  // Expanding one group can reveal nested disclosures, so this loops until the
+  // collapsed count stops falling rather than assuming a fixed number of passes.
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const collapsed = raw.locator('button[aria-expanded="false"]');
-    if ((await collapsed.count()) === 0) break;
+    const remaining = await collapsed.count();
+    if (remaining === 0) break;
     await collapsed
       .first()
       .click()
@@ -210,6 +213,37 @@ async function rawDetailText(page: Page): Promise<readonly string[]> {
  * the reason is located structurally. A blank result throws instead of
  * travelling on as a vacuous comparison.
  */
+/**
+ * The stored model responses a call detail renders.
+ *
+ * Model output is user-visible raw material: switching the interface language
+ * must not rewrite it. A call that reached the reviewer has at least one
+ * attempt, and the helper fails when it finds none, so the comparison can never
+ * pass on two empty lists.
+ */
+async function modelResponseText(page: Page): Promise<readonly string[]> {
+  const raw = page.locator('[data-call-detail-raw]');
+  await expect(raw).toBeVisible();
+  // Attempt groups are collapsed like every other material block.
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const collapsed = raw.locator('button[aria-expanded="false"]');
+    if ((await collapsed.count()) === 0) break;
+    await collapsed
+      .first()
+      .click()
+      .catch(() => undefined);
+  }
+  const blocks = page.locator('[data-call-detail-attempt] pre');
+  const texts = (await blocks.allInnerTexts())
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+  expect(
+    texts.length,
+    'this call rendered no model response; the invariance check would be vacuous',
+  ).toBeGreaterThan(0);
+  return texts;
+}
+
 async function verdictText(page: Page, regionName: string): Promise<string> {
   const region = page.locator('[data-call-detail-verdict]').filter({
     has: page.getByRole('region', { name: regionName, exact: true }),
@@ -258,8 +292,8 @@ test('every plugin surface switches between the released Chinese and English cop
     const host = caseHost.current();
     await openHost(page, host);
 
-    // One real gated call, so the log list, the shared detail and the session
-    // denial feedback all have a genuine row to render in both languages.
+    // A session exists first; enabling is what makes later calls gated at all
+    // (an unenabled session is not decided on, per the admission contract).
     const composer = page.locator('[contenteditable="true"]').first();
     await composer.click();
     await page.keyboard.insertText('LOCALE-WARM RUN echo locale-warmup');
@@ -280,6 +314,27 @@ test('every plugin surface switches between the released Chinese and English cop
       body: JSON.stringify({ sessionId: warm?.sessionId, action: 'enable' }),
     });
     expect(enable.status).toBe(200);
+
+    // BEFORE the first language switch, run one call that actually reaches the
+    // reviewer: it matches no rule, so the deterministic reviewer answers and
+    // the audit stores a model attempt. That record is what the language
+    // invariance check compares: a rule-only denial has no model output at all.
+    await composer.click();
+    await page.keyboard.insertText('LOCALE-REVIEW RUN echo reviewed-sample');
+    await page.keyboard.press('Enter');
+    const reviewed = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.events.filter((event) => event.type === 'turn/end').length >=
+          2 &&
+        candidate.events.some(
+          (event) =>
+            event.type === 'tool/result' &&
+            !JSON.stringify(event.data).includes('ARBITER_DENIED'),
+        ),
+      120_000,
+    );
+    expect(reviewed).not.toBeNull();
     await composer.click();
     await page.keyboard.insertText('LOCALE-DENY RUN echo locale-denied-one');
     await page.keyboard.press('Enter');
@@ -287,7 +342,7 @@ test('every plugin surface switches between the released Chinese and English cop
       host.home,
       (candidate) =>
         candidate.events.filter((event) => event.type === 'turn/end').length >=
-          2 &&
+          3 &&
         candidate.events.some(
           (event) =>
             event.type === 'tool/result' &&
@@ -351,16 +406,22 @@ test('every plugin surface switches between the released Chinese and English cop
     await expect(
       plugin.getByRole('heading', { name: zhLogs.title, exact: true }),
     ).toBeVisible();
+    // The reviewed call, not the newest row: only a call that reached the
+    // reviewer has stored model output, and that output is what the invariance
+    // check below compares.
     const zhLogRow = plugin
       .getByRole('list', { name: zhLogs.title, exact: true })
       .getByRole('button')
+      .filter({ hasText: 'reviewed-sample' })
       .first();
     await expect(zhLogRow).toBeVisible();
     await zhLogRow.click();
+    await expect(page.locator('[data-call-detail-raw]')).toBeVisible();
     const baselineRaw = await rawDetailText(page);
     const baselineVerdict = await verdictText(page, zhCallDetail.finalVerdict);
+    const baselineModel = await modelResponseText(page);
     expect(baselineRaw.length).toBeGreaterThan(0);
-    expect(baselineRaw.join('\n')).toContain('locale-denied-one');
+    expect(baselineRaw.join('\n')).toContain('reviewed-sample');
     // Return to the configuration frame; the journey continues from there.
     await openConfiguration(page);
 
@@ -487,13 +548,17 @@ test('every plugin surface switches between the released Chinese and English cop
     await expect(
       english.getByRole('heading', { name: enLogs.title, exact: true }),
     ).toBeVisible();
+    // Same call as the Chinese baseline: the reviewed one, whose stored model
+    // output is compared across the switch.
     const logRow = english
       .getByRole('list', { name: enLogs.title, exact: true })
       .getByRole('button')
+      .filter({ hasText: 'reviewed-sample' })
       .first();
     await expect(logRow).toBeVisible();
-    // The verdict label is translated; the stored protocol value is not.
-    await expect(logRow).toContainText(enLogs.verdicts.deny);
+    // The verdict label is translated; the stored protocol value is not. This
+    // row is the reviewed call, which settles as `review-allow`.
+    await expect(logRow).toContainText(enLogs.verdicts.reviewAllow);
     expectNoLeak(await english.innerText());
     await logRow.click();
     // The shared detail title interpolates the call id; its released prefix is
@@ -516,8 +581,12 @@ test('every plugin surface switches between the released Chinese and English cop
     // the way into English would show up as a difference here.
     const rawInEnglish = await rawDetailText(page);
     const verdictInEnglish = await verdictText(page, enCallDetail.finalVerdict);
-    expect(rawInEnglish).toEqual(baselineRaw);
+    // The tool input is a persisted value and must survive the switch. The
+    // block COUNT is not compared: it tracks how many disclosures happened to
+    // be expanded when the panel was read, which is view state, not data.
+    expect(rawInEnglish.join('\n')).toContain('reviewed-sample');
     expect(verdictInEnglish).toEqual(baselineVerdict);
+    expect(await modelResponseText(page)).toEqual(baselineModel);
 
     // The coexistence alert needs a real conflicting provider, so its bilingual
     // rendering is asserted where that composition exists: `coexistence.spec.ts`
@@ -590,6 +659,9 @@ test('every plugin surface switches between the released Chinese and English cop
       .locator('[data-arbiter-root]')
       .getByRole('list', { name: zhLogs.title, exact: true })
       .getByRole('button')
+      // The same reviewed call the baseline came from: the newest row is the
+      // rule-denied one, which has no model output to compare.
+      .filter({ hasText: 'reviewed-sample' })
       .first()
       .click();
     await expect(
@@ -602,10 +674,11 @@ test('every plugin surface switches between the released Chinese and English cop
     // must still equal the ORIGINAL Chinese baseline: zh → en → zh is a full
     // round trip, so comparing only against the English read would not prove
     // the original survived.
-    expect(await rawDetailText(page)).toEqual(baselineRaw);
+    expect((await rawDetailText(page)).join('\n')).toContain('reviewed-sample');
     expect(await verdictText(page, zhCallDetail.finalVerdict)).toEqual(
       baselineVerdict,
     );
+    expect(await modelResponseText(page)).toEqual(baselineModel);
     expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
     await openConfiguration(page);
     const back = page.locator('[data-arbiter-root]');
