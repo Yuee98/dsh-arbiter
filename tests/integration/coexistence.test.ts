@@ -1448,3 +1448,81 @@ describe('the admission view keeps the persisted identity', () => {
     }
   });
 });
+
+describe('an existing admission is not widened while the state is unknown', () => {
+  test('confirming a managed session withholds the widening', async () => {
+    const session = makeSession('s-unknown-managed');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-unknown-managed',
+      rootSessionId: 's-unknown-managed',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      await harness.request('/api/arbiter/state');
+      harness.setLoaderUnreadable(true);
+      // Confirming an already-managed admission must not grant the widening.
+      expect((await enable(harness, 's-unknown-managed')).status).toBe(200);
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+      expect(admissions(session).at(-1)?.['boundary']).toBe('guarded');
+      // The gate keeps deciding, unchanged by detection.
+      expect(
+        (await harness.gate(call(session, 'still-gated'), allow)).kind,
+      ).toBe('allow');
+      // A readable Loader confirming the stop releases the restriction.
+      harness.setLoaderUnreadable(false);
+      harness.official.remove();
+      expect((await harness.gate(call(session, 'released'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a configuration save cannot widen a managed session while unknown', async () => {
+    const session = makeSession('s-unknown-save');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-unknown-save',
+      rootSessionId: 's-unknown-save',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'guarded',
+    });
+    try {
+      harness.official.activate();
+      await harness.request('/api/arbiter/state');
+      harness.setLoaderUnreadable(true);
+      // Saving the trusted boundary is a configuration activation, which must
+      // obey the same restriction as an explicit enable.
+      harness.reconfigure({ ...ALLOW_ECHO, boundary: 'trusted' });
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+      expect(admissions(session).at(-1)?.['boundary']).toBe('guarded');
+    } finally {
+      harness.dispose();
+    }
+  });
+});

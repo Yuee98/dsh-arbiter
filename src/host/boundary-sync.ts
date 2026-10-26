@@ -108,11 +108,14 @@ function syncOne(
   if (!folded.enabled || folded.boundary === boundary) return;
   // An established withholding is only released by positive evidence.
   if (sync.isHeld(id) && !sync.releasable()) return;
+  // The same predicate the lazy path and `enable()` use: a new widening waits
+  // when the provider state is unreadable after a confirmed conflict, not only
+  // when the veto currently returns a refusal.
   const activation = activationOf(
     session,
     boundary,
     folded.boundary,
-    sync.vetoPresent(),
+    sync.vetoPresent() || sync.unprovable(),
     true,
   );
   if (activation.writes.length === 0) return;

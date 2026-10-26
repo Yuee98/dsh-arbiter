@@ -450,7 +450,7 @@ export class SessionAdmissions {
       session,
       boundary,
       this.admissionOf(id)?.boundary ?? 'guarded',
-      this.conflictPresent(),
+      this.conflictPresent() || this.startUnprovable(),
       wasManaged,
     );
     if (withheld) this.hold.hold(id);
