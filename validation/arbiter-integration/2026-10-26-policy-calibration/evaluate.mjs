@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_CONFIG } from '../../../lib/config.js';
-import { compareStrategies, decideReview } from '../../../lib/policy.js';
+import { compareStrategies, decideReview, strategyFor } from '../../../lib/policy.js';
 import {
   parseChatText,
   parseDecisionResponse,
@@ -233,11 +233,35 @@ for (const risk of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
   }
 }
 
-const invariants = { gridSize: grid.length, normalEqualsStrict: true, normalSubsetOfProgress: true, violations: [] };
+/**
+ * Resolve a mode through the production mapping.
+ *
+ * The equality check must exercise the mapping rather than assume it: comparing
+ * two hardcoded `'normal'` calls cannot fail even if the plugin stopped routing
+ * strict to the regular strategy, and would report a green invariant this
+ * harness never tested.
+ */
+function decideInMode(input, mode) {
+  const strategy = strategyFor(mode);
+  const thresholds = strategy === 'progress' ? progress : normal;
+  return decideReview(input, strategy, thresholds).verdict;
+}
+
+const invariants = {
+  gridSize: grid.length,
+  modesResolvedThroughStrategyFor: {
+    normal: strategyFor('normal'),
+    strict: strategyFor('strict'),
+    progress: strategyFor('progress'),
+  },
+  normalEqualsStrict: true,
+  normalSubsetOfProgress: true,
+  violations: [],
+};
 for (const input of grid) {
-  const normalVerdict = decideReview(input, 'normal', normal).verdict;
-  const strictVerdict = decideReview(input, 'normal', normal).verdict;
-  const progressVerdict = decideReview(input, 'progress', progress).verdict;
+  const normalVerdict = decideInMode(input, 'normal');
+  const strictVerdict = decideInMode(input, 'strict');
+  const progressVerdict = decideInMode(input, 'progress');
   if (normalVerdict !== strictVerdict) {
     invariants.normalEqualsStrict = false;
     invariants.violations.push({ invariant: 'normal=strict', input: describe(input) });
@@ -250,6 +274,20 @@ for (const input of grid) {
     invariants.normalSubsetOfProgress = false;
     invariants.violations.push({ invariant: 'fixed deny is fixed', input: describe(input) });
   }
+}
+if (invariants.modesResolvedThroughStrategyFor.strict !== 'normal') {
+  invariants.normalEqualsStrict = false;
+  invariants.violations.push({
+    invariant: 'strict maps to the regular strategy',
+    actual: invariants.modesResolvedThroughStrategyFor.strict,
+  });
+}
+if (invariants.modesResolvedThroughStrategyFor.progress !== 'progress') {
+  invariants.normalSubsetOfProgress = false;
+  invariants.violations.push({
+    invariant: 'progress maps to the progress strategy',
+    actual: invariants.modesResolvedThroughStrategyFor.progress,
+  });
 }
 if (!invariants.normalEqualsStrict || !invariants.normalSubsetOfProgress) failed += 1;
 

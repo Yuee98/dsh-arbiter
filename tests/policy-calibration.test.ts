@@ -414,6 +414,79 @@ describe('first-release policy calibration', () => {
       ).toEqual([]);
   });
 
+  test('the mode mapping is exercised, not assumed', () => {
+    // `normalEquality` is only meaningful if `strict` reaches the regular
+    // strategy through the production mapping. Comparing two hardcoded
+    // `'normal'` strategies would stay green even if strict stopped delegating
+    // to it, and would report an invariant the suite never tested.
+    expect(strategyFor('normal')).toBe('normal');
+    expect(strategyFor('strict')).toBe('normal');
+    expect(strategyFor('progress')).toBe('progress');
+  });
+
+  test('every normal allow is also a progress allow across the grid', () => {
+    // A deliberately small grid, enough to catch a widened strategy moving the
+    // wrong way without duplicating the standalone harness.
+    const widened: string[] = [];
+    for (const riskPoint of [1, 3, 4, 6, 7, 8, 9]) {
+      for (const authPoint of [0, 5, 8]) {
+        for (const bulk of [false, true]) {
+          const input: ReviewSignals = {
+            riskDist: null,
+            riskPoint,
+            riskScore: null,
+            riskClass:
+              riskPoint <= 3 ? 'low' : riskPoint <= 8 ? 'medium' : 'high',
+            authDist: null,
+            authPoint,
+            authClass:
+              authPoint >= 8 ? 'explicit' : authPoint >= 5 ? 'implied' : 'none',
+            secrets: false,
+            destructive: false,
+            egress: bulk,
+            bulk,
+            source: 'chat',
+            repairs: 0,
+          };
+          const normalVerdict = decideReview(
+            input,
+            strategyFor('normal'),
+            DEFAULT_CONFIG.policy.normal,
+          ).verdict;
+          expect(
+            decideReview(
+              input,
+              strategyFor('strict'),
+              DEFAULT_CONFIG.policy.normal,
+            ).verdict,
+          ).toBe(normalVerdict);
+          const progressVerdict = decideReview(
+            input,
+            strategyFor('progress'),
+            DEFAULT_CONFIG.policy.progress,
+          ).verdict;
+          // Collect the violations and assert once, so the expectation is not
+          // inside a loop condition and a failure reports every offending input.
+          if (
+            normalVerdict === 'review-allow' &&
+            progressVerdict !== 'review-allow'
+          )
+            widened.push(
+              `allow lost: ${String(riskPoint)}/${String(authPoint)}/${String(bulk)}`,
+            );
+          if (
+            normalVerdict === 'review-deny' &&
+            progressVerdict !== 'review-deny'
+          )
+            widened.push(
+              `deny lifted: ${String(riskPoint)}/${String(authPoint)}/${String(bulk)}`,
+            );
+        }
+      }
+    }
+    expect(widened).toEqual([]);
+  });
+
   test('the shipped defaults are each admissible under the labelled set', () => {
     expect(calibration.calibration.length).toBeGreaterThan(0);
     for (const entry of calibration.calibration) {

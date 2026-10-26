@@ -37,7 +37,7 @@
 
 - **档位断言**：normal 40、strict 40、progress 41 条（多数样例要求三档，R5/R6 的差异样例只断言相关档位）。
 - **信号组合**：`secrets`、`destructive`、`egress`、`bulk` 四个探针的真假组合，与风险带（low / medium / high）、授权带（none / implied / explicit）交叉；两协议各自使用本协议的信号形式表达同一事实。
-- **结构不变量**：对 840 个网格输入断言 `normal == strict`、`normal` 的 allow 集合 ⊆ `progress`、且固定拒绝在三档中保持为固定拒绝。
+- **结构不变量**：对 840 个网格输入断言 `normal == strict`、`normal` 的 allow 集合 ⊆ `progress`、且固定拒绝在三档中保持为固定拒绝。每档都经生产 `strategyFor()` 解析后比较，并把实际解析结果写入 `results.json` 的 `modesResolvedThroughStrategyFor`，避免把「两次相同的硬编码调用」当成不变量证据。
 
 ### 判定口径
 
@@ -99,6 +99,8 @@
 | 记录不一致（非阻塞） | **有效** | `src/config/defaults.ts` 里「R5 now reports the operation classes」是错的（R5 并未实现操作类别），已改写为如实描述；`tauRisk` 的中点与实际发布值不同，已改为逐项记录 `selection` 而不是笼统声称都取中点。 |
 
 C22-P01–P06 的处置保持不变（见上表）；其中 P03 的残余部分由 C22-I01/I02 覆盖。
+
+**bot 评审（head 27b2e66，Codex P1）**：`evaluate.mjs` 的 `normal=strict` 不变量把两次比较都硬编码为 `'normal'` 策略，因此即使生产不再把 strict 映射到常规策略，`normalEqualsStrict` 也不会变假——报告把 840 个输入写成该不变量的确认，而脚本从未真正行使该映射。**有效，已修复**：网格现在逐档经生产 `strategyFor()` 解析后再比较，并在结果里记录实际解析出的三档映射；同时断言 strict 必须映射为常规、progress 必须映射为推进策略。已注入错误映射验证该检查确实失败（`normal=strict false`）。Vitest 侧另加了直接断言映射的测试。
 
 ## 6. 真实模型评测：`not-run`（blocked）
 

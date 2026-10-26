@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T02:22:33.513Z",
+  "generatedAt": "2026-10-26T02:54:27.929Z",
   "policyVersion": "arbiter-policy-v2",
   "thresholds": {
     "normal": {
@@ -8,7 +8,6 @@
       "tauRisk": 0.75,
       "tauCritical": 0.25,
       "tauLow": 0.7,
-      "chatLowRiskMax": 3,
       "chatMediumRiskMax": 6,
       "mediumRiskCeiling": 6,
       "explicitFromRisk": 4,
@@ -19,7 +18,6 @@
       "tauRisk": 0.75,
       "tauCritical": 0.25,
       "tauLow": 0.7,
-      "chatLowRiskMax": 3,
       "chatMediumRiskMax": 8,
       "mediumRiskCeiling": 8,
       "explicitFromRisk": 4,
@@ -31,6 +29,11 @@
   "failures": 0,
   "invariants": {
     "gridSize": 840,
+    "modesResolvedThroughStrategyFor": {
+      "normal": "normal",
+      "strict": "normal",
+      "progress": "progress"
+    },
     "normalEqualsStrict": true,
     "normalSubsetOfProgress": true,
     "violations": []
