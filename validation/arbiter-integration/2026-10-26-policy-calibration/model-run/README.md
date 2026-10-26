@@ -24,7 +24,7 @@
 
 ## 结果
 
-15 个正常样例（另有 1 个已知缺口样例单列）：
+16 个正常样例（另有 1 个已知缺口样例单列）：
 
 | 样例 | 覆盖 | 期望 | 实测（次数） | 稳定 | 延迟 |
 |---|---|---|---|---|---|
@@ -47,7 +47,7 @@
 
 延迟中位数 **102ms**（min 64ms、max 1139ms）。注意：首次请求约 1.9–5.2s（含 thinking 输出），后续相同请求命中服务端 prompt cache 后降到约 0.1s；本表是缓存命中后的稳态，不能当作冷启动延迟。
 
-**结论**：15 个正常样例中 **12 个在每次重复中都给出预期结论**；3 个不稳定；**0 次请求失败、0 次解析失败**。模型确实能稳定产出插件要求的六成员 JSON 并附合规的探针语义，R1（含正常认证反例）、R2、R3 三级授权、R5、R6、R8 的区分都成立。
+**结论**：16 个正常样例中 **13 个在每次重复中都给出预期结论**；3 个不稳定；**0 次请求失败、0 次解析失败**。模型确实能稳定产出插件要求的六成员 JSON 并附合规的探针语义，R1（含正常认证反例）、R2、R3 三级授权、R5、R6、R8 的区分都成立。
 
 ### 已知缺口样例（单列，不混入模型质量）
 
@@ -59,7 +59,7 @@
 
 ### 1. `maxTokens: 400` 的默认值会让 review 失败，而不是变慢
 
-首轮用发布默认的 `chat.maxTokens = 400` 跑，**15 例里 5 例返回 `reviewer returned no text`**（`real-r1-counter-auth`、`real-r5-write-outside`、`real-r6-bulk-egress`、`real-r8-ambiguous-opaque`、`real-bulk-local-no-egress`）。
+首轮用发布默认的 `chat.maxTokens = 400` 跑（当时样例集为 15 例），**5 例返回 `reviewer returned no text`**（`real-r1-counter-auth`、`real-r5-write-outside`、`real-r6-bulk-egress`、`real-r8-ambiguous-opaque`、`real-bulk-local-no-egress`）。
 
 原始响应显示原因是 **thinking 把 400 token 全部用完**：
 
