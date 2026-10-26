@@ -1464,6 +1464,135 @@ describe('a real v1 database', () => {
   });
 });
 
+/**
+ * A file that claims the current version but carries the v1 structure.
+ *
+ * Built by taking a complete current file and removing exactly what this
+ * version added — the `templates` table and the seven columns — so it is the
+ * shape a build leaves behind when it stamps `user_version` before applying its
+ * own additions. Every writer then prepares statements against columns that are
+ * not there, so each record is rejected while the version check passes.
+ */
+async function buildDriftedV2Database(path: string): Promise<void> {
+  const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+  seed.enqueue(record({ callId: 'legacy-call', result: 'review-deny' }));
+  await seed.flush();
+  seed.close();
+  const db = new DatabaseSync(path);
+  for (const [table, column] of [
+    ['calls', 'record_format_version'],
+    ['calls', 'arguments_schema'],
+    ['calls', 'execution_started_at'],
+    ['calls', 'execution_finished_at'],
+    ['stages', 'rule_name'],
+    ['stages', 'config_snapshot_id'],
+    ['model_calls', 'template_id'],
+  ] as const) {
+    db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  }
+  db.exec('DROP TABLE templates');
+  db.exec('PRAGMA user_version = 2');
+  db.close();
+}
+
+describe('a stamped version with a drifted structure', () => {
+  test('is repaired in place, keeps its rows and writes again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    await buildDriftedV2Database(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // The store no longer accepts the stamp as proof of the structure.
+    expect(store.health()).toMatchObject({
+      state: 'ok',
+      lastError: null,
+    });
+    expect(store.paused).toBe(false);
+    // The legacy row survived and still reads through the old-format adapter.
+    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
+      'review-deny',
+    );
+    // A new record actually reaches the database: this is the failure the
+    // drift caused, so the test must observe storage, not just health.
+    store.enqueue(record({ callId: 'after-repair', result: 'review-allow' }));
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(2);
+    expect(stringField(store.getCall('after-repair'), 'result')).toBe(
+      'review-allow',
+    );
+    store.close();
+
+    // The version did not move: this is a repair, not a downgrade.
+    const repaired = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(
+        repaired.prepare('PRAGMA user_version').get(),
+        'user_version',
+      ),
+    ).toBe(2);
+    const callColumns = repaired
+      .prepare('PRAGMA table_info(calls)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(callColumns).toContain('arguments_schema');
+    const stageColumns = repaired
+      .prepare('PRAGMA table_info(stages)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(stageColumns).toContain('config_snapshot_id');
+    repaired.close();
+    // A structure change is still a migration: the pre-repair copy is kept.
+    expect(existsSync(`${path}.backup-v2`)).toBe(true);
+  });
+
+  test('a single missing column is repaired without touching the rest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-one-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // A complete current file, then exactly one column removed: the narrowest
+    // possible drift, which must not need a wider rewrite to recover.
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    const db = new DatabaseSync(path);
+    db.exec('ALTER TABLE calls DROP COLUMN arguments_schema');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    store.enqueue(record({ callId: 'one-column', result: 'review-allow' }));
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(1);
+    store.close();
+  });
+
+  test('a table this build never wrote is not recreated as an empty one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-table-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    await buildDriftedV2Database(path);
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE calls');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Recreating the table would report an empty history as a complete one, so
+    // the file stays unreadable and the store stays usable for everything else.
+    const listed = store.listCalls({});
+    expect(listed.unreadable).toBe(true);
+    expect(listed.rows).toEqual([]);
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    const tables = after
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(tables).not.toContain('calls');
+    after.close();
+  });
+});
+
 describe('write containment covers every entry point', () => {
   test('a failing clear neither throws nor discards queued work', async () => {
     const { store } = await makeStore();
