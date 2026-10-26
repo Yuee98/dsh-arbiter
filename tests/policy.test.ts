@@ -5,6 +5,7 @@ import {
   applyProbeOverrides,
   compareStrategies,
   decideReview,
+  reclassifySignals,
   strategyFor,
 } from '../src/policy.js';
 import type { ReviewSignals } from '../src/types.js';
@@ -362,5 +363,122 @@ describe('mode to strategy mapping', () => {
     expect(chat.verdict).toBe('review-escalate');
     expect(decided.verdict).toBe(chat.verdict);
     expect(chat.decisionRules).toEqual(decided.decisionRules);
+  });
+});
+
+describe('calibrated rule rows', () => {
+  test('R8 stays reachable for an unresolved uncertainty instead of being reported as R5', () => {
+    // An identified risk and an unresolved uncertainty are different findings:
+    // telling a human that a risk was measured when the model was not confident
+    // enough to measure one misstates the evidence they are asked to accept.
+    const uncertain = signals({
+      riskPoint: null,
+      riskDist: {
+        '1': 0.15,
+        '3': 0.15,
+        '5': 0.2,
+        '6': 0.2,
+        '7': 0.2,
+        '8': 0.1,
+      },
+      riskClass: 'medium',
+      authPoint: null,
+      authDist: { '8': 0.8, '9': 0.2 },
+      authClass: 'explicit',
+      source: 'decision',
+    });
+    const decision = decideReview(uncertain, 'normal', normal);
+    expect(decision.verdict).toBe('review-escalate');
+    expect(decision.decisionRules).toEqual(['R8']);
+    expect(decision.reason).toContain('did not clear the risk gate');
+
+    // The identified-risk path keeps reporting R5.
+    const identified = signals({
+      riskPoint: 7,
+      riskClass: 'medium',
+      authPoint: 9,
+      authClass: 'explicit',
+    });
+    const overCeiling = decideReview(identified, 'normal', normal);
+    expect(overCeiling.verdict).toBe('review-escalate');
+    expect(overCeiling.decisionRules).toEqual(['R5']);
+  });
+
+  test('the risk-category boundary is a constant, not a tuning knob', () => {
+    // `low` is 0-3 for both protocols (docs/reviewer.md#design-5-5). A decision
+    // distribution sitting entirely inside the medium band must not be
+    // reclassified as low by any policy field: that would drop its authorization
+    // requirement while the equivalent chat call still escalated.
+    const raw = signals({
+      riskPoint: null,
+      riskDist: { '4': 0.2, '5': 0.6, '6': 0.2 },
+      riskClass: 'medium',
+      authPoint: null,
+      authDist: { '1': 0.7, '2': 0.2, '6': 0.1 },
+      authClass: 'none',
+      source: 'decision',
+    });
+    // Widen every delegable ceiling and keep the authorization evidence absent:
+    // the engine must still refuse to delegate. Deriving the class with the
+    // production helper is the point — a hand-set `low` would bypass the very
+    // classification this test protects.
+    const widened = {
+      ...normal,
+      chatMediumRiskMax: 10,
+      mediumRiskCeiling: 10,
+      tauLow: 0.1,
+    };
+    const mediumBand = reclassifySignals(raw, widened);
+    expect(mediumBand.riskClass).toBe('medium');
+    const decision = decideReview(mediumBand, 'normal', widened);
+    expect(decision.verdict).toBe('review-escalate');
+    expect(decision.decisionRules).toEqual(['R3']);
+  });
+
+  test('an implied goal never satisfies a medium-risk delegation in any mode', () => {
+    // The unified authorization standard is the same in all three modes; only
+    // the risk ceiling and bulk egress move for progress.
+    const implied = signals({
+      riskPoint: 5,
+      riskClass: 'medium',
+      authPoint: 6,
+      authClass: 'implied',
+    });
+    for (const [strategy, thresholds] of [
+      ['normal', normal],
+      ['normal', normal],
+      ['progress', progress],
+    ] as const) {
+      const decision = decideReview(implied, strategy, thresholds);
+      expect(decision.verdict).toBe('review-escalate');
+      expect(decision.decisionRules).toContain('R3');
+    }
+  });
+
+  test('calibrated gate boundaries are observable at the shipped values', () => {
+    // Each pair sits immediately either side of a calibrated probability gate.
+    // They are what makes the chosen value falsifiable: a gate moved past either
+    // sample flips one of these verdicts.
+    const gatePair = (riskProbabilities: Record<string, number>) =>
+      signals({
+        riskPoint: null,
+        riskDist: riskProbabilities,
+        riskClass: 'medium',
+        authPoint: null,
+        authDist: { '8': 0.8, '9': 0.2 },
+        authClass: 'explicit',
+        source: 'decision',
+      });
+    expect(
+      decideReview(gatePair({ '5': 0.4, '6': 0.4, '7': 0.2 }), 'normal', normal)
+        .verdict,
+    ).toBe('review-allow');
+    const blocked = decideReview(
+      gatePair({ '5': 0.35, '6': 0.35, '7': 0.3 }),
+      'normal',
+      normal,
+    );
+    expect(blocked.verdict).toBe('review-escalate');
+    expect(blocked.decisionRules).toEqual(['R8']);
   });
 });

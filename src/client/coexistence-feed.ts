@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getJson, postJson } from './api.js';
 import { coexistenceResponse } from './decoders/coexistence.js';
-import type { CoexistenceView } from './view-types.js';
+import type { CoexistenceView, StateResponse } from './view-types.js';
 
 /**
  * How often an open page re-reads the host's provider state.
@@ -22,6 +22,14 @@ export const COEXISTENCE_POLL_MS = 15_000;
  * waiting for its own interval — and neither one owns a second transport.
  */
 export const COEXISTENCE_REFRESH_EVENT = 'arbiter:coexistence-refresh';
+
+/** The conflict section of a feed seed, whether it is a view or a payload. */
+function sectionOf(
+  seed: CoexistenceView | StateResponse | null,
+): CoexistenceView | null {
+  if (seed === null) return null;
+  return 'coexistence' in seed ? seed.coexistence : seed;
+}
 
 /** Tell every mounted consumer to re-read the host now. */
 export function requestCoexistenceRefresh(): void {
@@ -43,10 +51,10 @@ export interface CoexistenceFeed {
  * state); a failed acknowledgement is reported, because the user asked for it.
  */
 export function useCoexistenceFeed(
-  initial: CoexistenceView | null,
+  seed: CoexistenceView | StateResponse | null,
   onError: (failure: unknown) => void = () => undefined,
 ): CoexistenceFeed {
-  const [view, setView] = useState<CoexistenceView | null>(initial);
+  const [view, setView] = useState<CoexistenceView | null>(sectionOf(seed));
   /**
    * The newest request this consumer accepted.
    *
@@ -87,9 +95,12 @@ export function useCoexistenceFeed(
 
   // A page load (or a save-triggered reload) replaces the confirmed state.
   useEffect(() => {
-    setView(initial);
+    setView(sectionOf(seed));
     accepted.current = nextTicket();
-  }, [initial, nextTicket]);
+    // A payload seed means the page just re-read the host, so the *other*
+    // consumer refreshes too: they share one transport, not two.
+    if (seed !== null && 'coexistence' in seed) requestCoexistenceRefresh();
+  }, [seed, nextTicket]);
 
   useEffect(() => {
     const refresh = (): void => {

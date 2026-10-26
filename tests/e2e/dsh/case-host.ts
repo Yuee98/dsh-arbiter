@@ -40,6 +40,9 @@ function fixtureRow(options: CaseOptions): Record<string, unknown> {
           ...(options.holdMatch === undefined
             ? {}
             : { holdMatch: options.holdMatch }),
+          ...(options.requestDir === undefined
+            ? {}
+            : { requestDir: options.requestDir }),
         },
       },
       // The fixture owns the default model selection, so the host never asks
@@ -62,6 +65,14 @@ export interface CaseOptions {
   readonly barrierDir?: string;
   /** Pending-action text that must hold its review open. */
   readonly holdMatch?: string;
+  /**
+   * Directory receiving one JSON file per conversation model request.
+   *
+   * A case that asserts what the model actually saw on one step reads these
+   * files instead of the session log, which keeps historical messages after a
+   * compaction replaced them.
+   */
+  readonly requestDir?: string;
   /**
    * Additional profile rows, appended after the fixture rows.
    *

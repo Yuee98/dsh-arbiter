@@ -110,6 +110,40 @@ export interface WorkingDirectoryLike {
   ensure(agent: AgentLike, signal?: AbortSignal): Promise<string>;
 }
 
+/**
+ * The host's public per-assembly context.
+ *
+ * `agent` is present for a real model request and absent on a diagnostic
+ * assembly; `scope` is the host's own opaque identity and is not read here.
+ */
+export interface AssembleContextLike {
+  readonly agent?: AgentLike;
+}
+
+/** One runtime-context contribution, as the host registry accepts it. */
+export interface PromptContextRegistrationLike {
+  readonly name: string;
+  readonly order: number;
+  readonly text: string | ((context: AssembleContextLike) => string);
+  readonly interpolate?: boolean;
+  /** Keep this context when the deployment suppresses optional runtime context. */
+  readonly required?: boolean;
+}
+
+/** The centrally ordered placements this plugin reads. */
+export type PromptContextOrderNameLike = 'APPROVAL_POLICY';
+
+/**
+ * The slice of the host `systemPrompt` service this plugin uses.
+ *
+ * Only context registration and the central order lookup are read: assembly,
+ * sections, tools and variables belong to the host and to other plugins.
+ */
+export interface SystemPromptLike {
+  context(registration: PromptContextRegistrationLike): () => void;
+  getContextOrder(name: PromptContextOrderNameLike): number;
+}
+
 export interface CredentialsLike {
   resolve(ref: string): Promise<{ readonly value: string } | undefined>;
   describe?(

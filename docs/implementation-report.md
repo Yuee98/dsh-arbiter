@@ -122,6 +122,7 @@ mise exec -- pnpm verify
 | I10 | 审计用 `node:sqlite`，异步有界队列；失败只标记 degraded | 无本地编译依赖；权限结果不等待持久化；故障不改变结论 | 记录可能缺失，页面显示故障；审批继续 | `audit-unavailable` 集成用例 |
 | I11 | 离线候选最少 3 次、全部放行、无失败且无硬类别；规则为 `^<前两个命令词>(?:\s|$)` | 先打通真实审核流程；候选只是建议，必须人工确认 | 候选保守、数量可能少；可修改规则文本 | 单测；真实历史为空 |
 | I12 | 默认策略 `arbiter-policy-v1`：R1／R2 固定拒绝，R4／R5／R3／R8 要求人工，R6／R7 按风险与授权代批；progress 放宽 medium 上限与批量外发 | 形成自洽、可回放、normal = strict 的初版；阈值标为未校准 | 保守：中风险无明确授权会要求人工；progress 可代批更多 | 单测与集成固定信号 |
+| I15 | `arbiter-policy-v2`（#22）：阈值表改为由 54 例合成标注样例区间夹逼的初值；R8 与 R5 分开报告；风险类别固定为契约常量并移除可写的 `chatLowRiskMax`；新增 `tests/policy-calibration.test.ts` 守卫默认值与记录在案的候选 | 让发布默认值可追溯到可复核样例，修正「未过概率门」被表述为「已识别风险」，并消除「可调字段改写授权类别」造成的两协议分歧 | 计算/默认值基本不变；R8 的理由与其他规则一样可区分；高级设置少一个字段；改默认值若脱离证据会失败 | 确定性回放 54/54、840 输入网格、`pnpm verify`；真实模型 chat 小样本见[评测记录](../validation/arbiter-integration/2026-10-26-policy-calibration/REPORT.md)（72 次请求、16 例中 13 例每次一致、0 解析失败；decision `not-run`） |
 | I13 | 无 `exec.agent` 的程序化调用直接 `next()`，不进入插件判定 | 官方 auto review 同样跳过；这类调用没有会话、证据或审批通道；强行审查会产生无来源的人工要求 | 调试/内部程序化调用不在覆盖范围内，页面“覆盖范围”明确列出 | 仅源码/设计；未做无 agent 集成 |
 | I14 | 熔断按会话计数，`turn/start` 重置；默认 preset balanced | 先提供有界保护；按 turn 精确边界仍待验证 | 连续拒绝会提前进入 error-escalate；不伪造 review-deny | 无集成用例；单测未覆盖 |
 
@@ -131,6 +132,7 @@ mise exec -- pnpm verify
 - normal 与 strict 共用常规策略，strict 只把需要人工的调用结算为 fallback-deny：`decideReview` 只接收 `normal` 或 `progress` 策略；集成对比了 normal 与 strict。
 - progress 在形成审查结论前调整条件，不覆盖已形成的 deny／error：策略层实现；回放可比较。
 - 人工、故障、兜底阶段分开：trace 记录 `review-escalate → human-*`、`error-escalate → fallback-deny`、`force-ask → fallback-deny`。
+- 首版策略与阈值初值按 #22 选定并记录限制；`normal = strict ⊆ progress`、两协议统一授权标准由确定性样例与网格断言锁定，模型质量部分单独记为 `not-run`。
 - 配置成功应用后才生效；已有结果不重算：配置在 `configEditor.edit` 成功后由 Loader 重新加载，运行配置发布到 profile runtime；在途请求保留原审查协议与快照，模型返回后未形成的判定读取新配置，阶段记录各自 revision。
 - 规则只由用户编辑或人工确认候选产生：候选未确认不进入运行时；确认后走普通配置校验。
 - 审计失败不改变权限：`audit-unavailable` 证据。

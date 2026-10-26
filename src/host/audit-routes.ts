@@ -1,5 +1,113 @@
+import type { CallAnchor, CallFilter } from '../audit/types.js';
+import { readCallDetail } from './call-detail.js';
 import { jsonResponse } from './http.js';
 import type { HostEnvironment, FetchRouteLike } from './types.js';
+
+/**
+ * A numeric query parameter, or `undefined` when it is absent or unusable.
+ *
+ * `Number('')` is `0` and `Number('abc')` is `NaN`; neither is a page window the
+ * caller asked for, so both fall back to the store's default instead of
+ * silently becoming a different query.
+ */
+function numericParam(url: URL, name: string): number | undefined {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim().length === 0) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/** A text query parameter, or `undefined` when the caller omitted it. */
+function textParam(url: URL, name: string): string | undefined {
+  const raw = url.searchParams.get(name);
+  return raw === null ? undefined : raw;
+}
+
+/** An integer query parameter: fractions are not a window the caller asked for. */
+function integerParam(url: URL, name: string): number | undefined {
+  const value = numericParam(url, name);
+  return value === undefined ? undefined : Math.trunc(value);
+}
+
+/** A `1`/`true` flag; the client sends `1`, and `false` is simply absent. */
+function flagParam(url: URL, name: string): boolean | undefined {
+  const raw = url.searchParams.get(name);
+  if (raw === null) return undefined;
+  return raw === '1' || raw === 'true';
+}
+
+/** The list filter one logs request asked for, with omitted parameters absent. */
+function filterOf(url: URL): CallFilter {
+  const filter: {
+    limit?: number;
+    result?: string;
+    tool?: string;
+    sessionId?: string;
+    sessionKind?: string;
+    ruleId?: string;
+    deniedOnly?: boolean;
+    reviewFailureOnly?: boolean;
+    query?: string;
+    from?: number;
+    to?: number;
+  } = {};
+  const limit = integerParam(url, 'limit');
+  if (limit !== undefined) filter.limit = limit;
+  const result = textParam(url, 'result');
+  if (result !== undefined) filter.result = result;
+  const tool = textParam(url, 'tool');
+  if (tool !== undefined) filter.tool = tool;
+  const session = textParam(url, 'session');
+  if (session !== undefined) filter.sessionId = session;
+  const sessionKind = textParam(url, 'sessionKind');
+  if (sessionKind !== undefined) filter.sessionKind = sessionKind;
+  const rule = textParam(url, 'rule');
+  if (rule !== undefined) filter.ruleId = rule;
+  const denied = flagParam(url, 'denied');
+  if (denied !== undefined) filter.deniedOnly = denied;
+  const reviewFailure = flagParam(url, 'reviewFailure');
+  if (reviewFailure !== undefined) filter.reviewFailureOnly = reviewFailure;
+  const query = textParam(url, 'q');
+  if (query !== undefined) filter.query = query;
+  const from = numericParam(url, 'from');
+  if (from !== undefined) filter.from = from;
+  const to = numericParam(url, 'to');
+  if (to !== undefined) filter.to = to;
+  return filter;
+}
+
+/**
+ * A keyset cursor, when the caller supplied one.
+ *
+ * A cursor is a pair. A half-supplied one is treated as absent: silently
+ * starting a fresh traversal would move the reader's window, which is exactly
+ * what the cursor exists to prevent.
+ */
+function cursorParam(
+  url: URL,
+  tsName: string,
+  callIdName: string,
+): CallAnchor | undefined {
+  const ts = integerParam(url, tsName);
+  const callId = textParam(url, callIdName);
+  if (ts === undefined || callId === undefined || callId.length === 0)
+    return undefined;
+  return { ts, callId };
+}
+
+/** The list filter plus the cursors one logs request asked for. */
+function requestOf(url: URL): CallFilter {
+  const after = cursorParam(url, 'afterTs', 'afterCallId');
+  const before = cursorParam(url, 'beforeTs', 'beforeCallId');
+  const anchor = cursorParam(url, 'anchorTs', 'anchorCallId');
+  return {
+    ...filterOf(url),
+    ...(url.searchParams.get('tail') === '1' ? { tail: true } : {}),
+    ...(after === undefined ? {} : { after }),
+    ...(before === undefined ? {} : { before }),
+    ...(anchor === undefined ? {} : { anchor }),
+  };
+}
 
 export function logsRoute(host: HostEnvironment): FetchRouteLike {
   const { audit, runtime } = host;
@@ -15,6 +123,12 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
             code: 'audit-unavailable',
             rows: [],
             total: 0,
+            limit: 0,
+            nextCursor: null,
+            prevCursor: null,
+            anchor: null,
+            newer: 0,
+            remaining: 0,
             health: {
               state: 'unavailable',
               lastError: runtime.auditError,
@@ -24,57 +138,24 @@ export function logsRoute(host: HostEnvironment): FetchRouteLike {
           }),
         );
       }
-      const url = new URL(request.url);
-      const from = url.searchParams.get('from');
-      const to = url.searchParams.get('to');
-      return Promise.resolve(
-        jsonResponse({
-          ok: true,
-          ...audit.listCalls({
-            limit: Number(url.searchParams.get('limit') ?? '100'),
-            offset: Number(url.searchParams.get('offset') ?? '0'),
-            ...(url.searchParams.get('result') === null
-              ? {}
-              : { result: url.searchParams.get('result') ?? '' }),
-            ...(url.searchParams.get('tool') === null
-              ? {}
-              : { tool: url.searchParams.get('tool') ?? '' }),
-            ...(url.searchParams.get('session') === null
-              ? {}
-              : { sessionId: url.searchParams.get('session') ?? '' }),
-            ...(url.searchParams.get('q') === null
-              ? {}
-              : { query: url.searchParams.get('q') ?? '' }),
-            ...(from === null ? {} : { from: Number(from) }),
-            ...(to === null ? {} : { to: Number(to) }),
-          }),
-        }),
-      );
-    },
-  };
-}
-
-export function logRoute(host: HostEnvironment): FetchRouteLike {
-  const { audit } = host;
-  return {
-    path: `/api/arbiter/log`,
-    methods: ['GET'],
-    requestBody: 'buffered',
-    fetch: (request) => {
-      const callId = new URL(request.url).searchParams.get('callId') ?? '';
-      if (audit === null) {
-        return Promise.resolve(
-          jsonResponse({ ok: false, code: 'audit-unavailable' }, 404),
-        );
-      }
-      const detail = audit.readCall(callId);
-      if (detail.unreadable) {
-        // A structure this build cannot read is not the same as a missing call.
+      const listed = audit.listCalls(requestOf(new URL(request.url)));
+      // A database this build cannot interpret is an unreadable page, not an
+      // empty history. Reporting it as a successful zero-row page would tell the
+      // operator the records do not exist.
+      if (listed.unreadable === true) {
         return Promise.resolve(
           jsonResponse(
             {
               ok: false,
               code: 'audit-unavailable',
+              rows: [],
+              total: 0,
+              limit: listed.limit,
+              nextCursor: null,
+              prevCursor: null,
+              anchor: listed.anchor,
+              newer: 0,
+              remaining: 0,
               health: audit.health(),
             },
             503,
@@ -82,9 +163,62 @@ export function logRoute(host: HostEnvironment): FetchRouteLike {
         );
       }
       return Promise.resolve(
-        detail.record === null
-          ? jsonResponse({ ok: false, code: 'not-found' }, 404)
-          : jsonResponse({ ok: true, record: detail.record }),
+        jsonResponse({
+          ok: true,
+          rows: listed.rows,
+          total: listed.total,
+          limit: listed.limit,
+          nextCursor: listed.nextCursor,
+          prevCursor: listed.prevCursor,
+          anchor: listed.anchor,
+          newer: listed.newer,
+          remaining: listed.remaining,
+        }),
+      );
+    },
+  };
+}
+
+/**
+ * One call's detail, located by `callId` alone.
+ *
+ * The audit store is preferred but not required: the route answers from the
+ * runtime's memory or the session log when the audit row is gone, and only says
+ * "unavailable" when no source holds the call at all. A structure this build
+ * cannot read stays distinguishable from a record that does not exist.
+ */
+export function logRoute(host: HostEnvironment): FetchRouteLike {
+  return {
+    path: `/api/arbiter/log`,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: (request) => {
+      const callId = new URL(request.url).searchParams.get('callId') ?? '';
+      if (callId.length === 0) {
+        return Promise.resolve(
+          jsonResponse({ ok: false, code: 'record-unavailable' }, 404),
+        );
+      }
+      const read = readCallDetail(host, callId);
+      if (read.kind === 'found') {
+        return Promise.resolve(jsonResponse({ ok: true, detail: read.detail }));
+      }
+      if (read.unreadableStructure) {
+        // A stored structure this build cannot interpret is not a missing call.
+        return Promise.resolve(
+          jsonResponse(
+            {
+              ok: false,
+              code: 'audit-unavailable',
+              health: host.currentAudit()?.health() ?? null,
+            },
+            503,
+          ),
+        );
+      }
+      // Every available source answered, and none of them holds this call.
+      return Promise.resolve(
+        jsonResponse({ ok: false, code: 'record-unavailable' }, 404),
       );
     },
   };

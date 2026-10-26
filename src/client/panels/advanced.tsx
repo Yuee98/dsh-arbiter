@@ -42,7 +42,6 @@ function PolicySettings({
     ['tauRisk', t('advanced.tauRisk'), 0, 1, 0.05],
     ['tauCritical', t('advanced.tauCritical'), 0, 1, 0.05],
     ['tauLow', t('advanced.tauLow'), 0, 1, 0.05],
-    ['chatLowRiskMax', t('advanced.chatLowMax'), 0, 10, 1],
     ['chatMediumRiskMax', t('advanced.chatMediumMax'), 0, 10, 1],
     ['mediumRiskCeiling', t('advanced.decisionMax'), 0, 10, 1],
     ['explicitFromRisk', t('advanced.explicitRisk'), 0, 10, 1],

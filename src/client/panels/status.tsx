@@ -17,6 +17,13 @@ function modeHelp(t: Translate): Record<string, string> {
   };
 }
 
+function boundaryHelp(t: Translate): Record<string, string> {
+  return {
+    guarded: t('status.boundaryGuardedHelp'),
+    trusted: t('status.boundaryTrustedHelp'),
+  };
+}
+
 export function StatusPanel(props: {
   readonly state: StateResponse;
   readonly draft: Draft;
@@ -46,6 +53,24 @@ export function StatusPanel(props: {
           />
           {t('status.enabled')}
         </label>
+        <Field
+          label={t('status.boundaryLabel')}
+          hint={boundaryHelp(t)[draft.boundary] ?? '—'}
+        >
+          <Select
+            value={draft.boundary}
+            options={['guarded', 'trusted'] as const}
+            labels={{
+              guarded: t('status.boundaryGuarded'),
+              trusted: t('status.boundaryTrusted'),
+            }}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.boundary = value;
+              });
+            }}
+          />
+        </Field>
         <div
           style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}
         >
@@ -87,6 +112,24 @@ export function StatusPanel(props: {
             />
           </Field>
         </div>
+        <p
+          style={{
+            margin: 0,
+            color: 'var(--dsw-alias-label-tertiary)',
+            fontSize: 11.5,
+          }}
+        >
+          {t('status.subagentNote')}
+        </p>
+        <p
+          style={{
+            margin: 0,
+            color: 'var(--dsw-alias-label-tertiary)',
+            fontSize: 11.5,
+          }}
+        >
+          {t('status.sessionNote')}
+        </p>
         <RuntimeSummary state={state} />
         {state.invalidConfigError === null ? null : (
           <Notice

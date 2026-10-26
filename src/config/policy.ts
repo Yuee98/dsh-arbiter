@@ -38,14 +38,6 @@ function parseThresholds(
     tauRisk: probability('tauRisk'),
     tauCritical: probability('tauCritical'),
     tauLow: probability('tauLow'),
-    chatLowRiskMax: asInteger(
-      value['chatLowRiskMax'],
-      fallback.chatLowRiskMax,
-      0,
-      10,
-      `${path}.chatLowRiskMax`,
-      errors,
-    ),
     chatMediumRiskMax: asInteger(
       value['chatMediumRiskMax'],
       fallback.chatMediumRiskMax,

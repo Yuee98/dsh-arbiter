@@ -106,7 +106,8 @@ describe('first-release page scope', () => {
     await screen.findByRole('checkbox', { name: '启用 dsh-arbiter' });
 
     await user.click(screen.getByRole('button', { name: '规则' }));
-    expect(screen.getByRole('heading', { name: '规则表' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '规则' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '展开测试区' }));
     await user.click(screen.getByRole('button', { name: '运行测试' }));
     expect(requested).toContain('/api/arbiter/test');
 

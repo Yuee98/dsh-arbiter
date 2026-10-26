@@ -54,7 +54,7 @@ describe('prototype page after panel extraction', () => {
     });
   });
 
-  test('sends the disabled rule draft to the rule tester and renders the decoded result', async () => {
+  test('sends the disabled rule draft to the rule tester and renders both conclusions', async () => {
     const requests: unknown[] = [];
     server.use(
       http.get('*/api/arbiter/state', () =>
@@ -68,7 +68,9 @@ describe('prototype page after panel extraction', () => {
             {
               input: 'pwd',
               tool: 'bash',
+              cwd: '/workspace',
               path: 'review(default)',
+              pathDetail: { kind: 'review-default', reason: 'no-match' },
               rule: null,
               matches: [],
               rules: [
@@ -98,6 +100,26 @@ describe('prototype page after panel extraction', () => {
                 unresolved: [],
               },
               argv: ['pwd'],
+              normalization: {
+                raw: 'pwd',
+                completeness: 'complete',
+                issues: [],
+                commands: [
+                  {
+                    text: 'pwd',
+                    raw: 'pwd',
+                    words: [
+                      {
+                        raw: 'pwd',
+                        text: 'pwd',
+                        status: 'static',
+                        reasons: [],
+                        value: 'pwd',
+                      },
+                    ],
+                  },
+                ],
+              },
               shadowed: [],
             },
           ],
@@ -106,19 +128,31 @@ describe('prototype page after panel extraction', () => {
     );
     const { user } = renderClient(<ArbiterPage />);
     await user.click(await screen.findByRole('button', { name: '规则' }));
-    await user.click(screen.getByRole('button', { name: '+ 添加规则' }));
-    await user.click(screen.getByRole('checkbox', { name: '启用' }));
-    const input = screen.getByRole('textbox', { name: '输入' });
+    await user.click(screen.getByRole('button', { name: '新建规则' }));
+    await user.click(screen.getByRole('checkbox', { name: /^启用规则/ }));
+    // The test area is collapsed by default; its own entry opens it, and a row's
+    // "测试" action focuses one rule without running anything.
+    await user.click(screen.getByRole('button', { name: '展开测试区' }));
+    const input = screen.getByRole('textbox', { name: '命令' });
     await user.clear(input);
     await user.type(input, 'pwd');
     await user.click(screen.getByRole('button', { name: '运行测试' }));
     expect(
       await screen.findByText('review(default)', { exact: true }),
     ).toBeInTheDocument();
+    // The explanation carries the normalization evidence the server sent: the
+    // matched text and the per-word status, not only the final verdict.
+    // The explanation is a native `<details>`; opening its summary is what a reader
+    // does, and the word-level evidence must be there once it is open.
+    await user.click(screen.getByText('查看详细解释'));
+    const detail = await screen.findByTestId('rule-test-normalization');
+    expect(detail).toHaveTextContent('匹配文本：pwd');
+    expect(detail).toHaveTextContent('pwd → pwd（静态）');
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      inputs: ['pwd'],
+      samples: [{ tool: 'bash', args: { command: 'pwd' } }],
       rules: [{ id: 'rule-1', enabled: false }],
+      identity: 'main',
     });
   });
 

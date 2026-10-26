@@ -50,6 +50,16 @@ export interface FixtureConfig {
   readonly barrierDir?: string;
   readonly holdMatch?: string;
   readonly barrierTimeoutMs?: number;
+  /**
+   * Directory receiving one JSON file per conversation model request.
+   *
+   * The file records the exact system prompt and user-role context the host
+   * actually sent, which is the only honest evidence of what the model saw on
+   * one step. A session log keeps historical messages even after a compaction
+   * replaced them, so reading the log alone cannot distinguish the effective
+   * prompt from an older one.
+   */
+  readonly requestDir?: string;
 }
 
 function textOfBlocks(content: unknown): string {
@@ -65,12 +75,25 @@ interface RequestedTurn {
   readonly text: string;
   /** The `RUN <command>` marker of this turn, when present. */
   readonly command: string | null;
+  /**
+   * Commands of one step that issues several independent calls.
+   *
+   * A `RUN2 <command>` line adds a second `bash` call to the same assistant
+   * message, so a case can observe two calls whose outcomes differ inside one
+   * step instead of racing two separate turns.
+   */
+  readonly commands: readonly string[];
   /** The `DELEGATE <task>` marker of this turn, when present. */
   readonly delegate: string | null;
+  /** The `ASK <question>` marker of this turn, when present. */
+  readonly ask: string | null;
 }
 
-function markerValue(text: string, marker: string): string | null {
-  const at = text.lastIndexOf(marker);
+function markerValue(
+  text: string,
+  marker: string,
+  at = text.lastIndexOf(marker),
+): string | null {
   if (at === -1) return null;
   const rest = text.slice(at + marker.length);
   const line = rest.split(/\r?\n/u)[0] ?? '';
@@ -83,11 +106,22 @@ function requestedTurn(messages: readonly ChatMessage[]): RequestedTurn {
     if (message === undefined || message.role !== 'user') continue;
     const text = textOfBlocks(message.content);
     const command = markerValue(text, 'RUN ');
+    const second = markerValue(text, 'RUN2 ');
     const delegate = markerValue(text, 'DELEGATE ');
-    if (command === null && delegate === null) continue;
-    return { text, command, delegate };
+    const ask = markerValue(text, 'ASK ');
+    if (command === null && delegate === null && ask === null) continue;
+    return {
+      text,
+      command,
+      commands: [
+        ...(command === null ? [] : [command]),
+        ...(second === null ? [] : [second]),
+      ],
+      delegate,
+      ask,
+    };
   }
-  return { text: '', command: null, delegate: null };
+  return { text: '', command: null, commands: [], delegate: null, ask: null };
 }
 
 /** Whether the user turn carrying `text` already produced a tool call. */
@@ -122,6 +156,8 @@ interface StreamChunk {
 class FixtureAdapter {
   private readonly config: FixtureConfig;
   private reviewIndex = 0;
+  /** Monotone index of recorded conversation requests. */
+  private requestIndex = 0;
 
   constructor(config: FixtureConfig) {
     this.config = config;
@@ -163,6 +199,16 @@ class FixtureAdapter {
   providerRetryPolicy(): undefined {
     return undefined;
   }
+  /**
+   * The base adapter contract declares no request-image pricing.
+   *
+   * This fixture is a plain object on the real `llm` service rather than an
+   * `LlmAdapter` subclass, so it states the same default explicitly: the token
+   * meter calls this hook when it prices a compaction request.
+   */
+  imageRequestPricing(): undefined {
+    return undefined;
+  }
   async prepareCall(provider: string, model: string) {
     return {
       model: await this.resolveModel(provider, model),
@@ -186,6 +232,43 @@ class FixtureAdapter {
       context: { contextWindow: 200_000 },
       defaultMaxTokens: 8_192,
     });
+  }
+
+  /**
+   * Write the exact request the host sent for one conversation step.
+   *
+   * Only conversation requests are recorded: a reviewer or compaction call is
+   * a different purpose and must not be mistaken for the agent's own view.
+   */
+  private recordRequest(options: {
+    readonly system?: string;
+    readonly messages?: readonly ChatMessage[];
+  }): void {
+    const directory = this.config.requestDir;
+    if (directory === undefined) return;
+    mkdirSync(directory, { recursive: true });
+    const messages = options.messages ?? [];
+    const text = messages.map((message) => textOfBlocks(message.content));
+    // A loop-built request carries the system prompt as the leading system-role
+    // message in `messages`; `options.system` is only set by a one-shot caller.
+    // Record whichever form this request actually used, so a driver reads the
+    // prompt the model really received.
+    const fromMessages = messages
+      .filter((message) => message.role === 'system')
+      .map((message) => textOfBlocks(message.content))
+      .join('\n\n');
+    // One file per request, ordered by name so a driver reads them in order.
+    const index = this.requestIndex;
+    this.requestIndex += 1;
+    writeFileSync(
+      join(directory, `${String(index).padStart(4, '0')}.json`),
+      JSON.stringify({
+        at: Date.now(),
+        system:
+          options.system ?? (fromMessages.length > 0 ? fromMessages : null),
+        userTexts: text,
+      }),
+    );
   }
 
   /** One deterministic answer, yielded through a real async generator. */
@@ -213,9 +296,87 @@ class FixtureAdapter {
       yield { type: 'finish', reason: { kind: 'stop' } };
       return;
     }
+    this.recordRequest(options);
     const messages = options.messages ?? [];
-    const { text, command, delegate } = requestedTurn(messages);
-    if (delegate !== null && !alreadyCalled(messages, text)) {
+    const { text, command, commands, delegate, ask } = requestedTurn(messages);
+    // A turn that already produced its calls falls through to the plain reply,
+    // so every command is issued exactly once.
+    const issuing = alreadyCalled(messages, text) ? [] : commands;
+    if (issuing.length > 1) {
+      // Several independent calls in one assistant step: the host schedules
+      // them by its own concurrency rule, so a case can observe one refusal and
+      // one successful execution without racing two turns.
+      yield { type: 'block-start', index: 0, blockType: 'text' };
+      yield {
+        type: 'text-delta',
+        index: 0,
+        text: 'Running the requested calls.',
+      };
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'text', text: 'Running the requested calls.' },
+      };
+      for (const [offset, entry] of issuing.entries()) {
+        const id = `fx-${String(Date.now())}-${String(offset)}-${String(Math.trunc(Math.random() * 1e6))}`;
+        const args = JSON.stringify({
+          command: entry,
+          description: 'fixture call',
+        });
+        const index = offset + 1;
+        yield { type: 'block-start', index, blockType: 'tool-call' };
+        yield {
+          type: 'tool-call-delta',
+          index,
+          id,
+          name: 'bash',
+          argumentsDelta: args,
+        };
+        yield {
+          type: 'block-end',
+          index,
+          block: { type: 'tool-call', id, name: 'bash', arguments: args },
+        };
+      }
+    } else if (ask !== null && !alreadyCalled(messages, text)) {
+      // A real `ask_user_question` call: the answer card, the answerer
+      // waterfall and the recorded reply are all the host's own path.
+      const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;
+      const args = JSON.stringify({
+        questions: [
+          {
+            id: 'authorization',
+            question: ask,
+            options: [{ label: '允许' }, { label: '不允许' }],
+          },
+        ],
+      });
+      yield { type: 'block-start', index: 0, blockType: 'text' };
+      yield { type: 'text-delta', index: 0, text: 'Asking the user.' };
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'text', text: 'Asking the user.' },
+      };
+      yield { type: 'block-start', index: 1, blockType: 'tool-call' };
+      yield {
+        type: 'tool-call-delta',
+        index: 1,
+        id,
+        name: 'ask_user_question',
+        argumentsDelta: args,
+      };
+      yield {
+        type: 'block-end',
+        index: 1,
+        block: {
+          type: 'tool-call',
+          id,
+          name: 'ask_user_question',
+          arguments: args,
+        },
+      };
+    } else if (delegate !== null && !alreadyCalled(messages, text)) {
       // A real delegation: the child is a host-managed subagent session whose
       // own turns run the same fixture.
       const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;

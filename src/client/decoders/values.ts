@@ -1,3 +1,10 @@
+import type {
+  NormalizationCommand,
+  NormalizationDetail,
+  NormalizationIssue,
+  NormalizationWord,
+} from '../../types.js';
+
 /** Browser response readers validate values before giving them a static type. */
 export type Decoder<T> = (value: unknown) => T;
 export type JsonObject = Readonly<Record<string, unknown>>;
@@ -71,6 +78,51 @@ export function choice<const T extends string>(
     if (selected === undefined)
       throw new TypeError(`expected one of: ${options.join(', ')}`);
     return selected;
+  };
+}
+
+function normalizationWord(value: unknown): NormalizationWord {
+  const source = object(value);
+  const wordValue = field(source, 'value', optional(text));
+  return {
+    raw: field(source, 'raw', text),
+    text: field(source, 'text', text),
+    status: field(source, 'status', choice('static', 'dynamic')),
+    reasons: field(source, 'reasons', strings),
+    ...(wordValue === undefined ? {} : { value: wordValue }),
+  };
+}
+
+function normalizationCommand(value: unknown): NormalizationCommand {
+  const source = object(value);
+  return {
+    text: field(source, 'text', text),
+    raw: field(source, 'raw', text),
+    words: field(source, 'words', array(normalizationWord)),
+  };
+}
+
+function normalizationIssue(value: unknown): NormalizationIssue {
+  const source = object(value);
+  return {
+    kind: field(source, 'kind', text),
+    message: field(source, 'message', text),
+    pos: field(source, 'pos', number),
+  };
+}
+
+/** Decode the normalization evidence the tester and the call detail both carry. */
+export function normalizationDetail(value: unknown): NormalizationDetail {
+  const source = object(value);
+  return {
+    raw: field(source, 'raw', text),
+    completeness: field(
+      source,
+      'completeness',
+      choice('complete', 'partial', 'none'),
+    ),
+    issues: field(source, 'issues', array(normalizationIssue)),
+    commands: field(source, 'commands', array(normalizationCommand)),
   };
 }
 

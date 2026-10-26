@@ -1,12 +1,26 @@
-/** Observed effects derived from the conservative parse, without executing it. */
+/**
+ * Observed effects derived from the parse, without executing anything.
+ *
+ * This layer answers "what did the parse actually see?" and nothing else. It
+ * never infers the absence of an effect from a missing node, and its
+ * `completeness` describes fact extraction only — structure and per-word values
+ * are separate dimensions and are reported by `parse.ts`.
+ *
+ * Words are classified by the adapter, not by looking for `$` in the text: a
+ * statically known `'$X'` is a literal dollar, while a dynamic `$X` is an unknown
+ * value. A path built from an unknown value is reported in its original form and
+ * never resolved to a guessed location.
+ */
+
 import type { DerivedFacts } from '../types.js';
 import {
   CREDENTIAL_HINTS,
   INTERPRETERS,
   NETWORK_COMMANDS,
 } from './constants.js';
-import { hasUnresolved, normalizePath, resolvePath } from './paths.js';
-import type { ShellCommand, ShellParse } from './types.js';
+import { normalizePath, resolvePath } from './paths.js';
+import { isPlainPathValue } from './quote.js';
+import type { ShellCommand, ShellParse, ShellRedirect } from './types.js';
 
 export interface FactsOptions {
   readonly cwd: string;
@@ -21,35 +35,147 @@ export interface FactsResult {
   readonly writesOutsideWorkspace: readonly string[];
 }
 
+/** Most entries any one observed list may carry before it is truncated. */
+const LIST_LIMIT = 30;
+
+/** Pipeline-exec entries are the most specific observation, so they cap lower. */
+const PIPELINE_LIMIT = 10;
+
+/**
+ * One candidate write target.
+ *
+ * `target` is always the *decoded value* of a static word, never the canonical
+ * matching text: `touch "/tmp/a b"` matches as `touch '/tmp/a b'`, but the path it
+ * writes is `/tmp/a b`. A non-static or unusable value is reported in its original
+ * form and is never resolved to a guessed location.
+ */
 interface WriteTarget {
   readonly target: string;
+  readonly dynamic: boolean;
   readonly cwd: string | null;
 }
 
+/**
+ * A write target from one argv position.
+ *
+ * Both the flag and the text come from the same word, so a decoded path is never
+ * paired with a canonical (quoted) text or the other way round.
+ */
+function writeTargetAt(
+  command: ShellCommand,
+  index: number,
+): WriteTarget | null {
+  const word = command.words[index];
+  if (word === undefined) return null;
+  if (word.status !== 'static') {
+    return { target: word.text, dynamic: true, cwd: command.cwd };
+  }
+  const value = word.value ?? '';
+  return {
+    target: value,
+    // A relative target written in a repeated body may resolve elsewhere on the
+    // next pass, so it is not reported as one confirmed path.
+    dynamic:
+      !isPlainPathValue(value) || (command.repeated && !value.startsWith('/')),
+    cwd: command.cwd,
+  };
+}
+
+/** Operators that redirect an input descriptor. */
+const INPUT_OPERATORS = new Set(['<', '<<', '<<-', '<<<', '<&', '<>']);
+
+/** Operators that redirect both stdout and stderr. */
+const BOTH_OPERATORS = new Set(['&>', '&>>']);
+
+/**
+ * Which descriptors one redirect takes away from an inherited pipe.
+ *
+ * The descriptor the operator acts on decides this, not the operator's
+ * characters: `1<&2` duplicates descriptor 2 onto stdout and so takes stdout off
+ * the pipe, while `2<file` reopens descriptor 2 and leaves stdin alone. A missing
+ * descriptor means the operator's default, which is stdin for an input operator
+ * and stdout otherwise.
+ */
+function affectedDescriptors(redirect: ShellRedirect): readonly number[] {
+  if (BOTH_OPERATORS.has(redirect.op)) return [1, 2];
+  if (redirect.descriptor !== null) return [redirect.descriptor];
+  return [INPUT_OPERATORS.has(redirect.op) ? 0 : 1];
+}
+
+/**
+ * Whether this command's stdout still reaches the pipe it writes to.
+ *
+ * Any redirect acting on descriptor 1 takes stdout away — a file target
+ * (`> out`), a duplication (`1>&2`, `1<&2`) or a close. A duplication `2>&1`
+ * acts on descriptor 2 and leaves stdout on the pipe.
+ */
+function pipeReceivesStdout(command: ShellCommand): boolean {
+  for (const redirect of command.redirects) {
+    if (affectedDescriptors(redirect).includes(1)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether the receiving command still reads its stdin from the pipe.
+ *
+ * `curl … | sh < script` builds the pipe, but `sh` reads the file instead of the
+ * download. A here-string or here-doc on stdin replaces it the same way, while
+ * `sh 2< /dev/null` reopens descriptor 2 and changes nothing about stdin.
+ */
+function pipeFeedsStdin(command: ShellCommand): boolean {
+  for (const redirect of command.redirects) {
+    if (affectedDescriptors(redirect).includes(0)) return false;
+  }
+  return true;
+}
+
+/** Commands whose non-option arguments are all written to. */
+const ALL_ARGS_WRITTEN = new Set(['touch', 'mkdir', 'tee', 'truncate']);
+/** Commands whose last argument is the destination (plus `rm`, handled below). */
+const LAST_ARG_WRITTEN = new Set(['cp', 'mv', 'install', 'rsync', 'dd']);
+const REMOVING = new Set(['rm', 'shred', 'unlink', 'rmdir']);
+
+/** Add the target at `index` when that word is a real argument. */
+function addWriteTarget(
+  command: ShellCommand,
+  index: number,
+  targets: WriteTarget[],
+): void {
+  const target = writeTargetAt(command, index);
+  if (target !== null) targets.push(target);
+}
+
 function directWriteTargets(command: ShellCommand): WriteTarget[] {
-  const name = command.argv[0] ?? '';
-  const args = command.argv.slice(1);
+  const name = command.words[0]?.value ?? '';
   const targets: WriteTarget[] = [];
-  if (['touch', 'mkdir', 'tee', 'truncate'].includes(name)) {
-    for (const target of args.filter((arg) => !arg.startsWith('-'))) {
-      targets.push({ target, cwd: command.cwd });
+  const args = command.words.slice(1);
+  if (ALL_ARGS_WRITTEN.has(name) || REMOVING.has(name)) {
+    for (const [offset, word] of args.entries()) {
+      if (!(word.value ?? '').startsWith('-')) {
+        addWriteTarget(command, offset + 1, targets);
+      }
     }
+    return targets;
   }
-  if (['cp', 'mv', 'install', 'rsync', 'dd'].includes(name)) {
-    const last = args.at(-1);
-    if (last !== undefined) targets.push({ target: last, cwd: command.cwd });
+  if (LAST_ARG_WRITTEN.has(name)) {
+    if (args.length > 0)
+      addWriteTarget(command, command.words.length - 1, targets);
+    return targets;
   }
-  if (['rm', 'shred', 'unlink', 'rmdir'].includes(name)) {
-    for (const argument of args) {
-      if (!argument.startsWith('-'))
-        targets.push({ target: argument, cwd: command.cwd });
-    }
-  }
-  if (name === 'find' && args.includes('-delete')) {
-    const first = args[0];
-    if (first !== undefined) targets.push({ target: first, cwd: command.cwd });
+  if (
+    name === 'find' &&
+    args.length > 0 &&
+    args.some((word) => word.value === '-delete')
+  ) {
+    addWriteTarget(command, 1, targets);
   }
   return targets;
+}
+
+function isNetworkCommand(name: string, args: readonly string[]): boolean {
+  if (NETWORK_COMMANDS.has(name) || name === 'gh') return true;
+  return name === 'git' && args[0] === 'push';
 }
 
 class FactCollector {
@@ -59,6 +185,8 @@ class FactCollector {
   readonly pipelineExec: string[][] = [];
   readonly writesOutsideWorkspace: string[] = [];
   expansionRisk: string | null = null;
+  wordGap = false;
+  truncated = false;
 
   private readonly parse: ShellParse;
   private readonly options: FactsOptions;
@@ -69,60 +197,68 @@ class FactCollector {
   }
 
   private networkEffects(command: ShellCommand): void {
-    const name = command.argv[0] ?? '';
-    const args = command.argv.slice(1);
-    if (
-      NETWORK_COMMANDS.has(name) ||
-      (name === 'git' && args[0] === 'push') ||
-      name === 'gh'
-    ) {
-      this.networkCommands.push(name);
-    }
+    const name = command.words[0]?.value ?? '';
+    const args = command.words.slice(1).map((word) => word.value ?? word.text);
+    if (isNetworkCommand(name, args)) this.networkCommands.push(name);
     if (name !== 'curl' && name !== 'wget') return;
-    const shellPipe = args.find((argument) =>
-      ['sh', 'bash', 'zsh'].includes(argument),
-    );
-    const next = this.parse.commands.find(
-      (other) => other.index === command.index + 1,
-    );
-    const pipedInterpreter =
-      next !== undefined && INTERPRETERS.has(next.argv[0] ?? '')
-        ? next.argv[0]
-        : undefined;
-    if (shellPipe !== undefined || pipedInterpreter !== undefined) {
-      this.pipelineExec.push([name, shellPipe ?? pipedInterpreter ?? 'sh']);
-    }
+    const interpreter = this.pipedInterpreter(command);
+    if (interpreter !== null) this.pipelineExec.push([name, interpreter]);
   }
 
-  private writeTarget({ target, cwd }: WriteTarget): void {
+  /**
+   * The interpreter a downloader's output is piped into.
+   *
+   * Only a real pipe edge in the AST counts. Two commands on separate lines run
+   * sequentially, so reporting `curl\nbash` as `curl | bash` would invent a
+   * dangerous fact nobody observed.
+   */
+  private pipedInterpreter(command: ShellCommand): string | null {
+    // Only a real pipe edge proves the download is executed. A bare `sh` argument
+    // (`curl --output sh …`) is a value, not a pipe.
+    if (command.pipeTarget === null) return null;
+    // The edge also has to carry this command's stdout. `curl … > out.txt | sh`
+    // creates a pipe, but the redirect takes stdout away from it, so nothing
+    // downloaded reaches `sh`.
+    if (!pipeReceivesStdout(command)) return null;
+    const receiver = this.parse.commands.find(
+      (other) => other.index === command.pipeTarget,
+    );
+    if (receiver === undefined) return null;
+    if (!pipeFeedsStdin(receiver)) return null;
+    const name = receiver.words[0]?.value ?? '';
+    return INTERPRETERS.has(name) ? name : null;
+  }
+
+  private writeTarget({ target, dynamic, cwd }: WriteTarget): void {
     if (target === '' || target.startsWith('-')) return;
-    if (hasUnresolved(target)) {
+    // A dynamic path keeps its original expression: the shell may expand it to
+    // anything, so neither a resolved location nor "no writes" is claimed.
+    if (dynamic) {
       this.expansionRisk = 'write target contains an unresolved expansion';
       this.writes.push(target);
       return;
     }
-    let resolved: string;
-    if (target.startsWith('/')) {
-      resolved = normalizePath(target);
-    } else {
-      if (cwd === null) {
-        this.expansionRisk = 'working directory is not statically known';
-        this.writes.push(target);
-        return;
-      }
-      resolved = resolvePath(target, cwd);
+    // An absolute path does not depend on the working directory, so an unknown
+    // directory only stops relative targets from being classified.
+    if (!target.startsWith('/') && cwd === null) {
+      this.expansionRisk = 'working directory is not statically known';
+      this.writes.push(target);
+      return;
     }
+    const resolved =
+      cwd === null ? normalizePath(target) : resolvePath(target, cwd);
     this.writes.push(resolved);
-    if (this.options.workspaceRoot !== null) {
-      const root = normalizePath(this.options.workspaceRoot);
-      const inside = resolved === root || resolved.startsWith(`${root}/`);
-      if (!inside) this.writesOutsideWorkspace.push(resolved);
-    }
+    const root = this.options.workspaceRoot;
+    if (root === null) return;
+    const inside =
+      resolved === normalizePath(root) ||
+      resolved.startsWith(`${normalizePath(root)}/`);
+    if (!inside) this.writesOutsideWorkspace.push(resolved);
   }
 
   private commandEffects(command: ShellCommand): void {
-    const name = command.argv[0] ?? '';
-    const args = command.argv.slice(1);
+    const name = command.words[0]?.value ?? '';
+    const args = command.words.slice(1).map((word) => word.value ?? word.text);
     this.networkEffects(command);
     for (const argument of [name, ...args]) {
       if (
@@ -131,27 +267,59 @@ class FactCollector {
         this.credentialPaths.push(argument);
       }
     }
-    const writeTargets = directWriteTargets(command);
-    for (const redirect of command.redirects) {
-      if (redirect.op.includes('>'))
-        writeTargets.push({ target: redirect.target, cwd: redirect.cwd });
-      if (hasUnresolved(redirect.target))
-        this.expansionRisk = 'redirect target contains an unresolved expansion';
-    }
-    for (const target of writeTargets) this.writeTarget(target);
-    for (const arg of args) {
-      if (
-        hasUnresolved(arg) &&
-        ['rm', 'mv', 'dd', 'shred', 'find'].includes(name)
-      ) {
+    for (const target of directWriteTargets(command)) this.writeTarget(target);
+    if (['rm', 'mv', 'dd', 'shred', 'find'].includes(name)) {
+      const dynamic = command.words
+        .slice(1)
+        .some((word) => word.status === 'dynamic');
+      if (dynamic) {
         this.expansionRisk =
           'destructive argument contains an unresolved expansion';
       }
     }
   }
 
+  /**
+   * File redirects, wherever they appeared.
+   *
+   * A redirect can belong to a command, to a compound construct, or to nothing at
+   * all (`> out`); reading them from the global list means none of those writes is
+   * missed. Descriptor duplication, heredocs and here-strings were already excluded
+   * from that list.
+   */
+  private redirectEffects(): void {
+    for (const redirect of this.parse.redirects) {
+      if (!redirect.op.includes('>')) continue;
+      this.writeTarget({
+        target: redirect.target,
+        // A repeated body or an unknown directory means a relative target may
+        // resolve elsewhere on a later pass, so it is not a single known path.
+        dynamic: redirect.dynamic || redirect.unresolved,
+        cwd: redirect.cwd,
+      });
+    }
+  }
+
   collect(): void {
     for (const command of this.parse.commands) this.commandEffects(command);
+    this.redirectEffects();
+    for (const word of this.parse.words) {
+      if (word.status === 'dynamic') this.wordGap = true;
+    }
+    // Every capped category downgrades fact completeness; only `writes` has a
+    // separate `truncated` flag in the shared shape, so the others are reported
+    // through `completeness` rather than silently looking complete.
+    // Any capped list that overflowed makes the observation set incomplete, and
+    // `truncated` says so explicitly rather than only lowering completeness.
+    if (
+      this.writes.length > LIST_LIMIT ||
+      new Set(this.networkCommands).size > LIST_LIMIT ||
+      new Set(this.credentialPaths).size > LIST_LIMIT ||
+      this.parse.unresolved.length > LIST_LIMIT ||
+      this.pipelineExec.length > PIPELINE_LIMIT
+    ) {
+      this.truncated = true;
+    }
   }
 }
 
@@ -181,6 +349,38 @@ function parseErrorFacts(options: FactsOptions): FactsResult {
   };
 }
 
+/**
+ * Fact completeness.
+ *
+ * This describes how much of the call's effect space was actually observed. It is
+ * a separate dimension from structure and from per-word values, but it can never be
+ * higher than the structure allows: effects inside a fragment nobody parsed were
+ * not observed either.
+ *
+ *  - `none` when the parse could not be used at all;
+ *  - `partial` when the structure is incomplete, the call is opaque (interpreter,
+ *    script, self-evaluating builtin), it carries dynamic words or expansions, or
+ *    an observation list hit its limit;
+ *  - `complete` when every word and observed list was fully read.
+ *
+ * A `complete` fact section still never asserts that an effect is absent.
+ */
+function factCompleteness(
+  parse: ShellParse,
+  collected: FactCollector,
+): 'complete' | 'partial' | 'none' {
+  if (parse.status === 'error') return 'none';
+  if (parse.completeness !== 'complete') return 'partial';
+  if (parse.opaque) return 'partial';
+  if (parse.unresolved.length > 0) return 'partial';
+  // A reported expansion risk means some write target could not be pinned to one
+  // location, so the observed set is not exhaustive even without a parse gap.
+  if (collected.expansionRisk !== null) return 'partial';
+  if (collected.wordGap) return 'partial';
+  if (collected.truncated) return 'partial';
+  return 'complete';
+}
+
 /** Build only the observed facts section, retaining parse incompleteness. */
 export function buildFacts(
   parse: ShellParse,
@@ -190,27 +390,37 @@ export function buildFacts(
   const collected = new FactCollector(parse, options);
   collected.collect();
   const observedWrites = [...new Set(collected.writes)];
+  const completeness = factCompleteness(parse, collected);
   return {
     facts: {
       version: 1,
       parse: { status: 'ok', statements: parse.statements },
       observed: {
-        writes: observedWrites.slice(0, 30),
-        networkCommands: [...new Set(collected.networkCommands)].slice(0, 30),
-        credentialPaths: [...new Set(collected.credentialPaths)].slice(0, 30),
-        pipelineExec: collected.pipelineExec.slice(0, 10),
+        writes: observedWrites.slice(0, LIST_LIMIT),
+        networkCommands: [...new Set(collected.networkCommands)].slice(
+          0,
+          LIST_LIMIT,
+        ),
+        credentialPaths: [...new Set(collected.credentialPaths)].slice(
+          0,
+          LIST_LIMIT,
+        ),
+        pipelineExec: collected.pipelineExec.slice(0, PIPELINE_LIMIT),
         substitutions: parse.substitutions,
         subshells: parse.subshells,
       },
       opaque: parse.opaque,
       opaqueReason: parse.opaqueReasons[0] ?? null,
-      unresolvedExpansions: parse.unresolved.slice(0, 30),
+      unresolvedExpansions: parse.unresolved.slice(0, LIST_LIMIT),
       expansionRisk: collected.expansionRisk,
-      completeness: parse.completeness,
+      completeness,
       parentAuthorizationPresent: options.parentAuthorizationPresent,
       overlapsDeniedEffect: options.overlapsDeniedEffect,
       historyTruncated: options.historyTruncated,
-      ...(observedWrites.length > 30 ? { truncated: true } : {}),
+      // One flag covers every capped category: the reviewer only needs to know
+      // that some observation was cut, and `completeness` already says the set is
+      // not exhaustive.
+      ...(collected.truncated ? { truncated: true } : {}),
     },
     writesOutsideWorkspace: collected.writesOutsideWorkspace,
   };

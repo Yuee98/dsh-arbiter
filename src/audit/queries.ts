@@ -1,10 +1,11 @@
 import type { ReviewSignals } from '../types.js';
 import type {
   CallFilter,
-  CallSummary,
+  CallPage,
   CandidateRecord,
   StoredCall,
 } from './types.js';
+import { callPage } from './call-list.js';
 import {
   LATEST_CALL_FORMAT,
   READABLE_CALL_FORMATS,
@@ -22,8 +23,6 @@ import {
   rowStrings,
   rowTrace,
   rowSignals,
-  isRecord,
-  json,
 } from './rows.js';
 export function configHistory(
   db: DatabaseSync,
@@ -116,91 +115,19 @@ function versionFields(row: Record<string, unknown>): {
   };
 }
 
-export function listCalls(
-  db: DatabaseSync,
-  filter: CallFilter = {},
-): {
-  readonly rows: CallSummary[];
-  readonly total: number;
-} {
-  const clauses: string[] = [];
-  const values: (string | number)[] = [];
-  if (filter.result !== undefined && filter.result.length > 0) {
-    clauses.push('result = ?');
-    values.push(filter.result);
-  }
-  if (filter.tool !== undefined && filter.tool.length > 0) {
-    clauses.push('tool = ?');
-    values.push(filter.tool);
-  }
-  if (filter.sessionId !== undefined && filter.sessionId.length > 0) {
-    clauses.push('session_id = ?');
-    values.push(filter.sessionId);
-  }
-  if (filter.from !== undefined) {
-    clauses.push('ts >= ?');
-    values.push(filter.from);
-  }
-  if (filter.to !== undefined) {
-    clauses.push('ts <= ?');
-    values.push(filter.to);
-  }
-  if (filter.query !== undefined && filter.query.length > 0) {
-    clauses.push('(arguments LIKE ? OR reason LIKE ? OR tool LIKE ?)');
-    const like = `%${filter.query}%`;
-    values.push(like, like, like);
-  }
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
-  const offset = Math.max(filter.offset ?? 0, 0);
-  const totalRow = asRow(
-    db.prepare(`SELECT COUNT(*) AS count FROM calls ${where}`).get(...values),
-  );
-  const total = rowNumber(totalRow['count']);
-  const rows = asRows(
-    db
-      .prepare(
-        `SELECT call_id, ts, session_id, session_kind, tool, arguments, result, reason, approval_mode, decision_rules,
-                trace, record_format_version, execution_status, execution_started_at, execution_finished_at
-           FROM calls ${where} ORDER BY ts DESC LIMIT ? OFFSET ?`,
-      )
-      .all(...values, limit, offset),
-  );
-  return {
-    total,
-    rows: rows.map((row) => {
-      const args = rowJson(row['arguments']);
-      const command = isRecord(args)
-        ? typeof args['command'] === 'string'
-          ? args['command']
-          : typeof args['code'] === 'string'
-            ? args['code']
-            : json(args).slice(0, 240)
-        : '';
-      const trace = rowTrace(row['trace']);
-      const rule = trace.find((stage) => stage.stage === 'rule');
-      return {
-        callId: rowText(row['call_id']),
-        ts: rowNumber(row['ts']),
-        sessionId: rowText(row['session_id']),
-        sessionKind: rowText(row['session_kind'], 'main'),
-        tool: rowText(row['tool']),
-        command,
-        result: rowText(row['result']),
-        reason: rowText(row['reason']),
-        ruleId: rule?.ruleId ?? null,
-        // The historical name is carried with the row; it is not re-read from
-        // whatever the rule list contains today.
-        ruleName: rule?.ruleName ?? null,
-        approvalMode: rowText(row['approval_mode']),
-        decisionRules: rowStrings(row['decision_rules']),
-        executionStatus: rowText(row['execution_status']),
-        executionStartedAt: optionalNumber(row['execution_started_at']),
-        executionFinishedAt: optionalNumber(row['execution_finished_at']),
-        ...versionFields(row),
-      };
-    }),
-  };
+/**
+ * One page of the call list.
+ *
+ * The paging contract — stable total order, bounded window, narrow projection —
+ * belongs to `call-list.ts`; this is the module boundary the store already
+ * exposes, kept so the read adapter has one import site for call reads.
+ *
+ * The detail read (`getCall`) is a separate contract and does return the whole
+ * record: the list must not, or a page would carry every call's full prompt and
+ * response.
+ */
+export function listCalls(db: DatabaseSync, filter: CallFilter = {}): CallPage {
+  return callPage(db, filter);
 }
 
 /** One stored stage row as the detail view presents it. */
@@ -249,7 +176,14 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-/** Template content for the identities a detail view references. */
+/**
+ * Template content for the identities a detail view references.
+ *
+ * A `model_calls.template_id` that names no row is reported as absent rather than
+ * as an empty template: `model_calls` declares no foreign key, so a dangling
+ * reference is representable, and manufacturing a record with `content: null`
+ * would tell the reader the template exists and merely has no text.
+ */
 function templatesFor(
   db: DatabaseSync,
   models: readonly Record<string, unknown>[],
@@ -262,16 +196,27 @@ function templatesFor(
     ),
   ];
   return ids.map((id) => {
-    const row = asRow(
-      db
-        .prepare(
-          'SELECT template_id, content, format_version, renderer_version FROM templates WHERE template_id = ?',
-        )
-        .get(id),
-    );
+    const value = db
+      .prepare(
+        'SELECT template_id, content, format_version, renderer_version FROM templates WHERE template_id = ?',
+      )
+      .get(id);
+    if (value === undefined) {
+      return {
+        templateId: id,
+        // No row at all, which is different from a row this build cannot read.
+        present: false,
+        content: null,
+        formatVersion: null,
+        rendererVersion: null,
+        unreadable: false,
+      };
+    }
+    const row = asRow(value);
     const version = rowNumber(row['format_version'], 1);
     return {
       templateId: id,
+      present: true,
       content: readableTemplate(version) ? rowText(row['content']) : null,
       formatVersion: version,
       rendererVersion: rowText(row['renderer_version']),

@@ -11,16 +11,12 @@ import { ApiError, getJson, postJson } from './api.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
-import {
-  requestCoexistenceRefresh,
-  useCoexistenceFeed,
-} from './coexistence-feed.js';
+import { useCoexistenceFeed } from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
 import type { ConfigIssueView } from './view-issues.js';
 import type {
-  CoexistenceView,
   Draft,
   SaveResponse,
   StateResponse,
@@ -53,13 +49,6 @@ function failureOf(error: unknown): SaveFailure {
   };
 }
 
-/** The payload's own coexistence section, the feed's starting value. */
-function initialCoexistence(
-  state: StateResponse | null,
-): CoexistenceView | null {
-  return state === null ? null : state.coexistence;
-}
-
 export function ArbiterPage(_props: SlotProps): ReactNode {
   const t = useArbiterTranslation();
   const [state, setState] = useState<StateResponse | null>(null);
@@ -76,44 +65,71 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     readonly warnings: readonly ConfigIssueView[];
   }>({ errors: [], warnings: [] });
   const generation = useRef(0);
+  /**
+   * Findings belong to the draft revision that produced them.
+   *
+   * Editing invalidates the current revision, and a late `/validate` answer is
+   * dropped when its revision is no longer current, so a rule never keeps an
+   * error that was reported for different content.
+   */
+  const validationRevision = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
     setError(errorText(failure));
   }, []);
-  // The feed owns the live coexistence view; the payload's own value is only
-  // the initial one, so a conflict found while the page is open still shows.
-  const coexistenceFeed = useCoexistenceFeed(
-    initialCoexistence(state),
-    onFailure,
-  );
+  // The feed keeps the conflict view live; the payload's value only seeds it.
+  const coexistence = useCoexistenceFeed(state, onFailure);
 
-  const load = useCallback(async (): Promise<void> => {
-    const ticket = generation.current + 1;
-    generation.current = ticket;
-    setBusy(true);
-    setError(null);
-    try {
-      const value = await getJson('/state', stateResponse);
-      if (generation.current !== ticket) return;
-      setState(value);
-      setDraft(cloneDraft(value.config));
-      // The state we just read is authoritative for the overlay as well.
-      requestCoexistenceRefresh();
-      setDirty(false);
-      setSaveStatus('idle');
-      setAuditNotice(null);
-      setValidation({ errors: value.loadErrors, warnings: value.warnings });
-    } catch (errorValue) {
-      if (generation.current === ticket) setError(errorText(errorValue));
-    } finally {
-      if (generation.current === ticket) setBusy(false);
-    }
-  }, []);
+  /**
+   * Read the host state.
+   *
+   * When a save initiated the reload, the submitted draft revision travels with
+   * it: the decision to keep or replace the draft is made after `/state`
+   * resolves, immediately before the draft is written, so edits made during
+   * either the save or the reload survive.
+   */
+  const load = useCallback(
+    async (
+      options: { readonly submittedRevision?: number } = {},
+    ): Promise<void> => {
+      const ticket = generation.current + 1;
+      generation.current = ticket;
+      setBusy(true);
+      setError(null);
+      try {
+        const value = await getJson('/state', stateResponse);
+        if (generation.current !== ticket) return;
+        // A reload or a completed save replaces the draft, so any answer for
+        // the previous draft is stale from here on.
+        const edited = validationRevision.current !== options.submittedRevision;
+        validationRevision.current += 1;
+        setState(value);
+        if (options.submittedRevision !== undefined && edited) {
+          // The user edited after submitting the save. The applied
+          // configuration is what was sent; the newer edits stay unsaved.
+          setValidation({ errors: [], warnings: [] });
+          return;
+        }
+        setDraft(cloneDraft(value.config));
+        setDirty(false);
+        setSaveStatus('idle');
+        setAuditNotice(null);
+        setValidation({ errors: value.loadErrors, warnings: value.warnings });
+      } catch (errorValue) {
+        if (generation.current === ticket) setError(errorText(errorValue));
+      } finally {
+        if (generation.current === ticket) setBusy(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     load().catch(onFailure);
   }, [load, onFailure]);
 
   const onDraft = useCallback((mutator: (draft: Draft) => void): void => {
+    validationRevision.current += 1;
+    setValidation({ errors: [], warnings: [] });
     setDraft((current) => {
       if (current === null) return current;
       const next = cloneDraft(current);
@@ -125,12 +141,15 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
   const validate = useCallback(async (): Promise<void> => {
     if (draft === null) return;
+    const revision = validationRevision.current;
     try {
       const response = await postJson(
         '/validate',
         { config: draft },
         validationResponse,
       );
+      // A draft edit while the request was in flight makes this answer stale.
+      if (validationRevision.current !== revision) return;
       setValidation({ errors: response.errors, warnings: response.warnings });
     } catch (errorValue) {
       setError(errorText(errorValue));
@@ -139,6 +158,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
   const save = useCallback(async (): Promise<void> => {
     if (state === null || draft === null) return;
+    // Findings from this save belong to the draft submitted here.
+    const revision = validationRevision.current;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -151,8 +172,9 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         saveResponse,
       );
       // Reload first: the reload clears transient state, so the saved-and-
-      // effective feedback is published after the fresh identities arrive.
-      await load();
+      // effective feedback is published after the fresh identities arrive. A
+      // draft edited during the request is preserved instead of discarded.
+      await load({ submittedRevision: revision });
       // Saved and effective are reported separately: the API only returns this
       // payload after the candidate was written and applied.
       setSaveStatus(response.changed ? 'saved' : 'unchanged');
@@ -173,7 +195,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         const errors = draftErrors(
           errorValue instanceof ApiError ? errorValue.payload : null,
         );
-        setValidation((current) => ({ ...current, errors }));
+        // The errors describe the draft that was submitted. If the editor has
+        // moved on, they must not be attached to whatever rule now sits at that
+        // index; the failure is still reported, without per-rule findings.
+        if (validationRevision.current === revision)
+          setValidation((current) => ({ ...current, errors }));
         setError(t('config.invalid', { errors: issuesText(errors, t) }));
         return;
       }
@@ -240,12 +266,19 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
       {tab === 'status' ? (
         <StatusPanel
-          state={{ ...state, coexistence: coexistenceFeed.view }}
+          state={{ ...state, coexistence: coexistence.view }}
           draft={draft}
           onDraft={onDraft}
         />
       ) : null}
-      {tab === 'rules' ? <RulesPanel draft={draft} onDraft={onDraft} /> : null}
+      {tab === 'rules' ? (
+        <RulesPanel
+          draft={draft}
+          onDraft={onDraft}
+          errors={validation.errors}
+          warnings={validation.warnings}
+        />
+      ) : null}
       {tab === 'reviewer' ? (
         <ReviewerPanel draft={draft} onDraft={onDraft} />
       ) : null}

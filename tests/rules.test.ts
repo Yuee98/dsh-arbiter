@@ -72,11 +72,24 @@ describe('shell reader', () => {
     expect(parse.completeness).toBe('complete');
   });
 
-  test('marks substitutions, subshells and interpreters incomplete', () => {
-    expect(parseShell('echo $(date)').completeness).toBe('partial');
-    expect(parseShell('(echo hi)').completeness).toBe('partial');
-    expect(parseShell('bash deploy.sh').completeness).toBe('partial');
-    expect(parseShell('echo $UNKNOWN').completeness).toBe('partial');
+  test('separates structure, word values and effect opacity', () => {
+    // A reliably parsed substitution or subshell is *structure* the adapter read;
+    // its commands become separate subjects, so coverage still has to include
+    // them, but the structure itself is complete.
+    expect(parseShell('echo $(date)').completeness).toBe('complete');
+    expect(parseShell('(echo hi)').completeness).toBe('complete');
+    // An interpreter makes the effects opaque; the command text is still read.
+    const interpreter = parseShell('bash deploy.sh');
+    expect(interpreter.completeness).toBe('complete');
+    expect(interpreter.opaque).toBe(true);
+    expect(interpreter.opaqueReasons).toContain('interpreter "bash"');
+    // A dynamic word keeps its raw expression and does not break structure.
+    const dynamic = parseShell('echo $UNKNOWN');
+    expect(dynamic.completeness).toBe('complete');
+    expect(dynamic.unresolved).toContain('$UNKNOWN');
+    expect(dynamic.commands[0]?.words[1]?.status).toBe('dynamic');
+    // Structure the adapter could not account for stays incomplete.
+    expect(parseShell('echo (').completeness).toBe('partial');
   });
 
   test('observes pipe-to-interpreter and credential paths', () => {
@@ -725,7 +738,9 @@ describe('rule priority and coverage', () => {
     });
   });
 
-  test('incomplete parse never grants allow', () => {
+  test('an uncovered nested command never grants allow', () => {
+    // `$(date)` parses reliably, so the structure is complete — but `date` is a
+    // command this call runs, and the rule covered only the outer text.
     const evaluation = evaluate(
       [
         rule({
@@ -741,6 +756,29 @@ describe('rule priority and coverage', () => {
         }),
       ],
       'echo $(date)',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
+  test('incomplete structure never grants allow', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'any',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: 'echo(?: .*)?',
+            }),
+          ],
+        }),
+      ],
+      'echo (',
     );
     expect(evaluation.path).toEqual({
       kind: 'review-default',
@@ -1033,6 +1071,332 @@ describe('rule priority and coverage', () => {
       kind: 'review-default',
       reason: 'unresolved',
     });
+  });
+
+  test('canonical text decides, so a quoted argument is not two arguments', () => {
+    const rules = (pattern: string): CommandRule[] => [
+      rule({
+        id: 'exact',
+        verdict: 'allow',
+        conditions: [condition({ target: 'command', kind: 'exact', pattern })],
+      }),
+    ];
+    // Each command is allowed only by the text it actually normalizes to.
+    expect(verdictOf(evaluate(rules("echo 'a b'"), 'echo "a b"'))).toBe(
+      'allow',
+    );
+    expect(verdictOf(evaluate(rules('echo a b'), 'echo "a b"'))).toBe('review');
+    expect(verdictOf(evaluate(rules("echo ''"), 'echo ""'))).toBe('allow');
+    expect(verdictOf(evaluate(rules('echo'), 'echo ""'))).toBe('review');
+    // Concatenated quoting normalizes to the same single word.
+    expect(verdictOf(evaluate(rules('gh pr view 42'), "gh pr v'ie'w 42"))).toBe(
+      'allow',
+    );
+  });
+
+  test('every nested command has to be covered by the allow', () => {
+    const nested = evaluate(
+      [
+        rule({
+          id: 'ok',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+          ],
+        }),
+      ],
+      'echo hi; echo $(rm -rf /)',
+    );
+    expect(nested.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+    // Covering the outer text is not enough: the substitution's own command is a
+    // separate subject, so a rule that only lists both outer texts stays partial.
+    const outerOnly = evaluate(
+      [
+        rule({
+          id: 'outer',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'echo $(date)',
+            }),
+          ],
+        }),
+      ],
+      'echo hi; echo $(date)',
+    );
+    expect(outerOnly.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+    // Covering every subject, including the nested command, completes the call.
+    const covered = evaluate(
+      [
+        rule({
+          id: 'all',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'echo $(date)',
+            }),
+            condition({ target: 'command', kind: 'exact', pattern: 'date' }),
+          ],
+        }),
+      ],
+      'echo hi; echo $(date)',
+    );
+    expect(verdictOf(covered)).toBe('allow');
+  });
+
+  test('an incomplete structure makes a higher-priority deny uncertain', () => {
+    // The `(` is not part of any parsed node. The deny matched no known command,
+    // but the unread fragment could have contained one, so a tool-wide allow must
+    // not authorize the call.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-rm',
+          verdict: 'deny',
+          conditions: [
+            condition({ target: 'command', kind: 'glob', pattern: 'rm*' }),
+          ],
+        }),
+        rule({
+          id: 'bash-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'echo ok; echo (',
+    );
+    expect(evaluation.rules.map((entry) => [entry.id, entry.outcome])).toEqual([
+      ['deny-rm', 'unknown'],
+      ['bash-allow', 'match'],
+    ]);
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a certain match still decides when the structure is incomplete', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'rm -rf /',
+            }),
+          ],
+        }),
+        rule({
+          id: 'bash-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'rm -rf /; echo (',
+    );
+    expect(
+      evaluation.path.kind === 'rule' ? evaluation.path.verdict : null,
+    ).toBe('deny');
+  });
+
+  test('a PowerShell command line is never given a bash structure', () => {
+    // `'a''b'` is `a'b` in PowerShell and `ab` in bash; treating the bash reading
+    // as confirmed could allow a call whose real argument is different.
+    const toolAllow = [
+      rule({
+        id: 'pwsh-allow',
+        verdict: 'allow',
+        conditions: [
+          condition({ target: 'tool', kind: 'exact', pattern: 'pwsh' }),
+        ],
+      }),
+    ];
+    const shellCall = callTool(toolAllow, 'pwsh', {
+      command: "Write-Output 'a''b'",
+    });
+    expect(shellCall.parse.commands).toEqual([]);
+    // A shell-tool call without a verified structure cannot be covered by an
+    // argument condition, and its command conditions stay unknown.
+    expect(shellCall.rules[0]?.outcome).toBe('match');
+    const denyCommand = callTool(
+      [
+        rule({
+          id: 'deny',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'glob',
+              pattern: 'Write-Output*',
+            }),
+          ],
+        }),
+        ...toolAllow,
+      ],
+      'pwsh',
+      { command: "Write-Output 'a''b'" },
+    );
+    expect(denyCommand.rules[0]?.outcome).toBe('unknown');
+    expect(denyCommand.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a dynamic redirect target is never a confirmed path', () => {
+    // `/workspace/$REL` looks absolute but can expand anywhere, so a deny that
+    // names the expanded path must stay uncertain rather than becoming no-match.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-passwd',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+        rule({
+          id: 'bash-allow',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'echo hi > /workspace/$REL',
+    );
+    expect(evaluation.rules.map((entry) => [entry.id, entry.outcome])).toEqual([
+      ['deny-passwd', 'unknown'],
+      ['bash-allow', 'match'],
+    ]);
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a static redirect is still decided exactly', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-passwd',
+          verdict: 'deny',
+          conditions: [
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/etc/passwd',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > /etc/passwd',
+    );
+    expect(verdictOf(evaluation)).toBe('deny');
+  });
+
+  test('a dynamic assignment is matchable by the text that was written', () => {
+    // The value is unknown, but the assignment's own text is not, so a rule that
+    // names it can match it. Its inner command still has to be covered separately.
+    const assignmentOnly = evaluate(
+      [
+        rule({
+          id: 'array',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'variable_assignment',
+              kind: 'exact',
+              pattern: 'x=($(rm y))',
+            }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(assignmentOnly.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+    const both = evaluate(
+      [
+        rule({
+          id: 'both',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'variable_assignment',
+              kind: 'exact',
+              pattern: 'x=($(rm y))',
+            }),
+            condition({ target: 'command', kind: 'exact', pattern: 'rm y' }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(verdictOf(both)).toBe('allow');
+    // Covering only the inner command is not enough either.
+    const commandOnly = evaluate(
+      [
+        rule({
+          id: 'inner',
+          verdict: 'allow',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'rm y' }),
+          ],
+        }),
+      ],
+      'x=($(rm y))',
+    );
+    expect(commandOnly.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
+  test('a dynamic word keeps its raw expression as matchable text', () => {
+    const rules = (pattern: string): CommandRule[] => [
+      rule({
+        id: 'exact',
+        verdict: 'allow',
+        conditions: [condition({ target: 'command', kind: 'exact', pattern })],
+      }),
+    ];
+    expect(
+      verdictOf(
+        evaluate(rules('gpt-relay send $CONTENT'), 'gpt-relay send $CONTENT'),
+      ),
+    ).toBe('allow');
+    // Quoting forms are still distinguishable, so they are different texts.
+    expect(
+      verdictOf(
+        evaluate(rules('gpt-relay send $CONTENT'), 'gpt-relay send "$CONTENT"'),
+      ),
+    ).toBe('review');
   });
 
   test('an explicit whole-tool allow covers a shell call', () => {
@@ -1383,15 +1747,23 @@ describe('rule tester', () => {
     expect(result.path).toBe('allow');
   });
 
-  test('reports path, partial coverage and unresolved facts', () => {
+  test('reports path, structure and unresolved words independently', () => {
     const result = testRules('bash: echo $UNKNOWN', [], {
       identity: 'main',
       workspaceRoot: '/workspace/app',
       cwd: '/workspace/app',
     });
     expect(result.path).toBe('review(default)');
-    expect(result.parse.completeness).toBe('partial');
+    // A dynamic word keeps its raw expression; it is not a structural gap.
+    expect(result.parse.completeness).toBe('complete');
     expect(result.parse.unresolved).toContain('$UNKNOWN');
+    expect(result.normalization?.commands[0]?.text).toBe('echo $UNKNOWN');
+    expect(result.normalization?.commands[0]?.words[1]).toEqual({
+      raw: '$UNKNOWN',
+      text: '$UNKNOWN',
+      status: 'dynamic',
+      reasons: ['variable'],
+    });
   });
 
   test('parses JSON input and tool names', () => {
