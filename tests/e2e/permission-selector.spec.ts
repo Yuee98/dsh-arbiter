@@ -509,7 +509,19 @@ test('removing the client overlay drops the confirmed state and leaves the backe
     await page.reload();
     await openHost(page, host);
     await expect(arbiterControl(page)).toHaveCount(0);
-    steps.add('reloaded-without-override');
+    // Positive proof of the fallback: the host's own permission control holds
+    // the seat and is operable, not merely "no arbiter occupant".
+    const native = permissionSeat(page).getByRole('button').first();
+    await expect(native).toBeVisible();
+    await expect(native).toBeEnabled();
+    const nativeLabel = await native.getAttribute('aria-label');
+    // The host's own trigger names itself as the access mode selector.
+    expect(nativeLabel ?? '').toMatch(/访问模式|Access mode/u);
+    await native.click();
+    const nativeMenu = page.getByRole('menu').or(page.getByRole('dialog'));
+    await expect(nativeMenu.first()).toBeVisible();
+    steps.add('native-control-restored', { nativeLabel });
+    await page.keyboard.press('Escape');
     await testInfo.attach('reloaded.png', {
       body: await page.screenshot({ fullPage: false }),
       contentType: 'image/png',
@@ -817,12 +829,124 @@ test('a host preset the backend refuses leaves admission and shows a failure', a
     await expect(
       arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
     ).toBeVisible();
+
+    // A rejected selection through Arbiter's own menu: `auto` is not an option,
+    // so the failure is produced by a preset the host no longer accepts. The
+    // selector must report it instead of claiming success, and the confirmed
+    // admission must not move.
+    const beforeMenu = await admissionView(host, sessionId);
+    const menuLabels = await arbiterControl(page)
+      .getByRole('menu', { name: '会话权限' })
+      .count();
+    expect(menuLabels).toBe(0);
+    await arbiterControl(page)
+      .getByRole('button', { name: /Arbiter ·/u })
+      .click();
+    const items = arbiterControl(page).getByRole('menu', { name: '会话权限' });
+    await expect(items).toBeVisible();
+    await expect(
+      items.getByRole('menuitemradio', { name: 'auto' }),
+    ).toHaveCount(0);
+    await arbiterControl(page)
+      .getByRole('menuitemradio', { name: '完全权限' })
+      .click();
+    const confirmDialog = arbiterControl(page).getByRole('dialog');
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog
+      .getByRole('checkbox', { name: '我已了解风险，愿意继续' })
+      .check();
+    await confirmDialog.getByRole('button', { name: '切换权限' }).click();
+    await expect(confirmDialog).toHaveCount(0);
+    const afterMenu = await waitForAdmission(
+      host,
+      sessionId,
+      (admission) => admission['enabled'] === false,
+    );
+    expect(afterMenu).not.toBeNull();
+    expect(afterMenu?.['at']).not.toBe(beforeMenu['at']);
+    await expect(
+      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
+    ).toBeVisible();
     await testInfo.attach('refused-preset.png', {
       body: await arbiterControl(page).screenshot(),
       contentType: 'image/png',
     });
   } finally {
     await testInfo.attach('refused-preset-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
+test('an external same-value slash exit updates the selector without focus', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-external-exit'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-EXTERNAL RUN echo external-warmup');
+    const session = await settledSession(host, 'SEL-EXTERNAL');
+    const sessionId = session.sessionId;
+
+    await arbiterControl(page)
+      .getByRole('button', { name: /未启用自动审查/u })
+      .click();
+    await arbiterControl(page)
+      .getByRole('menu', { name: '会话权限' })
+      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
+      .click();
+    expect(
+      await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === true,
+      ),
+    ).not.toBeNull();
+
+    // The user exits through the native slash entry, not through the Arbiter
+    // menu. Guarded already runs workspace-write, so this writes no permission
+    // event: only the command pair can carry the exit, and no focus/online
+    // event happens here.
+    await sendPrompt(page, '/permission workspace-write');
+    const settled = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.events.some((event) => event.type === 'command/done'),
+      60_000,
+    );
+    expect(permissionCommands(settled?.events ?? []).at(-1)).toMatchObject({
+      args: ' workspace-write',
+      settled: 'success',
+    });
+    expect(
+      await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === false,
+      ),
+    ).not.toBeNull();
+
+    // The mounted selector adopted the exit from the session's own event
+    // stream; nothing in this case dispatched focus, online or visibility.
+    await expect(
+      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
+    ).toBeVisible();
+    steps.add('external-exit-adopted', {
+      commands: permissionCommands(settled?.events ?? []),
+    });
+    await testInfo.attach('external-exit.png', {
+      body: await arbiterControl(page).screenshot(),
+      contentType: 'image/png',
+    });
+  } finally {
+    await testInfo.attach('external-exit-steps.json', {
       body: steps.json(),
       contentType: 'application/json',
     });

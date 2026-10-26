@@ -3,7 +3,8 @@ import { ArbiterI18nProvider } from './i18n-provider.js';
 import { createArbiterI18n } from './i18n.js';
 import { ArbiterPage } from './page.js';
 import { createHostBridge } from './host-bridge.js';
-import { hostHalfPresent } from './permission-slot-claim.js';
+import { claimWhenPresent, hostHalfPresent } from './permission-slot-claim.js';
+import { subscribeConnectionRecovery } from './host-bridge.js';
 import {
   PermissionSelector,
   PERMISSION_SLOT_PRIORITY,
@@ -49,28 +50,26 @@ export function apply(ctx: ClientContext): void {
   // the seat to the host's own control instead of showing an inert override.
   ctx.slots.inject('conversation.input.permission', () => {
     // Ownership rides one fiber effect: the probe, the claim and the release
-    // are all cancelled or disposed with this declaration.
-    ctx.effect(() => {
-      let claim: (() => void) | null = null;
-      let cancelled = false;
-      hostHalfPresent()
-        .then((present) => {
-          if (cancelled || !present) return;
-          claim = ctx.slots.register(
-            {
-              name: 'conversation.input.permission',
-              priority: PERMISSION_SLOT_PRIORITY,
-            },
-            RegisteredPermissionSelector,
-          );
-        })
-        .catch(() => undefined);
-      return () => {
-        cancelled = true;
-        claim?.();
-        claim = null;
-      };
-    }, 'Arbiter permission seat claim');
+    // are all disposed with this declaration.
+    ctx.effect(
+      () =>
+        claimWhenPresent({
+          present: hostHalfPresent,
+          claim: () =>
+            ctx.slots.register(
+              {
+                name: 'conversation.input.permission',
+                priority: PERMISSION_SLOT_PRIORITY,
+              },
+              RegisteredPermissionSelector,
+            ),
+          // A boot that could not reach the host half must not lose the seat for
+          // the page's whole lifetime: a recovered connection retries once.
+          subscribe: (retry) =>
+            subscribeConnectionRecovery((name) => ctx.get(name), retry),
+        }),
+      'Arbiter permission seat claim',
+    );
   });
 }
 

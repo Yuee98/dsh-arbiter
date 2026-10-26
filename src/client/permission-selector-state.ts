@@ -124,6 +124,32 @@ export function confirmed(
   };
 }
 
+/**
+ * A confirmed answer that arrives while a mutation is still reconciling.
+ *
+ * The value is authoritative and is shown, but the control stays busy and
+ * noninteractive: the mutation has not finished deciding whether the switch
+ * applied, and letting a second selection start here would produce two
+ * overlapping mutations whose ordering nothing guarantees.
+ */
+export function confirmedWhileWriting(
+  state: AdmissionState,
+  view: SessionAdmissionView,
+): AdmissionState {
+  return {
+    ...state,
+    confirmed: view,
+    pending: true,
+    failure: null,
+    writing: true,
+  };
+}
+
+/** A mutation finished: only now may the control become interactive again. */
+export function settled(state: AdmissionState): AdmissionState {
+  return { ...state, pending: false, writing: false, readQueued: false };
+}
+
 /** A failure keeps the last confirmed view: the requested value never lands. */
 export function failed(
   state: AdmissionState,

@@ -21,10 +21,12 @@ import { getAdmission, setAdmission } from './api.js';
 import {
   EMPTY_ADMISSION_STATE,
   confirmed,
+  confirmedWhileWriting,
   failed,
   failureFromAnswer,
   failureOf,
   queueRead,
+  settled,
   started,
   writing,
 } from './permission-selector-state.js';
@@ -75,6 +77,10 @@ interface FlowOps {
   readonly markQueued: () => void;
   readonly markFailed: (failure: AdmissionFailure) => void;
   readonly markError: (ticket: Ticket, error: unknown) => void;
+  /** Apply a confirmation without releasing an in-flight mutation's busy flags. */
+  readonly applyWhileWriting: (answer: SessionAdmissionResponse) => void;
+  /** Release the busy flags: only the owning mutation may do this. */
+  readonly markSettled: () => void;
 }
 
 /** Ticket-guarded answers; a superseded answer is dropped, never replayed. */
@@ -123,6 +129,19 @@ function useFlow(sessionId: string | undefined): {
   const markFailed = useCallback((failure: AdmissionFailure): void => {
     setState((old) => failed(old, failure));
   }, []);
+  const applyWhileWriting = useCallback(
+    (answer: SessionAdmissionResponse): void => {
+      if (!answer.ok) {
+        setState((old) => failed(old, failureFromAnswer(answer)));
+        return;
+      }
+      setState((old) => confirmedWhileWriting(old, answer.admission));
+    },
+    [],
+  );
+  const markSettled = useCallback((): void => {
+    setState((old) => settled(old));
+  }, []);
   const markError = useCallback(
     (ticket: Ticket, error: unknown): void => {
       if (!current(ticket)) return;
@@ -141,13 +160,17 @@ function useFlow(sessionId: string | undefined): {
       markQueued,
       markFailed,
       markError,
+      applyWhileWriting,
+      markSettled,
     }),
     [
       apply,
+      applyWhileWriting,
       current,
       markError,
       markFailed,
       markQueued,
+      markSettled,
       markStarted,
       markWriting,
       next,
@@ -236,21 +259,31 @@ const EXIT_CONFIRM_ATTEMPTS = 15;
 const EXIT_CONFIRM_DELAY_MS = 120;
 
 /**
- * Confirm that a native switch really left Arbiter.
+ * Confirm that a native switch really applied the requested preset.
  *
- * The read is the only evidence; the loop exists because #4 writes the exit
- * record one microtask after the command handler, and the host may commit the
- * command pair before that write lands. It is bounded and authoritative — no
- * timer-driven polling of a second state.
+ * Two independent facts are required, and neither is the command's `matched`
+ * flag:
+ *   - the host's own current selection is the requested preset (the positive
+ *     evidence that the switch happened), and
+ *   - Arbiter is no longer enabled for the session, when it was enabled before
+ *     (the exit #4 records after a successful command).
+ *
+ * The loop exists because #4 writes the exit record one microtask after the
+ * handler; it is bounded and reads only existing authorities.
  */
-async function reconcileExit(options: {
+async function reconcileSwitch(options: {
   readonly read: () => Promise<void>;
   readonly view: () => AdmissionState['confirmed'];
+  readonly hostPreset: () => string | null;
+  readonly preset: string;
+  readonly wasEnabled: boolean;
 }): Promise<boolean> {
   for (let attempt = 0; attempt < EXIT_CONFIRM_ATTEMPTS; attempt += 1) {
     await options.read();
+    const applied = options.hostPreset() === options.preset;
     const current = options.view();
-    if (current !== null && !current.enabled) return true;
+    const exited = current !== null && !current.enabled;
+    if (applied && (exited || !options.wasEnabled)) return true;
     await new Promise((resolve) => {
       setTimeout(resolve, EXIT_CONFIRM_DELAY_MS);
     });
@@ -315,6 +348,7 @@ function useAdmissionWrites(options: {
         ops.markError(ticket, error);
       } finally {
         if (barrier.closed()) await read();
+        if (ops.current(ticket)) ops.markSettled();
       }
     },
     [barrier, ops, read, sessionId],
@@ -332,6 +366,9 @@ function useAdmissionWrites(options: {
         return;
       }
       if (barrier.writing()) return;
+      // Read before the mutation: whether the session was admitted decides
+      // whether an admission exit is part of the expected outcome.
+      const wasEnabled = view()?.enabled === true;
       const ticket = ops.next();
       barrier.opened();
       ops.markWriting();
@@ -349,9 +386,14 @@ function useAdmissionWrites(options: {
         // exit one microtask after the handler, and a handler can settle with an
         // error. Confirm through the authoritative answer, bounded, so neither a
         // successful exit nor a refused one is misreported.
-        const exit = await reconcileExit({
+        const exit = await reconcileSwitch({
           read: reconcileFor(ticket),
           view,
+          // The host's own selection is the independent evidence; the admission
+          // exit alone could be true simply because it was already disabled.
+          hostPreset: () => bridge.hostPreset(sessionId)?.currentValue ?? null,
+          preset,
+          wasEnabled,
         });
         if (!ops.current(ticket)) return;
         if (!exit) ops.markFailed({ code: 'command-not-applied', detail: '' });
@@ -364,6 +406,9 @@ function useAdmissionWrites(options: {
         // during it is redundant and would clear the refusal just recorded.
         barrier.clear();
         barrier.closed();
+        // Ownership: an operation superseded by a newer one must not release
+        // the newer one's busy state.
+        if (ops.current(ticket)) ops.markSettled();
       }
     },
     [barrier, bridge, ops, read, reconcileFor, sessionId, view],
@@ -426,7 +471,9 @@ function useReads(options: {
       try {
         const answer = await getAdmission(sessionId);
         if (!ops.current(ticket)) return;
-        ops.apply(answer);
+        // The mutation is still deciding; only its owner releases the busy
+        // state, so an intermediate answer cannot make the control actionable.
+        ops.applyWhileWriting(answer);
       } catch (error) {
         ops.markError(ticket, error);
       }

@@ -989,6 +989,161 @@ describe('arbiter permission selector', () => {
     ).toBeInTheDocument();
   });
 
+  test('stays busy while a native switch is still being confirmed', async () => {
+    const command = deferred<unknown>();
+    const reads: string[] = [];
+    let admitted = true;
+    let applied = false;
+    server.use(
+      http.get('*/api/arbiter/sessions', () => {
+        reads.push('read');
+        return HttpResponse.json(
+          admitted
+            ? admission({ enabled: true, reason: 'session-enabled' })
+            : admission({ enabled: false }),
+        );
+      }),
+      http.post('*/api/arbiter/sessions', () => {
+        reads.push('write');
+        return HttpResponse.json(admission({ enabled: true }));
+      }),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          selectPreset: () => command.promise.then(() => true),
+          hostPreset: () => ({
+            currentValue: applied ? 'read-only' : 'workspace-write',
+          }),
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
+    );
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+
+    // The command settles, but the first authoritative answer still says
+    // "admitted" and the host selection has not moved yet. The control must
+    // stay busy and refuse a second selection in that window.
+    await act(async () => {
+      command.resolve({ ok: true, value: { matched: true } });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(reads.length).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
+    expect(reads).not.toContain('write');
+
+    // Once the switch really applied, the control settles to the confirmed
+    // state and never overwrites it with an intermediate answer.
+    admitted = false;
+    applied = true;
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('button', { name: /未启用自动审查（只读）/u }),
+        ).toBeEnabled();
+      },
+      { timeout: 10_000 },
+    );
+  }, 20_000);
+
+  test('a rejected switch on an already disabled session is a failure, not success', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          // Recognized, but the host never applied it: the selection stays put.
+          selectPreset: () => Promise.resolve(true),
+          hostPreset: () => ({ currentValue: 'workspace-write' }),
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /未启用自动审查/u }),
+    );
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+    // Arbiter was already disabled, so an admission read proves nothing about
+    // the switch; the host selection is the independent evidence.
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/宿主命令未实际生效，仍显示上次确认的状态/u),
+        ).toBeInTheDocument();
+      },
+      { timeout: 10_000 },
+    );
+  }, 20_000);
+
+  test('refreshes the catalog when the connection generation is replaced', async () => {
+    let recovery: (() => void) | null = null;
+    let catalogReads = 0;
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          // The first catalog belongs to the old generation; the recovered host
+          // serves a different option set with no catalog-changed event.
+          catalog: () => {
+            catalogReads += 1;
+            return Promise.resolve(
+              catalogReads === 1
+                ? [{ value: 'read-only', name: '只读' }]
+                : [{ value: 'workspace-write', name: '工作区内修改' }],
+            );
+          },
+          observe: (_id, _listener, onCatalogChanged) => {
+            recovery = onCatalogChanged;
+            return () => undefined;
+          },
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /未启用自动审查/u }),
+    );
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /取消/u }));
+
+    // A recovered generation invalidates the options as well as the admission.
+    await act(async () => {
+      recovery?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(catalogReads).toBe(2);
+    });
+    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '工作区内修改',
+      }),
+    ).toBeInTheDocument();
+  });
+
   test('offers the host presets but never the auto or derived entries', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),

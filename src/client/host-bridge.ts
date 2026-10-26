@@ -243,8 +243,11 @@ function observeAll(
   }
   // The connection generation is a client-level service, not a member of the
   // session face: subscribing the session would install a silent no-op and a
-  // silent reconnect would never trigger a reread.
-  stops.push(observeConnection(get, listener));
+  // silent reconnect would never trigger a reread. A recovered generation
+  // invalidates both the admission answer and the selectable catalog, because
+  // the recovered host may serve a different option set without any catalog
+  // event of its own.
+  stops.push(observeConnection(get, listener, onCatalogChanged));
   const remote = get('remote');
   if (isRecord(remote) && typeof remote['$on'] === 'function') {
     const on = remote['$on'];
@@ -348,9 +351,40 @@ function observeProjection(
 function observeConnection(
   get: (name: string) => unknown,
   listener: () => void,
+  onCatalogChanged: () => void,
 ): () => void {
   const connection = get('connection');
   if (!isRecord(connection)) return () => undefined;
   const generation = observableOf(connection['generation']);
-  return generation === null ? () => undefined : generation.subscribe(listener);
+  if (generation === null) return () => undefined;
+  return generation.subscribe(() => {
+    listener();
+    onCatalogChanged();
+  });
+}
+
+/**
+ * Run `retry` whenever the host connection is re-established.
+ *
+ * The generation source is the only public signal that a page which booted
+ * against an unreachable host now has one; it is read from the client
+ * connection service, and an absent service simply means no retry signal.
+ */
+export function subscribeConnectionRecovery(
+  get: (name: string) => unknown,
+  retry: () => void,
+): () => void {
+  const connection = get('connection');
+  if (!isRecord(connection)) return () => undefined;
+  const generation = observableOf(connection['generation']);
+  if (generation === null) return () => undefined;
+  let last = generation.getSnapshot();
+  return generation.subscribe(() => {
+    const next = generation.getSnapshot();
+    const before = isRecord(last) ? last['id'] : undefined;
+    const after = isRecord(next) ? next['id'] : undefined;
+    last = next;
+    // Only a replacement is a recovery; an unrelated publication is not.
+    if (after !== undefined && after !== before) retry();
+  });
 }
