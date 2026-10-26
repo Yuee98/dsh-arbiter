@@ -485,9 +485,7 @@ describe('arbiter permission selector', () => {
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: /正在应用/u }),
-      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: /正在应用/u })).toBeDisabled();
     });
 
     // The write commits; its answer is the newest server state.
