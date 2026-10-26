@@ -29,6 +29,18 @@
 
 首版发布验收统一补齐英文资源，核对中英文 key 和插值覆盖，并在宿主中验证语言切换、主要页面与弹窗、提示及英文布局。英文翻译留到发布前不意味着 i18n 接入也延期；用户内容、模型原文、审计证据和稳定协议值不随界面语言改写。当前原型的插件自有文案已完成中文 locale 接入，并接通宿主语言订阅；新版功能继续沿用这套机制，新增文案和完整交互仍在所属功能内验收。现有原型通过工程基线不代表首版产品验收完成；开发与发布检查见[开发基线](development-baseline.md)。文档和 issues 继续使用中文。
 
+### 英文资源补齐结果（#23，2026-10-26）
+
+14 个模块、705 个中文 key 已全部译入 `locale/en/`，并在 `src/client/i18n/resources.ts` 与中文并列登记：`about`、`advanced`、`callDetail`、`coexistence`、`config`、`denials`、`logs`、`page`、`permission`、`reviewer`、`ruleTest`、`rules`、`status` 与既有的 `common`。文件内嵌套结构与中文逐层一致，组件继续使用点号 key，不新增第二套 key 命名。
+
+翻译规则：用户内容、协议值与稳定标识保持原样不译，包括 `R1`–`R8`、`guardian`、`trusted`／`guarded`、`ARBITER_DENIED`、`arbiter-config-v1`／`v2`、`deny`／`force-ask`／`force-review`／`allow`、`review(default)`、provider／model 标识与审计原文。术语统一为 Arbiter、Reviewer、guardian、trusted、force-review 等专有名词，不随模块改写。
+
+校验：`pnpm check:i18n:release` 在补齐后退出 0，逐条核对覆盖、结构与插值一致性；`InspectCatalog` 的插值检查在两种语言间比对 `{count}`、`{page}`、`{revision}` 等占位符集合，占位符缺失或改名都会失败。英文补齐后不再有以中文回退冒充英文完成的路径。
+
+英文补齐的连带影响（同一 PR 已按新事实校正）：`tests/unit/i18n.test.ts` 的英文渲染断言由中文回退文本改为真实英文；`tests/e2e/locale-smoke.spec.ts` 与 `tests/e2e/permission-selector.spec.ts` 中原先假定「英文只有 common」的断言改为「英文渲染自己的资源，且刷新后保持」；十个 RTL 用例的同名假定一并更新。**逐条回退能力本身仍由独立的合成目录用例证明**（`tests/unit/i18n.test.ts` 的 per-leaf／per-module 用例），不依赖真实英文缺失。
+
+宿主内语言切换与布局验收：`tests/e2e/locale-smoke.spec.ts` 覆盖配置框架在 zh → en → zh 的切换与刷新；`tests/e2e/locale-surfaces.spec.ts` 在同一真实宿主内覆盖规则编辑、规则测试区、Reviewer 入口与连接测试弹窗、日志列表与共用调用详情、会话拒绝反馈与详情入口，逐项核对无裸 key／未解析占位符／`undefined`，并以「实际裁剪」为判据检查英文长文本不会截断可读文案。测试夹具中的长规则名与长备注专门用于该检查。
+
 <a id="design-12"></a>
 
 ## 早期实施阶段
