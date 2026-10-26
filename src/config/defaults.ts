@@ -3,13 +3,17 @@ import type { ArbiterConfig, PolicyThresholds } from '../types.js';
 /**
  * The calibrated first-release policy version.
  *
- * v1 shipped the prototype's numbers and an R5 that could only mean "above the
- * risk ceiling". #22 replaced both: every threshold below is bracketed by a
- * labelled sample pair in
- * `validation/arbiter-integration/2026-10-26-policy-calibration/cases.json`, and
- * R5 now reports the operation classes the rule matrix names. Old audit rows keep
- * their own recorded thresholds, so they stay explainable under the version they
- * were decided with.
+ * v1 shipped the prototype's numbers, reported every risk-gate failure as R5
+ * (which made R8 unreachable), and derived decision risk classes from a
+ * hardcoded low band. #22 fixed those and replaced the numbers with values whose
+ * admissible intervals are derived from a labelled sample set in
+ * `validation/arbiter-integration/2026-10-26-policy-calibration/`.
+ *
+ * R5 still means "above the selected risk ceiling": the operation classes the
+ * rule matrix names (production change, security-control change, irreversible
+ * delete) have no observable signal yet, so they are recorded as a limitation
+ * rather than claimed as implemented. Old audit rows keep their own recorded
+ * thresholds, so they stay explainable under the version they were decided with.
  */
 export const POLICY_VERSION = 'arbiter-policy-v2';
 
@@ -27,7 +31,6 @@ export const DEFAULT_NORMAL: PolicyThresholds = {
   tauRisk: 0.75,
   tauCritical: 0.25,
   tauLow: 0.7,
-  chatLowRiskMax: 3,
   chatMediumRiskMax: 6,
   mediumRiskCeiling: 6,
   explicitFromRisk: 4,

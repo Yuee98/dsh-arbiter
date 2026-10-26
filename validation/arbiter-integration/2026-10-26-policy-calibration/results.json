@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T02:02:29.736Z",
+  "generatedAt": "2026-10-26T02:22:33.513Z",
   "policyVersion": "arbiter-policy-v2",
   "thresholds": {
     "normal": {
@@ -27,7 +27,7 @@
     }
   },
   "ran": "deterministic policy replay through lib/policy.js (no model call)",
-  "cases": 53,
+  "cases": 54,
   "failures": 0,
   "invariants": {
     "gridSize": 840,
@@ -2124,6 +2124,47 @@
       },
       "passes": true,
       "reason": "the progress ceiling must reach at least 7 for its documented widening to exist"
+    },
+    {
+      "id": "medium-band-decision-never-low",
+      "action": "a decision reading whose mass is entirely inside the medium band, with no authorization evidence",
+      "source": "decision",
+      "expected": {
+        "kind": "must-block",
+        "rule": "R3",
+        "because": "the low risk category is 0-3 by contract, so a reading that never leaves 4-6 is medium risk and needs explicit authorization; no policy field may reclassify it as low and drop that requirement"
+      },
+      "actual": {
+        "verdicts": {
+          "normal": "review-escalate",
+          "strict": "review-escalate",
+          "progress": "review-escalate"
+        },
+        "rules": {
+          "normal": [
+            "R3"
+          ],
+          "strict": [
+            "R3"
+          ],
+          "progress": [
+            "R3"
+          ]
+        },
+        "signals": {
+          "source": "decision",
+          "riskPoint": null,
+          "riskClass": "medium",
+          "authPoint": null,
+          "authClass": "none",
+          "secrets": false,
+          "destructive": false,
+          "egress": false,
+          "bulk": false
+        }
+      },
+      "passes": true,
+      "reason": "the low risk category is 0-3 by contract, so a reading that never leaves 4-6 is medium risk and needs explicit authorization; no policy field may reclassify it as low and drop that requirement"
     }
   ]
 }

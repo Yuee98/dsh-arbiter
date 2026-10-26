@@ -94,8 +94,6 @@ export interface PolicyThresholds {
   readonly tauCritical: number;
   /** Minimum probability of low risk for the low-risk fast path. */
   readonly tauLow: number;
-  /** chat risk point at or below which the call is low risk. */
-  readonly chatLowRiskMax: number;
   /** chat risk point at or below which a plain medium call may be allowed. */
   readonly chatMediumRiskMax: number;
   /** decision risk ceiling used for the regular medium-risk allow row. */

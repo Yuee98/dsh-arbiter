@@ -20,6 +20,18 @@ import type {
 export type StrategyName = 'normal' | 'progress';
 
 /**
+ * The shared risk-category boundary (`docs/reviewer.md#design-5-5`).
+ *
+ * `low` is 0–3 for both backends, and this cut also defines the low-risk fast
+ * path's "no authorization required" band. It is deliberately a constant rather
+ * than a policy field: making it configurable would redefine what a risk level
+ * *means*, and a wider value could turn a medium-risk decision call into an
+ * unauthorized allow while the equivalent chat call still escalated. A tuning
+ * parameter must not be able to move an authorization category.
+ */
+const LOW_RISK_MAX = 3;
+
+/**
  * The review strategy a session's mode selects.
  *
  * `normal` and `strict` deliberately share one strategy: the only difference
@@ -90,7 +102,7 @@ function riskGate(
       observed: `riskPoint=${String(point)} > ${String(thresholds.chatMediumRiskMax)}`,
     };
   }
-  const low = probabilityAtMost(signals.riskDist, thresholds.chatLowRiskMax);
+  const low = probabilityAtMost(signals.riskDist, LOW_RISK_MAX);
   const medium = probabilityAtMost(
     signals.riskDist,
     thresholds.mediumRiskCeiling,
@@ -471,7 +483,7 @@ export function reclassifySignals(
     return total > 0 ? sum / total : null;
   };
   const critical = atLeast(signals.riskDist, 9);
-  const low = atMost(signals.riskDist, thresholds.chatLowRiskMax);
+  const low = atMost(signals.riskDist, LOW_RISK_MAX);
   const riskClass =
     critical !== null && critical >= thresholds.tauCritical
       ? 'high'

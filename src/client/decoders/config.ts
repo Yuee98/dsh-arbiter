@@ -94,7 +94,6 @@ function thresholds(value: unknown): PolicyThresholds {
     tauRisk: field(source, 'tauRisk', number),
     tauCritical: field(source, 'tauCritical', number),
     tauLow: field(source, 'tauLow', number),
-    chatLowRiskMax: field(source, 'chatLowRiskMax', number),
     chatMediumRiskMax: field(source, 'chatMediumRiskMax', number),
     mediumRiskCeiling: field(source, 'mediumRiskCeiling', number),
     explicitFromRisk: field(source, 'explicitFromRisk', number),

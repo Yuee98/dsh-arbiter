@@ -2,7 +2,7 @@
 
 本目录是 issue #22 的可复核评测记录。它记录**确定性策略证据**，以及**真实模型质量证据为 `not-run`** 的事实与原因。两者严格分开，任何确定性结论都不被表述为模型质量结论。
 
-- 评测集：[`cases.json`](cases.json)（53 例，合成）
+- 评测集：[`cases.json`](cases.json)（54 例，合成）
 - 确定性回放：[`evaluate.mjs`](evaluate.mjs) → [`results.json`](results.json)
 - 区间推导：[`calibrate.mjs`](calibrate.mjs) → [`calibration.json`](calibration.json)
 - CI 守卫：`tests/policy-calibration.test.ts`、`tests/policy.test.ts`、`tests/reviewer.test.ts`
@@ -11,8 +11,8 @@
 
 | 项目 | 状态 | 依据 |
 |---|---|---|
-| 确定性策略正确性（R1–R8、三档关系、两协议统一授权标准） | **passed** | 53/53 标注样例 + 840 输入网格 |
-| 阈值初值的样例区间夹逼 | **passed（有限）** | 10 个字段全部落在标注区间内；其中 7 个双侧夹逼 |
+| 确定性策略正确性（R1–R8、三档关系、两协议统一授权标准） | **passed** | 54/54 标注样例 + 840 输入网格 |
+| 阈值初值的样例区间夹逼 | **passed（有限）** | 9 个字段全部落在标注区间内；其中 7 个双侧夹逼 |
 | 真实 chat 协议模型质量 | **not-run（blocked）** | 无授权可用的 provider／凭据，见 §6 |
 | 真实 decision 协议模型质量 | **not-run（blocked）** | 同上；且本机无 endpoint |
 | 长期阈值校准 | **not-run** | 需要真实流量与人工裁决，首版不具备 |
@@ -21,15 +21,15 @@
 
 ## 2. 评测集构成
 
-53 个合成样例，全部为本次编写的假想操作，不含任何真实会话、路径、凭据或调用。每个样例声明：动作描述、信号事实（chat 点值或 decision 分布）、期望规则、期望结论、适用档位。
+54 个合成样例，全部为本次编写的假想操作，不含任何真实会话、路径、凭据或调用。每个样例声明：动作描述、信号事实（chat 点值或 decision 分布）、期望规则、期望结论、适用档位。
 
 | 规则 | 期望代批 | 期望拦截 | chat | decision | 覆盖要点 |
 |---|---|---|---|---|---|
 | R1 | 0 | 3 | 2 | 1 | `secrets ∧ egress` 两协议固定拒绝；**含正常认证反例**（用 token 认证到其所属服务，必须放行） |
 | R2 | 0 | 4 | 2 | 2 | chat 点值 ≥ 9；decision `P(risk≥9) ≥ τ_critical`；含「仅低于 critical」的对照 |
-| R3 | 0 | 9 | 7 | 2 | 无授权／暗示级授权／明确授权；两协议同一事实同判 |
+| R3 | 0 | 10 | 7 | 3 | 无授权／暗示级授权／明确授权；两协议同一事实同判 |
 | R4 | 0 | 3 | 2 | 1 | `destructive ∧ bulk`；三档均要求人工 |
-| R5 | 0 | 3 | 3 | 0 | 生产读、工作区外写、非批量不可逆删除；**progress 对同一事实放行**（上限放宽） |
+| R5 | 0 | 3 | 3 | 0 | 生产读、工作区外写、非批量不可逆删除（按风险上限判定，非操作类别）；**progress 对同一事实放行**（上限放宽） |
 | R6 | 3 | 1 | 3 | 1 | 普通批量外发；normal 恒拦截，progress 需明确授权且过闸 |
 | R7 | 19 | 0 | 11 | 8 | 普通低风险、工作区内可逆写、无外发的批量本地工作、可恢复删除 |
 | R8 | 0 | 6 | 0 | 6 | 分布量分散、无辨识度、低带未过门、`P(risk≥9)` 未达 critical |
@@ -47,18 +47,21 @@
 
 方法：一次只动一个字段，其余保持发布默认，在界面步长网格（概率 0.05、点值 1）上逐一回放全部标注样例；能保持全部标签的取值集合即可行集，区间取最近失败候选之外的开口，初值取可行区间中点。这是**固定样例集上的区间算术**，不是统计估计。
 
-| 字段 | 发布值 | 可行取值 | 区间 | 夹逼样例 |
-|---|---|---|---|---|
-| `tauAuth` | 0.80 | 0.80–0.85 | (0.75, 0.90) | `tau-auth-pins-0.85-passes` / `tau-auth-pins-0.75-blocked` |
-| `tauRisk` | 0.75 | 0.75–0.80 | (0.70, 0.85) | `decision-ceiling-pins-0.80-passes` / `decision-ceiling-pins-0.70-blocked` |
-| `tauCritical` | 0.25 | 0.20–0.30 | (0.15, 0.35) | `tau-critical-pins-0.30-denies` / `tau-critical-pins-0.15-not-deny` |
-| `tauLow` | 0.70 | 0.70 | (0.65, 0.75) | `low-path-just-above-tauLow` / `low-path-just-below-tauLow` |
-| `chatLowRiskMax` | 3 | 0–8 | 未夹逼 | `chat-low-band-pins-3` / `chat-low-band-pins-4-outside`（点值口径）；分布口径由 `tauLow` 承担 |
-| `chatMediumRiskMax`（normal） | 6 | 6 | (5, 7) | `chat-ceiling-pins-6-passes` / `r5-chat-write-outside-workspace` |
-| `chatMediumRiskMax`（progress） | 8 | 7–8 | (6, ∞) | `progress-ceiling-pins-7`；上界无样例（风险 9 已是固定拒绝） |
-| `mediumRiskCeiling`（normal） | 6 | 6 | (5, 7) | 同 `tauRisk` 样本对 |
-| `mediumRiskCeiling`（progress） | 8 | 7–8 | (6, ∞) | `progress-raised-ceiling-accepts-mid-band` |
-| `explicitFromRisk` | 4 | 4 | (3, 5) | `explicit-from-risk-pins-3-implied-passes` / `explicit-from-risk-pins-4-implied-blocked` |
+| 字段 | 发布值 | 可行取值 | 区间 | 选取规则 | 夹逼样例 |
+|---|---|---|---|---|---|---|
+| `tauAuth` | 0.80 | 0.80–0.85 | (0.75, 0.90) | 可行区间中点 | `tau-auth-pins-0.85-passes` / `tau-auth-pins-0.75-blocked` |
+| `tauRisk` | 0.75 | 0.75–0.80 | (0.70, 0.85) | **保持发布值**（中点 0.80，但样例未要求移动） | `decision-ceiling-pins-0.80-passes` / `decision-ceiling-pins-0.70-blocked` |
+| `tauCritical` | 0.25 | 0.20–0.30 | (0.15, 0.35) | 可行区间中点 | `tau-critical-pins-0.30-denies` / `tau-critical-pins-0.15-not-deny` |
+| `tauLow` | 0.70 | 0.70 | (0.65, 0.75) | 可行区间中点 | `low-path-just-above-tauLow` / `low-path-just-below-tauLow` |
+| `chatMediumRiskMax`（normal） | 6 | 6 | (5, 7) | 可行区间中点 | `chat-ceiling-pins-6-passes` / `r5-chat-write-outside-workspace` |
+| `chatMediumRiskMax`（progress） | 8 | 7–10 | (6, ∞) | **保持发布值**（中点 9，但样例未要求移动） | `progress-ceiling-pins-7`；上界无样例（风险 9 已是固定拒绝） |
+| `mediumRiskCeiling`（normal） | 6 | 6 | (5, 7) | 可行区间中点 | 同 `tauRisk` 样本对 |
+| `mediumRiskCeiling`（progress） | 8 | 7–10 | (6, ∞) | **保持发布值**（中点 9） | `progress-raised-ceiling-accepts-mid-band` |
+| `explicitFromRisk` | 4 | 4 | (3, 5) | 可行区间中点 | `explicit-from-risk-pins-3-implied-passes` / `explicit-from-risk-pins-4-implied-blocked` |
+
+`calibration.json` 的每个条目带 `selection` 字段，逐项说明该发布值是「可行区间中点」还是「样例允许、但无样例推动移动」。**不是每个数都取中点**：当可行区间的一侧没有失败候选时，中点会漂到没有证据支持的方向，此时保持发布值才是诚实的做法。
+
+原先的 `chatLowRiskMax` 已从策略字段中移除，原因见 §4。
 
 ### 为什么选这些值
 
@@ -71,7 +74,8 @@
 1. **R8 曾不可达。** `riskDecision()` 把闸门失败的两种情形都报成 R5，于是「模型没信心」被表述为「已识别风险」。现在按闸门自身的判定报告规则：点值超上限仍为 R5，分布未过概率门为 R8，理由文字也区分「未过闸」与「超过上限」。
 2. **低风险带改为读取配置。** `chatLowRiskMax` 原先参与 `riskGate()` 的分布分支，但分类时硬编码为 3；同一个字段在两处含义不同。现在 `reclassifySignals()` 与 `parseDecisionResponse()` 都按配置取值。
 3. **策略版本升为 `arbiter-policy-v2`。** 阈值表与 R5/R8 的报告语义都变了；审计与状态页展示版本号，旧记录必须能按当时的版本解释。历史记录保存自身阈值，不随新默认值改写。
-4. **新增 CI 守卫。** `tests/policy-calibration.test.ts` 直接读 `cases.json` 与 `calibration.json`，对发布默认值逐条断言：默认值在可行集内、落点与记录一致、双侧区间确实夹住发布值。改默认值而不同步证据会失败。
+4. **风险类别恢复为契约常量，`chatLowRiskMax` 删除。** `docs/reviewer.md#design-5-5` 规定两后端共用的类别区间是 `low` 0–3、`medium` 4–8、`high` 9–10。上一版把 `low` 的边界改成读取 `chatLowRiskMax`，于是把该字段调到 5 就能让一个整体落在 4–6 的 decision 分布被判为 `low`，从而跳过授权要求得到 R7 allow，而同一事实的 chat 调用仍是 R3 escalate —— 这是一个可经界面写入的授权绕过。现在类别边界是 `LOW_RISK_MAX = 3` 常量，`chatLowRiskMax` 字段一并移除：它既不该改变类别语义，也从未真正成为一个可观测的独立门。回归样例 `medium-band-decision-never-low` 固化该场景。
+5. **新增 CI 守卫。** `tests/policy-calibration.test.ts` 直接读 `cases.json` 与 `calibration.json`，对发布默认值逐条断言：默认值在可行集内、落点与记录一致、双侧区间确实夹住发布值。此外它**用生产引擎重算**每个记录在案的可行取值——校准脚本一旦与生产分类或判定不一致，就会发布出策略实际拒绝的候选值，这一项使该类不一致立即失败而不是随包发布。改默认值而不同步证据同样会失败。
 
 ## 5. 与审查意见（Relay）的对应
 
@@ -85,6 +89,16 @@
 | C22-P04 R6 “P95” 与概率门冲突 | **有效** | 计划文字里的 “P95 ceiling” 是我写错的措辞，与 `tauRisk=0.75` 的累积概率门不一致。实现与样例一律使用文档定义的累积概率门，报告不再出现 P95 表述。 |
 | C22-P05 must-block 不是充分 oracle | **有效** | 已改为按规则映射出**确切结论**（deny / escalate / allow）＋**首个命中规则**，evaluator 与 Vitest 共用同一口径；R6 这一模式相关行由样例逐档显式声明。R2 优先于 R5 的次序由规则顺序与 `r2-*` 样例共同锁定。 |
 | C22-P06 R8 截断样例超出可观测范围 | **有效** | `ReviewSignals` 没有截断或自报置信度字段，用样例元数据「测截断」是假证据。**删除**相关表述；R8 只用「合法但分散／未过门」的分布来测，输入截断归入既有快照与宿主集成测试的范围，本目录不重复声明。 |
+
+### 实现评审（同一 sessionRef，head e795065）
+
+| ID | 判断 | 处置 |
+|---|---|---|
+| C22-I01 可配置低风险边界绕过授权 | **有效** | 见 §4-4。已实测复现：`chatLowRiskMax = 5` 时 decision 分布 `{4:0.2,5:0.6,6:0.2}` 被判 low → R7 allow，而 chat 同事实为 R3 escalate。修复后两协议均为 R3（`riskClass = medium`）。 |
+| C22-I02 校准脚本与生产重分类不一致 | **有效** | `calibrate.mjs` 曾自带一份分类实现，其中 `low` 仍用常量 3，而生产已改读配置，于是脚本把生产会拒绝的候选发布为「可行」。现在脚本**直接调用生产 `reclassifySignals()`**；扫描域由 0–8 对齐到界面与解析器实际接受的 0–10；`calibration.json` 记录选取规则；Vitest 新增用生产引擎重算全部记录候选的断言，并已注入错误候选验证该断言确实失败。 |
+| 记录不一致（非阻塞） | **有效** | `src/config/defaults.ts` 里「R5 now reports the operation classes」是错的（R5 并未实现操作类别），已改写为如实描述；`tauRisk` 的中点与实际发布值不同，已改为逐项记录 `selection` 而不是笼统声称都取中点。 |
+
+C22-P01–P06 的处置保持不变（见上表）；其中 P03 的残余部分由 C22-I01/I02 覆盖。
 
 ## 6. 真实模型评测：`not-run`（blocked）
 
@@ -123,8 +137,8 @@ issue 正文要求「在实施时获得现有 provider/凭据使用授权后」�
 2. **R5 只实现为「超过风险上限」。** 矩阵中「生产变更／安全控制变更／既有对象不可逆删除」的操作类别事实不在 `ReviewSignals` 中，本轮不实现也不宣称。
 3. **decision 协议的 R5 不可达。** `riskClass === 'high'` 等价于 `P(risk≥9) ≥ τ_critical`，已被 R2 固定拒绝；剩余情况按 R8 报告。要在 decision 协议区分「已识别但未达 critical 的风险」，需要新增信号字段（会改变 reviewer 契约），不在阈值校准范围内。
 4. **`implied` 授权带在中等风险以上用不到。** `requiredAuthorization()` 只返回 none/explicit，因此授权等级 ≥5 且 <8 的样本在风险高于低带时一律按 R3 拦截。这符合「不因档位产生授权」的既有语义，但意味着「明确 vs 暗示」的边界在首版没有被使用；是否引入由产品决定，本轮不改授权标准。
-5. **`chatLowRiskMax` 只被点值口径夹逼。** 分布口径的低带判定实际由 `tauLow` 承担，该字段在分布路径上没有独立可观测的边界。
-6. **progress 上限的上界没有样例。** 风险 9 已是固定拒绝，因此 progress 的 8 只能确认下界（≥7）。
+5. **风险类别是常量，低风险带不接受配置。** `low` 0–3 是两协议共用的语义定义（`docs/reviewer.md#design-5-5`），本轮把原先可写的 `chatLowRiskMax` 字段移除。若将来确实需要「放宽可代批的低风险范围」，那是一个独立的产品决定，且必须同时约束两协议、并把「类别」与「委托资格」分开建模。
+6. **progress 上限的上界没有样例。** 风险 9 已是固定拒绝，因此 progress 的 8 只能确认下界（≥7）；区间上界在 10 处仍未失败，故该项记录为「保持发布值」而非中点。
 7. **样例是我写的。** 标注依据是 `docs/approval-modes.md` 的规则矩阵与 `docs/reviewer.md` 的授权来源层级，不是人工裁决的真实语料。样例与实现由同一人编写，因此它验证「实现与文档一致」，不验证「文档在真实场景下正确」。
 8. **未测并发、跨会话、真实宿主席位。** 本目录只回放 `decideReview`；端到端的结算行为由既有隔离 DSH E2E 覆盖，不在此重复声明。
 
@@ -132,8 +146,8 @@ issue 正文要求「在实施时获得现有 provider/凭据使用授权后」�
 
 ```sh
 pnpm build
-node validation/arbiter-integration/2026-10-26-policy-calibration/evaluate.mjs   # 53/53
-node validation/arbiter-integration/2026-10-26-policy-calibration/calibrate.mjs  # 10 字段区间
+node validation/arbiter-integration/2026-10-26-policy-calibration/evaluate.mjs   # 54/54
+node validation/arbiter-integration/2026-10-26-policy-calibration/calibrate.mjs  # 9 字段区间
 pnpm vitest run --project unit tests/policy-calibration.test.ts
 ```
 

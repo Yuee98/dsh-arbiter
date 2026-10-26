@@ -3,7 +3,6 @@
   "tauRisk": "风险概率门 τ_risk",
   "tauCritical": "critical 概率门",
   "tauLow": "低风险概率门",
-  "chatLowMax": "chat 低风险上限",
   "chatMediumMax": "chat 中风险上限",
   "decisionMax": "decision 风险上限",
   "explicitRisk": "需要明确授权的最低风险",

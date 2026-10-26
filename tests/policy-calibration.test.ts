@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { decideReview, strategyFor } from '../src/policy.js';
+import { decideReview, reclassifySignals, strategyFor } from '../src/policy.js';
 import {
   parseChatText,
   parseDecisionResponse,
@@ -72,7 +72,6 @@ const POLICY_FIELDS = [
   'tauRisk',
   'tauCritical',
   'tauLow',
-  'chatLowRiskMax',
   'chatMediumRiskMax',
   'mediumRiskCeiling',
   'explicitFromRisk',
@@ -350,6 +349,70 @@ describe('first-release policy calibration', () => {
       }
     },
   );
+
+  test('every recorded admissible value really holds with the production engine', () => {
+    // The calibrator once carried its own copy of the decision classifier, so it
+    // published candidates the real policy rejected. Replaying the recorded
+    // admissible values here, through the same engine the gate uses, is what
+    // makes that class of disagreement fail instead of ship.
+    const labelled = cases.filter(
+      (entry) => entry.expectParseFailure === undefined,
+    );
+    const checked = calibration.calibration.map((entry) => {
+      const wrong: string[] = [];
+      for (const candidate of entry.admissibleValues) {
+        const normal = {
+          ...DEFAULT_CONFIG.policy.normal,
+          ...(entry.table === 'normal' || entry.table === 'both'
+            ? { [entry.field]: candidate }
+            : {}),
+        };
+        const progress = {
+          ...DEFAULT_CONFIG.policy.progress,
+          ...(entry.table === 'progress' || entry.table === 'both'
+            ? { [entry.field]: candidate }
+            : {}),
+        };
+        const thresholdsFor = (mode: string) =>
+          mode === 'progress' ? progress : normal;
+        for (const sample of labelled) {
+          const read = readCase(sample);
+          if (!read.ok)
+            throw new Error(`${sample.id} should parse: ${read.error}`);
+          const rule = sample.label.rule;
+          if (rule === undefined) continue;
+          for (const mode of sample.label.modes ?? [
+            'normal',
+            'strict',
+            'progress',
+          ]) {
+            const thresholds = thresholdsFor(mode);
+            // Re-derive decision classes under the candidate, exactly as the
+            // gate does, so a candidate cannot pass on stale classification.
+            const signals =
+              read.signals.source === 'decision'
+                ? reclassifySignals(read.signals, thresholds)
+                : read.signals;
+            const decision = decideReview(
+              signals,
+              strategyFor(mode),
+              thresholds,
+            );
+            if (decision.decisionRules[0] !== rule)
+              wrong.push(
+                `${entry.field}/${entry.table}=${String(candidate)}: ${sample.id}/${mode} -> ${decision.decisionRules.join(',') || decision.verdict}`,
+              );
+          }
+        }
+      }
+      return { field: `${entry.field}/${entry.table}`, wrong };
+    });
+    for (const entry of checked)
+      expect(
+        entry.wrong,
+        `${entry.field} publishes a rejected candidate`,
+      ).toEqual([]);
+  });
 
   test('the shipped defaults are each admissible under the labelled set', () => {
     expect(calibration.calibration.length).toBeGreaterThan(0);

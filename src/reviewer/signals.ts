@@ -23,6 +23,15 @@ export function extractJsonObject(text: string): string {
   return candidate.slice(start, end + 1);
 }
 
+/**
+ * The shared risk-category boundary: `low` is 0–3 for both backends
+ * (`docs/reviewer.md#design-5-5`). It is a semantic definition, not a tuning
+ * knob — a configurable version of it would let an advanced setting redefine
+ * what a risk level means and desynchronize the two protocols' authorization
+ * classes.
+ */
+const LOW_RISK_MAX = 3;
+
 function isScore(value: unknown): value is number {
   return (
     typeof value === 'number' &&
@@ -257,7 +266,7 @@ export function parseDecisionResponse(
   if (typeof bulk === 'string') return { ok: false, error: bulk };
 
   const critical = probabilityAtLeast(risk.dist, 9);
-  const low = probabilityAtMost(risk.dist, thresholds.chatLowRiskMax);
+  const low = probabilityAtMost(risk.dist, LOW_RISK_MAX);
   const riskClass =
     critical >= thresholds.tauCritical
       ? 'high'

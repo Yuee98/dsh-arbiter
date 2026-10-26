@@ -3,10 +3,13 @@
  *
  * For one threshold at a time, every candidate value on the shipped UI grid is
  * tried with all other thresholds held at the shipped default, and the labelled
- * cases are replayed. The admissible set is the set of candidate values under
- * which every label still holds. The interval is reported as the open bounds
- * implied by the nearest failing candidate on each side, and the recommendation
- * is the grid midpoint of that interval.
+ * cases are replayed through the *production* classifier and decision engine.
+ * The admissible set is the set of candidate values under which every label
+ * still holds. The interval is reported as the open bounds implied by the nearest
+ * failing candidate on each side; `midpoint` is the grid middle of the admissible
+ * run and is a *candidate* the record may adopt, not a claim that the shipped
+ * value is that midpoint. Where the shipped value is not the midpoint, the
+ * selection rule is stated explicitly in `calibration.json`.
  *
  * This is interval arithmetic over a fixed sample set, not a statistical
  * estimate: it says which values the labels permit, and says nothing about how
@@ -20,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_CONFIG } from '../../../lib/config.js';
-import { decideReview } from '../../../lib/policy.js';
+import { decideReview, reclassifySignals } from '../../../lib/policy.js';
 import {
   parseChatText,
   parseDecisionResponse,
@@ -37,15 +40,14 @@ const FIELDS = [
   { key: 'tauRisk', min: 0, max: 1, step: 0.05, tables: ['normal', 'progress'] },
   { key: 'tauCritical', min: 0, max: 1, step: 0.05, tables: ['normal', 'progress'] },
   { key: 'tauLow', min: 0, max: 1, step: 0.05, tables: ['normal', 'progress'] },
-  { key: 'chatLowRiskMax', min: 0, max: 8, step: 1, tables: ['normal', 'progress'] },
   // These two are the fields the two strategies deliberately differ on, so each
   // table is scanned on its own: a single sweep across both would ask one value
   // to satisfy the normal must-blocks and the progress must-passes at once, which
   // is precisely the widening the design intends to keep separate.
-  { key: 'chatMediumRiskMax', min: 0, max: 8, step: 1, tables: ['normal'], table: 'normal' },
-  { key: 'chatMediumRiskMax', min: 0, max: 8, step: 1, tables: ['progress'], table: 'progress' },
-  { key: 'mediumRiskCeiling', min: 0, max: 8, step: 1, tables: ['normal'], table: 'normal' },
-  { key: 'mediumRiskCeiling', min: 0, max: 8, step: 1, tables: ['progress'], table: 'progress' },
+  { key: 'chatMediumRiskMax', min: 0, max: 10, step: 1, tables: ['normal'], table: 'normal' },
+  { key: 'chatMediumRiskMax', min: 0, max: 10, step: 1, tables: ['progress'], table: 'progress' },
+  { key: 'mediumRiskCeiling', min: 0, max: 10, step: 1, tables: ['normal'], table: 'normal' },
+  { key: 'mediumRiskCeiling', min: 0, max: 10, step: 1, tables: ['progress'], table: 'progress' },
   { key: 'explicitFromRisk', min: 0, max: 9, step: 1, tables: ['normal', 'progress'] },
 ];
 
@@ -86,11 +88,12 @@ function labelsHold(normalThresholds, progressThresholds) {
   for (const { entry, signals } of PREPARED) {
     for (const mode of entry.label.modes ?? ['normal', 'strict', 'progress']) {
       // The gate re-derives decision classes under the *deciding* mode's
-      // thresholds (`reclassifySignals`), so each mode is judged by its own
-      // classes here rather than by one shared reclassification.
+      // thresholds, and the harness must not carry a second copy of that rule:
+      // a copy silently disagreed with production on `chatLowRiskMax` and
+      // published admissible values the real policy rejects.
       const rescored =
         entry.signals.source === 'decision'
-          ? reclassify(signals, thresholds[mode])
+          ? reclassifySignals(signals, thresholds[mode])
           : signals;
       const decision = decideReview(rescored, strategyOf[mode], thresholds[mode]);
       const isAllow = decision.verdict === 'review-allow';
@@ -104,43 +107,6 @@ function labelsHold(normalThresholds, progressThresholds) {
     }
   }
   return true;
-}
-
-/**
- * Re-derive decision classes under a candidate threshold set.
- *
- * `parseDecisionResponse` classifies with the *request-time* thresholds; a
- * calibration sweep changes the thresholds a later decision uses, so the classes
- * are recomputed here with the same documented boundaries.
- */
-function reclassify(signals, thresholds) {
-  const atLeast = (dist, minimum) =>
-    Object.entries(dist ?? {}).reduce(
-      (sum, [level, p]) => (Number(level) >= minimum ? sum + p : sum),
-      0,
-    );
-  const atMost = (dist, maximum) =>
-    Object.entries(dist ?? {}).reduce(
-      (sum, [level, p]) => (Number(level) <= maximum ? sum + p : sum),
-      0,
-    );
-  const critical = atLeast(signals.riskDist, 9);
-  const low = atMost(signals.riskDist, 3);
-  const riskClass =
-    critical >= thresholds.tauCritical
-      ? 'high'
-      : low >= thresholds.tauLow
-        ? 'low'
-        : 'medium';
-  const explicit = atLeast(signals.authDist, 8);
-  const implied = atLeast(signals.authDist, 5);
-  const authClass =
-    explicit >= thresholds.tauAuth
-      ? 'explicit'
-      : implied >= thresholds.tauAuth
-        ? 'implied'
-        : 'none';
-  return { ...signals, riskClass, authClass };
 }
 
 const normalDefaults = { ...base };
@@ -181,6 +147,10 @@ for (const field of FIELDS) {
       upperInclusive: highestFailingAbove(candidates, admissible, shipped),
     },
     midpoint: midpointOf(admissible, field.step),
+    selection:
+      shipped === midpointOf(admissible, field.step)
+        ? 'admissible-run midpoint'
+        : 'kept at the shipped value: the labels admit it and no sample moves it',
   });
 }
 
@@ -221,7 +191,7 @@ for (const entry of calibration) {
   const lower = entry.interval.lowerExclusive;
   const upper = entry.interval.upperInclusive;
   console.log(
-    `${(entry.field + (entry.table === 'both' ? '' : `[${entry.table}]`)).padEnd(28)} shipped=${String(entry.shipped).padEnd(5)} admissible=[${entry.admissibleValues.join(',')}] interval=(${lower === null ? 'unbounded' : lower},${upper === null ? 'unbounded' : upper}) mid=${String(entry.midpoint)}`,
+    `${(entry.field + (entry.table === 'both' ? '' : `[${entry.table}]`)).padEnd(28)} shipped=${String(entry.shipped).padEnd(5)} admissible=[${entry.admissibleValues.join(',')}] interval=(${lower === null ? 'unbounded' : lower},${upper === null ? 'unbounded' : upper}) mid=${String(entry.midpoint)} (${entry.selection})`,
   );
 }
 process.exitCode = calibration.every((entry) => entry.shippedIsAdmissible) ? 0 : 1;

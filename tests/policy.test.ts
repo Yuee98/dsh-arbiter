@@ -5,6 +5,7 @@ import {
   applyProbeOverrides,
   compareStrategies,
   decideReview,
+  reclassifySignals,
   strategyFor,
 } from '../src/policy.js';
 import type { ReviewSignals } from '../src/types.js';
@@ -403,39 +404,35 @@ describe('calibrated rule rows', () => {
     expect(overCeiling.decisionRules).toEqual(['R5']);
   });
 
-  test('the low-risk boundary is the configured one, not a constant', () => {
-    // The matrix defines the fast path by the configured band, so a deployment
-    // that narrows `chatLowRiskMax` narrows the fast path with it.
-    const narrative = signals({
-      riskPoint: 4,
-      riskClass: 'medium',
-      authPoint: 9,
-      authClass: 'explicit',
-    });
-    const widened = { ...normal, chatLowRiskMax: 4, explicitFromRisk: 4 };
-    // Risk 4 with explicit authorization clears the ceiling either way; what
-    // changes is which rule the low-risk fast path can take.
-    expect(decideReview(narrative, 'normal', normal).verdict).toBe(
-      'review-allow',
-    );
-    expect(decideReview(narrative, 'normal', widened).verdict).toBe(
-      'review-allow',
-    );
-    // A decision distribution whose low mass sits between the two boundaries is
-    // classified by the configured band.
-    const borderline = signals({
+  test('the risk-category boundary is a constant, not a tuning knob', () => {
+    // `low` is 0-3 for both protocols (docs/reviewer.md#design-5-5). A decision
+    // distribution sitting entirely inside the medium band must not be
+    // reclassified as low by any policy field: that would drop its authorization
+    // requirement while the equivalent chat call still escalated.
+    const raw = signals({
       riskPoint: null,
-      riskDist: { '1': 0.68, '3': 0.24, '5': 0.08 },
+      riskDist: { '4': 0.2, '5': 0.6, '6': 0.2 },
       riskClass: 'medium',
       authPoint: null,
-      authDist: { '8': 0.9, '9': 0.1 },
-      authClass: 'explicit',
+      authDist: { '1': 0.7, '2': 0.2, '6': 0.1 },
+      authClass: 'none',
       source: 'decision',
     });
-    expect(
-      decideReview(borderline, 'normal', { ...normal, chatLowRiskMax: 3 })
-        .verdict,
-    ).toBe('review-allow');
+    // Widen every delegable ceiling and keep the authorization evidence absent:
+    // the engine must still refuse to delegate. Deriving the class with the
+    // production helper is the point — a hand-set `low` would bypass the very
+    // classification this test protects.
+    const widened = {
+      ...normal,
+      chatMediumRiskMax: 10,
+      mediumRiskCeiling: 10,
+      tauLow: 0.1,
+    };
+    const mediumBand = reclassifySignals(raw, widened);
+    expect(mediumBand.riskClass).toBe('medium');
+    const decision = decideReview(mediumBand, 'normal', widened);
+    expect(decision.verdict).toBe('review-escalate');
+    expect(decision.decisionRules).toEqual(['R3']);
   });
 
   test('an implied goal never satisfies a medium-risk delegation in any mode', () => {
