@@ -670,7 +670,7 @@ describe('conflict state and reminders', () => {
 });
 
 describe('resuming a retained admission under a running conflict', () => {
-  test('turning the master switch back on keeps the session at a safe boundary', async () => {
+  test('turning the master switch back on does not resume coverage', async () => {
     const session = makeSession('s-resume');
     // A retained admission is still in the log from a previous runtime.
     appendRecord(session, 'plugin:arbiter/admission', {
@@ -685,22 +685,19 @@ describe('resuming a retained admission under a running conflict', () => {
     const harness = createHarness([session], { ...ALLOW_ECHO, enabled: false });
     try {
       harness.official.activate();
-      // Re-enabling the plugin reconciles retained admissions. A running
-      // conflict must hold the widening rather than restore full access.
+      // Re-enabling the plugin reconciles retained admissions. Starting
+      // coverage again is a takeover, so under a running conflict it must not
+      // begin: no gate decision, no widening, and the retained record is
+      // closed as disabled.
       harness.reconfigure({
         ...ALLOW_ECHO,
         enabled: true,
         boundary: 'trusted',
       });
       expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
-      // The session is still gated: the conflict never withdrew protection.
-      expect((await harness.gate(call(session, 'resumed'), allow)).kind).toBe(
-        'allow',
-      );
-      expect(decisions(session).at(-1)).toMatchObject({
-        callId: 'resumed',
-        result: 'allow',
-      });
+      expect(admissions(session).at(-1)?.['enabled']).toBe(false);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(decisions(session)).toEqual([]);
     } finally {
       harness.dispose();
     }

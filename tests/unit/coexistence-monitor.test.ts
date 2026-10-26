@@ -41,15 +41,18 @@ interface Harness {
   readonly setAutoSlot: (slot: AutoSlot) => void;
   /** `other` is a foreign approval-capable listener; `self` is Arbiter's own. */
   readonly setHooks: (owner: 'other' | 'self' | null) => void;
+  readonly setLoaderReadable: (readable: boolean) => void;
 }
 
 function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
   let official: 'active' | 'failed' | null = null;
   let hooks: 'other' | 'self' | null = null;
   let slot: AutoSlot = 'arbiter';
+  let loaderReadable = true;
   const hostFiber = options.selfFiber ?? { name: 'arbiter' };
   const loader = {
     *entries() {
+      if (!loaderReadable) throw new Error('loader unavailable');
       if (official === null) return;
       yield {
         id: 'auto-review',
@@ -107,6 +110,9 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
     },
     setHooks: (owner) => {
       hooks = owner;
+    },
+    setLoaderReadable: (readable) => {
+      loaderReadable = readable;
     },
   };
 }
@@ -289,5 +295,54 @@ describe('resolving a conflict still reports the Auto-slot capability', () => {
     });
     test_.setAutoSlot('arbiter');
     expect(test_.monitor.read('arbiter').autoSlotProblem).toBeNull();
+  });
+});
+
+describe('period lifecycle across an unreadable surface', () => {
+  test('a temporarily unreadable loader does not end the official period', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    const first = test_.monitor.read('active');
+    test_.monitor.acknowledge([first.notices[0]?.id ?? '']);
+    // The Loader read fails for one observation; the provider never stopped.
+    test_.setLoaderReadable(false);
+    const blind = test_.monitor.read('blind');
+    expect(blind.detection).toBe('partial');
+    expect(blind.notices).toHaveLength(1);
+    expect(blind.notices[0]?.acknowledged).toBe(true);
+    // The surface returns; the same period must not earn a new reminder.
+    test_.setLoaderReadable(true);
+    const back = test_.monitor.read('back');
+    expect(back.notices).toHaveLength(1);
+    expect(back.notices[0]?.acknowledged).toBe(true);
+    expect(back.blocked).toBe(true);
+  });
+
+  test('a conflict confirmed absent on complete observation ends its period', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    const first = test_.monitor.read('active');
+    test_.monitor.acknowledge([first.notices[0]?.id ?? '']);
+    test_.setOfficial(null);
+    const cleared = test_.monitor.read('cleared');
+    expect(cleared.conflicts).toEqual([]);
+    test_.setOfficial('active');
+    const again = test_.monitor.read('again');
+    // A genuinely new period earns a fresh reminder.
+    expect(again.notices).toHaveLength(2);
+    expect(again.notices.at(-1)?.acknowledged).toBe(false);
+  });
+
+  test('a resolved conflict never raises a stale blocking reminder', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    const active = test_.monitor.read('active');
+    expect(active.notices[0]?.acknowledged).toBe(false);
+    test_.setOfficial(null);
+    const resolved = test_.monitor.read('resolved');
+    // The history is retained, but it can no longer drive a dialog.
+    expect(resolved.notices).toHaveLength(1);
+    expect(resolved.notices[0]?.acknowledged).toBe(true);
+    expect(resolved.conflicts).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, test } from 'vitest';
 
 import { ArbiterPage } from '../../src/client/index.js';
+import { CoexistenceOverlay } from '../../src/client/coexistence-overlay.js';
 import type { CoexistenceView } from '../../src/client/view-types.js';
 import { setupApiMock } from '../helpers/api-mock.js';
 import { effectiveState } from '../helpers/client-state.js';
@@ -111,13 +112,26 @@ function useState(coexistence: CoexistenceView | null): void {
     http.get('*/api/arbiter/state', () =>
       HttpResponse.json({ ...effectiveState(), coexistence }),
     ),
+    http.get('*/api/arbiter/coexistence', () =>
+      HttpResponse.json({ ok: true, coexistence }),
+    ),
+  );
+}
+
+/** Render the page plus the frame-wide overlay, as the host mounts them. */
+function renderHostSurfaces(): ReturnType<typeof renderClient> {
+  return renderClient(
+    <>
+      <ArbiterPage />
+      <CoexistenceOverlay />
+    </>,
   );
 }
 
 describe('conflict reasons and handling guidance', () => {
   test('an official conflict shows why it blocks and how to clear it', async () => {
     useState(blocking());
-    renderClient(<ArbiterPage />);
+    renderHostSurfaces();
     const alert = await screen.findByRole('alertdialog', {
       name: '存在冲突的审批提供者',
     });
@@ -145,6 +159,14 @@ describe('conflict reasons and handling guidance', () => {
           }),
         }),
       ),
+      http.get('*/api/arbiter/coexistence', () =>
+        HttpResponse.json({
+          ok: true,
+          coexistence: blocking({
+            notices: acknowledged ? [acknowledgedNotice()] : blocking().notices,
+          }),
+        }),
+      ),
       http.post('*/api/arbiter/coexistence', async ({ request }) => {
         const body: unknown = await request.json();
         expect(body).toEqual({ noticeIds: [NOTICE_ID] });
@@ -155,7 +177,7 @@ describe('conflict reasons and handling guidance', () => {
         });
       }),
     );
-    const { user } = renderClient(<ArbiterPage />);
+    const { user } = renderHostSurfaces();
     const alert = await screen.findByRole('alertdialog', {
       name: '存在冲突的审批提供者',
     });
@@ -175,7 +197,7 @@ describe('conflict reasons and handling guidance', () => {
 
   test('a third-party listener is a warning, not a block', async () => {
     useState(warningOnly());
-    renderClient(<ArbiterPage />);
+    renderHostSurfaces();
     // A warning uses a lightweight notice, never a modal.
     const notice = await screen.findByText('其他插件可能影响审批');
     expect(notice).toBeInTheDocument();
@@ -199,7 +221,7 @@ describe('conflict reasons and handling guidance', () => {
         notices: [],
       }),
     );
-    renderClient(<ArbiterPage />);
+    renderHostSurfaces();
     expect(
       await screen.findByText(/部分公开接口不可用（loader）/),
     ).toBeInTheDocument();
@@ -212,7 +234,7 @@ describe('conflict reasons and handling guidance', () => {
 describe('interpolation and Chinese fallback', () => {
   test('a template is filled rather than rendered raw', async () => {
     useState(warningOnly());
-    renderClient(<ArbiterPage />);
+    renderHostSurfaces();
     const rows = await screen.findAllByText(
       /third-party-reviewer 注册了 tools\/pre-execute/,
     );
@@ -225,7 +247,7 @@ describe('interpolation and Chinese fallback', () => {
 
   test('a missing English key falls back to Chinese per entry', async () => {
     useState(blocking());
-    const { i18n, locale } = renderClient(<ArbiterPage />);
+    const { i18n, locale } = renderHostSurfaces();
     await screen.findByRole('alertdialog', {
       name: '存在冲突的审批提供者',
     });
@@ -251,8 +273,11 @@ describe('interpolation and Chinese fallback', () => {
       http.get('*/api/arbiter/state', () =>
         HttpResponse.json({ ...effectiveState(), coexistence: first }),
       ),
+      http.get('*/api/arbiter/coexistence', () =>
+        HttpResponse.json({ ok: true, coexistence: first }),
+      ),
     );
-    const { user } = renderClient(<ArbiterPage />);
+    const { user } = renderHostSurfaces();
     await screen.findByRole('alertdialog', {
       name: '存在冲突的审批提供者',
     });

@@ -167,14 +167,21 @@ export class CoexistenceMonitor {
    * period and earns a new notice. Staying present never re-notifies.
    */
   refresh(reason: string): CoexistenceView {
-    const assessment = assess(this.observe());
+    const observation = this.observe();
+    const assessment = assess(observation);
     const present = new Set(assessment.conflicts.map((item) => item.id));
     for (const id of present) {
       if (this.activeConflictIds.has(id)) continue;
       this.openNotice(assessment.conflicts.find((item) => item.id === id));
     }
+    // An incomplete observation cannot prove a period ended. Only a conflict
+    // whose source surface was fully read may be retired; otherwise the same
+    // continuous conflict would earn a second reminder when the surface returns.
+    const complete = observation.missing.length === 0;
     for (const id of [...this.activeConflictIds]) {
-      if (!present.has(id)) this.activeConflictIds.delete(id);
+      if (present.has(id)) continue;
+      if (!complete && this.dependsOnMissing(id, observation.missing)) continue;
+      this.activeConflictIds.delete(id);
     }
     this.observations += 1;
     this.view = {
@@ -186,7 +193,13 @@ export class CoexistenceMonitor {
       autoSlot: assessment.autoSlot,
       autoSlotProblem: this.autoSlotProblem(assessment.autoSlot),
       conflicts: assessment.conflicts,
-      notices: this.notices,
+      // A reminder is only current if its period is still open: a resolved
+      // conflict keeps its history for reading but must not raise a dialog.
+      notices: this.notices.map((notice) =>
+        notice.acknowledged || present.has(notice.conflictId)
+          ? notice
+          : { ...notice, acknowledged: true },
+      ),
       observations: this.observations,
       updatedAt: Date.now(),
     };
@@ -237,6 +250,18 @@ export class CoexistenceMonitor {
     return () => {
       clearInterval(timer);
     };
+  }
+
+  /**
+   * Whether one conflict's evidence comes from a surface that was unreadable.
+   *
+   * The Auto-slot conflict is internal, so it is always provable; a hook row and
+   * the official row both come from the Loader and event bus respectively.
+   */
+  private dependsOnMissing(id: string, missing: readonly string[]): boolean {
+    if (id === 'auto-slot') return false;
+    if (id === 'official-auto-review') return missing.includes('loader');
+    return missing.includes('events');
   }
 
   /** Record one notice, bounded and with a stable per-period identity. */

@@ -2,9 +2,9 @@ import { describe, expect, test } from 'vitest';
 
 import {
   assess,
-  eachItem,
   OFFICIAL_AUTO_REVIEW_MODULE,
   readObservation,
+  walkItems,
 } from '../../src/host/coexistence-detect.js';
 import type {
   CoexistenceObservation,
@@ -321,8 +321,10 @@ describe('insufficient public information', () => {
       }),
     );
     expect(result.detection).toBe('partial');
-    expect(result.missing).toEqual(['loader']);
-    // The event list itself was walkable, so that surface stays readable.
+    // Both surfaces are genuinely unreadable: the loader has no callable
+    // `entries`, and the listener list is not a collection. Reporting only one
+    // would let the caller trust the other.
+    expect(result.missing).toEqual(['loader', 'events']);
     expect(result.observedHooks).toEqual([]);
   });
 });
@@ -335,16 +337,16 @@ describe('structural reader', () => {
       yield 2;
     }
     expect(
-      eachItem(source(), (item) => {
+      walkItems(source(), (item) => {
         seen.push(item);
       }),
-    ).toBe(true);
+    ).toBe('complete');
     expect(seen).toEqual([1, 2]);
   });
 
   test('rejects non-iterable values and stops on done', () => {
-    expect(eachItem({}, () => undefined)).toBe(false);
-    expect(eachItem(null, () => undefined)).toBe(false);
+    expect(walkItems({}, () => undefined)).toBe('unreadable');
+    expect(walkItems(null, () => undefined)).toBe('unreadable');
     let count = 0;
     const iterator = {
       [Symbol.iterator]() {
@@ -354,11 +356,35 @@ describe('structural reader', () => {
       },
     };
     expect(
-      eachItem(iterator, () => {
+      walkItems(iterator, () => {
         count += 1;
       }),
-    ).toBe(true);
+    ).toBe('complete');
     expect(count).toBe(0);
+  });
+
+  test('reports a throwing iterator instead of propagating it', () => {
+    const hostile = {
+      [Symbol.iterator]() {
+        return {
+          next: () => {
+            throw new Error('host inventory exploded');
+          },
+        };
+      },
+    };
+    expect(walkItems(hostile, () => undefined)).toBe('failed');
+  });
+
+  test('reports truncation rather than claiming a complete inventory', () => {
+    const many = Array.from({ length: 600 }, (_value, index) => index);
+    let visited = 0;
+    expect(
+      walkItems(many, () => {
+        visited += 1;
+      }),
+    ).toBe('truncated');
+    expect(visited).toBe(512);
   });
 
   test('reads the host entry and hook shapes the loader actually exposes', () => {

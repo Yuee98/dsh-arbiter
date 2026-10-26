@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getJson, postJson } from './api.js';
 import { coexistenceResponse } from './decoders/coexistence.js';
@@ -12,6 +12,21 @@ import type { CoexistenceView } from './view-types.js';
  * visible notice instead of a stale section.
  */
 export const COEXISTENCE_POLL_MS = 15_000;
+
+/**
+ * A browser-wide "the host was just re-read" signal.
+ *
+ * The settings page and the frame-wide overlay are independent consumers of the
+ * same host state. When one of them learns something authoritative (a reload, a
+ * save), it announces it here so the other refreshes immediately instead of
+ * waiting for its own interval — and neither one owns a second transport.
+ */
+export const COEXISTENCE_REFRESH_EVENT = 'arbiter:coexistence-refresh';
+
+/** Tell every mounted consumer to re-read the host now. */
+export function requestCoexistenceRefresh(): void {
+  document.dispatchEvent(new Event(COEXISTENCE_REFRESH_EVENT));
+}
 
 export interface CoexistenceFeed {
   readonly view: CoexistenceView | null;
@@ -32,17 +47,46 @@ export function useCoexistenceFeed(
   onError: (failure: unknown) => void = () => undefined,
 ): CoexistenceFeed {
   const [view, setView] = useState<CoexistenceView | null>(initial);
+  /**
+   * The newest request this consumer accepted.
+   *
+   * A GET that started before an acknowledgement can return after it. Arrival
+   * order is not age order, so every accepted response advances this counter and
+   * a response from an older request is dropped instead of reviving a notice the
+   * user already dismissed.
+   */
+  const accepted = useRef(0);
+  /**
+   * Reserve a ticket when the request starts, not when it answers.
+   *
+   * Reserving at allocation is what makes the rule "an older request can never
+   * win": two in-flight requests already have distinct ages even though neither
+   * has answered, so the later one wins regardless of arrival order.
+   */
+  const nextTicket = useCallback((): number => {
+    accepted.current += 1;
+    return accepted.current;
+  }, []);
+  const accept = useCallback(
+    (ticket: number, next: CoexistenceView | null): void => {
+      if (ticket < accepted.current) return;
+      setView(next);
+    },
+    [],
+  );
 
   // A page load (or a save-triggered reload) replaces the confirmed state.
   useEffect(() => {
     setView(initial);
-  }, [initial]);
+    accepted.current = nextTicket();
+  }, [initial, nextTicket]);
 
   useEffect(() => {
     const refresh = (): void => {
+      const ticket = nextTicket();
       getJson('/coexistence', coexistenceResponse)
         .then((response) => {
-          setView(response.coexistence);
+          accept(ticket, response.coexistence);
         })
         .catch(() => undefined);
     };
@@ -54,21 +98,24 @@ export function useCoexistenceFeed(
       if (document.visibilityState === 'visible') refresh();
     };
     document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener(COEXISTENCE_REFRESH_EVENT, refresh);
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener(COEXISTENCE_REFRESH_EVENT, refresh);
     };
-  }, []);
+  }, [accept, nextTicket]);
 
   const acknowledge = useCallback(
     (ids: readonly string[]): void => {
+      const ticket = nextTicket();
       postJson('/coexistence', { noticeIds: ids }, coexistenceResponse)
         .then((response) => {
-          setView(response.coexistence);
+          accept(ticket, response.coexistence);
         })
         .catch(onError);
     },
-    [onError],
+    [accept, nextTicket, onError],
   );
   return { view, acknowledge };
 }

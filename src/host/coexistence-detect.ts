@@ -195,34 +195,59 @@ function moduleOf(entry: Record<string, unknown>): string | null {
 const MAX_ITEMS = 512;
 
 /**
+ * How completely one collection could be read.
+ *
+ * The distinction matters more than the count: a traversal that stopped at the
+ * cap, threw, or was never iterable cannot establish that something is absent,
+ * and reporting it as `complete` would let the caller conclude "no conflict".
+ */
+export type WalkResult = 'complete' | 'unreadable' | 'truncated' | 'failed';
+
+/**
  * Visit the items of an array, iterable or generator result.
  *
  * Cordis' `entries()` returns a generator, so the value is walked through the
  * `Symbol.iterator` protocol instead of being asserted into a container type.
- * Returns false when the value is not iterable at all.
+ * A throwing iterator is reported, never propagated: this runs inside a state
+ * read and an interval, neither of which may be broken by a host quirk.
  */
-export function eachItem(
+export function walkItems(
   value: unknown,
   visit: (item: unknown, index: number) => void,
-): boolean {
-  if (Array.isArray(value)) {
-    value.slice(0, MAX_ITEMS).forEach(visit);
-    return true;
+): WalkResult {
+  try {
+    if (Array.isArray(value)) {
+      if (value.length > MAX_ITEMS) {
+        value.slice(0, MAX_ITEMS).forEach(visit);
+        return 'truncated';
+      }
+      value.forEach(visit);
+      return 'complete';
+    }
+    if (value === null || typeof value !== 'object') return 'unreadable';
+    const factory: unknown = Reflect.get(value, Symbol.iterator);
+    if (typeof factory !== 'function') return 'unreadable';
+    const iterator: unknown = Reflect.apply(factory, value, []);
+    if (!isRecord(iterator)) return 'unreadable';
+    const next: unknown = iterator['next'];
+    if (typeof next !== 'function') return 'unreadable';
+    for (let index = 0; index < MAX_ITEMS; index += 1) {
+      const step: unknown = Reflect.apply(next, iterator, []);
+      if (!isRecord(step)) return 'unreadable';
+      if (step['done'] === true) return 'complete';
+      visit(step['value'], index);
+    }
+    // The cap is reached with the iterator still open: later items may hold the
+    // answer, so this is not a complete observation.
+    return 'truncated';
+  } catch {
+    return 'failed';
   }
-  if (!isRecord(value) && typeof value !== 'object') return false;
-  if (value === null) return false;
-  const factory: unknown = Reflect.get(value, Symbol.iterator);
-  if (typeof factory !== 'function') return false;
-  const iterator: unknown = Reflect.apply(factory, value, []);
-  if (!isRecord(iterator)) return false;
-  const next: unknown = iterator['next'];
-  if (typeof next !== 'function') return false;
-  for (let index = 0; index < MAX_ITEMS; index += 1) {
-    const step: unknown = Reflect.apply(next, iterator, []);
-    if (!isRecord(step) || step['done'] === true) return true;
-    visit(step['value'], index);
-  }
-  return true;
+}
+
+/** Whether a walk established the full truth of its collection. */
+export function isComplete(result: WalkResult): boolean {
+  return result === 'complete';
 }
 
 interface ReadInput {
@@ -241,25 +266,28 @@ function readEntries(loader: unknown): {
   if (!isRecord(loader)) return { entries: [], missing: true };
   const entriesOf = loader['entries'];
   if (typeof entriesOf !== 'function') return { entries: [], missing: true };
-  const listed: unknown = Reflect.apply(entriesOf, loader, []);
-  const entries: ProviderEntry[] = [];
-  if (
-    !eachItem(listed, (item) => {
-      if (!isRecord(item)) return;
-      // Group nodes are declarations, not running plugins.
-      const options = item['options'];
-      if (isRecord(options) && options['group']) return;
-      entries.push({
-        entryId: entryIdOf(item),
-        moduleName: moduleOf(item),
-        enabled: !(isRecord(options) && options['disabled'] === true),
-        phase: phaseOf(item),
-        injects: injectsOf(item),
-      });
-    })
-  )
+  let listed: unknown;
+  try {
+    listed = Reflect.apply(entriesOf, loader, []);
+  } catch {
     return { entries: [], missing: true };
-  return { entries, missing: false };
+  }
+  const entries: ProviderEntry[] = [];
+  const walk = walkItems(listed, (item) => {
+    if (!isRecord(item)) return;
+    // Group nodes are declarations, not running plugins.
+    const options = item['options'];
+    if (isRecord(options) && options['group']) return;
+    entries.push({
+      entryId: entryIdOf(item),
+      moduleName: moduleOf(item),
+      enabled: !(isRecord(options) && options['disabled'] === true),
+      phase: phaseOf(item),
+      injects: injectsOf(item),
+    });
+  });
+  // A truncated or failed walk can hide the answer, so it is not complete.
+  return { entries, missing: !isComplete(walk) };
 }
 
 function selfFiberOf(hook: Record<string, unknown>): unknown {
@@ -300,10 +328,14 @@ function readHooks(
   const registry = events['_hooks'];
   if (!isRecord(registry)) return { hooks: [], missing: true };
   const hooks: ObservedHook[] = [];
+  let incomplete = false;
   for (const event of APPROVAL_EVENTS) {
     const list = registry[event];
-    if (list === undefined) continue;
-    eachItem(list, (item) => {
+    if (list === undefined) {
+      // An absent event key is a complete answer: nothing registered there.
+      continue;
+    }
+    const walk = walkItems(list, (item) => {
       if (!isRecord(item)) return;
       // This plugin's own listener is the gate, not a competing provider.
       if (selfFiberOf(item) === selfFiber && selfFiber !== undefined) return;
@@ -317,8 +349,9 @@ function readHooks(
         injects: injectsOfOwner(item),
       });
     });
+    if (!isComplete(walk)) incomplete = true;
   }
-  return { hooks, missing: false };
+  return { hooks, missing: incomplete };
 }
 
 /** Read every public surface this runtime can see, reporting what was absent. */

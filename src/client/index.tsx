@@ -48,12 +48,21 @@ export function apply(ctx: ClientContext): void {
  * navigation button and still shows the reason.
  */
 function openPluginManager(ctx: ClientContext): (() => void) | undefined {
-  const navigation = ctx.pluginNavigation;
-  return navigation === undefined
-    ? undefined
-    : () => {
-        navigation.openList();
-      };
+  // Looked up through the dynamic-access seam: the plugin manager provides this
+  // service, and reading it as a plain property would throw on a deployment that
+  // does not. A missing panel therefore costs the shortcut, not the reminder.
+  let navigation: unknown;
+  try {
+    navigation = ctx.reflect?.get('pluginNavigation', false);
+  } catch {
+    return undefined;
+  }
+  if (navigation === null || typeof navigation !== 'object') return undefined;
+  const openList: unknown = Reflect.get(navigation, 'openList');
+  if (typeof openList !== 'function') return undefined;
+  return () => {
+    Reflect.apply(openList, navigation, []);
+  };
 }
 
 export const inject = ['slots', 'locale'];

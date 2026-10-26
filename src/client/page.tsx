@@ -8,11 +8,13 @@ import type { TabId } from './components/page-tabs.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, getJson, postJson } from './api.js';
-import { CoexistenceAlert } from './components/coexistence.js';
-import { useCoexistenceFeed } from './coexistence-feed.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
+import {
+  requestCoexistenceRefresh,
+  useCoexistenceFeed,
+} from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
@@ -94,6 +96,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       if (generation.current !== ticket) return;
       setState(value);
       setDraft(cloneDraft(value.config));
+      // The state we just read is authoritative for the overlay as well.
+      requestCoexistenceRefresh();
       setDirty(false);
       setSaveStatus('idle');
       setAuditNotice(null);
@@ -221,11 +225,6 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         onSave={() => {
           save().catch(onFailure);
         }}
-      />
-
-      <CoexistenceAlert
-        coexistence={coexistenceFeed.view}
-        onAcknowledge={coexistenceFeed.acknowledge}
       />
 
       <PageTabs tab={tab} onTab={setTab} />

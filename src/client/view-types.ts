@@ -344,14 +344,14 @@ export interface SlotProps {
 export interface ClientContext {
   readonly locale: LocaleService;
   /**
-   * Cross-plugin navigation to the host's plugin panel, when it is mounted.
+   * Service lookup that does not require declaring `inject`.
    *
-   * Provided by the plugin manager; absent on a deployment that has none, in
-   * which case the conflict guidance names the panel without a shortcut.
+   * The dynamic-access seam of the plugin context: reading an optional service
+   * this plugin does not depend on is only safe through this, because a plain
+   * property read of an undeclared service throws.
    */
-  readonly pluginNavigation?: {
-    openList(): void;
-    openBundle(packageName: string): void;
+  readonly reflect?: {
+    get(name: string, strict?: boolean): unknown;
   };
   effect(callback: () => () => void, label?: string): unknown;
   readonly slots: {

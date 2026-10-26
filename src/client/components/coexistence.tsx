@@ -265,66 +265,62 @@ function BlockingAlert({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
+    // A reminder, not a gate: this is a corner card rather than a full-screen
+    // scrim, because covering the page would stop the user from continuing the
+    // work the contract says must not wait for an answer.
     <div
       role="alertdialog"
-      aria-modal="true"
       aria-label={t('coexistence.notice.blockingTitle')}
       data-arbiter-coexistence-alert
       style={{
         position: 'fixed',
-        inset: 0,
+        right: 24,
+        bottom: 24,
         zIndex: 60,
+        maxWidth: 560,
+        background: 'var(--dsw-alias-bg-layer-1)',
+        border: '0.5px solid var(--dsw-alias-border-l4)',
+        borderRadius: 10,
+        boxShadow: '0 8px 28px rgba(0, 0, 0, 0.18)',
+        padding: 20,
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'color-mix(in srgb, black 35%, transparent)',
+        flexDirection: 'column',
+        gap: 12,
+        fontSize: 13,
+        lineHeight: 1.7,
       }}
     >
-      <div
-        style={{
-          maxWidth: 560,
-          background: 'var(--dsw-alias-bg-layer-1)',
-          borderRadius: 10,
-          padding: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          fontSize: 13,
-          lineHeight: 1.7,
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-          {t('coexistence.notice.blockingTitle')}
-        </h3>
-        <p style={{ margin: 0 }}>
-          {t('coexistence.notice.blockingBody', { source: notice.source })}
-        </p>
-        <p style={{ margin: 0 }}>{t('coexistence.notice.blockingGuidance')}</p>
-        {coexistence.official.present ? null : (
-          <p style={{ margin: 0 }}>{t('coexistence.notice.detectionOnly')}</p>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {onOpenPluginManager === undefined ? null : (
-            <Button
-              onClick={() => {
-                // Opening the manager is a navigation action, not an
-                // acknowledgement: the conflict stays visible until it is
-                // actually gone.
-                onOpenPluginManager();
-              }}
-            >
-              {t('coexistence.notice.openManager')}
-            </Button>
-          )}
+      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+        {t('coexistence.notice.blockingTitle')}
+      </h3>
+      <p style={{ margin: 0 }}>
+        {t('coexistence.notice.blockingBody', { source: notice.source })}
+      </p>
+      <p style={{ margin: 0 }}>{t('coexistence.notice.blockingGuidance')}</p>
+      {coexistence.official.present ? null : (
+        <p style={{ margin: 0 }}>{t('coexistence.notice.detectionOnly')}</p>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {onOpenPluginManager === undefined ? null : (
           <Button
-            tone="primary"
             onClick={() => {
-              onAcknowledge([notice.id]);
+              // Opening the manager is a navigation action, not an
+              // acknowledgement: the conflict stays visible until it is
+              // actually gone.
+              onOpenPluginManager();
             }}
           >
-            {t('coexistence.notice.acknowledge')}
+            {t('coexistence.notice.openManager')}
           </Button>
-        </div>
+        )}
+        <Button
+          tone="primary"
+          onClick={() => {
+            onAcknowledge([notice.id]);
+          }}
+        >
+          {t('coexistence.notice.acknowledge')}
+        </Button>
       </div>
     </div>
   );

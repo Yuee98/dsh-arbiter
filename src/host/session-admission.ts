@@ -9,6 +9,7 @@
  */
 
 import { appendRecord, sessionRecordReady } from '../records.js';
+import type { RecordState } from '../records.js';
 import type { SessionLike } from '../snapshot.js';
 import type {
   AdmissionScope,
@@ -33,6 +34,8 @@ import {
   toAdmission,
 } from './admission.js';
 import type { FoldedAdmission } from './admission.js';
+import { refuseResume } from './admission-resume.js';
+import { admissionSummary } from './admission-summary.js';
 import { refuseEnable } from './admission-veto.js';
 import type { AdmissionFailure, EnableGuard } from './admission-veto.js';
 import type { HostEnvironment, KnobWrite } from './types.js';
@@ -65,6 +68,8 @@ export class SessionAdmissions {
   private readonly failingClosed = new Set<string>();
   /** A coexistence veto consulted before a takeover writes anything. */
   private enableGuard: EnableGuard | null = null;
+  /** Whether this runtime currently takes over sessions (not master-off). */
+  private active = false;
 
   constructor(host: HostEnvironment) {
     this.host = host;
@@ -206,7 +211,7 @@ export class SessionAdmissions {
    *     a child on purpose.
    */
   private syncOne(id: string, session: SessionLike): boolean {
-    const boundary = this.effectiveBoundary(id, session);
+    const boundary = configuredBoundary(this.host.runtime.config);
     const folded = this.admissionOf(id);
     if (folded === null) {
       if (boundary !== 'trusted') {
@@ -220,7 +225,7 @@ export class SessionAdmissions {
     // The record is not evidence that the host is confined: a guarded enable
     // can have committed its record and then failed to write the sandbox. Only
     // the live host value proves the boundary is in force.
-    const narrow = boundary === 'guarded' && !this.confined(session);
+    const narrow = boundary === 'guarded' && !atSafeSandbox(session);
     if (folded.boundary === boundary && !narrow) return true;
     this.writeKnobs(session, boundaryWrites(session, boundary));
     if (this.writeRecord(session, true, boundary) !== 'written') {
@@ -233,41 +238,9 @@ export class SessionAdmissions {
     return boundary !== 'guarded' || this.atSafeBoundary(session);
   }
 
-  /**
-   * The boundary this session may actually receive right now.
-   *
-   * A resume is an activation too: a retained admission whose master switch is
-   * turned back on, or a cold restore that lazily re-applies the configured
-   * boundary, must not widen a session while another approval provider is
-   * running. Widening is the one write that grants a permission this plugin
-   * could not honour, so a blocking conflict degrades the *widening* to guarded
-   * while the gate and the current mode stay exactly as they are. The session
-   * is then recorded at the narrower boundary, so the decision converges
-   * instead of being retried on every call.
-   */
-  private effectiveBoundary(
-    id: string,
-    session: SessionLike,
-  ): ExecutionBoundary {
-    const configured = configuredBoundary(this.host.runtime.config);
-    if (configured !== 'trusted') return configured;
-    const folded = this.admissionOf(id);
-    // A delegated child is never widened by this plugin, and an unadmitted
-    // scope is not a resume; neither needs the veto read.
-    if (session.header?.parentSession !== undefined) return configured;
-    if (folded !== null && !folded.enabled) return configured;
-    const veto = this.enableGuard?.() ?? null;
-    if (veto === null) return configured;
-    this.host.lifecycle('admission/widening-held', {
-      sessionId: id,
-      code: veto.code,
-    });
-    this.host.ctx.logger.warn(
-      'arbiter: session %s keeps the guarded boundary while another approval provider runs (%s)',
-      id,
-      veto.code,
-    );
-    return 'guarded';
+  /** Whether another approval provider is running right now (read-only). */
+  private conflictPresent(): boolean {
+    return (this.enableGuard?.() ?? null) !== null;
   }
 
   /**
@@ -351,7 +324,7 @@ export class SessionAdmissions {
     session: SessionLike,
     enabled: boolean,
     boundary: ExecutionBoundary,
-  ): string {
+  ): RecordState {
     const id = session.id ?? 'unknown';
     return appendRecord(session, ADMISSION_RECORD_TYPE, {
       version: ADMISSION_VERSION,
@@ -458,11 +431,29 @@ export class SessionAdmissions {
     const prepared = this.prepareEnable(id);
     if ('ok' in prepared) return prepared;
     const { session, boundary, wasManaged } = prepared;
-    const state = this.writeRecord(session, true, boundary);
+    // While another provider runs, a restart of an already-running admission
+    // must not *expand* it. Only the widening write is withheld; the sandbox,
+    // the mode, the gate and the record keep the values they already had, so
+    // detection changes nothing about a live session. A genuinely new takeover
+    // was refused earlier by the guard.
+    const requested = boundaryWrites(session, boundary);
+    const writes =
+      wasManaged && this.conflictPresent()
+        ? requested.filter(
+            (write) =>
+              write.type !== 'sandbox/mode' ||
+              write.value !== 'danger-full-access',
+          )
+        : requested;
+    const widened = writes.length < requested.length;
+    const state = this.writeRecord(
+      session,
+      true,
+      widened ? this.boundaryOf(session) : boundary,
+    );
     if (state !== 'written')
       return { ok: false, code: 'record-failed', message: state };
     this.covered.set(id, session);
-    const writes = boundaryWrites(session, boundary);
     this.writeKnobs(session, writes);
     if (writes.length > 0) {
       const applied = this.writeRecord(session, true, boundary);
@@ -479,7 +470,9 @@ export class SessionAdmissions {
     // default may be full access, and the sandbox write may have been refused.
     // Compensate in the log so a cold reader cannot believe an effective
     // guarded admission exists when the fence does not.
-    if (boundary === 'guarded' && !this.confined(session)) {
+    // A withheld widening did not claim the configured boundary, so the
+    // guarded-confinement obligation it implies does not apply.
+    if (!widened && boundary === 'guarded' && !atSafeSandbox(session)) {
       // Keep protecting a session that was already managed: withdrawing its
       // record would hand over an ungated session that is still wide. It stays
       // fail-closed (see refuseUnconfirmed) until a later attempt confirms the
@@ -517,13 +510,10 @@ export class SessionAdmissions {
   /**
    * Disable one session.
    *
-   * Two exit sources differ in what happens to host permissions:
-   *   - a native permission switch already applied the user's own choice, so
-   *     the record is the only new fact;
-   *   - an explicit API disable has no native target, so a boundary this
-   *     plugin widened is narrowed back to workspace-write + ask *before* the
-   *     record removes gate protection. Otherwise `trusted` would leave a
-   *     danger-full-access session that no longer passes the gate.
+   * A native switch already applied the user's own choice, so the record is the
+   * only new fact. An explicit API disable has no native target, so a boundary
+   * this plugin widened is narrowed back *before* the record removes gate
+   * protection; otherwise `trusted` would leave an ungated wide session.
    */
   disable(id: string, trigger: AdmissionTrigger): AdmissionResult {
     const failure = this.unavailable(id);
@@ -662,21 +652,18 @@ export class SessionAdmissions {
   }
 
   /**
-   * Whether the host currently confines this session.
+   * The boundary a session is recorded under.
    *
-   * An absent sandbox event is not proof of confinement: the deployment default
-   * can be full access, so only an observed workspace-write (or read-only) counts.
+   * Used when a widening write is withheld: the record must describe the
+   * boundary the host actually holds, never one this request did not apply.
    */
-  private confined(session: SessionLike): boolean {
-    return atSafeSandbox(session);
+  private boundaryOf(session: SessionLike): ExecutionBoundary {
+    const folded =
+      session.id === undefined ? null : this.admissionOf(session.id);
+    return folded?.boundary ?? 'guarded';
   }
 
-  /**
-   * Whether this session already satisfies everything teardown must restore.
-   *
-   * Delegated to the pure helper so the obligation is stated once, next to the
-   * writes it checks.
-   */
+  /** Whether this session already satisfies what teardown must restore. */
   atSafeBoundary(session: SessionLike): boolean {
     return boundaryIsSafe(session);
   }
@@ -744,17 +731,27 @@ export class SessionAdmissions {
    */
   syncBoundary(config: ArbiterConfig): void {
     if (!config.enabled) {
+      this.active = false;
       // The master switch turning off stops the gate, so a session this plugin
       // widened would become ungated while keeping that permission. Narrow the
       // whole managed scope first: the same direction as teardown.
       this.releaseManagedScope();
       return;
     }
+    // Starting or resuming coverage is a takeover, even when the admission
+    // records were retained from an earlier run: while the master switch was
+    // off this plugin did not gate these sessions. If another approval provider
+    // is running now, it must not begin.
+    if (!this.active) {
+      this.active = true;
+      const veto = this.enableGuard?.() ?? null;
+      if (veto !== null) {
+        refuseResume(this.host, this, veto);
+        return;
+      }
+    }
+    const boundary = configuredBoundary(config);
     for (const [id, session] of this.covered) {
-      // Turning the master switch back on is an activation too, so the
-      // configured boundary is filtered per session here as well: a running
-      // conflict may keep a retained admission at guarded but never drops it.
-      const boundary = this.effectiveBoundary(id, session);
       const folded = this.admissionOf(id);
       if (folded === null) {
         // An inherited scope has no record of its own: when its root narrows,
@@ -879,6 +876,35 @@ export class SessionAdmissions {
     return sessionId !== undefined && this.failingClosed.has(sessionId);
   }
 
+  /** Summary projection for the state payload. */
+  summary(): unknown {
+    return admissionSummary(this.host, {
+      coveredIds: [...this.covered.keys()],
+      failingClosed: [...this.failingClosed],
+      admission: (id) => this.admission(id),
+    });
+  }
+
+  /** Adapters the resume refusal needs; each forwards to this service's path. */
+  readonly resumeTargets = (): readonly (readonly [string, SessionLike])[] => {
+    this.discover();
+    return this.teardownTargets();
+  };
+  readonly writeAdmission = (
+    session: SessionLike,
+    enabled: boolean,
+    boundary: ExecutionBoundary,
+  ): RecordState => this.writeRecord(session, enabled, boundary);
+  readonly writeSessionKnobs = (
+    session: SessionLike,
+    writes: readonly KnobWrite[],
+  ): void => {
+    this.writeKnobs(session, writes);
+  };
+  readonly dropCoverage = (sessionId: string): void => {
+    this.covered.delete(sessionId);
+  };
+
   /** Sessions still awaiting a confirmed rollback, for reporting. */
   failingClosedSessions(): readonly string[] {
     return [...this.failingClosed];
@@ -887,22 +913,5 @@ export class SessionAdmissions {
   /** The session reached a safe boundary on a later attempt. */
   clearFailingClosed(sessionId: string): void {
     this.failingClosed.delete(sessionId);
-  }
-
-  /** One bounded summary for the state payload. */
-  summary(): unknown {
-    return {
-      boundary: configuredBoundary(this.host.runtime.config),
-      covered: this.covered.size,
-      // A session the plugin widened and could not narrow again: a human must
-      // reselect its permission, because the plugin no longer gates it.
-      failingClosed: [...this.failingClosed],
-      sessions: [...this.covered.keys()].slice(-20).map((id) => {
-        const admission = this.admission(id);
-        return admission === null
-          ? { sessionId: id, admission: null }
-          : { sessionId: id, admission };
-      }),
-    };
   }
 }
