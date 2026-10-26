@@ -59,6 +59,19 @@ function ruleNameStage(name: string | null): { readonly ruleName?: string } {
 }
 
 /** Gate admission, rule evaluation and reviewer hand-off. */
+/** What the audit row keeps about this evaluation. */
+function auditEffect(
+  evaluation: ReturnType<typeof evaluateCall>,
+): Record<string, unknown> | null {
+  const facts = evaluation.facts;
+  const normalization = evaluation.normalization;
+  if (facts === null && normalization === null) return null;
+  return {
+    ...(facts === null ? {} : { ...facts }),
+    ...(normalization === null ? {} : { normalization }),
+  };
+}
+
 export class CallGate {
   private readonly host: HostEnvironment;
   private readonly permissions: PermissionLifecycle;
@@ -369,7 +382,11 @@ export class CallGate {
       ],
       view,
       extras: {
-        effect: evaluation.facts === null ? null : { ...evaluation.facts },
+        // The audit record keeps the evidence the decision used: the observed
+        // effects and the command normalization (raw text, matched text, per-word
+        // status). Both travel in the existing `effect` payload, so no schema
+        // migration is needed and old rows stay readable.
+        effect: auditEffect(evaluation),
         signals: null,
         snapshot: null,
         reviewReason: null,

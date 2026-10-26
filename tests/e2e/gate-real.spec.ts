@@ -39,6 +39,32 @@ const PRODUCTION_RULE = {
 
 const CONFIG = { format: FORMAT, rules: [PRODUCTION_RULE] };
 
+/** Tools the fixture registers; the shell tool carries the same argument shape. */
+const DEFAULT_TOOLS = [
+  {
+    name: 'deploy',
+    parameters: { environment: { type: 'string', required: true } },
+  },
+] as const;
+
+/**
+ * A shell allow, so the real gate proves the same normalization the tester uses.
+ *
+ * The condition names the canonical text, which is why `echo "a b"` matches and
+ * `echo a b` does not: two arguments are not one quoted argument.
+ */
+const SHELL_TOOLS = [
+  { name: 'bash', parameters: { command: { type: 'string', required: true } } },
+] as const;
+
+const SHELL_ALLOW = {
+  id: 'echo-quoted',
+  conditions: [{ target: 'command', kind: 'exact', pattern: "echo 'a b'" }],
+  verdict: 'allow',
+};
+
+const SHELL_CONFIG = { format: FORMAT, rules: [SHELL_ALLOW] };
+
 interface GateEvent {
   readonly type: string;
   readonly data: unknown;
@@ -145,6 +171,15 @@ function isToolRuntime(value: unknown): value is HostToolRuntime {
   );
 }
 
+/** The first string argument a fixture tool received, for the reached log. */
+function firstArgument(args: unknown): string {
+  if (!isRecordValue(args)) return '';
+  for (const value of Object.values(args)) {
+    if (typeof value === 'string') return value;
+  }
+  return '';
+}
+
 function narrowFixture(value: unknown): (options: unknown) => unknown {
   if (typeof value !== 'function')
     throw new TypeError('pinned host is missing the tool fixture factory');
@@ -189,7 +224,14 @@ function scopeMembers(value: unknown): ScopeMembers {
  * working-directory providers below are minimal stand-ins that keep the gate on
  * the real code path without booting DSH's whole daemon.
  */
-async function mountGate(options: { readonly readOnly: boolean }): Promise<{
+async function mountGate(options: {
+  readonly readOnly: boolean;
+  readonly config?: unknown;
+  readonly tools?: readonly {
+    readonly name: string;
+    readonly parameters?: Readonly<Record<string, unknown>>;
+  }[];
+}): Promise<{
   readonly execute: (name: string, args: unknown) => Promise<GateDecision>;
   readonly reached: string[];
   readonly received: { name: string; kind: string; reason?: string }[];
@@ -280,31 +322,29 @@ async function mountGate(options: { readonly readOnly: boolean }): Promise<{
       [scoped, { mode: 'native' }],
       isToolRuntime,
     );
-    runtime.register(
-      fixture({
-        name: 'deploy',
-        description: 'deploy to an environment',
-        parameters: {
-          environment: { type: 'string', required: true },
-        },
-        execute: (args: unknown) => {
-          const environment =
-            isRecordValue(args) && typeof args['environment'] === 'string'
-              ? args['environment']
-              : '';
-          reached.push(environment);
-          return Promise.resolve([
-            { type: 'text', text: `deployed ${environment}` },
-          ]);
-        },
-      }),
-    );
+    for (const tool of options.tools ?? DEFAULT_TOOLS) {
+      runtime.register(
+        fixture({
+          name: tool.name,
+          description: `run ${tool.name}`,
+          parameters: tool.parameters ?? {
+            environment: { type: 'string', required: true },
+          },
+          execute: (args: unknown) => {
+            reached.push(`${tool.name}:${firstArgument(args)}`);
+            return Promise.resolve([
+              { type: 'text', text: `ran ${tool.name}` },
+            ]);
+          },
+        }),
+      );
+    }
     box.runtime = runtime;
   }
 
   // `apply` registers the gate on the same context; the plugin's own
   // `tools/pre-execute` listener is what decides the call.
-  apply(context, CONFIG);
+  apply(context, options.config ?? CONFIG);
   // Wait for the plugin scope to mount instead of assuming a fixed delay.
   const deadline = Date.now() + 15_000;
   while (box.runtime === undefined) {
@@ -424,6 +464,64 @@ test.describe('real host gate', () => {
       expect(payload).toMatchObject({
         ok: true,
         results: [{ path: 'deny', tool: 'deploy' }],
+      });
+    },
+  );
+
+  test(
+    'the real gate allows a quoted shell argument but not two arguments',
+    { tag: '@smoke' },
+    async ({ dsh }) => {
+      // The plugin document is written before the host boots, so the gate reads
+      // the same rules the tester is asked about.
+      const gate = await mountGate({
+        readOnly: false,
+        config: SHELL_CONFIG,
+        tools: SHELL_TOOLS,
+      });
+      let allowed: GateDecision;
+      let twoArguments: GateDecision;
+      try {
+        allowed = await gate.execute('bash', { command: 'echo "a b"' });
+        twoArguments = await gate.execute('bash', { command: 'echo a b' });
+      } finally {
+        await gate.dispose();
+      }
+
+      // The quoted argument is one argument, so the canonical text matches and the
+      // call reaches the tool body.
+      expect(allowed).toMatchObject({ kind: 'ok' });
+      // The tool body receives the original command, not the normalized text: the
+      // matching form never replaces what the host executes.
+      expect(gate.reached).toContain('bash:echo "a b"');
+      // Two arguments normalize to a different text, so the allow does not cover
+      // it: the call never reaches the tool body and the decision is not this
+      // rule's own allow.
+      expect(twoArguments.kind).not.toBe('ok');
+      expect(gate.reached).not.toContain('bash:echo a b');
+
+      const response = await fetch(`${dsh.origin}/api/arbiter/test`, {
+        method: 'POST',
+        headers: {
+          cookie: `${dsh.cookie.name}=${dsh.cookie.value}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: [
+            JSON.stringify({ tool: 'bash', args: { command: 'echo "a b"' } }),
+            JSON.stringify({ tool: 'bash', args: { command: 'echo a b' } }),
+          ],
+          rules: [SHELL_ALLOW],
+        }),
+      });
+      expect(response.status).toBe(200);
+      const payload: unknown = await response.json();
+      expect(payload).toMatchObject({
+        ok: true,
+        results: [
+          { path: 'allow', tool: 'bash' },
+          { path: 'review(default)', tool: 'bash' },
+        ],
       });
     },
   );

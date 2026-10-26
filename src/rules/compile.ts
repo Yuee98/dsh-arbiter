@@ -345,6 +345,11 @@ function evaluateStructural(
   const subjects = call.subjects.filter(
     (subject) => subject.target === condition.target,
   );
+  // An incomplete structure means the condition's own kind of node might exist in
+  // the part nobody read. Reporting a mismatch for a known prefix would let a
+  // higher-priority rule look like a certain miss while a lower-priority tool
+  // allow authorizes the whole call from what was actually seen.
+  const partiallyRead = call.shellCall && !call.structureComplete;
   if (subjects.length === 0) {
     // No node can mean two different things, and only the tool category plus the
     // parse state can tell them apart:
@@ -355,8 +360,7 @@ function evaluateStructural(
     //   - a shell call whose structure could not be determined (a parse error, or
     //     a construct recorded as partial/none without extracting a node) might
     //     have had the node, so the honest answer is unknown.
-    const undetermined =
-      call.shellCall && (call.structureUnknown || !call.structureComplete);
+    const undetermined = partiallyRead || call.structureUnknown;
     return undetermined
       ? conditionResult(index, condition, 'unknown', {
           reason: 'unresolved-structure',
@@ -377,10 +381,10 @@ function evaluateStructural(
       matchedValues: matched.map((subject) => subject.text),
       matchedValue: matched[0]?.text ?? '',
     });
-  // No certain match. An unresolved sibling could still match, so the honest
-  // answer is unknown rather than a mismatch — otherwise adding one known-safe
-  // redirect would turn an undetermined call into a confident one.
-  if (subjects.some((subject) => subject.unresolved))
+  // No certain match. An unresolved sibling could still match, and so could a node
+  // in the part of the source that was never read, so the honest answer is
+  // unknown rather than a mismatch.
+  if (subjects.some((subject) => subject.unresolved) || partiallyRead)
     return conditionResult(index, condition, 'unknown', {
       reason: 'unresolved-structure',
     });

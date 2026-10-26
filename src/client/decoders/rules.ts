@@ -12,6 +12,7 @@ import {
   choice,
   field,
   nullable,
+  normalizationDetail,
   number,
   object,
   optional,
@@ -142,6 +143,11 @@ function ruleTest(value: unknown): RuleTestResultView {
   const source = object(value);
   const parse = field(source, 'parse', object);
   const error = field(source, 'error', optional(text));
+  const detail = field(
+    source,
+    'normalization',
+    optional(nullable(normalizationDetail)),
+  );
   const path = field(
     source,
     'path',
@@ -169,6 +175,9 @@ function ruleTest(value: unknown): RuleTestResultView {
       unresolved: field(parse, 'unresolved', strings),
     },
     argv: field(source, 'argv', strings),
+    // Older responses do not carry normalization; absence is not an error, it
+    // only means the tester cannot show the word-level evidence.
+    ...(detail === undefined ? {} : { normalization: detail }),
     shadowed: field(source, 'shadowed', strings),
     ...(error === undefined ? {} : { error }),
   };

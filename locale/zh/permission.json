@@ -1,0 +1,55 @@
+{
+  "label": "会话权限",
+  "loading": "正在读取会话权限…",
+  "busy": "正在应用…",
+  "trigger": {
+    "enabled": "自动审查（Arbiter · {boundary}）",
+    "hostOnly": "未启用自动审查（{preset}）",
+    "hostUnknown": "未启用自动审查",
+    "open": "打开权限菜单，当前：{current}",
+    "unavailable": "当前会话不可用"
+  },
+  "option": {
+    "arbiter": "自动审查（Arbiter）",
+    "arbiterHint": "由 Arbiter 接管本会话的新调用：规则与审查后自动批准或拒绝，审批模式决定是否需要人工。",
+    "hostHint": "交给宿主权限：{preset}",
+    "current": "当前",
+    "disable": "关闭自动审查",
+    "disableHint": "停止接管本会话的新调用；若此前放宽过执行边界，宿主权限会先收窄回工作区写入再交还。"
+  },
+  "boundary": {
+    "guarded": "工作区写入",
+    "trusted": "完全权限"
+  },
+  "confirm": {
+    "title": "切换到完全权限？",
+    "description": "完全权限会减少宿主的确认步骤，agent 可以直接执行更多操作，包括敏感文件、命令与网络请求。只有在你信任当前任务时才使用。",
+    "acknowledge": "我已了解风险，愿意继续",
+    "cancel": "取消",
+    "enable": "切换权限"
+  },
+  "hostUnavailable": "宿主权限菜单不可用；本控件仍可启用或停用自动审查。",
+  "error": {
+    "sessionRequired": "没有可用的会话，无法改变权限。",
+    "sessionUnknown": "宿主不认识当前会话，权限未改变。",
+    "invalidAction": "请求无效，权限未改变。",
+    "boundaryNotOverridable": "执行边界属于插件配置，不能在会话中单独覆盖。",
+    "boundaryUnconfirmed": "宿主未确认执行边界，该会话保持拦截状态。",
+    "boundaryNotApplied": "宿主拒绝应用执行边界，权限未改变。",
+    "recordUnavailable": "会话记录不可用，权限未改变。",
+    "recordFailed": "会话记录写入失败，权限未改变。",
+    "pluginDisabled": "插件总开关已关闭，无法启用会话。",
+    "stopping": "插件正在停止，权限未改变。",
+    "requestFailed": "请求失败，仍显示上次确认的状态：{detail}",
+    "hostUnavailableDetail": "宿主权限命令未生效，仍显示上次确认的状态。",
+    "commandNotApplied": "宿主命令未实际生效，仍显示上次确认的状态。"
+  },
+  "preset": {
+    "readOnly": "只读",
+    "workspaceWrite": "工作区内修改",
+    "fullAccess": "完全权限",
+    "readOnlyHint": "只读访问：不能修改文件，也不执行需要写入的操作。",
+    "workspaceWriteHint": "工作区内修改：文件写入限制在当前工作区，其他操作由宿主确认。",
+    "fullAccessHint": "完全权限：减少宿主的确认步骤，agent 可以直接执行更多操作。"
+  }
+}

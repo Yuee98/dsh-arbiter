@@ -10,6 +10,7 @@ import zhReviewer from '../../../locale/zh/reviewer.json' with { type: 'json' };
 import zhRules from '../../../locale/zh/rules.json' with { type: 'json' };
 import zhRuleTest from '../../../locale/zh/ruleTest.json' with { type: 'json' };
 import zhStatus from '../../../locale/zh/status.json' with { type: 'json' };
+import zhPermission from '../../../locale/zh/permission.json' with { type: 'json' };
 import enCommon from '../../../locale/en/common.json' with { type: 'json' };
 
 /** Explicit imports retain literal Chinese keys and keep JSON in the browser bundle. */
@@ -27,6 +28,7 @@ export const localeResources = {
     rules: zhRules,
     ruleTest: zhRuleTest,
     status: zhStatus,
+    permission: zhPermission,
   },
   en: {
     common: enCommon,

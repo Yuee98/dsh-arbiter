@@ -32,6 +32,7 @@ import {
 } from '../shell/parse.js';
 import type {
   CommandRule,
+  NormalizationDetail,
   RuleConditionResult,
   RuleEvaluation,
   RuleMatchDetail,
@@ -49,13 +50,36 @@ const VERDICT_PRIORITY: Record<RuleVerdict, number> = {
   allow: 3,
 };
 
-const SHELL_TOOLS = new Set([
-  'bash',
-  'terminal',
-  'shell',
-  'pwsh',
-  'powershell',
-]);
+/**
+ * Tools whose command text is a POSIX-style shell command line.
+ *
+ * The parser is a bash parser, so only these may receive a complete structure.
+ * `pwsh`/`powershell` carry a different language: bash quoting and expansion do
+ * not describe what PowerShell will run (`'a''b'` is `a'b` in PowerShell and `ab`
+ * in bash). Their calls still go through the same rule engine and can be matched
+ * on the tool name or raw arguments, but their structure is never claimed.
+ */
+const SHELL_TOOLS = new Set(['bash', 'terminal', 'shell']);
+
+/**
+ * Shell-family tools whose dialect the parser is not verified for.
+ *
+ * They are shell calls — they run a command line — so an argument condition does
+ * not cover them — but no command/redirect/assignment node is published from
+ * unverified syntax.
+ */
+const OTHER_SHELL_TOOLS = new Set(['pwsh', 'powershell']);
+
+/**
+ * Every tool that executes a command line.
+ *
+ * The distinction between the two sets decides whether a parse may be used, not
+ * whether the tool is a shell tool: treating a PowerShell call as a non-shell
+ * tool would let an argument condition authorize it on arguments alone.
+ */
+function isShellTool(tool: string): boolean {
+  return SHELL_TOOLS.has(tool) || OTHER_SHELL_TOOLS.has(tool);
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -64,11 +88,10 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Text a shell call carries as its command line.
  *
- * This reader is deliberately conservative: it only finds the conventional
- * command fields and never invents a normalized form. Shell normalization and
- * per-word static values are #8's responsibility; until then the raw text is
- * what a command condition sees, and an unresolved variable keeps its original
- * spelling instead of becoming a guessed value.
+ * This reader only finds the conventional command fields. It never normalizes
+ * anything: normalization is the shell adapter's single job, so a rule that
+ * matches here and a rule that matches at runtime cannot disagree about which
+ * text they compared.
  */
 function shellTextOf(argumentsValue: unknown): string | null {
   if (!isPlainRecord(argumentsValue)) return null;
@@ -92,6 +115,16 @@ interface SubjectInputs {
   readonly parse: ShellParse | null;
 }
 
+/**
+ * Structural subjects the matcher may compare against.
+ *
+ * Command text comes from the adapter's canonical form, so `echo "a b"` and
+ * `echo a b` are different subjects with different text while both keep their
+ * argument boundaries. A command containing a dynamic word is still matchable on
+ * its raw expression: the caller wrote it, and the rule may describe exactly what
+ * was written. A redirect whose target is dynamic or whose directory is unknown
+ * is a subject only `unknown` can satisfy, because no path can be confirmed.
+ */
 function structuralSubjects(inputs: SubjectInputs): Subject[] {
   const { parse } = inputs;
   const subjects: Subject[] = [];
@@ -99,18 +132,19 @@ function structuralSubjects(inputs: SubjectInputs): Subject[] {
   for (const command of parse.commands) {
     subjects.push({
       target: 'command',
-      text: command.argv.join(' '),
+      text: command.text,
       nodeIndex: subjects.length,
-      // A command whose words include an unresolved expansion still has a
-      // comparable text (the raw expression is preserved), so it stays
-      // matchable; it is not treated as unknown text.
       unresolved: false,
     });
   }
   for (const redirect of parse.redirects) {
-    const absolute = redirect.target.startsWith('/');
-    const cwdKnown = redirect.cwd !== null;
-    const unresolved = !absolute && (redirect.unresolved || !cwdKnown);
+    // A dynamic target is never a confirmed path, even when it looks absolute:
+    // `/workspace/$REL` can expand to `../../etc/passwd`. Only a static target can
+    // be resolved, and only a relative one depends on the directory being known.
+    const absolute = !redirect.dynamic && redirect.target.startsWith('/');
+    // The adapter has already decided whether the target is confirmed; a repeated
+    // body or an unknown directory both make a relative path unconfirmed.
+    const unresolved = redirect.unresolved;
     subjects.push({
       target: 'file_redirect',
       text:
@@ -122,6 +156,10 @@ function structuralSubjects(inputs: SubjectInputs): Subject[] {
     });
   }
   for (const assignment of parse.assignments) {
+    // The assignment's text is what the user wrote, so a rule can match it even
+    // when the value is dynamic. Only a value the adapter could not even attribute
+    // to the word would be unresolved here; expansions are covered by the command
+    // subjects they run.
     subjects.push({
       target: 'variable_assignment',
       text: `${assignment.name}=${assignment.value}`,
@@ -142,11 +180,13 @@ function callSubjects(
   // could be extracted. A shell tool whose arguments carry no usable command text
   // still carries shell structure in principle; treating it as a non-shell tool
   // would let an argument condition cover a call whose structure is unknown.
-  const isShellCall = SHELL_TOOLS.has(tool);
+  const isShellCall = isShellTool(tool);
   const complete =
-    parse === null
-      ? false
-      : parse.status === 'ok' && parse.completeness === 'complete';
+    isShellCall &&
+    SHELL_TOOLS.has(tool) &&
+    parse !== null &&
+    parse.status === 'ok' &&
+    parse.completeness === 'complete';
   return {
     tool,
     identity,
@@ -154,11 +194,12 @@ function callSubjects(
     subjects: structuralSubjects({ tool, argumentsValue, parse }),
     shellCall: isShellCall,
     // A shell call with no readable command text has no trustworthy structure at
-    // all, which is as undetermined as a parse error. A partial parse does have
-    // usable nodes, so its existing commands stay matchable; #8 refines how
-    // incomplete structure propagates into coverage.
+    // all. A partially read command stays matchable on what was extracted, but
+    // the missing structure is still reported separately so coverage cannot be
+    // claimed from it.
     structureUnknown:
-      isShellCall && (parse === null || parse.status === 'error'),
+      isShellCall &&
+      (!SHELL_TOOLS.has(tool) || parse === null || parse.status === 'error'),
     structureComplete: !isShellCall || complete,
   };
 }
@@ -366,9 +407,13 @@ function evaluationRulePath(
 }
 
 export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
-  const commandText = SHELL_TOOLS.has(options.tool)
-    ? shellTextOf(options.arguments)
-    : null;
+  // Only a verified shell dialect is parsed. A PowerShell command line is not a
+  // bash command line, so no structure is derived from it and its conditions stay
+  // unknown rather than being compared against a second language's syntax.
+  const commandText =
+    isShellTool(options.tool) && SHELL_TOOLS.has(options.tool)
+      ? shellTextOf(options.arguments)
+      : null;
   const parse =
     commandText === null ? null : parseShell(commandText, options.cwd);
   const call = callSubjects(
@@ -399,12 +444,15 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
     path,
     matches: details,
     rules: results,
+    // A call with no shell text has no shell parse at all; reporting an empty
+    // "complete" parse would claim a structure nobody read.
     parse: parse ?? {
       status: 'ok',
       statements: 1,
       commands: [],
       redirects: [],
       assignments: [],
+      words: [],
       subshells: 0,
       substitutions: 0,
       heredocs: 0,
@@ -412,12 +460,13 @@ export function evaluateCall(options: EvaluateOptions): RuleEvaluation {
       opaque: false,
       opaqueReasons: [],
       completeness: 'complete',
+      structure: { issues: [], errors: [], nodes: 0 },
       background: false,
       nodes: ['tool'],
       argv: [],
-      comments: [],
     },
     argv: parse?.argv ?? [],
+    normalization: normalizationOf(commandText, parse),
     facts: factsResult?.facts ?? null,
     shadowed: details
       .filter((detail) => !detail.effective)
@@ -431,6 +480,41 @@ export function evaluationPath(
   return evaluation.path.kind === 'rule'
     ? evaluation.path.verdict
     : 'review(default)';
+}
+
+/**
+ * Diagnostic evidence about how the command text was read and normalized.
+ *
+ * The contract requires the tester and call explanations to show the original
+ * command, the text that was actually matched, and why a word was not normalized.
+ * This is derived from the same parse the evaluator used, so it cannot describe a
+ * different normalization than the one that decided the verdict.
+ */
+function normalizationOf(
+  commandText: string | null,
+  parse: ShellParse | null,
+): NormalizationDetail | null {
+  if (commandText === null || parse === null) return null;
+  return {
+    raw: commandText,
+    completeness: parse.completeness,
+    issues: parse.structure.issues.map((issue) => ({
+      kind: issue.kind,
+      message: issue.message,
+      pos: issue.pos,
+    })),
+    commands: parse.commands.map((command) => ({
+      text: command.text,
+      raw: command.raw,
+      words: command.words.map((word) => ({
+        raw: word.raw,
+        text: word.text,
+        status: word.status,
+        reasons: [...word.reasons],
+        ...(word.value === undefined ? {} : { value: word.value }),
+      })),
+    })),
+  };
 }
 
 /** Parse one rule-tester input line: a bare command, `tool: command`, or JSON. */
@@ -508,6 +592,7 @@ export function testRules(
       opaque: evaluation.parse.opaque,
       unresolved: evaluation.parse.unresolved,
     },
+    normalization: evaluation.normalization,
     argv: parsed.tool === 'bash' ? evaluation.argv : [],
     shadowed: evaluation.shadowed,
     ...(evaluation.parse.error === undefined

@@ -273,6 +273,7 @@ export function RuleTestDetails(props: {
           allowMatched={coverage.allowMatched}
         />
         <ParseBlock result={props.result} />
+        <NormalizationBlock result={props.result} />
       </div>
     </details>
   );
@@ -438,6 +439,69 @@ function ShadowList(props: {
       </span>
       {props.allowMatched ? null : (
         <span style={muted}>{t('ruleTest.noAllow')}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The matched text and how each word got there.
+ *
+ * A reader has to be able to see why `echo "a b"` and `echo a b` take different
+ * paths, and why a word kept its original expression instead of becoming a value.
+ * The backend produces this from the same parse it matched against, so it cannot
+ * describe a different normalization than the one that decided the answer.
+ */
+function NormalizationBlock(props: {
+  readonly result: RuleTestResultView;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const detail = props.result.normalization;
+  if (detail === null || detail === undefined) return null;
+  return (
+    <div
+      data-testid="rule-test-normalization"
+      style={{
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        borderRadius: 6,
+        padding: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        fontSize: 12,
+      }}
+    >
+      <strong>{t('ruleTest.normalizationTitle')}</strong>
+      {detail.commands.length === 0 ? (
+        <span style={muted}>{t('ruleTest.normalizationEmpty')}</span>
+      ) : (
+        detail.commands.map((command, index) => (
+          <div
+            key={`${String(index)}-${command.text}`}
+            style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+          >
+            <span style={mono}>
+              {t('ruleTest.normalizationCommand', { text: command.text })}
+            </span>
+            {command.words.map((word, at) => (
+              <span
+                key={`${String(at)}-${word.raw}`}
+                style={{ ...muted, ...mono }}
+              >
+                {t('ruleTest.normalizationWord', {
+                  raw: word.raw,
+                  text: word.text,
+                  status:
+                    word.status === 'static'
+                      ? t('ruleTest.normalizationStatic')
+                      : t('ruleTest.normalizationDynamic', {
+                          reasons: word.reasons.join(', '),
+                        }),
+                })}
+              </span>
+            ))}
+          </div>
+        ))
       )}
     </div>
   );
