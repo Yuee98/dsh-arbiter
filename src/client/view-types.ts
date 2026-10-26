@@ -2,7 +2,8 @@ import type { ComponentType } from 'react';
 import type {
   ArbiterConfig,
   CommandRule,
-  NormalizationDetail,
+  RulePath,
+  RuleTestResult,
 } from '../types.js';
 import type { LocaleService } from './i18n.js';
 import type { ConfigIssueView } from './view-issues.js';
@@ -17,6 +18,19 @@ export type Mutable<T> = {
 
 export type Draft = Mutable<ArbiterConfig>;
 export type DraftRule = Mutable<CommandRule>;
+
+/**
+ * One tester answer.
+ *
+ * `pathDetail` is the evaluator's structured rule path; the host sends it next
+ * to the legacy `path` word so the page can explain a `review(default)` reason
+ * without re-deriving priority. `cwd` is the directory the evaluation actually
+ * used, so a relative-path answer is reproducible.
+ */
+export interface RuleTestResultView extends RuleTestResult {
+  readonly pathDetail: RulePath;
+  readonly cwd: string;
+}
 
 export interface AuditHealthView {
   readonly state: 'ok' | 'degraded' | 'unavailable' | 'disabled';
@@ -91,71 +105,213 @@ export interface SaveResponse {
   readonly warnings: readonly ConfigIssueView[];
 }
 
+/**
+ * One row of the call list.
+ *
+ * The row exists to locate a call: identity, the one-line operation summary and
+ * the final verdict. The reason, stage chain, arguments and model traffic are
+ * read only when the row is opened, so a page never carries them.
+ */
 export interface LogRow {
   readonly callId: string;
   readonly ts: number;
   readonly sessionId: string;
   readonly sessionKind: string;
   readonly tool: string;
+  /** The command, the code, or a bounded JSON excerpt — never the whole input. */
   readonly command: string;
   readonly result: string;
-  readonly reason: string;
   readonly ruleId: string | null;
-  readonly approvalMode: string;
-  readonly decisionRules: readonly string[];
+  /** True when the stored record's format is newer than this build. */
+  readonly unreadable: boolean;
 }
 
-export interface LogDetail {
-  readonly callId: string;
+/** The newest record a traversal is anchored at. */
+export interface LogAnchor {
   readonly ts: number;
-  readonly sessionId: string;
-  readonly sessionKind: string;
-  readonly parentSession: string | null;
-  readonly tool: string;
-  readonly arguments: unknown;
-  readonly cwd: string;
-  readonly fingerprint: string;
-  readonly configRevision: string;
-  readonly approvalMode: string;
-  readonly executionMode: string;
-  readonly result: string;
-  readonly reason: string;
-  readonly trace: readonly unknown[];
-  readonly effect: unknown;
-  /** Command normalization the decision used, when the record carries it. */
-  readonly normalization: NormalizationDetail | null;
-  readonly sessionRecordState: string;
-  readonly signals: unknown;
-  readonly policyStrategy: string | null;
-  readonly decisionRules: readonly string[];
-  readonly executionStatus: string;
-  readonly stages: readonly {
-    readonly seq: number;
-    readonly stage: string;
-    readonly result: string;
-    readonly reason: string | null;
-    readonly ruleId: string | null;
-    readonly decisionRules: readonly string[];
-    readonly configRevision: string | null;
-    readonly ts: number;
-  }[];
-  readonly snapshot: unknown;
-  readonly modelCalls: readonly {
-    readonly requestId: string;
-    readonly attempt: number;
-    readonly backend: string;
-    readonly protocol: string;
-    readonly request: unknown;
-    readonly responseText: string | null;
-    readonly parsed: unknown;
-    readonly error: string | null;
-    readonly startedAt: number;
-    readonly durationMs: number;
-    readonly estimatedInputTokens: number;
-    readonly usage: unknown;
-  }[];
-  readonly config: unknown;
+  readonly callId: string;
 }
+
+/**
+ * One decoded list page and the cursors that continue it.
+ *
+ * Paging is keyed to a row, not to a row count: `nextCursor` is the last row of
+ * this page, and the next request asks for what follows it. A call arriving
+ * anywhere in the order therefore cannot shift the rows under the reader.
+ * `newer` counts arrivals above the traversal head, which a total delta cannot.
+ */
+export interface LogPage {
+  /** False when the host could not read the audit store at all. */
+  readonly ok: boolean;
+  readonly rows: readonly LogRow[];
+  readonly total: number;
+  readonly limit: number;
+  readonly nextCursor: LogAnchor | null;
+  readonly prevCursor: LogAnchor | null;
+  readonly anchor: LogAnchor | null;
+  readonly newer: number;
+  /** How many matching rows follow this page inside the traversal. */
+  readonly remaining: number;
+  readonly code: string | undefined;
+}
+
+/**
+ * Why part of a detail is not shown.
+ *
+ * The host sends a stable code so the page can render a localized sentence; an
+ * unrecognized code falls back to a generic sentence rather than a bare key.
+ */
+export type CallDetailMissingCode =
+  | 'audit-disabled'
+  | 'audit-unavailable'
+  | 'audit-record-cleared'
+  | 'audit-unreadable'
+  | 'record-format-newer'
+  | 'snapshot-missing'
+  | 'snapshot-unreadable'
+  | 'config-missing'
+  | 'config-unreadable'
+  | 'model-attempts-missing'
+  | 'template-missing'
+  | 'template-unreadable'
+  | 'stages-missing'
+  | 'stage-details-missing'
+  | 'rule-name-missing'
+  | 'arguments-missing'
+  | 'execution-not-observed';
+
+export interface CallDetailStageView {
+  readonly seq: number;
+  readonly stage: string;
+  readonly result: string;
+  readonly reason: string | null;
+  readonly ruleId: string | null;
+  readonly ruleName: string | null;
+  readonly decisionRules: readonly string[];
+  readonly configRevision: string | null;
+  readonly configSnapshotId: string | null;
+  readonly ts: number | null;
+}
+
+export interface CallDetailModelAttemptView {
+  readonly requestId: string;
+  readonly attempt: number;
+  readonly backend: string;
+  readonly protocol: string;
+  readonly templateId: string | null;
+  readonly request: unknown;
+  /** The model's own answer; shown as received, never relabelled as a reason. */
+  readonly responseText: string | null;
+  readonly parsed: unknown;
+  readonly error: string | null;
+  readonly startedAt: number;
+  readonly durationMs: number;
+  readonly estimatedInputTokens: number;
+  readonly usage: unknown;
+}
+
+/**
+ * One call's detail, from the audit store or a partial runtime record.
+ *
+ * `source` says which: a session-sourced detail is the minimal verdict record,
+ * so the page reports the absent layers instead of pretending they were read.
+ */
+export interface CallDetailView {
+  readonly callId: string;
+  readonly source: 'audit' | 'session';
+  readonly recordFormatVersion: number | null;
+  readonly unreadable: boolean;
+  readonly unreadableReason: string | null;
+  readonly overview: {
+    readonly tool: string;
+    readonly ts: number;
+    readonly sessionId: string | null;
+    readonly sessionKind: string | null;
+    readonly parentSession: string | null;
+    readonly workspace: string | null;
+    readonly cwd: string | null;
+    readonly profile: string | null;
+    readonly approvalMode: string | null;
+    readonly executionMode: string | null;
+    /** The final permission verdict; `null` when no source stated one. */
+    readonly verdict: string | null;
+    readonly verdictReason: string | null;
+    readonly configRevision: string | null;
+    readonly fingerprint: string | null;
+    readonly execution: {
+      readonly status: string | null;
+      readonly startedAt: number | null;
+      readonly finishedAt: number | null;
+    };
+    readonly cancelled: boolean;
+  };
+  readonly basis: {
+    readonly rule: {
+      readonly ruleId: string;
+      readonly ruleName: string | null;
+    } | null;
+    readonly decisionRules: readonly string[];
+    /** Disagreements between sources for this same call, both readings kept. */
+    readonly conflicts: readonly {
+      readonly field: string;
+      readonly observed: readonly string[];
+    }[];
+    readonly conflictsTruncated: boolean;
+    readonly policyStrategy: string | null;
+    readonly chain: readonly CallDetailStageView[] | null;
+    /**
+     * Whether the record proves a model review ran.
+     *
+     * `none` is a rule short-circuit (no review material expected), `reviewed`
+     * means absent material is a real gap, and `unknown` means the stored record
+     * does not establish either.
+     */
+    readonly reviewState: 'none' | 'reviewed' | 'unknown';
+    readonly trace: readonly string[];
+    readonly signals: unknown;
+    readonly evidence: readonly unknown[];
+    readonly materials: readonly unknown[];
+    readonly evidenceTruncated: boolean;
+    readonly snapshotMissing: readonly string[];
+    readonly historyStatus: unknown;
+    readonly effect: unknown;
+  };
+  readonly raw: {
+    readonly arguments: unknown;
+    readonly argumentsSchema: unknown;
+    readonly snapshot: unknown;
+    readonly config: unknown;
+    readonly configFormatVersion: number | null;
+    readonly snapshotFormatVersion: number | null;
+    readonly modelAttempts: readonly CallDetailModelAttemptView[];
+    readonly templates: readonly unknown[];
+    readonly sessionRecordState: string | null;
+  };
+  readonly missing: readonly CallDetailMissingCode[];
+  /**
+   * How many reported gaps this build has no wording for.
+   *
+   * A newer host may report a code this build does not know. It is counted so
+   * the page still says material is unavailable instead of dropping the fact or
+   * rendering the raw token.
+   */
+  readonly missingUnknown: number;
+}
+
+/**
+ * What one detail request settled at.
+ *
+ * The absence cases are distinct on purpose: "no source holds this call" is a
+ * clean answer, "the stored structure cannot be read" is a degraded one, and a
+ * transport failure is neither. Collapsing them would tell the operator the
+ * wrong thing about their own history.
+ */
+export type CallDetailState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly detail: CallDetailView }
+  | { readonly kind: 'record-unavailable' }
+  | { readonly kind: 'audit-unavailable' }
+  | { readonly kind: 'failed'; readonly message: string };
 
 /** One model the host catalog offers for a provider route. */
 export interface ModelOptionView {
@@ -266,6 +422,38 @@ export type ReviewerProbeView =
       readonly failure: ReviewerProbeFailure;
       readonly attempts: readonly ReviewerProbeAttemptView[];
     };
+
+/**
+ * The rules panel's stable interface.
+ *
+ * The draft and its mutator stay owned by the page, so the tester panel can be
+ * replaced or extended without the editor growing another responsibility. The
+ * selection is held by the panel rather than the page: it is view state, not
+ * configuration.
+ */
+export interface RulesPanelProps {
+  readonly draft: Draft;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  /** Backend validation findings for the current draft, already decoded. */
+  readonly errors?: readonly ConfigIssueView[];
+  readonly warnings?: readonly ConfigIssueView[];
+}
+
+/**
+ * The rule-list interface a tester panel can drive.
+ *
+ * `onTest` is a focus request, not an execution: the header action reveals the
+ * tester for one rule and never runs it, so saving never depends on testing.
+ */
+export interface RuleListProps {
+  readonly draft: Draft;
+  readonly selectedId: string | null;
+  readonly errors?: readonly ConfigIssueView[];
+  readonly warnings?: readonly ConfigIssueView[];
+  readonly onSelect: (id: string | null) => void;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  readonly onTest: (id: string) => void;
+}
 
 export interface SlotProps {
   readonly view?: string;

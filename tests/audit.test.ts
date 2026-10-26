@@ -3,9 +3,10 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
+import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -2270,6 +2271,793 @@ describe('WAL bytes never justify deleting retained calls', () => {
     expect(outcome.irreducible).toBe(false);
     reader.exec('COMMIT');
     reader.close();
+    store.close();
+  });
+});
+
+/** The store's database handle, checked rather than asserted. */
+function databaseOf(store: AuditStore): DatabaseSync {
+  const value: unknown = Reflect.get(store, 'db');
+  if (!(value instanceof DatabaseSync))
+    throw new TypeError('the store must expose its database');
+  return value;
+}
+
+/** Every statement a store operation prepared, so a read's SQL is inspectable. */
+function preparedStatements(
+  db: DatabaseSync,
+  run: () => void,
+): readonly unknown[] {
+  const spy = vi.spyOn(db, 'prepare');
+  try {
+    run();
+    return spy.mock.calls.map((call) => call[0]);
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+/**
+ * The paged, filtered call list.
+ *
+ * The list is the audit trail's index: it has to stay a stable reading surface
+ * while calls keep arriving, and it must not carry the material that only the
+ * detail read needs. Both properties are storage behaviour, so they are proven
+ * against a real SQLite database rather than a decoded payload.
+ */
+describe('call list paging and filtering', () => {
+  /** Enqueue `count` calls with deterministic, descending timestamps. */
+  async function seed(
+    store: AuditStore,
+    count: number,
+    overrides: (index: number) => Partial<CallRecord> = () => ({}),
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const callId = `pag-${String(index).padStart(3, '0')}`;
+      ids.push(callId);
+      store.enqueue(
+        record({
+          callId,
+          result: 'allow',
+          ts: 1_000 + (count - index) * 10,
+          ...overrides(index),
+        }),
+      );
+    }
+    await store.flush();
+    return ids;
+  }
+
+  /** Walk every page forward, following the keyset cursor. */
+  function walk(
+    store: AuditStore,
+    limit: number,
+    filter: CallFilter = {},
+  ): { readonly ids: readonly string[]; readonly pages: number } {
+    const ids: string[] = [];
+    let after: CallAnchor | null = null;
+    for (let guard = 0; guard < 100; guard += 1) {
+      const page = store.listCalls({
+        limit,
+        ...filter,
+        ...(after === null ? {} : { after }),
+      });
+      ids.push(...page.rows.map((row) => row.callId));
+      if (page.nextCursor === null || page.rows.length < limit) break;
+      after = page.nextCursor;
+    }
+    return { ids, pages: Math.ceil(ids.length / limit) };
+  }
+
+  test('walks every page of a multi-page result without gaps or repeats', async () => {
+    const { store } = await makeStore();
+    const ids = await seed(store, 60);
+    const walked = walk(store, 25);
+    expect(walked.ids).toHaveLength(60);
+    expect(new Set(walked.ids).size).toBe(60);
+    expect(walked.ids).toEqual(ids);
+    expect(store.listCalls({ limit: 25 }).total).toBe(60);
+    store.close();
+  });
+
+  test('orders equal timestamps deterministically across reads and pages', async () => {
+    const { store } = await makeStore();
+    const shared = 5_000;
+    for (const callId of ['same-a', 'same-b', 'same-c', 'same-d']) {
+      store.enqueue(
+        record({ callId, result: 'allow', ts: shared, tool: 'bash' }),
+      );
+    }
+    store.enqueue(
+      record({ callId: 'newest', result: 'allow', ts: shared + 1 }),
+    );
+    await store.flush();
+    const order = ['newest', 'same-d', 'same-c', 'same-b', 'same-a'];
+    expect(walk(store, 2).ids).toEqual(order);
+    expect(store.listCalls({ limit: 2 }).rows.map((row) => row.callId)).toEqual(
+      order.slice(0, 2),
+    );
+    store.close();
+  });
+
+  test('a call inserted inside the window cannot shift the next page', async () => {
+    const { store } = await makeStore();
+    const ids = await seed(store, 12);
+    const pageSize = 4;
+    const first = store.listCalls({ limit: pageSize });
+    expect(first.rows.map((row) => row.callId)).toEqual(ids.slice(0, 4));
+    // Three insertions that each land somewhere different relative to the
+    // window: above the head, inside the already-read timestamps, and sharing a
+    // timestamp with a row that sorts below the cursor.
+    const cursor = first.nextCursor;
+    if (cursor === null) throw new Error('the first page must continue');
+    store.enqueue(record({ callId: 'zzz-above', result: 'allow', ts: 9_000 }));
+    store.enqueue(
+      record({
+        callId: 'aaa-inside',
+        result: 'allow',
+        ts: ids.length > 0 ? 1_000 + (12 - 1) * 10 : 1_000,
+      }),
+    );
+    store.enqueue(
+      record({ callId: 'same-ts-lower', result: 'allow', ts: cursor.ts - 5 }),
+    );
+    await store.flush();
+    const rest = walk(store, pageSize, { after: cursor });
+    // Every surviving row of the original set is visited exactly once: no row
+    // is repeated and none is skipped by the insertions.
+    expect(rest.ids.filter((id) => ids.includes(id))).toEqual(ids.slice(4));
+    expect(new Set(rest.ids).size).toBe(rest.ids.length);
+    store.close();
+  });
+
+  test('an insertion that shares the cursor timestamp is not skipped or repeated', async () => {
+    const { store } = await makeStore();
+    for (const callId of ['tie-a', 'tie-b', 'tie-c']) {
+      store.enqueue(record({ callId, result: 'allow', ts: 7_000 }));
+    }
+    store.enqueue(record({ callId: 'tie-d', result: 'allow', ts: 6_000 }));
+    await store.flush();
+    const first = store.listCalls({ limit: 2 });
+    // `call_id DESC` means tie-c, tie-b, tie-a; the page took the first two.
+    expect(first.rows.map((row) => row.callId)).toEqual(['tie-c', 'tie-b']);
+    const cursor = first.nextCursor;
+    if (cursor === null) throw new Error('the first page must continue');
+    // A new row with the same timestamp, sorting below the cursor, is exactly
+    // the case a row-count window would break on: it must join the unread
+    // remainder without disturbing the rows already returned.
+    store.enqueue(record({ callId: 'tie-a5', result: 'allow', ts: 7_000 }));
+    await store.flush();
+    const rest = store.listCalls({ limit: 2, after: cursor });
+    expect(rest.rows.map((row) => row.callId)).toEqual(['tie-a5', 'tie-a']);
+    expect(rest.rows.map((row) => row.callId)).not.toContain('tie-b');
+    // The already-read rows never reappear, and no unread original row is lost.
+    const all = store.listCalls({ limit: 10 }).rows.map((row) => row.callId);
+    expect(all).toEqual(['tie-c', 'tie-b', 'tie-a5', 'tie-a', 'tie-d']);
+    const tail = rest.nextCursor;
+    if (tail === null) throw new Error('the remainder must continue');
+    expect(
+      store.listCalls({ limit: 2, after: tail }).rows.map((row) => row.callId),
+    ).toEqual(['tie-d']);
+    store.close();
+  });
+
+  test('a delayed older-timestamp write does not duplicate the previous page', async () => {
+    const { store } = await makeStore();
+    await seed(store, 6);
+    const first = store.listCalls({ limit: 3 });
+    const cursor = first.nextCursor;
+    if (cursor === null) throw new Error('the first page must continue');
+    store.enqueue(record({ callId: 'late-old', result: 'allow', ts: 1_000 }));
+    await store.flush();
+    const rest = store.listCalls({ limit: 3, after: cursor });
+    // The late row sorts after everything read so far; it appears once, at the
+    // end, rather than shifting a row out of the page just read.
+    expect(rest.rows.map((row) => row.callId)).toEqual([
+      'pag-003',
+      'pag-004',
+      'pag-005',
+    ]);
+    const tailCursor = rest.nextCursor;
+    if (tailCursor === null) throw new Error('the second page must continue');
+    const tail = store.listCalls({ limit: 3, after: tailCursor });
+    expect(tail.rows.map((row) => row.callId)).toEqual(['late-old']);
+    store.close();
+  });
+
+  test('reads the page before a cursor for backward navigation', async () => {
+    const { store } = await makeStore();
+    const ids = await seed(store, 10);
+    const pageSize = 3;
+    const first = store.listCalls({ limit: pageSize });
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({ limit: pageSize, after: firstCursor });
+    expect(second.rows.map((row) => row.callId)).toEqual(ids.slice(3, 6));
+    const previousCursor = second.prevCursor;
+    if (previousCursor === null)
+      throw new Error('the second page must carry a cursor');
+    const previous = store.listCalls({
+      limit: pageSize,
+      before: previousCursor,
+    });
+    expect(previous.rows.map((row) => row.callId)).toEqual(ids.slice(0, 3));
+    store.close();
+  });
+
+  test('counts records above the traversal head', async () => {
+    const { store } = await makeStore();
+    await seed(store, 3);
+    const first = store.listCalls({ limit: 10 });
+    expect(first.newer).toBe(0);
+    store.enqueue(record({ callId: 'arrived', result: 'allow', ts: 5_000 }));
+    await store.flush();
+    const reread = store.listCalls({
+      limit: 10,
+      ...(first.anchor === null ? {} : { anchor: first.anchor }),
+    });
+    expect(reread.total).toBe(3);
+    expect(reread.newer).toBe(1);
+    // A fresh traversal includes it and has nothing above itself.
+    const fresh = store.listCalls({ limit: 10 });
+    expect(fresh.total).toBe(4);
+    expect(fresh.newer).toBe(0);
+    store.close();
+  });
+
+  test('combines every filter in SQL before the window', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 12; index += 1) {
+      const denied = index % 2 === 0;
+      store.enqueue(
+        record({
+          callId: `combo-${String(index)}`,
+          result: denied ? 'review-deny' : 'review-allow',
+          tool: index % 3 === 0 ? 'bash' : 'write',
+          sessionKind: index % 4 === 0 ? 'subagent' : 'main',
+          sessionId: index % 5 === 0 ? 'session-x' : 'session-y',
+          reason: index % 2 === 0 ? 'needs human review' : 'looks safe',
+          ts: 2_000 + index * 10,
+          trace: [
+            {
+              stage: 'review',
+              result: denied ? 'review-deny' : 'review-allow',
+              decisionRules: index % 2 === 0 ? ['R7'] : ['R8'],
+              at: 2,
+            },
+          ],
+          decisionRules: index % 2 === 0 ? ['R7'] : ['R8'],
+        }),
+      );
+    }
+    await store.flush();
+    const deniedBash = store.listCalls({
+      limit: 50,
+      deniedOnly: true,
+      tool: 'bash',
+    });
+    expect(deniedBash.total).toBe(2);
+    expect(
+      deniedBash.rows.every(
+        (row) => row.result === 'review-deny' && row.tool === 'bash',
+      ),
+    ).toBe(true);
+    const ruleRows = store.listCalls({ limit: 50, ruleId: 'R8' });
+    expect(ruleRows.total).toBe(6);
+    expect(ruleRows.rows.every((row) => row.result === 'review-allow')).toBe(
+      true,
+    );
+    expect(store.listCalls({ limit: 50, sessionId: 'session-x' }).total).toBe(
+      3,
+    );
+    expect(store.listCalls({ limit: 50, sessionKind: 'subagent' }).total).toBe(
+      3,
+    );
+    expect(store.listCalls({ limit: 50, from: 2_050, to: 2_090 }).total).toBe(
+      5,
+    );
+    const combined = store.listCalls({
+      limit: 50,
+      deniedOnly: true,
+      tool: 'bash',
+      ruleId: 'R7',
+      sessionId: 'session-y',
+    });
+    expect(combined.total).toBe(1);
+    expect(combined.rows[0]?.callId).toBe('combo-6');
+    expect(store.listCalls({ limit: 50, tool: 'nonexistent' }).total).toBe(0);
+    store.close();
+  });
+
+  test('the rule filter matches a short-circuit rule and a review decision rule', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'short-circuit',
+        result: 'deny',
+        decisionRules: [],
+        trace: [
+          {
+            stage: 'rule',
+            result: 'deny',
+            ruleId: 'no-push',
+            ruleName: 'Block force push',
+            at: 1,
+          },
+        ],
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'reviewed',
+        result: 'review-deny',
+        decisionRules: ['R7'],
+        trace: [
+          {
+            stage: 'review',
+            result: 'review-deny',
+            decisionRules: ['R7'],
+            at: 2,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const byRule = store.listCalls({ ruleId: 'no-push' });
+    expect(byRule.rows.map((row) => row.callId)).toEqual(['short-circuit']);
+    expect(byRule.rows[0]?.ruleName).toBe('Block force push');
+    expect(
+      store.listCalls({ ruleId: 'R7' }).rows.map((row) => row.callId),
+    ).toEqual(['reviewed']);
+    store.close();
+  });
+
+  test('the review-failure shortcut only matches a failed review stage', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'failed',
+        result: 'human-allow',
+        trace: [
+          {
+            stage: 'review',
+            result: 'error-escalate',
+            reason: 'circuit_open',
+            at: 2,
+          },
+          { stage: 'human', result: 'human-allow', at: 3 },
+        ],
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'reviewed',
+        result: 'review-allow',
+        trace: [{ stage: 'review', result: 'review-allow', at: 2 }],
+      }),
+    );
+    await store.flush();
+    const failed = store.listCalls({ reviewFailureOnly: true });
+    expect(failed.rows.map((row) => row.callId)).toEqual(['failed']);
+    expect(failed.total).toBe(1);
+    store.close();
+  });
+
+  test('search treats wildcard characters literally', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'percent',
+        result: 'allow',
+        arguments: { command: 'echo 100%' },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'plain',
+        result: 'allow',
+        arguments: { command: 'echo 1000' },
+      }),
+    );
+    await store.flush();
+    const matched = store.listCalls({ query: '100%' });
+    expect(matched.rows.map((row) => row.callId)).toEqual(['percent']);
+    expect(matched.total).toBe(1);
+    store.close();
+  });
+
+  test('a cursor past the last row yields an empty page with a valid total', async () => {
+    const { store } = await makeStore();
+    await seed(store, 5);
+    const beyond = store.listCalls({
+      limit: 25,
+      after: { ts: 1_000, callId: 'pag-004' },
+    });
+    expect(beyond.rows).toEqual([]);
+    expect(beyond.total).toBe(5);
+    expect(beyond.nextCursor).toBeNull();
+    store.close();
+  });
+
+  test('page size boundaries are clamped to the readable window', async () => {
+    const { store } = await makeStore();
+    await seed(store, 3);
+    expect(store.listCalls({ limit: 0 }).limit).toBe(1);
+    expect(store.listCalls({ limit: -5 }).limit).toBe(1);
+    expect(store.listCalls({ limit: 1 }).rows).toHaveLength(1);
+    expect(store.listCalls({ limit: 500 }).limit).toBe(200);
+    expect(store.listCalls({ limit: Number.NaN }).limit).toBe(25);
+    expect(store.listCalls({ limit: 2.7 }).limit).toBe(2);
+    store.close();
+  });
+
+  test('a list page carries neither stored arguments nor prompt or response text', async () => {
+    const { store } = await makeStore();
+    const prompt = 'PROMPT-MATERIAL-MUST-NOT-APPEAR';
+    const response = 'RESPONSE-MATERIAL-MUST-NOT-APPEAR';
+    store.enqueue(
+      record({
+        callId: 'with-model-call',
+        result: 'review-allow',
+        arguments: { command: 'echo hi', secretInput: 'ARGUMENT-BODY' },
+        modelAttempts: [
+          {
+            requestId: 'with-model-call:model:1',
+            callId: 'with-model-call',
+            attempt: 1,
+            backend: 'chat',
+            protocol: 'chat',
+            request: {
+              system: 'REVIEW_POLICY\nPROMPT-MATERIAL-MUST-NOT-APPEAR',
+              messages: [{ role: 'user', content: prompt }],
+            },
+            responseText: response,
+            parsed: { verdict: 'allow' },
+            error: null,
+            startedAt: 1,
+            durationMs: 2,
+            estimatedInputTokens: 3,
+            usage: null,
+          },
+        ],
+      }),
+    );
+    await store.flush();
+    const page = store.listCalls({ limit: 10 });
+    expect(page.rows).toHaveLength(1);
+    const serialized = JSON.stringify(page);
+    expect(serialized).not.toContain(prompt);
+    expect(serialized).not.toContain(response);
+    expect(serialized).not.toContain('ARGUMENT-BODY');
+    const row = asRecord(page.rows[0]);
+    expect(Object.keys(row).sort()).toEqual(
+      [
+        'callId',
+        'command',
+        'recordFormatVersion',
+        'result',
+        'ruleId',
+        'ruleName',
+        'sessionId',
+        'sessionKind',
+        'tool',
+        'ts',
+        'unreadable',
+        'unreadableReason',
+      ].sort(),
+    );
+    const detail = store.getCall('with-model-call');
+    expect(JSON.stringify(detail)).toContain(prompt);
+    expect(JSON.stringify(detail)).toContain(response);
+    store.close();
+  });
+
+  test('the list query never reads model traffic or stored snapshots', async () => {
+    const { store } = await makeStore();
+    store.enqueue(record({ callId: 'plain', result: 'allow' }));
+    await store.flush();
+    const prepared = preparedStatements(databaseOf(store), () => {
+      store.listCalls({ limit: 5, query: 'echo' });
+    });
+    expect(prepared.length).toBeGreaterThan(0);
+    for (const statement of prepared) {
+      expect(statement).not.toContain('model_calls');
+      expect(statement).not.toContain('snapshots');
+      expect(statement).not.toContain('templates');
+      expect(statement).not.toContain('response_text');
+      expect(statement).not.toContain('SELECT *');
+    }
+    store.close();
+  });
+
+  test('an oversized stored command is truncated instead of returned whole', async () => {
+    const { store } = await makeStore();
+    store.enqueue(
+      record({
+        callId: 'long-command',
+        result: 'allow',
+        arguments: { command: 'x'.repeat(400_000) },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'long-code',
+        result: 'allow',
+        arguments: { code: 'y'.repeat(400_000) },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'numeric-command',
+        result: 'allow',
+        arguments: { command: 42, code: 'fallback-code' },
+      }),
+    );
+    store.enqueue(
+      record({
+        callId: 'multiline',
+        result: 'allow',
+        arguments: { command: 'echo one\necho two' },
+      }),
+    );
+    await store.flush();
+    const page = store.listCalls({ limit: 10 });
+    const byId = new Map(page.rows.map((row) => [row.callId, row]));
+    expect(byId.get('long-command')?.command).toHaveLength(240);
+    expect(byId.get('long-code')?.command).toHaveLength(240);
+    expect(byId.get('numeric-command')?.command).toBe('fallback-code');
+    expect(byId.get('multiline')?.command).toContain('echo one');
+    expect(JSON.stringify(page).length).toBeLessThan(20_000);
+    expect(
+      stringField(
+        asRecord(store.getCall('long-command'))['arguments'],
+        'command',
+      ),
+    ).toHaveLength(400_000);
+    store.close();
+  });
+
+  test('unreadable, legacy and current records all remain in the default list', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(record({ callId: 'current', result: 'allow', ts: 1_000 }));
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    const insert = db.prepare(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+          tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
+          approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
+          signals, policy_strategy, decision_rules, execution_status, record_format_version,
+          execution_started_at, execution_finished_at)
+       VALUES (?, ?, 'session-1', 'main', NULL, NULL, NULL, 'bash', '{"command":"seeded"}', NULL,
+          '/w', 'fp', 'rev', 'cfg', 'normal', 'trusted', 'allow', 'reason', '[]', 'null',
+          'written', NULL, NULL, '[]', 'pending', ?, NULL, NULL)`,
+    );
+    insert.run('legacy', 2_000, 1);
+    insert.run('future', 3_000, 99);
+    db.close();
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const page = reopened.listCalls({ limit: 10 });
+    expect(page.rows.map((row) => row.callId)).toEqual([
+      'future',
+      'legacy',
+      'current',
+    ]);
+    const rows = new Map(page.rows.map((row) => [row.callId, row]));
+    expect(rows.get('future')?.unreadable).toBe(true);
+    expect(rows.get('future')?.command).toBe('seeded');
+    expect(rows.get('legacy')?.unreadable).toBe(false);
+    expect(rows.get('current')?.unreadable).toBe(false);
+    reopened.close();
+  });
+});
+
+describe('tail reads for last-page recovery', () => {
+  test('the tail read returns the last page of the traversal', async () => {
+    const { store } = await makeStore();
+    for (let index = 0; index < 41; index += 1) {
+      store.enqueue(
+        record({
+          callId: `tail-${String(index).padStart(2, '0')}`,
+          result: 'allow',
+          ts: 10_000 - index,
+        }),
+      );
+    }
+    await store.flush();
+    const page = store.listCalls({ limit: 25, tail: true });
+    // 41 rows and a 25-row page means the last page holds 16 rows, not 25: the
+    // read is bounded to the rows that actually form it.
+    expect(page.total).toBe(41);
+    expect(page.rows).toHaveLength(16);
+    expect(page.rows[0]?.callId).toBe('tail-25');
+    expect(page.rows.at(-1)?.callId).toBe('tail-40');
+    expect(page.prevCursor).not.toBeNull();
+    store.close();
+  });
+
+  test('a tail read of a short set is the whole set', async () => {
+    const { store } = await makeStore();
+    await store.flush();
+    expect(store.listCalls({ limit: 25, tail: true }).rows).toEqual([]);
+    store.enqueue(record({ callId: 'only', result: 'allow' }));
+    await store.flush();
+    const page = store.listCalls({ limit: 25, tail: true });
+    expect(page.rows.map((row) => row.callId)).toEqual(['only']);
+    store.close();
+  });
+});
+
+/**
+ * The exact sequences the plan review used to reject the earlier windows.
+ *
+ * Each keeps four records A, B, C, D and inserts X at a different sort position.
+ * The anchored traversal must neither admit X into a page already being read nor
+ * offer a page that contains a row the reader has already seen.
+ */
+describe('anchored traversal against insertions in every position', () => {
+  async function seedFour(store: AuditStore, shared = false): Promise<void> {
+    const order = [
+      ['A', 100],
+      ['B', 90],
+      ['C', 80],
+      ['D', 70],
+    ] as const;
+    for (const [id, ts] of order) {
+      store.enqueue(
+        record({ callId: id, result: 'allow', ts: shared ? 100 : ts }),
+      );
+    }
+    await store.flush();
+  }
+
+  test('a call above the head never enters an anchored page on refresh', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(first.anchor).toEqual({ ts: 100, callId: 'A' });
+    if (first.anchor === null)
+      throw new Error('the first page must be anchored');
+    // X sorts above the traversal head.
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 110 }));
+    await store.flush();
+    // Re-reading page one with the anchor kept must return A and B again: X is
+    // an arrival, reported by `newer`, not a row of this traversal.
+    const refreshed = store.listCalls({ limit: 2, anchor: first.anchor });
+    expect(refreshed.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(refreshed.total).toBe(4);
+    expect(refreshed.newer).toBe(1);
+    // The next page still starts after B.
+    const cursor = refreshed.nextCursor;
+    if (cursor === null) throw new Error('the page must continue');
+    const second = store.listCalls({
+      limit: 2,
+      after: cursor,
+      anchor: first.anchor,
+    });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    expect(second.remaining).toBe(0);
+    store.close();
+  });
+
+  test('an insertion inside the read region does not create a third page', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    if (first.anchor === null)
+      throw new Error('the first page must be anchored');
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({
+      limit: 2,
+      after: firstCursor,
+      anchor: first.anchor,
+    });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    // The traversal is exhausted: no further row follows D.
+    expect(second.remaining).toBe(0);
+    // X lands between B and C, inside the region the reader already traversed.
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 95 }));
+    await store.flush();
+    // The total rose, but the traversal has no third page: continuation is a row
+    // probe, not arithmetic on the total.
+    const reread = store.listCalls({
+      limit: 2,
+      after: second.nextCursor ?? firstCursor,
+      anchor: first.anchor,
+    });
+    expect(reread.remaining).toBe(0);
+    expect(reread.rows).toEqual([]);
+    // `total` counts every matching record below the traversal head, so the
+    // insertion is included: it is a real matching record, and hiding it would
+    // make the denominator lie. It is *not* an arrival, because it sits below the
+    // head, so `newer` stays zero — the jump-back action only offers records the
+    // reader has not passed.
+    expect(reread.total).toBe(5);
+    expect(reread.newer).toBe(0);
+    store.close();
+  });
+
+  test('a shared timestamp still yields a total order with an insertion', async () => {
+    const { store } = await makeStore();
+    await seedFour(store, true);
+    // All four share ts; `call_id DESC` orders them D, C, B, A.
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['D', 'C']);
+    const cursor = first.nextCursor;
+    if (cursor === null) throw new Error('the first page must continue');
+    store.enqueue(record({ callId: 'B5', result: 'allow', ts: 100 }));
+    await store.flush();
+    const second = store.listCalls({
+      limit: 2,
+      after: cursor,
+      ...(first.anchor === null ? {} : { anchor: first.anchor }),
+    });
+    // B5 sorts after C and before B, so it belongs to the unread remainder and
+    // does not disturb the rows already returned.
+    expect(second.rows.map((row) => row.callId)).toEqual(['B5', 'B']);
+    expect(second.rows.map((row) => row.callId)).not.toContain('C');
+    store.close();
+  });
+
+  test('backward navigation returns the page that was actually read', async () => {
+    const { store } = await makeStore();
+    await seedFour(store);
+    const first = store.listCalls({ limit: 2 });
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({ limit: 2, after: firstCursor });
+    const back = second.prevCursor;
+    if (back === null) throw new Error('the second page must have a cursor');
+    const previous = store.listCalls({ limit: 2, before: back });
+    expect(previous.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    expect(previous.remaining).toBeGreaterThan(0);
+    store.close();
+  });
+});
+
+describe('backward reads against an insertion', () => {
+  test('the visited page is restored from its own boundary, not re-queried', async () => {
+    const { store } = await makeStore();
+    for (const [callId, ts] of [
+      ['A', 100],
+      ['B', 90],
+      ['C', 80],
+      ['D', 70],
+    ] as const) {
+      store.enqueue(record({ callId, result: 'allow', ts }));
+    }
+    await store.flush();
+    const first = store.listCalls({ limit: 2 });
+    expect(first.rows.map((row) => row.callId)).toEqual(['A', 'B']);
+    const firstCursor = first.nextCursor;
+    if (firstCursor === null) throw new Error('the first page must continue');
+    const second = store.listCalls({ limit: 2, after: firstCursor });
+    expect(second.rows.map((row) => row.callId)).toEqual(['C', 'D']);
+    store.enqueue(record({ callId: 'X', result: 'allow', ts: 95 }));
+    await store.flush();
+    // A backward read from C returns the rows that now precede it, which is
+    // X and B — not the page the reader saw. That is exactly why the client
+    // restores the visited page instead of asking for it again.
+    const backwards = store.listCalls({
+      limit: 2,
+      before: second.prevCursor ?? firstCursor,
+    });
+    expect(backwards.rows.map((row) => row.callId)).toEqual(['X', 'B']);
+    // X is below the traversal head, so it is a legitimate member of the set —
+    // not an arrival. An anchored re-read therefore legitimately returns it:
+    // [A, X]. That is precisely why the client restores the page it displayed
+    // instead of asking for the same window again, and why the restored page and
+    // the re-read page can differ without either being wrong.
+    const head = first.anchor;
+    if (head === null) throw new Error('the first page must be anchored');
+    const reread = store.listCalls({ limit: 2, anchor: head });
+    expect(reread.rows.map((row) => row.callId)).toEqual(['A', 'X']);
+    expect(reread.total).toBe(5);
+    expect(reread.newer).toBe(0);
     store.close();
   });
 });

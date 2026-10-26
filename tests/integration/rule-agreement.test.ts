@@ -212,9 +212,19 @@ async function createHarness(config: unknown): Promise<Harness> {
         );
         const body: unknown = await response.json();
         if (body !== null && typeof body === 'object') {
-          const record: unknown = Reflect.get(body, 'record');
-          if (record !== null && typeof record === 'object')
-            return { ...record };
+          // The route answers with the shared call-detail view; the audit effect
+          // travels under its `basis`. A detail built from the in-memory entry
+          // carries no effect, so waiting for a non-null effect is waiting for the
+          // stored row this case is about.
+          const detail: unknown = Reflect.get(body, 'detail');
+          if (detail !== null && typeof detail === 'object') {
+            const basis: unknown = Reflect.get(detail, 'basis');
+            const effect: unknown =
+              basis !== null && typeof basis === 'object'
+                ? Reflect.get(basis, 'effect')
+                : null;
+            if (effect !== null && effect !== undefined) return { effect };
+          }
         }
         if (Date.now() > deadline)
           throw new Error(`call ${callId} was not written to the audit store`);

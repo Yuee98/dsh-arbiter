@@ -3,10 +3,15 @@ import type { ReactNode } from 'react';
 export function Section(props: {
   readonly title: string;
   readonly description?: string;
+  /** An accessible name, so the block is a landmark the page can be read by. */
+  readonly ariaLabel?: string;
   readonly children: ReactNode;
 }): ReactNode {
   return (
     <section
+      {...(props.ariaLabel === undefined
+        ? {}
+        : { 'aria-label': props.ariaLabel })}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -79,6 +84,7 @@ export const inputStyle = {
 export function TextInput(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly onBlur?: () => void;
   readonly placeholder?: string;
   readonly monospace?: boolean;
   readonly ariaLabel?: string;
@@ -92,6 +98,7 @@ export function TextInput(props: {
       onChange={(event) => {
         props.onChange(event.target.value);
       }}
+      onBlur={props.onBlur}
       style={{
         ...inputStyle,
         fontFamily:

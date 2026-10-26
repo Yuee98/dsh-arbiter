@@ -1,6 +1,7 @@
 /** dsh-arbiter host entry. Decision, lifecycle and route adapters live in host/. */
 import { registerCommands } from './host/commands.js';
 import { CallGate } from './host/gate.js';
+import { AgentGuidance } from './host/guidance.js';
 import { DecisionHistory } from './host/history.js';
 import { PermissionLifecycle } from './host/permissions.js';
 import { registerRoutes } from './host/routes.js';
@@ -62,6 +63,7 @@ export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
   );
   permissions.register();
   new CallGate(host, permissions, history, settlement).register();
+  new AgentGuidance(host, admissions).register();
   registerCommands(host);
   registerRoutes(host, admissions);
   const { runtime, audit } = host;
