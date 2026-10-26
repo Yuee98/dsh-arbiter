@@ -543,6 +543,78 @@ describe('rule test panel', () => {
     ]);
   });
 
+  test('withdraws its location actions once the draft moves', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          {
+            ok: false,
+            code: 'invalid-rule',
+            message: 'the submitted rules are not valid',
+            errors: [
+              {
+                // The second condition of the ruled-with-redirects rule.
+                path: 'rules[1].conditions[1].path',
+                message: 'invalid JSONPath: unexpected token',
+                code: 'rule.path-invalid',
+              },
+            ],
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+    const located: unknown[] = [];
+    const draft = draftWith([ALLOW_TEST_ENV, ASK_DEPLOY]);
+    const { user, rerender, i18n } = renderClient(
+      <RuleTest
+        draft={draft}
+        focusedRule={draft.rules[0] ?? null}
+        focusRequest={1}
+        onLocateIssue={(target) => located.push(target)}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    const action = await screen.findByRole('button', {
+      name: '定位到 rules[1].conditions[1].path',
+    });
+    expect(action).toBeVisible();
+
+    // Delete an earlier condition on the same rule. The ordinal no longer names
+    // the same field, so the retained action would focus the wrong one.
+    const moved = {
+      ...draft,
+      rules: draft.rules.map((rule, index) =>
+        index === 1
+          ? {
+              ...rule,
+              conditions: rule.conditions.filter(
+                (_condition, conditionIndex) => conditionIndex !== 0,
+              ),
+            }
+          : rule,
+      ),
+    } as Draft;
+    rerender(
+      <ArbiterI18nProvider i18n={i18n}>
+        <RuleTest
+          draft={moved}
+          focusedRule={moved.rules[0] ?? null}
+          focusRequest={1}
+          onLocateIssue={(target) => located.push(target)}
+        />
+      </ArbiterI18nProvider>,
+    );
+
+    expect(
+      screen.queryByRole('button', {
+        name: '定位到 rules[1].conditions[1].path',
+      }),
+    ).toBeNull();
+    expect(await screen.findByText(/草稿已改变/)).toBeVisible();
+    expect(located).toEqual([]);
+  });
+
   test('imports a recorded call with its original tool input', async () => {
     const argumentsValue = {
       environments: ['test', 'production'],

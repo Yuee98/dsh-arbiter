@@ -33,6 +33,48 @@ import type {
   TestInputMode,
 } from './rule-test-model.js';
 
+/** A rejected draft: its targets, and the rules those targets were read from. */
+interface RejectedDraft {
+  readonly targets: readonly IssueTarget[];
+  readonly rules: Draft['rules'];
+}
+
+/**
+ * The location actions for a rejected draft.
+ *
+ * They are withdrawn as soon as the draft changes: the path the backend reported
+ * addresses a position in the submitted rule list, so after an insert, delete or
+ * reorder the same ordinal can name a different condition. Requiring a retest is
+ * the honest answer — an action that silently focuses another field would look
+ * like an exact location and be wrong.
+ */
+function IssueLocators(props: {
+  readonly issues: RejectedDraft;
+  readonly currentRules: Draft['rules'];
+  readonly onLocate: (target: IssueTarget) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const current = JSON.stringify(props.currentRules);
+  if (current !== JSON.stringify(props.issues.rules)) {
+    return <Notice kind="info" text={t('ruleTest.issuesOutdated')} />;
+  }
+  return (
+    <>
+      {props.issues.targets.map((target) => (
+        <div key={target.path}>
+          <Button
+            onClick={() => {
+              props.onLocate(target);
+            }}
+          >
+            {t('ruleTest.locateIssue', { path: target.path })}
+          </Button>
+        </div>
+      ))}
+    </>
+  );
+}
+
 /** One answer, kept with the signature of the sample and draft that produced it. */
 interface Answered {
   readonly result: RuleTestResultView;
@@ -212,7 +254,15 @@ function RuleTestForm(props: {
   const [cwd, setCwd] = useState('');
   const [problem, setProblem] = useState<SampleProblem | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [issueTargets, setIssueTargets] = useState<readonly IssueTarget[]>([]);
+  /**
+   * The rejected draft's location targets, kept with the exact rule snapshot
+   * they were resolved against.
+   *
+   * A condition ordinal is only meaningful inside that snapshot: deleting an
+   * earlier condition moves a later one into position, so a retained action
+   * would focus a different field while still claiming to point at the error.
+   */
+  const [issues, setIssues] = useState<RejectedDraft | null>(null);
   const [answer, setAnswer] = useState<Answered | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -267,7 +317,7 @@ function RuleTestForm(props: {
     }
     setProblem(null);
     setFailure(null);
-    setIssueTargets([]);
+    setIssues(null);
     setBusy(true);
     try {
       const response = await postJson(
@@ -304,15 +354,18 @@ function RuleTestForm(props: {
       // Invalid draft rules are a draft problem, not a transport failure: the
       // backend names the rule and condition so the editor can be corrected.
       if (error instanceof ApiError) {
-        const issues = configErrors(error.payload);
-        // Resolved against the draft that produced the error, so the target
-        // keeps naming the same rule after a later insert or reorder.
-        setIssueTargets(
-          issues.map((issue) => issueTarget(issue.path, props.draft.rules)),
-        );
-        setFailure(invalidDraftText(error, issues, t));
+        const reported = configErrors(error.payload);
+        // Resolved against the draft that was submitted, and kept with it: the
+        // actions are only offered while those rules are still the current ones.
+        setIssues({
+          targets: reported.map((issue) =>
+            issueTarget(issue.path, props.draft.rules),
+          ),
+          rules: props.draft.rules,
+        });
+        setFailure(invalidDraftText(error, reported, t));
       } else {
-        setIssueTargets([]);
+        setIssues(null);
         setFailure(t('ruleTest.requestFailed', { error: errorText(error) }));
       }
     } finally {
@@ -382,19 +435,13 @@ function RuleTestForm(props: {
         </Button>
       </div>
       {failure === null ? null : <Notice kind="error" text={failure} />}
-      {issueTargets.length === 0 || props.onLocateIssue === undefined
-        ? null
-        : issueTargets.map((target) => (
-            <div key={target.path}>
-              <Button
-                onClick={() => {
-                  props.onLocateIssue?.(target);
-                }}
-              >
-                {t('ruleTest.locateIssue', { path: target.path })}
-              </Button>
-            </div>
-          ))}
+      {issues === null || props.onLocateIssue === undefined ? null : (
+        <IssueLocators
+          issues={issues}
+          currentRules={props.draft.rules}
+          onLocate={props.onLocateIssue}
+        />
+      )}
       {stale ? <Notice kind="info" text={t('ruleTest.needsRetest')} /> : null}
       {answer === null ? null : (
         <div

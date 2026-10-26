@@ -85,5 +85,6 @@
   "jsonShape": "参数必须是一个 JSON 对象。",
   "invalidRules": "草稿中有规则未通过校验，整份规则无法测试：",
   "locateIssue": "定位到 {path}",
+  "issuesOutdated": "草稿已改变，原来的错误位置不再对应同一条条件；请重新运行测试。",
   "requestFailed": "测试请求失败：{error}"
 }

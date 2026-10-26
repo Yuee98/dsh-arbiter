@@ -45,11 +45,14 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
 
   // Selecting the rule expands its editor; this puts the caret in the field the
   // rejected issue actually names. It runs after the expanded body is rendered,
-  // and only reads the editor's own accessible labels.
+  // and only reads the editor's own row and accessible labels.
   useEffect(() => {
     if (locateRequest.nonce === 0) return;
-    focusConditionField(locateRequest.conditionIndex);
-  }, [locateRequest]);
+    focusConditionField(locateRequest, {
+      condition: (index) => t('rules.conditionIndex', { index: index + 1 }),
+      jsonPath: t('rules.jsonPath'),
+    });
+  }, [locateRequest, t]);
 
   return (
     <>
