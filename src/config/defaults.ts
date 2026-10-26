@@ -23,8 +23,10 @@ export const POLICY_VERSION = 'arbiter-policy-v2';
  * Read the calibration record before changing any of these numbers: the values
  * are the grid midpoints of the intervals the labelled samples permit, and
  * `tests/policy-calibration.test.ts` fails when a default leaves its interval.
- * That test proves the values agree with the documented matrix; it says nothing
- * about accuracy against a real model, which has not been measured.
+ * That test proves the values agree with the documented matrix. A small real-model
+ * run (see the same record's `model-run/`) showed the chat backend produces
+ * conforming signals, but it measured no false-allow or false-block rate, so
+ * these remain reviewed initial values rather than a calibration result.
  */
 export const DEFAULT_NORMAL: PolicyThresholds = {
   tauAuth: 0.8,
