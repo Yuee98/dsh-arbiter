@@ -380,7 +380,14 @@ class AstVisitor implements ExpansionSink {
   /** Follow a static `cd` so later relative targets resolve from the new cwd. */
   private changeDirectory(command: ShellCommand, frame: Frame): void {
     const name = command.argv[0];
-    if (name === undefined || name.split('/').at(-1) !== 'cd') return;
+    if (name === undefined) return;
+    // A function invoked by name may contain a `cd` this walk cannot follow into
+    // this position, so the directory it leaves behind is unknown.
+    if (this.functions.has(name)) {
+      frame.cwd = null;
+      return;
+    }
+    if (name.split('/').at(-1) !== 'cd') return;
     const first = command.words[1];
     if (first === undefined) {
       frame.cwd = null;
@@ -565,7 +572,8 @@ class AstVisitor implements ExpansionSink {
     frame: Frame,
   ): void {
     if (node.type === 'Function') {
-      this.recordWord(node.name, frame);
+      const reading = this.recordWord(node.name, frame);
+      this.functions.add(reading.reading.value ?? reading.reading.text);
       this.collected.subshells += 1;
     }
     this.nodeOrList(node.body, {
@@ -595,6 +603,14 @@ class AstVisitor implements ExpansionSink {
    * This records the distinction at the one place that knows it.
    */
   private ownCommand: number | null = null;
+  /**
+   * Names defined as shell functions in this source.
+   *
+   * Calling one can run any of its body's commands — including a `cd` — so the
+   * caller's directory is no longer known afterwards. The body itself was already
+   * walked as part of the call's text.
+   */
+  private readonly functions = new Set<string>();
 
   private compoundBody(node: CompoundCommand, frame: Frame): void {
     if (node.type === 'Subshell') {
@@ -608,6 +624,7 @@ class AstVisitor implements ExpansionSink {
       return;
     }
     if (node.type === 'ArithmeticFor') {
+      this.arithmeticForHeader(node, frame);
       this.repeatedBody(node.body, frame);
       return;
     }
@@ -650,6 +667,21 @@ class AstVisitor implements ExpansionSink {
     }
     if (node.expression !== undefined) {
       visitArithmetic(node.expression, frame, this);
+    }
+  }
+
+  /**
+   * Walk an arithmetic `for` header.
+   *
+   * Initialize, test and update are evaluated on each pass and can hold command
+   * substitutions (`for ((i=$(rm x); i<1; i++))`), so none may be skipped.
+   */
+  private arithmeticForHeader(
+    node: Extract<CompoundCommand, { readonly type: 'ArithmeticFor' }>,
+    frame: Frame,
+  ): void {
+    for (const expression of [node.initialize, node.test, node.update]) {
+      if (expression !== undefined) visitArithmetic(expression, frame, this);
     }
   }
 

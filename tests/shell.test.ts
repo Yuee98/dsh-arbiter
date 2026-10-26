@@ -572,6 +572,34 @@ describe('nested and compound structure', () => {
     expect(commandTexts('x=($(rm y))')).toEqual(['rm y']);
   });
 
+  test('an arithmetic for header is walked for executable parts', () => {
+    // All three header expressions are evaluated on every pass, so a command
+    // substitution there runs whether or not the body executes it.
+    const parse = parseShell(
+      'for ((i=$(rm /tmp/victim; printf 0); i<1; i++)); do :; done',
+    );
+    const texts = parse.commands.map((command) => command.text);
+    expect(texts.includes('rm /tmp/victim')).toBe(true);
+    expect(texts.includes('printf 0')).toBe(true);
+    expect(parse.completeness).toBe('complete');
+  });
+
+  test('invoking a defined function makes the directory unknown', () => {
+    // The definition must not move the caller, but calling it can: only a walk
+    // that follows the call would know where the write lands.
+    const called = parseShell(
+      'f() { cd /tmp; }; f; echo hi > out',
+      '/workspace',
+    );
+    expect(called.redirects[0]?.cwd).toBeNull();
+    expect(called.redirects[0]?.unresolved).toBe(true);
+    // Defining without calling leaves the caller's directory intact.
+    expect(
+      parseShell('f() { cd /tmp; }; echo hi > out', '/workspace').redirects[0]
+        ?.cwd,
+    ).toBe('/workspace');
+  });
+
   test('a function body is part of the call', () => {
     expect(commandTexts('f() { echo hi; }')).toEqual(['echo hi']);
     expect(commandTexts('f() { rm -rf x; }')).toContain('rm -rf x');
