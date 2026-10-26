@@ -176,7 +176,14 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-/** Template content for the identities a detail view references. */
+/**
+ * Template content for the identities a detail view references.
+ *
+ * A `model_calls.template_id` that names no row is reported as absent rather than
+ * as an empty template: `model_calls` declares no foreign key, so a dangling
+ * reference is representable, and manufacturing a record with `content: null`
+ * would tell the reader the template exists and merely has no text.
+ */
 function templatesFor(
   db: DatabaseSync,
   models: readonly Record<string, unknown>[],
@@ -189,16 +196,27 @@ function templatesFor(
     ),
   ];
   return ids.map((id) => {
-    const row = asRow(
-      db
-        .prepare(
-          'SELECT template_id, content, format_version, renderer_version FROM templates WHERE template_id = ?',
-        )
-        .get(id),
-    );
+    const value = db
+      .prepare(
+        'SELECT template_id, content, format_version, renderer_version FROM templates WHERE template_id = ?',
+      )
+      .get(id);
+    if (value === undefined) {
+      return {
+        templateId: id,
+        // No row at all, which is different from a row this build cannot read.
+        present: false,
+        content: null,
+        formatVersion: null,
+        rendererVersion: null,
+        unreadable: false,
+      };
+    }
+    const row = asRow(value);
     const version = rowNumber(row['format_version'], 1);
     return {
       templateId: id,
+      present: true,
       content: readableTemplate(version) ? rowText(row['content']) : null,
       formatVersion: version,
       rendererVersion: rowText(row['renderer_version']),

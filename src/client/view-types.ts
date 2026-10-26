@@ -155,55 +155,163 @@ export interface LogPage {
   readonly code: string | undefined;
 }
 
-export interface LogDetail {
-  readonly callId: string;
-  readonly ts: number;
-  readonly sessionId: string;
-  readonly sessionKind: string;
-  readonly parentSession: string | null;
-  readonly tool: string;
-  readonly arguments: unknown;
-  readonly cwd: string;
-  readonly fingerprint: string;
-  readonly configRevision: string;
-  readonly approvalMode: string;
-  readonly executionMode: string;
+/**
+ * Why part of a detail is not shown.
+ *
+ * The host sends a stable code so the page can render a localized sentence; an
+ * unrecognized code falls back to a generic sentence rather than a bare key.
+ */
+export type CallDetailMissingCode =
+  | 'audit-disabled'
+  | 'audit-unavailable'
+  | 'audit-record-cleared'
+  | 'audit-unreadable'
+  | 'record-format-newer'
+  | 'snapshot-missing'
+  | 'snapshot-unreadable'
+  | 'config-missing'
+  | 'config-unreadable'
+  | 'model-attempts-missing'
+  | 'template-missing'
+  | 'template-unreadable'
+  | 'stages-missing'
+  | 'stage-details-missing'
+  | 'rule-name-missing'
+  | 'arguments-missing'
+  | 'execution-not-observed';
+
+export interface CallDetailStageView {
+  readonly seq: number;
+  readonly stage: string;
   readonly result: string;
-  readonly reason: string;
-  readonly trace: readonly unknown[];
-  readonly effect: unknown;
-  readonly sessionRecordState: string;
-  readonly signals: unknown;
-  readonly policyStrategy: string | null;
+  readonly reason: string | null;
+  readonly ruleId: string | null;
+  readonly ruleName: string | null;
   readonly decisionRules: readonly string[];
-  readonly executionStatus: string;
-  readonly stages: readonly {
-    readonly seq: number;
-    readonly stage: string;
-    readonly result: string;
-    readonly reason: string | null;
-    readonly ruleId: string | null;
-    readonly decisionRules: readonly string[];
-    readonly configRevision: string | null;
-    readonly ts: number;
-  }[];
-  readonly snapshot: unknown;
-  readonly modelCalls: readonly {
-    readonly requestId: string;
-    readonly attempt: number;
-    readonly backend: string;
-    readonly protocol: string;
-    readonly request: unknown;
-    readonly responseText: string | null;
-    readonly parsed: unknown;
-    readonly error: string | null;
-    readonly startedAt: number;
-    readonly durationMs: number;
-    readonly estimatedInputTokens: number;
-    readonly usage: unknown;
-  }[];
-  readonly config: unknown;
+  readonly configRevision: string | null;
+  readonly configSnapshotId: string | null;
+  readonly ts: number | null;
 }
+
+export interface CallDetailModelAttemptView {
+  readonly requestId: string;
+  readonly attempt: number;
+  readonly backend: string;
+  readonly protocol: string;
+  readonly templateId: string | null;
+  readonly request: unknown;
+  /** The model's own answer; shown as received, never relabelled as a reason. */
+  readonly responseText: string | null;
+  readonly parsed: unknown;
+  readonly error: string | null;
+  readonly startedAt: number;
+  readonly durationMs: number;
+  readonly estimatedInputTokens: number;
+  readonly usage: unknown;
+}
+
+/**
+ * One call's detail, from the audit store or a partial runtime record.
+ *
+ * `source` says which: a session-sourced detail is the minimal verdict record,
+ * so the page reports the absent layers instead of pretending they were read.
+ */
+export interface CallDetailView {
+  readonly callId: string;
+  readonly source: 'audit' | 'session';
+  readonly recordFormatVersion: number | null;
+  readonly unreadable: boolean;
+  readonly unreadableReason: string | null;
+  readonly overview: {
+    readonly tool: string;
+    readonly ts: number;
+    readonly sessionId: string | null;
+    readonly sessionKind: string | null;
+    readonly parentSession: string | null;
+    readonly workspace: string | null;
+    readonly cwd: string | null;
+    readonly profile: string | null;
+    readonly approvalMode: string | null;
+    readonly executionMode: string | null;
+    /** The final permission verdict; `null` when no source stated one. */
+    readonly verdict: string | null;
+    readonly verdictReason: string | null;
+    readonly configRevision: string | null;
+    readonly fingerprint: string | null;
+    readonly execution: {
+      readonly status: string | null;
+      readonly startedAt: number | null;
+      readonly finishedAt: number | null;
+    };
+    readonly cancelled: boolean;
+  };
+  readonly basis: {
+    readonly rule: {
+      readonly ruleId: string;
+      readonly ruleName: string | null;
+    } | null;
+    readonly decisionRules: readonly string[];
+    /** Disagreements between sources for this same call, both readings kept. */
+    readonly conflicts: readonly {
+      readonly field: string;
+      readonly observed: readonly string[];
+    }[];
+    readonly conflictsTruncated: boolean;
+    readonly policyStrategy: string | null;
+    readonly chain: readonly CallDetailStageView[] | null;
+    /**
+     * Whether the record proves a model review ran.
+     *
+     * `none` is a rule short-circuit (no review material expected), `reviewed`
+     * means absent material is a real gap, and `unknown` means the stored record
+     * does not establish either.
+     */
+    readonly reviewState: 'none' | 'reviewed' | 'unknown';
+    readonly trace: readonly string[];
+    readonly signals: unknown;
+    readonly evidence: readonly unknown[];
+    readonly materials: readonly unknown[];
+    readonly evidenceTruncated: boolean;
+    readonly snapshotMissing: readonly string[];
+    readonly historyStatus: unknown;
+    readonly effect: unknown;
+  };
+  readonly raw: {
+    readonly arguments: unknown;
+    readonly argumentsSchema: unknown;
+    readonly snapshot: unknown;
+    readonly config: unknown;
+    readonly configFormatVersion: number | null;
+    readonly snapshotFormatVersion: number | null;
+    readonly modelAttempts: readonly CallDetailModelAttemptView[];
+    readonly templates: readonly unknown[];
+    readonly sessionRecordState: string | null;
+  };
+  readonly missing: readonly CallDetailMissingCode[];
+  /**
+   * How many reported gaps this build has no wording for.
+   *
+   * A newer host may report a code this build does not know. It is counted so
+   * the page still says material is unavailable instead of dropping the fact or
+   * rendering the raw token.
+   */
+  readonly missingUnknown: number;
+}
+
+/**
+ * What one detail request settled at.
+ *
+ * The absence cases are distinct on purpose: "no source holds this call" is a
+ * clean answer, "the stored structure cannot be read" is a degraded one, and a
+ * transport failure is neither. Collapsing them would tell the operator the
+ * wrong thing about their own history.
+ */
+export type CallDetailState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly detail: CallDetailView }
+  | { readonly kind: 'record-unavailable' }
+  | { readonly kind: 'audit-unavailable' }
+  | { readonly kind: 'failed'; readonly message: string };
 
 /** One model the host catalog offers for a provider route. */
 export interface ModelOptionView {

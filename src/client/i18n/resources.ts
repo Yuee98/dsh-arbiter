@@ -3,6 +3,7 @@ import zhConfig from '../../../locale/zh/config.json' with { type: 'json' };
 import zhPage from '../../../locale/zh/page.json' with { type: 'json' };
 import zhAbout from '../../../locale/zh/about.json' with { type: 'json' };
 import zhAdvanced from '../../../locale/zh/advanced.json' with { type: 'json' };
+import zhCallDetail from '../../../locale/zh/callDetail.json' with { type: 'json' };
 import zhLogs from '../../../locale/zh/logs.json' with { type: 'json' };
 import zhReviewer from '../../../locale/zh/reviewer.json' with { type: 'json' };
 import zhRules from '../../../locale/zh/rules.json' with { type: 'json' };
@@ -18,6 +19,7 @@ export const localeResources = {
     page: zhPage,
     about: zhAbout,
     advanced: zhAdvanced,
+    callDetail: zhCallDetail,
     logs: zhLogs,
     reviewer: zhReviewer,
     rules: zhRules,

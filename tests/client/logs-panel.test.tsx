@@ -634,6 +634,71 @@ describe('log list paging', () => {
   });
 });
 
+/** One decoded detail, shaped exactly as the host route returns it. */
+function detailBody(
+  callId: string,
+  overrides: {
+    readonly verdict?: string;
+    readonly verdictReason?: string;
+  } = {},
+): Record<string, unknown> {
+  return {
+    callId,
+    source: 'audit',
+    recordFormatVersion: 2,
+    unreadable: false,
+    unreadableReason: null,
+    overview: {
+      tool: 'bash',
+      ts: 1_700_000_000_000,
+      sessionId: 'session-1',
+      sessionKind: 'main',
+      parentSession: null,
+      workspace: '/workspace',
+      cwd: '/workspace',
+      profile: 'default',
+      approvalMode: 'normal',
+      executionMode: 'trusted',
+      verdict: overrides.verdict ?? 'review-deny',
+      verdictReason: overrides.verdictReason ?? 'force push is denied',
+      configRevision: 'rev-1',
+      fingerprint: 'fp',
+      execution: { status: 'pending', startedAt: null, finishedAt: null },
+      cancelled: false,
+    },
+    basis: {
+      rule: null,
+      decisionRules: [],
+      conflicts: [],
+      conflictsTruncated: false,
+      policyStrategy: null,
+      chain: [],
+      reviewState: 'reviewed',
+      trace: ['review-deny'],
+      signals: null,
+      evidence: [],
+      materials: [],
+      evidenceTruncated: false,
+      snapshotMissing: [],
+      historyStatus: null,
+      effect: null,
+    },
+    raw: {
+      arguments: null,
+      argumentsSchema: null,
+      snapshot: null,
+      config: null,
+      configFormatVersion: null,
+      snapshotFormatVersion: null,
+      modelAttempts: [],
+      templates: [],
+      sessionRecordState: 'written',
+    },
+    missing: [],
+    missingUnknown: 0,
+  };
+}
+
 describe('log list detail loading', () => {
   test('loads a detail only when a row is opened', async () => {
     const detailRequests: string[] = [];
@@ -641,37 +706,9 @@ describe('log list detail loading', () => {
       listHandler(SEEDED),
       http.get('*/api/arbiter/log', ({ request }) => {
         const url = new URL(request.url);
-        detailRequests.push(url.searchParams.get('callId') ?? '');
-        return HttpResponse.json({
-          ok: true,
-          record: {
-            callId: url.searchParams.get('callId') ?? '',
-            ts: 1_700_000_000_000,
-            sessionId: 'session-1',
-            sessionKind: 'main',
-            parentSession: null,
-            tool: 'bash',
-            arguments: { command: 'git push --force' },
-            cwd: '/workspace',
-            fingerprint: 'fp',
-            configRevision: 'rev-1',
-            approvalMode: 'normal',
-            executionMode: 'trusted',
-            result: 'review-deny',
-            reason: 'force push is denied',
-            trace: [],
-            effect: null,
-            sessionRecordState: 'written',
-            signals: null,
-            policyStrategy: null,
-            decisionRules: [],
-            executionStatus: 'pending',
-            stages: [],
-            snapshot: null,
-            modelCalls: [],
-            config: null,
-          },
-        });
+        const callId = url.searchParams.get('callId') ?? '';
+        detailRequests.push(callId);
+        return HttpResponse.json({ ok: true, detail: detailBody(callId) });
       }),
     );
     const { user } = renderClient(<LogsPanel />);
@@ -692,35 +729,13 @@ describe('log list detail loading', () => {
       listHandler(SEEDED),
       http.get('*/api/arbiter/log', ({ request }) => {
         const url = new URL(request.url);
+        const callId = url.searchParams.get('callId') ?? '';
         return HttpResponse.json({
           ok: true,
-          record: {
-            callId: url.searchParams.get('callId') ?? '',
-            ts: 1_700_000_000_000,
-            sessionId: 'session-1',
-            sessionKind: 'main',
-            parentSession: null,
-            tool: 'bash',
-            arguments: {},
-            cwd: '/workspace',
-            fingerprint: 'fp',
-            configRevision: 'rev-1',
-            approvalMode: 'normal',
-            executionMode: 'trusted',
-            result: 'review-allow',
-            reason: 'allowed by review',
-            trace: [],
-            effect: null,
-            sessionRecordState: 'written',
-            signals: null,
-            policyStrategy: null,
-            decisionRules: [],
-            executionStatus: 'pending',
-            stages: [],
-            snapshot: null,
-            modelCalls: [],
-            config: null,
-          },
+          detail: detailBody(callId, {
+            verdict: 'review-allow',
+            verdictReason: 'allowed by review',
+          }),
         });
       }),
     );
@@ -743,7 +758,7 @@ describe('log list detail loading', () => {
     await screen.findByText('共 60 条');
     await user.click(rowButtonFor('echo 0'));
     const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent('读取调用记录失败');
+    expect(status).toHaveTextContent('读取调用详情失败');
     // The list itself is still there: a detail failure is not a list failure.
     expect(screen.getByText('共 60 条')).toBeInTheDocument();
   });
