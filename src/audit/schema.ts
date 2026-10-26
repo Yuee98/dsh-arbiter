@@ -1,4 +1,4 @@
-import { existsSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -210,11 +210,17 @@ function userVersion(db: DatabaseSync): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
 
+/**
+ * Rows in a table this migration is supposed to preserve.
+ *
+ * A missing table must fail loudly here rather than count as zero: the caller
+ * uses this as the "before" side of a preservation check, and an absent table
+ * silently reporting 0 would let a recreated empty table compare equal.
+ */
 function rowCount(
   db: DatabaseSync,
   table: 'calls' | 'config_activations',
 ): number {
-  if (!tableNames(db).has(table)) return 0;
   const row: unknown = db
     .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
     .get();
@@ -230,13 +236,26 @@ function rowCount(
  * database, including committed WAL content, without blocking readers. That is
  * the backup the design requires before a migration; a failed migration keeps
  * it so the operator can go back.
+ *
+ * The copy is written beside the target and renamed over it, so an earlier
+ * backup of the same version survives a `VACUUM INTO` that fails part-way. Only
+ * a complete copy replaces it.
  */
 function backupDatabase(db: DatabaseSync, path: string): string {
   const backupPath = `${path}.backup-v${String(userVersion(db))}`;
+  const stagingPath = `${backupPath}.staging`;
   try {
-    if (existsSync(backupPath)) unlinkSync(backupPath);
-    db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`);
+    if (existsSync(stagingPath)) unlinkSync(stagingPath);
+    db.exec(`VACUUM INTO '${stagingPath.replaceAll("'", "''")}'`);
+    renameSync(stagingPath, backupPath);
   } catch (error) {
+    // A partial staging file is not a backup; drop it rather than leave it to be
+    // mistaken for one.
+    try {
+      if (existsSync(stagingPath)) unlinkSync(stagingPath);
+    } catch {
+      // Best effort: the original error is the useful one.
+    }
     throw new AuditMigrationError(
       `audit backup failed: ${error instanceof Error ? error.message : String(error)}`,
       null,
@@ -323,24 +342,48 @@ function tableNames(db: DatabaseSync): ReadonlySet<string> {
   return names;
 }
 
+/** Tables this plugin has written since v1, other than the ones it adds. */
+const ESTABLISHED_TABLES: readonly string[] = [
+  'config_snapshots',
+  'config_activations',
+  'calls',
+  'stages',
+  'snapshots',
+  'model_calls',
+  'candidates',
+  'analysis_runs',
+  'meta',
+];
+
 /**
- * What a file already stamped with this version is still missing.
+ * What a file is missing, compared with the structure this version needs.
  *
- * Only the parts this version added are checked, and only where the containing
- * table exists. A table that never existed is a different condition: it says the
- * file is not one this plugin wrote, reads already report it as `unreadable`,
- * and recreating it would present an empty history as a complete one.
+ * `user_version` is a build's claim about the file, not proof of it, so the
+ * structure is always compared rather than trusted. The comparison separates two
+ * conditions that would otherwise both look like "0 rows":
+ *
+ * - A **missing established table** means this file is damaged or was never
+ *   written by this plugin. It cannot be reconstructed: an empty table would
+ *   turn an unreadable history into a clean-looking empty one. The store must
+ *   pause writes instead.
+ * - A **missing column this version added**, in a table that exists, is the
+ *   repairable case: the additions are known and adding them keeps every row.
+ *   `templates` is in this group because this version introduced it.
  */
-function incompleteStructure(db: DatabaseSync): readonly string[] {
+function structureState(db: DatabaseSync): {
+  readonly absentTables: readonly string[];
+  readonly missingAdditions: readonly string[];
+} {
   const tables = tableNames(db);
-  const problems: string[] = [];
-  if (!tables.has('templates')) problems.push('templates');
+  const absentTables = ESTABLISHED_TABLES.filter((table) => !tables.has(table));
+  const missingAdditions: string[] = [];
+  if (!tables.has('templates')) missingAdditions.push('templates');
   for (const [table, column] of ADDED_COLUMNS) {
     if (!tables.has(table)) continue;
     if (!columnNames(db, table).has(column))
-      problems.push(`${table}.${column}`);
+      missingAdditions.push(`${table}.${column}`);
   }
-  return problems;
+  return { absentTables, missingAdditions };
 }
 
 /**
@@ -365,6 +408,47 @@ function applyStep(db: DatabaseSync, from: number): void {
 }
 
 /**
+ * Refuse a file whose established tables are gone.
+ *
+ * Recreating them would report an empty history as a complete one; the file is
+ * either damaged or not one this plugin wrote. A fresh file is exempt because
+ * the DDL is about to create every table for the first time.
+ */
+function refuseMissingHistory(db: DatabaseSync, fresh: boolean): void {
+  if (fresh) return;
+  const { absentTables } = structureState(db);
+  if (absentTables.length === 0) return;
+  throw new AuditMigrationError(
+    `audit database is missing the ${absentTables.join(', ')} table(s); refusing to recreate an empty history`,
+    null,
+  );
+}
+
+/** True when nothing this build needs is missing. */
+function isComplete(db: DatabaseSync): boolean {
+  const { absentTables, missingAdditions } = structureState(db);
+  return absentTables.length === 0 && missingAdditions.length === 0;
+}
+
+/**
+ * Fail the migration if the structure is still incomplete after the step.
+ *
+ * A file left incomplete would accept the version stamp and then reject every
+ * record, so it must pause writes with a reason instead.
+ */
+function refuseIncompleteResult(db: DatabaseSync): void {
+  const { absentTables, missingAdditions } = structureState(db);
+  if (absentTables.length === 0 && missingAdditions.length === 0) return;
+  const missing = [
+    ...absentTables.map((table) => `table ${table}`),
+    ...missingAdditions,
+  ];
+  throw new Error(
+    `structure is still incomplete after migration: ${missing.join(', ')}`,
+  );
+}
+
+/**
  * Upgrade the database to this build's structure version.
  *
  * The sequence is: back up consistently, migrate inside one transaction, verify
@@ -373,12 +457,15 @@ function applyStep(db: DatabaseSync, from: number): void {
  * backup is kept, and a typed error is thrown so the store can pause writes for
  * this database instead of corrupting it or blocking approvals.
  *
- * A file already stamped with the current version is still checked for what this
- * version introduced. The stamp records which build claimed the file, not that
- * the file was complete: a build that stamped the version before creating the
- * tables and columns this version needs leaves a file that reports v2 and
- * rejects every record. Repairing that is not a downgrade — the version does not
- * move — and leaving it unrepaired drops the audit silently.
+ * The version stamp is checked against the structure rather than trusted. Two
+ * outcomes are possible for a file that is not complete:
+ *
+ * - This version's own additions are missing → repair them. That is a file some
+ *   build stamped before creating what it introduced; leaving it alone drops
+ *   every record silently, and the repair keeps all existing rows.
+ * - An established table is missing → refuse. That file is damaged or is not
+ *   one this plugin wrote; reconstructing the table would report an empty
+ *   history as a complete one, and later writes would fail anyway.
  */
 export function migrateAudit(db: DatabaseSync, path?: string): void {
   const currentVersion = userVersion(db);
@@ -388,19 +475,16 @@ export function migrateAudit(db: DatabaseSync, path?: string): void {
       null,
     );
   }
-  const problems = incompleteStructure(db);
-  if (currentVersion === SCHEMA_VERSION && problems.length === 0) return;
-
-  // A fresh database has nothing to preserve, so it is created directly: a
-  // backup of an empty file would only add noise.
+  // A fresh file has none of these tables yet; the DDL is about to create them.
   const fresh = currentVersion === 0;
+  refuseMissingHistory(db, fresh);
+  if (currentVersion === SCHEMA_VERSION && isComplete(db)) return;
+
   const backupPath =
     needsBackup(db) && path !== undefined ? backupDatabase(db, path) : null;
-  // A table this build does not have reads as absent, not as zero rows, so the
-  // preservation check only compares tables that are there.
   const before = {
-    calls: rowCount(db, 'calls'),
-    activations: rowCount(db, 'config_activations'),
+    calls: fresh ? 0 : rowCount(db, 'calls'),
+    activations: fresh ? 0 : rowCount(db, 'config_activations'),
   };
 
   db.exec('BEGIN IMMEDIATE');
@@ -408,13 +492,7 @@ export function migrateAudit(db: DatabaseSync, path?: string): void {
     applyStep(db, currentVersion);
     db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`);
     if (!fresh) verifyMigration(db, before);
-    // A structure that is still incomplete must pause the store with a reason,
-    // rather than leave it accepting records it cannot write.
-    const remaining = incompleteStructure(db);
-    if (remaining.length > 0)
-      throw new Error(
-        `structure is still incomplete after migration: ${remaining.join(', ')}`,
-      );
+    refuseIncompleteResult(db);
     db.exec('COMMIT');
   } catch (error) {
     try {
