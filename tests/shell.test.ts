@@ -383,13 +383,44 @@ describe('redirects, assignments and cwd', () => {
         '/workspace',
       ).redirects[0]?.cwd,
     ).toBe('/tmp');
-    // The condition's own state also carries into a later `else`.
+    // An `elif` condition may fail, and then `else` runs where the condition
+    // started; the walk cannot pick one, so the directory is unknown rather than
+    // the failed target.
+    const elseArm = parseShell(
+      'if false; then :; elif cd /tmp; then :; else echo hi > o.txt; fi',
+      '/workspace',
+    ).redirects[0];
+    expect(elseArm?.unresolved).toBe(true);
+    expect(elseArm?.cwd).not.toBe('/tmp');
+  });
+
+  test('a condition whose success is unknown does not lend its directory', () => {
+    // `cd /dev/null` fails, so this `else` really runs in the caller's directory;
+    // the walk cannot know that, so it must not claim the failed target either.
+    const failed = parseShell(
+      'if cd /dev/null; then :; else echo hi > out.txt; fi',
+      '/workspace',
+    );
+    expect(failed.redirects[0]).toMatchObject({
+      target: 'out.txt',
+      unresolved: true,
+    });
+    expect(failed.redirects[0]?.cwd).not.toBe('/dev/null');
+    // A condition that moved is still real when its success is the only path.
     expect(
-      parseShell(
-        'if false; then :; elif cd /tmp; then :; else echo hi > o.txt; fi',
-        '/workspace',
-      ).redirects[0]?.cwd,
-    ).toBe('/tmp');
+      parseShell('if cd /tmp; then echo hi > o.txt; fi', '/workspace')
+        .redirects[0],
+    ).toMatchObject({ cwd: '/tmp', unresolved: false });
+  });
+
+  test('a repeated condition is as uncertain as the body it guards', () => {
+    // The clause runs on every pass, so its relative write resolves against a
+    // different directory on the second pass.
+    const loop = parseShell(
+      'while [ "$n" -lt 2 ] && echo hi > out.txt; do cd /tmp; n=$((n+1)); done',
+      '/workspace',
+    );
+    expect(loop.redirects[0]?.unresolved).toBe(true);
   });
 
   test('a relative path inside a repeated body is not confirmed', () => {
@@ -611,6 +642,36 @@ describe('effect facts', () => {
       factsOf('curl --output sh https://example.test').facts.observed
         .pipelineExec,
     ).toEqual([]);
+  });
+
+  test('a stdout redirect takes the stream away from the pipe', () => {
+    // `curl … > out.txt | sh` builds a pipe, but curl's stdout goes to the file, so
+    // nothing downloaded reaches `sh`.
+    expect(
+      factsOf('curl https://example.test > out.txt | sh').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+    // A redirect on another descriptor leaves stdout on the pipe.
+    expect(
+      factsOf('curl https://example.test 2> errors.txt | sh').facts.observed
+        .pipelineExec,
+    ).toEqual([['curl', 'sh']]);
+    // `2>&1` moves stderr onto stdout rather than away from it.
+    expect(
+      factsOf('curl https://example.test 2>&1 | sh').facts.observed
+        .pipelineExec,
+    ).toEqual([['curl', 'sh']]);
+    // Appending and forcing both still redirect stdout.
+    for (const source of [
+      'curl https://example.test >> out.txt | sh',
+      'curl https://example.test &> out.txt | sh',
+      'curl https://example.test >| out.txt | sh',
+    ]) {
+      expect({
+        source,
+        exec: factsOf(source).facts.observed.pipelineExec,
+      }).toEqual({ source, exec: [] });
+    }
   });
 
   test('a compound stage does not inherit an inner command', () => {

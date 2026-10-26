@@ -78,6 +78,22 @@ function writeTargetAt(
   };
 }
 
+/**
+ * Whether this command's stdout still reaches the pipe it writes to.
+ *
+ * A redirect on stdout — the default descriptor for an output operator — sends the
+ * bytes to a file instead. A descriptor duplication such as `2>&1` moves stderr
+ * onto stdout and does not take stdout away, so only real file redirects count.
+ */
+function pipeReceivesStdout(command: ShellCommand): boolean {
+  for (const redirect of command.redirects) {
+    if (redirect.kind !== 'file') continue;
+    if (!redirect.op.includes('>')) continue;
+    if (redirect.descriptor === null || redirect.descriptor === 1) return false;
+  }
+  return true;
+}
+
 /** Commands whose non-option arguments are all written to. */
 const ALL_ARGS_WRITTEN = new Set(['touch', 'mkdir', 'tee', 'truncate']);
 /** Commands whose last argument is the destination (plus `rm`, handled below). */
@@ -164,6 +180,10 @@ class FactCollector {
     // Only a real pipe edge proves the download is executed. A bare `sh` argument
     // (`curl --output sh …`) is a value, not a pipe.
     if (command.pipeTarget === null) return null;
+    // The edge also has to carry this command's stdout. `curl … > out.txt | sh`
+    // creates a pipe, but the redirect takes stdout away from it, so nothing
+    // downloaded reaches `sh`.
+    if (!pipeReceivesStdout(command)) return null;
     const receiver = this.parse.commands.find(
       (other) => other.index === command.pipeTarget,
     );

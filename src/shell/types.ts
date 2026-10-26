@@ -42,6 +42,14 @@ export type ShellRedirectKind = 'file' | 'descriptor';
 export interface ShellRedirect {
   readonly index: number;
   readonly op: string;
+  /**
+   * The descriptor the operator applies to, or null for the operator's default.
+   *
+   * `2> e` names descriptor 2, `> o` names the default (stdout for an output
+   * operator). It decides whether a redirect actually takes stdout away from a
+   * pipe.
+   */
+  readonly descriptor: number | null;
   /** Decoded target for a static word, raw expression for a dynamic one. */
   readonly target: string;
   readonly raw: string;

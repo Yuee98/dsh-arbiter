@@ -38,6 +38,7 @@ import type { Frame, WalkResult } from './collected.js';
 export type { WalkResult } from './collected.js';
 import { visitArithmetic, visitParts, visitTest } from './expansions.js';
 import type { ExpansionSink, WordPartSink } from './expansions.js';
+import { walkCase, walkIf } from './branches.js';
 import { unconsumed } from './source.js';
 import { readShellWord } from './words.js';
 import type {
@@ -46,6 +47,13 @@ import type {
   ShellRedirect,
   ShellWord,
 } from './types.js';
+
+/** The numeric descriptor a redirect names, or null for the operator default. */
+function descriptorOf(redirection: Redirection): number | null {
+  const descriptor = redirection.descriptor;
+  if (descriptor === undefined) return null;
+  return descriptor.type === 'FileDescriptor' ? descriptor.value : null;
+}
 
 /** Parser messages attached to this script, in a typed shape. */
 function parseErrors(script: Script): { message: string; pos: number }[] {
@@ -66,18 +74,6 @@ function parseErrors(script: Script): { message: string; pos: number }[] {
     }
   }
   return parsed;
-}
-
-/**
- * The one directory every path out of a construct agrees on, or null.
- *
- * An empty path list cannot confirm anything, and a single unknown path is enough
- * to make the answer unknown.
- */
-function joinOutcomes(outcomes: readonly (string | null)[]): string | null {
-  const first = outcomes[0];
-  if (first === undefined || first === null) return null;
-  return outcomes.every((outcome) => outcome === first) ? first : null;
 }
 
 function redirectKind(redirection: Redirect): 'file' | 'descriptor' {
@@ -214,6 +210,7 @@ class AstVisitor implements ExpansionSink {
     this.collected.redirects.push({
       index: this.collected.redirects.length,
       op: redirection.operator,
+      descriptor: descriptorOf(redirection),
       target: redirection.delimiter?.value ?? '',
       raw: this.source.slice(redirection.pos, redirection.end),
       commandIndex,
@@ -235,6 +232,7 @@ class AstVisitor implements ExpansionSink {
     this.collected.redirects.push({
       index: this.collected.redirects.length,
       op: redirection.operator,
+      descriptor: descriptorOf(redirection),
       target: redirection.target?.text ?? '',
       raw: this.source.slice(redirection.pos, redirection.end),
       commandIndex,
@@ -272,6 +270,7 @@ class AstVisitor implements ExpansionSink {
     this.collected.redirects.push({
       index: this.collected.redirects.length,
       op: redirection.operator,
+      descriptor: descriptorOf(redirection),
       target: reading === null ? '' : wordValue(reading),
       raw: this.source.slice(redirection.pos, redirection.end),
       commandIndex,
@@ -608,7 +607,9 @@ class AstVisitor implements ExpansionSink {
       return;
     }
     if (node.type === 'If') {
-      this.ifNode(node, frame);
+      walkIf(node, frame, (list, arm) => {
+        this.statementList(list, arm);
+      });
       return;
     }
     if (node.type === 'For' || node.type === 'Select') {
@@ -617,12 +618,25 @@ class AstVisitor implements ExpansionSink {
       return;
     }
     if (node.type === 'While') {
-      this.statementList(node.clause, frame);
+      const clause: Frame = { ...frame, repeated: true };
+      this.statementList(node.clause, clause);
+      // The clause runs on every pass, so its own relative writes are as
+      // unconfirmed as the body's, and it may run zero times.
+      if (clause.cwd !== frame.cwd) frame.cwd = null;
       this.repeatedBody(node.body, frame);
       return;
     }
     if (node.type === 'Case') {
-      this.caseNode(node, frame);
+      walkCase(
+        node,
+        frame,
+        (list, arm) => {
+          this.statementList(list, arm);
+        },
+        (word) => {
+          this.recordWord(word, frame);
+        },
+      );
       return;
     }
     if (node.type === 'TestCommand') {
@@ -646,86 +660,6 @@ class AstVisitor implements ExpansionSink {
     const inner: Frame = { ...frame, repeated: true };
     this.statementList(body, inner);
     frame.cwd = inner.cwd === frame.cwd ? frame.cwd : null;
-  }
-
-  private caseNode(
-    node: Extract<CompoundCommand, { readonly type: 'Case' }>,
-    frame: Frame,
-  ): void {
-    this.recordWord(node.word, frame);
-    const entry = frame.cwd;
-    const outcomes: (string | null)[] = [];
-    for (const item of node.items) {
-      for (const pattern of item.pattern) this.recordWord(pattern, frame);
-      const arm: Frame = {
-        cwd: entry,
-        pipeline: frame.pipeline,
-        repeated: frame.repeated,
-      };
-      this.statementList(item.body, arm);
-      outcomes.push(arm.cwd);
-    }
-    // Matching no arm is a real path: the directory then stays as it was.
-    outcomes.push(entry);
-    frame.cwd = joinOutcomes(outcomes);
-  }
-
-  /**
-   * Walk an `if`/`elif`/`else` chain.
-   *
-   * Each condition is evaluated from the state the previous conditions left, and a
-   * body starts from the state *its own* condition produced: `elif cd /tmp; then …`
-   * really does run its body in `/tmp`. The construct's exit is the join of every
-   * arm plus the path where no arm runs, because the directory after an `if` is not
-   * the directory of whichever arm the walk happened to visit last.
-   */
-  private ifNode(
-    node: Extract<CompoundCommand, { readonly type: 'If' }>,
-    frame: Frame,
-  ): void {
-    const outcomes: (string | null)[] = [];
-    // The first condition runs unconditionally.
-    this.statementList(node.clause, frame);
-    const firstEntry = frame.cwd;
-    const thenArm: Frame = {
-      cwd: firstEntry,
-      pipeline: frame.pipeline,
-      repeated: frame.repeated,
-    };
-    this.statementList(node.then, thenArm);
-    outcomes.push(thenArm.cwd);
-    // After `elif`, the condition is another command sequence that starts where the
-    // previous one finished — whether or not it succeeded.
-    let conditionState = firstEntry;
-    for (const arm of node.elif) {
-      const clause: Frame = {
-        cwd: conditionState,
-        pipeline: frame.pipeline,
-        repeated: frame.repeated,
-      };
-      this.statementList(arm.clause, clause);
-      conditionState = clause.cwd;
-      const body: Frame = {
-        cwd: clause.cwd,
-        pipeline: frame.pipeline,
-        repeated: frame.repeated,
-      };
-      this.statementList(arm.then, body);
-      outcomes.push(body.cwd);
-    }
-    if (node.else !== undefined) {
-      const elseArm: Frame = {
-        cwd: conditionState,
-        pipeline: frame.pipeline,
-        repeated: frame.repeated,
-      };
-      this.statementList(node.else, elseArm);
-      outcomes.push(elseArm.cwd);
-    } else {
-      // No `else`: taking no arm leaves the directory where the conditions left it.
-      outcomes.push(conditionState);
-    }
-    frame.cwd = joinOutcomes(outcomes);
   }
 
   private nodeOrList(
