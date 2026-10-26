@@ -158,6 +158,9 @@ export function sessionRecordReady(): boolean {
   return loaded !== null;
 }
 
+/** The outcome of one record write. */
+export type RecordState = 'written' | `failed: ${string}`;
+
 /**
  * Append one ignorable plugin record.
  *
@@ -169,7 +172,7 @@ export function appendRecord(
   session: PluginRecordSession,
   type: string,
   data: Record<string, unknown>,
-): 'written' | `failed: ${string}` {
+): RecordState {
   if (loaded === null) {
     return `failed: ${loadError ?? 'session record API is not loaded'}`;
   }

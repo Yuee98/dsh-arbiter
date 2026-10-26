@@ -1,0 +1,7 @@
+{
+  "name": "arbiter-e2e-conflicting-provider",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A local second approval provider for the coexistence E2E only"
+}

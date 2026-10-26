@@ -11,6 +11,7 @@ import { ApiError, getJson, postJson } from './api.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
+import { useCoexistenceFeed } from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
@@ -75,6 +76,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   const onFailure = useCallback((failure: unknown): void => {
     setError(errorText(failure));
   }, []);
+  // The feed keeps the conflict view live; the payload's value only seeds it.
+  const coexistence = useCoexistenceFeed(state, onFailure);
 
   /**
    * Read the host state.
@@ -262,7 +265,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       )}
 
       {tab === 'status' ? (
-        <StatusPanel state={state} draft={draft} onDraft={onDraft} />
+        <StatusPanel
+          state={{ ...state, coexistence: coexistence.view }}
+          draft={draft}
+          onDraft={onDraft}
+        />
       ) : null}
       {tab === 'rules' ? (
         <RulesPanel

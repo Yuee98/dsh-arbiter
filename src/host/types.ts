@@ -31,7 +31,17 @@ export interface ContextLike {
   get(key: 'configEditor'): ConfigEditorLike | undefined;
   get(key: 'commands'): CommandsLike | undefined;
   get(key: 'connection'): ConnectionLike | undefined;
+  /**
+   * Any other service, including the Loader that coexistence reads.
+   *
+   * A host without a Loader or event bus (a stub, an older deployment) makes the
+   * detection report a partial view instead of a conflict-free one.
+   */
   get(key: string): unknown;
+  /** The event bus; `_hooks` is the only public listener registry it exposes. */
+  readonly events?: { readonly _hooks?: unknown };
+  /** This plugin's own fiber, excluded from the competing-listener set. */
+  readonly fiber?: unknown;
   on(
     event: string,
     listener: Listener,
@@ -43,6 +53,18 @@ export interface ContextLike {
     callback: (ctx: ContextLike) => unknown,
   ): unknown;
   logger: LoggerLike;
+}
+
+/** The session's latest host permission values; `null` when never observed. */
+export interface Knobs {
+  readonly sandbox: string | null;
+  readonly approval: string | null;
+}
+
+/** One session event a boundary change appends. */
+export interface KnobWrite {
+  readonly type: 'sandbox/mode' | 'approval/policy';
+  readonly value: string;
 }
 
 export interface ToolExecutionLike {
@@ -207,6 +229,16 @@ export interface RuntimeState {
   audit: AuditStore | null;
   auditError: string | null;
   autoPresetError: string | null;
+  /**
+   * Whether this runtime holds the host's single Auto slot.
+   *
+   * `registered` means this plugin's `registerAuto` disposer is live; `other`
+   * means the slot was already taken when this plugin tried (the host throws
+   * for a second registration); `unavailable` means the host exposes no slot at
+   * all. Only the first lets `permissionPresets.resolve('auto')` describe this
+   * plugin, so the distinction is what coexistence reports.
+   */
+  autoSlot: 'unknown' | 'registered' | 'other' | 'unavailable';
   readonly priorVerdicts: Map<string, PriorVerdictItem[]>;
   /** How complete each session's last prior-verdict window is. */
   readonly historyStatus: Map<string, HistoryStatus>;

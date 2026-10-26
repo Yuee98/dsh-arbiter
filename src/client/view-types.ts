@@ -50,6 +50,82 @@ export interface AuditStats {
   }[];
 }
 
+/** One detected conflict with another approval provider. */
+export interface CoexistenceConflictView {
+  readonly id: string;
+  /** `blocking` stops a new takeover; `warning` only informs. */
+  readonly severity: 'blocking' | 'warning';
+  readonly kind: 'official-auto-review' | 'auto-slot' | 'approval-hook';
+  /** The module, entry or synthetic slot the conflict came from. */
+  readonly source: string;
+  readonly entryId: string | null;
+  /** The observable capability, e.g. `tools/pre-execute`. */
+  readonly capability: string;
+  readonly detail: string | null;
+}
+
+/** One reminder for a continuous conflict period. */
+export interface CoexistenceNoticeView {
+  readonly id: string;
+  readonly conflictId: string;
+  readonly severity: 'blocking' | 'warning';
+  readonly kind: CoexistenceConflictView['kind'];
+  readonly source: string;
+  readonly capability: string;
+  readonly at: number;
+  /** True once the user closed it; the conflict itself still stands. */
+  readonly acknowledged: boolean;
+  /** Whether the period that produced this notice has already ended. */
+  readonly retired?: boolean;
+}
+
+/**
+ * The Auto-slot capability problem that survives conflict resolution.
+ *
+ * A cleared official conflict does not prove this plugin holds the Auto entry:
+ * a registration that already failed stays failed. The UI shows this separately
+ * so "conflict gone" is never presented as "fully healthy".
+ */
+export type AutoSlotProblemView =
+  | null
+  | {
+      readonly kind: 'registration-failed';
+      readonly error: string | null;
+      readonly recovery: 'reload-plugin';
+    }
+  | {
+      readonly kind: 'slot-unavailable';
+      readonly error: null;
+      readonly recovery: 'host-unsupported';
+    };
+
+/**
+ * What the host could establish about other approval providers.
+ *
+ * `detection: 'partial'` means a public surface was missing, so "no conflict"
+ * is explicit about its limits instead of claiming a clean state.
+ */
+export interface CoexistenceView {
+  readonly detection: 'complete' | 'partial';
+  readonly missing: readonly string[];
+  readonly blocked: boolean;
+  readonly reason: 'official-running' | null;
+  readonly official: {
+    readonly present: boolean;
+    readonly module: string;
+    readonly enabled: boolean;
+    readonly running: boolean;
+    readonly phase: string | null;
+  };
+  readonly autoSlot: 'arbiter' | 'other' | 'unknown';
+  readonly autoSlotProblem: AutoSlotProblemView;
+  readonly conflicts: readonly CoexistenceConflictView[];
+  readonly notices: readonly CoexistenceNoticeView[];
+  /** How many times this runtime observed the host on its own. */
+  readonly observations: number;
+  readonly updatedAt: number;
+}
+
 export interface StateResponse {
   readonly name: string;
   readonly enabled: boolean;
@@ -89,6 +165,8 @@ export interface StateResponse {
   readonly executionMode: string;
   readonly reviewerType: string;
   readonly sessionRecordErrors: readonly (readonly [string, string])[];
+  /** Absent when the payload predates coexistence detection. */
+  readonly coexistence: CoexistenceView | null;
 }
 
 /** The API result of one save; `saved` and effective identity are separate. */
@@ -653,6 +731,16 @@ export interface ConversationDefinitionPort<State, Node> {
 
 export interface ClientContext {
   readonly locale: LocaleService;
+  /**
+   * Service lookup that does not require declaring `inject`.
+   *
+   * The dynamic-access seam of the plugin context: reading an optional service
+   * this plugin does not depend on is only safe through this, because a plain
+   * property read of an undeclared service throws.
+   */
+  readonly reflect?: {
+    get(name: string, strict?: boolean): unknown;
+  };
   effect(callback: () => () => void, label?: string): unknown;
   /** Read one host client service without declaring it as a dependency. */
   get(name: string): unknown;
@@ -681,6 +769,8 @@ export interface ClientContext {
         readonly key?: string;
         /** Single slots render the lowest priority first; native sits at 0. */
         readonly priority?: number;
+        /** A stable id for slots that accept several entries of one kind. */
+        readonly id?: string;
         readonly locale?: string;
         readonly inject?: (sessionId: string) => SlotProps;
       },

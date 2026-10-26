@@ -129,8 +129,24 @@ export function admissionsRoute(
 
 function failureResponse(
   host: HostEnvironment,
-  result: { readonly code: string; readonly message: string },
+  result: {
+    readonly code: string;
+    readonly message: string;
+    readonly detail?: Readonly<Record<string, unknown>>;
+  },
 ): Response {
   const status = result.code === 'session-unknown' ? 404 : 409;
-  return failed(host, status, result.code, result.message);
+  // A coexistence block is a policy refusal with guidance, not a malformed
+  // request: keep the structured detail so the client can render the exact
+  // reason and the way out instead of a bare sentence.
+  return jsonResponse(
+    {
+      ok: false,
+      code: result.code,
+      message: result.message,
+      revision: host.runtime.effectiveRevision,
+      ...(result.detail === undefined ? {} : { detail: result.detail }),
+    },
+    status,
+  );
 }

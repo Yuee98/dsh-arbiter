@@ -1,5 +1,7 @@
 import { admissionsRoute } from './admission-routes.js';
 import { clearRoute, logRoute, logsRoute } from './audit-routes.js';
+import { coexistenceRoute } from './coexistence-routes.js';
+import type { CoexistenceMonitor } from './coexistence.js';
 import { credentialsRoute, testRoute, validateRoute } from './config-routes.js';
 import { ConfigurationAccess } from './configuration.js';
 import { jsonResponse } from './http.js';
@@ -13,6 +15,7 @@ import type { FetchRouteLike, HostEnvironment } from './types.js';
 export function registerRoutes(
   host: HostEnvironment,
   admissions: SessionAdmissions,
+  coexistence?: CoexistenceMonitor,
 ): void {
   const configuration = new ConfigurationAccess(host);
   host.ctx.inject(['connection'], (registrationContext) => {
@@ -25,10 +28,13 @@ export function registerRoutes(
         requestBody: 'buffered',
         fetch: () =>
           Promise.resolve(
-            jsonResponse(statePayload(host, configuration, admissions)),
+            jsonResponse(
+              statePayload(host, configuration, admissions, coexistence),
+            ),
           ),
       },
       admissionsRoute(host, admissions),
+      ...(coexistence === undefined ? [] : [coexistenceRoute(coexistence)]),
       {
         path: '/api/arbiter/config/save',
         methods: ['POST'],

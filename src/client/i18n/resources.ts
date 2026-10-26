@@ -1,3 +1,4 @@
+import zhCoexistence from '../../../locale/zh/coexistence.json' with { type: 'json' };
 import zhCommon from '../../../locale/zh/common.json' with { type: 'json' };
 import zhConfig from '../../../locale/zh/config.json' with { type: 'json' };
 import zhPage from '../../../locale/zh/page.json' with { type: 'json' };
@@ -16,6 +17,7 @@ import enCommon from '../../../locale/en/common.json' with { type: 'json' };
 /** Explicit imports retain literal Chinese keys and keep JSON in the browser bundle. */
 export const localeResources = {
   zh: {
+    coexistence: zhCoexistence,
     common: zhCommon,
     config: zhConfig,
     page: zhPage,
