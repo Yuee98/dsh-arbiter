@@ -42,7 +42,9 @@ export function refuseLateRestore(
   }
   targets.dropCoverage(id);
   if (!targets.atSafeSandbox(session)) {
-    targets.markFailingClosed(id);
+    // A refusal mark: recovery verifies the sandbox only, because a stricter
+    // approval policy was deliberately preserved.
+    targets.markFailingClosed(id, true);
     host.ctx.logger.error(
       'arbiter: session %s could not be narrowed after a refused resume',
       id,
@@ -91,7 +93,7 @@ export function refuseResume(
     // exactly as the user left it.
     targets.writeSessionKnobs(session, restrictedWrites(session));
     if (!targets.atSafeSandbox(session)) {
-      targets.markFailingClosed(id);
+      targets.markFailingClosed(id, true);
       host.ctx.logger.error(
         'arbiter: session %s could not be narrowed while another approval provider runs',
         id,

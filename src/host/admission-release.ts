@@ -21,6 +21,21 @@ export interface ReleaseSource {
 }
 
 /**
+ * Whether a *refusal* cleanup reached its target.
+ *
+ * A refusal only ever promised a safe sandbox: it left a stricter approval
+ * policy — `never`, say — exactly as the user set it. Checking the full exit
+ * boundary here would demand `ask` and could never succeed, leaving a recovered
+ * session refused forever. A normal exit keeps its own predicate.
+ */
+export function refusalRecovered(
+  session: SessionLike,
+  source: { readonly atSafeSandbox: (session: SessionLike) => boolean },
+): boolean {
+  return source.atSafeSandbox(session);
+}
+
+/**
  * Narrow one late-restored session, without writing an admission record.
  *
  * @returns `safe` when nothing was needed, `narrowed` when the host confirmed

@@ -25,8 +25,14 @@ export interface AdmissionAdapters {
   writeSessionKnobs(session: SessionLike, writes: readonly KnobWrite[]): void;
   /** Whether the sandbox is at a value this plugin can call safe. */
   atSafeSandbox(session: SessionLike): boolean;
-  /** Mark a session whose rollback could not be confirmed. */
-  markFailingClosed(sessionId: string): void;
+  /**
+   * Mark a session whose rollback could not be confirmed.
+   *
+   * `byRefusal` records provenance: a refusal only promised a safe sandbox,
+   * while a teardown promised the full exit boundary, so recovery must verify
+   * the right one.
+   */
+  markFailingClosed(sessionId: string, byRefusal?: boolean): void;
   /** Drop one session from coverage. */
   dropCoverage(sessionId: string): void;
 }

@@ -68,9 +68,10 @@ interface StubSession {
   readonly events: SessionEventLike[];
   readonly append: (type: string, data: unknown) => void;
   readonly snapshotEvents: () => readonly SessionEventLike[];
-  /** Refuse `sandbox/mode` appends, as a host publishing another commit does. */
-  refuseSandboxWrites?: boolean;
 }
+
+/** Session ids whose `sandbox/mode` appends must throw, as a busy host does. */
+const refusing = new Set<string>();
 
 function makeSession(id: string): StubSession {
   const events: SessionEventLike[] = [
@@ -82,7 +83,9 @@ function makeSession(id: string): StubSession {
     header: { id, cwd: process.cwd() },
     events,
     append(type, data) {
-      if (this.refuseSandboxWrites === true && type === 'sandbox/mode') {
+      // Read the flag through the module-level holder: the host calls `append`
+      // as a plain function, so `this` is not the session there.
+      if (refusing.has(id) && type === 'sandbox/mode') {
         throw new Error('append refused while the host is publishing');
       }
       events.push({
@@ -1149,7 +1152,7 @@ describe('a failed late-restore rollback refuses the call', () => {
       at: Date.now(),
     });
     session.append('sandbox/mode', { mode: 'danger-full-access' });
-    session.refuseSandboxWrites = true;
+    refusing.add(session.id);
     const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
     try {
       harness.official.activate();
@@ -1258,6 +1261,40 @@ describe('an unreadable Loader keeps an established restriction', () => {
       harness.addSession(session);
       expect((await harness.gate(call(session), allow)).kind).toBe('allow');
       expect(decisions(session)).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a refusal recovers once the sandbox is safe', () => {
+  test('a stricter approval policy does not block recovery', async () => {
+    const session = makeSession('s-refusal-recovery');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-refusal-recovery',
+      rootSessionId: 's-refusal-recovery',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    session.append('approval/policy', { policy: 'never' });
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      // The first narrowing is refused, so the first call is denied.
+      refusing.add(session.id);
+      harness.addSession(session);
+      expect((await harness.gate(call(session), allow)).kind).toBe('deny');
+      // The host recovers: the next call narrows and is allowed again.
+      refusing.delete(session.id);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      // The refusal preserved the stricter policy, so recovery must not demand
+      // `ask`; the user's own choice is still in force.
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'never' });
     } finally {
       harness.dispose();
     }

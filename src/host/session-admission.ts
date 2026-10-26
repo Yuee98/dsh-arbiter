@@ -76,18 +76,18 @@ export class SessionAdmissions {
   private readonly observed = new Map<string, SessionLike>();
   /** Sessions inside an enabled admission, for boundary sync and teardown. */
   private readonly covered = new Map<string, SessionLike>();
-  /**
-   * Sessions whose teardown rollback could not be confirmed. They stay denied
-   * after admission stops: an unconfirmed wide sandbox must not silently run
-   * ungated calls.
-   */
-  private readonly failingClosed = new Set<string>();
+  /** Sessions whose teardown rollback could not be confirmed. They stay denied after admission stops: an unconfirmed wide sandbox must not silently run ungated calls. */
+
   /** A coexistence veto consulted before a takeover writes anything. */
   private enableGuard: EnableGuard | null = null;
   /** A tri-state reader, which can tell `unknown` from `stopped`. */
   private providerState: (() => ProviderState) | null = null;
   /** Whether this runtime currently takes over sessions (not master-off). */
   private active = false;
+  /**
+   * The fail-closed marks, their provenance and the widening holds: three
+   * questions that share one lifetime, kept together.
+   */
   /** The activation decisions that must outlive the request that made them. */
   private readonly hold = new CoverageHold();
 
@@ -95,31 +95,20 @@ export class SessionAdmissions {
     this.host = host;
   }
 
-  /**
-   * Install the pre-admission veto.
-   *
-   * Called once by the composition root with the coexistence monitor, so this
-   * service still owns "may this session be taken over" and the monitor owns
-   * "is another approval provider active". Nothing else is written here.
-   */
+  /** Install the pre-admission veto. Called once by the composition root with the coexistence monitor, so this service still owns "may this session be taken over" and the monitor owns "is another approval provider active". Nothing else is written here. */
+
   setEnableGuard(guard: EnableGuard | null): void {
     this.enableGuard = guard;
   }
 
-  /**
-   * The tri-state provider answer. A veto that returns `null` only says "not
-   * refused"; it cannot distinguish a cleared conflict from a failed read.
-   */
+  /** The tri-state provider answer. A veto that returns `null` only says "not refused"; it cannot distinguish a cleared conflict from a failed read. */
+
   setProviderState(read: (() => ProviderState) | null): void {
     this.providerState = read;
   }
 
-  /**
-   * Whether an established restriction may be released.
-   *
-   * Only positive evidence releases it; `unknown` is missing evidence, and the
-   * contract forbids reading that as resolution.
-   */
+  /** Whether an established restriction may be released. Only positive evidence releases it; `unknown` is missing evidence, and the contract forbids reading that as resolution. */
+
   private releasable(): boolean {
     const state = this.providerState?.();
     return state === undefined ? !this.conflictPresent() : state === 'stopped';
@@ -197,13 +186,8 @@ export class SessionAdmissions {
     return toAdmission(id, this.rootOf(id), folded);
   }
 
-  /**
-   * The main session this one descends from: itself when it has no parent.
-   *
-   * A subagent can delegate again, so the answer is the top of the bounded
-   * parent chain — never just the immediate parent. An unresolvable or cyclic
-   * chain falls back to the first unresolved id, which no admission can match.
-   */
+  /** The main session this one descends from: itself when it has no parent. A subagent can delegate again, so the answer is the top of the bounded parent chain — never just the immediate parent. An unresolvable or cyclic chain falls back to the first unresolved id, which no admission can match. */
+
   rootOf(id: string): string {
     const chain = parentChain(
       id,
@@ -213,13 +197,8 @@ export class SessionAdmissions {
     return chain.ids[chain.ids.length - 1] ?? id;
   }
 
-  /**
-   * Resolve whether a call from this session is covered by the gate.
-   *
-   * Recording coverage here is what lets teardown address exactly the sessions
-   * still managed; an unmanaged or retired session is dropped instead of being
-   * remembered as someone the plugin must roll back.
-   */
+  /** Resolve whether a call from this session is covered by the gate. Recording coverage here is what lets teardown address exactly the sessions still managed; an unmanaged or retired session is dropped instead of being remembered as someone the plugin must roll back. */
+
   scopeFor(session: SessionLike): AdmissionScope {
     this.observe(session);
     const id = session.id;
@@ -275,10 +254,7 @@ export class SessionAdmissions {
     return false;
   }
 
-  /**
-   * Align one covered session with the effective boundary on the first covered
-   * call after a reload. An inherited scope is only ever narrowed.
-   */
+  /** Align one covered session with the configured boundary, lazily. */
   private syncOne(id: string, session: SessionLike): boolean {
     const boundary = configuredBoundary(this.host.runtime.config);
     const folded = this.admissionOf(id);
@@ -451,23 +427,14 @@ export class SessionAdmissions {
     };
   }
 
-  /**
-   * Enable one session under the configured boundary.
-   *
-   * Order matters: the record lands first so the gate already covers the
-   * session, then the boundary widens it. A failed record widens nothing; a
-   * failed knob write leaves the session admitted and narrower, the safe
-   * direction. The host has no cross-event transaction, so this ordering, not a
-   * rollback, is what prevents an ungated wide session. Activation is refused
-   * while the master switch is off or teardown has begun.
-   */
+  /** Enable one session under the configured boundary: the record lands first so the gate covers the session, then the boundary widens it. A failed record widens nothing, and a failed knob write leaves the session narrower. */
+
   enable(id: string): AdmissionResult {
     const prepared = this.prepareEnable(id);
     if ('ok' in prepared) return prepared;
     const { session, boundary, wasManaged } = prepared;
-    // One decision, used by every write below, so a withheld widening cannot
-    // reappear through the record, the knobs or the next lazy sync. A genuinely
-    // new takeover was already refused by the guard in `prepareEnable`.
+    // One decision drives every write below, so a withheld widening cannot
+    // reappear through the record, the knobs or the next lazy sync.
     const {
       boundary: applied,
       writes,
@@ -536,14 +503,8 @@ export class SessionAdmissions {
     return this.result(id);
   }
 
-  /**
-   * Disable one session.
-   *
-   * A native switch already applied the user's own choice, so the record is the
-   * only new fact. An explicit API disable has no native target, so a boundary
-   * this plugin widened is narrowed back *before* the record removes gate
-   * protection; otherwise `trusted` would leave an ungated wide session.
-   */
+  /** Disable one session. A native switch already applied the user's own choice, so the record is the only new fact. An explicit API disable has no native target, so a boundary this plugin widened is narrowed back *before* the record removes gate protection; otherwise `trusted` would leave an ungated wide session. */
+
   disable(id: string, trigger: AdmissionTrigger): AdmissionResult {
     const failure = this.unavailable(id);
     if (failure !== null) return failure;
@@ -574,14 +535,8 @@ export class SessionAdmissions {
     return this.result(id);
   }
 
-  /**
-   * Whether an API disable has anything to narrow.
-   *
-   * An inherited child has no record of its own but still runs under the
-   * parent's captured sandbox, so disabling it must narrow it too — otherwise
-   * the new disabled record would remove gate protection and leave the child
-   * at full access, which is worse than before the request.
-   */
+  /** Whether an API disable has anything to narrow. An inherited child has no record of its own but still runs under the parent's captured sandbox, so disabling it must narrow it too — otherwise the new disabled record would remove gate protection and leave the child at full access, which is worse than before the request. */
+
   private needsNarrowing(id: string, current: FoldedAdmission | null): boolean {
     if (current !== null) return current.enabled;
     const session = this.sessionFor(id);
@@ -590,14 +545,8 @@ export class SessionAdmissions {
     return this.covered.has(id) || narrowWrites(session).length > 0;
   }
 
-  /**
-   * Stop protecting a session, taking back any permission this plugin widened.
-   *
-   * Dropping coverage is an admission exit in effect: the gate will no longer
-   * review this session's calls, so a sandbox the plugin widened must not stay
-   * behind. Only a session this plugin actually covered is touched — an
-   * ordinary session that was never admitted keeps whatever its user chose.
-   */
+  /** Stop protecting a session, taking back any permission this plugin widened. Dropping coverage is an admission exit in effect: the gate will no longer review this session's calls, so a sandbox the plugin widened must not stay behind. Only a session this plugin actually covered is touched — an ordinary session that was never admitted keeps whatever its user chose. */
+
   private releaseOnDrop(id: string, session: SessionLike): void {
     const covered = this.covered.has(id);
     this.covered.delete(id);
@@ -642,13 +591,12 @@ export class SessionAdmissions {
   }
 
   /** Whether `id` sits below `ancestor` in the bounded parent chain. */
-  private isDescendantOf(id: string, ancestor: string): boolean {
-    return descendantOf(
+  isDescendantOf = (id: string, ancestor: string): boolean =>
+    descendantOf(
       id,
       ancestor,
       (sessionId) => this.sessionFor(sessionId)?.header?.parentSession,
     );
-  }
 
   readonly atSafeSandbox = (session: SessionLike): boolean =>
     atSafeSandbox(session);
@@ -657,9 +605,8 @@ export class SessionAdmissions {
   atSafeBoundary = (session: SessionLike): boolean => boundaryIsSafe(session);
 
   /** Narrow one session, retrying: this is the last protection before exit. */
-  narrowSession(session: SessionLike, attempts = 3): boolean {
-    return narrowWithRetry(session, this.adapters(), attempts);
-  }
+  narrowSession = (session: SessionLike, attempts = 3): boolean =>
+    narrowWithRetry(session, this.adapters(), attempts);
 
   /** Narrow one covered session and every covered session inheriting it. */
   private narrowCovered(root: SessionLike): void {
@@ -717,15 +664,8 @@ export class SessionAdmissions {
     };
   }
 
-  /**
-   * Add every live session carrying an enabled admission to the coverage set.
-   *
-   * Teardown must not rely on which sessions happened to call the gate: a
-   * session restored from a previous run can be live, trusted and admitted
-   * without this process having seen a single gated call from it. The host's
-   * public `sessions.list()` is the enumeration source; when it is absent the
-   * already-covered set stays the only known scope, which is reported.
-   */
+  /** Add every live session carrying an enabled admission to the coverage set. Teardown must not rely on which sessions happened to call the gate: a session restored from a previous run can be live, trusted and admitted without this process having seen a single gated call from it. The host's public `sessions.list()` is the enumeration source; when it is absent the already-covered set stays the only known scope, which is reported. */
+
   discover(): number {
     const sessions = this.host.services.sessions;
     if (sessions?.list === undefined) return 0;
@@ -775,21 +715,21 @@ export class SessionAdmissions {
     });
   }
 
-  /** Remember that this session could not be brought back to a safe boundary. */
-  markFailingClosed(sessionId: string): void {
-    this.failingClosed.add(sessionId);
+  markFailingClosed(sessionId: string, byRefusal = false): void {
+    this.hold.mark(sessionId, byRefusal);
   }
-
-  /** Whether a call from this session must still be refused after teardown. */
   isFailingClosed(sessionId: string | undefined): boolean {
-    return sessionId !== undefined && this.failingClosed.has(sessionId);
+    return this.hold.isMarked(sessionId);
+  }
+  isRefusalMarked(sessionId: string | undefined): boolean {
+    return this.hold.isRefusalMarked(sessionId);
   }
 
   /** Summary projection for the state payload. */
   summary(): unknown {
     return admissionSummary(this.host, {
       coveredIds: [...this.covered.keys()],
-      failingClosed: [...this.failingClosed],
+      failingClosed: this.hold.markedIds(),
       admission: (id) => this.admission(id),
     });
   }
@@ -807,19 +747,18 @@ export class SessionAdmissions {
         this.covered.delete(id);
       },
       atSafeSandbox: (session) => atSafeSandbox(session),
-      markFailingClosed: (id) => {
-        this.markFailingClosed(id);
+      markFailingClosed: (id, byRefusal) => {
+        this.markFailingClosed(id, byRefusal);
       },
     };
   }
 
   /** Sessions still awaiting a confirmed rollback, for reporting. */
   failingClosedSessions(): readonly string[] {
-    return [...this.failingClosed];
+    return this.hold.markedIds();
   }
 
-  /** The session reached a safe boundary on a later attempt. */
   clearFailingClosed(sessionId: string): void {
-    this.failingClosed.delete(sessionId);
+    this.hold.clearMark(sessionId);
   }
 }

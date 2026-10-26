@@ -17,6 +17,15 @@ export class CoverageHold {
   private refused = false;
   /** Sessions whose widening was withheld and must stay narrow. */
   private readonly held = new Set<string>();
+  /**
+   * Sessions the gate must refuse, and the subset a *refusal* marked.
+   *
+   * The two promises differ: a teardown restores the full exit boundary, while a
+   * refusal only guaranteed a safe sandbox and deliberately left a stricter
+   * approval policy alone. Recovery has to verify the right one.
+   */
+  private readonly marked = new Set<string>();
+  private readonly refusedMarks = new Set<string>();
 
   /** Whether a resume was refused and no later read has cleared it. */
   get refusalStands(): boolean {
@@ -41,6 +50,34 @@ export class CoverageHold {
   /** Whether a boundary change for this session is currently withheld. */
   isHeld(sessionId: string): boolean {
     return this.held.has(sessionId);
+  }
+
+  /** Mark one session, recording whether a refusal rather than teardown did it. */
+  mark(sessionId: string, byRefusal: boolean): void {
+    this.marked.add(sessionId);
+    if (byRefusal) this.refusedMarks.add(sessionId);
+    else this.refusedMarks.delete(sessionId);
+  }
+
+  /** Whether this session is marked at all. */
+  isMarked(sessionId: string | undefined): boolean {
+    return sessionId !== undefined && this.marked.has(sessionId);
+  }
+
+  /** Whether this session's mark came from a coexistence refusal. */
+  isRefusalMarked(sessionId: string | undefined): boolean {
+    return sessionId !== undefined && this.refusedMarks.has(sessionId);
+  }
+
+  /** Every marked session, in insertion order. */
+  markedIds(): readonly string[] {
+    return [...this.marked];
+  }
+
+  /** Forget one mark, once recovery is confirmed. */
+  clearMark(sessionId: string): void {
+    this.marked.delete(sessionId);
+    this.refusedMarks.delete(sessionId);
   }
 
   /** Stop holding one session, once the widening may legitimately apply. */

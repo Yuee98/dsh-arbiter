@@ -1,3 +1,4 @@
+import { refusalRecovered } from './admission-release.js';
 import type { SessionLike } from '../snapshot.js';
 import type { HostEnvironment, TurnSessionLike } from './types.js';
 import type { DecisionHistory } from './history.js';
@@ -138,8 +139,17 @@ export class PermissionLifecycle {
    */
   retryRollback(session: SessionLike | undefined): boolean {
     if (session === undefined) return false;
-    if (!this.admissions.narrowSession(session)) return false;
-    if (!this.admissions.atSafeBoundary(session)) return false;
+    // A refusal only promised a safe sandbox; a teardown promised the full exit.
+    // `narrowSession` reports whether *both* knobs converged, which is the wrong
+    // question for a refusal that deliberately preserved a stricter policy, so
+    // the narrowing is attempted and the right predicate verifies it.
+    const refusal = this.admissions.isRefusalMarked(session.id);
+    const narrowed = this.admissions.narrowSession(session);
+    if (!refusal && !narrowed) return false;
+    const recovered = refusal
+      ? refusalRecovered(session, this.admissions)
+      : this.admissions.atSafeBoundary(session);
+    if (!recovered) return false;
     if (session.id !== undefined)
       this.admissions.clearFailingClosed(session.id);
     return true;
