@@ -197,7 +197,7 @@ function renderDenial(options: {
 }
 
 /** Render one denial built directly from its recorded fields. */
-function renderRawDenial(denial: ArbiterDenialView, locale?: 'zh' | 'en') {
+function renderRawDenial(denial: ArbiterDenialView, locale?: string) {
   return renderClient(
     <DenialRow callId="call-1" tool="bash" denial={denial} />,
     locale === undefined ? {} : { locale },
@@ -402,7 +402,7 @@ describe('the denial row', () => {
     expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 
-  test('renders Chinese per key when the English file is absent', () => {
+  test('renders the released English catalog without touching the agent text', () => {
     const denial = denialOf({
       name: ARBITER_DENIED_ERROR_NAME,
       code: ARBITER_DENIED_CODE,
@@ -414,7 +414,14 @@ describe('the denial row', () => {
     expect(document.body.textContent).not.toMatch(
       /denials\.[a-zA-Z.]|undefined|\[object Object\]/u,
     );
-    expect(screen.getByText('Arbiter 已拒绝')).toBeInTheDocument();
+    // The UI chrome is translated...
+    expect(screen.getByText('Arbiter denied')).toBeInTheDocument();
+    expect(screen.getByText('Rule denial')).toBeInTheDocument();
+    // ...while the recorded reason is not plugin-owned UI copy, so the row must
+    // still show the words the agent received rather than a translated variant.
+    expect(document.body.textContent).toContain(
+      'a deny rule matched this call',
+    );
   });
 });
 

@@ -153,7 +153,7 @@ describe('configuration actions', () => {
     expect(screen.getByRole('button', { name: '校验草稿' })).toBeEnabled();
   });
 
-  test('host language changes rerender mounted UI and unfinished English falls back to Chinese', () => {
+  test('host language changes rerender mounted UI in the released catalogs', () => {
     const { ui } = actions();
     const { locale } = renderClient(
       <>
@@ -174,11 +174,16 @@ describe('configuration actions', () => {
         'Command rules, real auto review, approval modes, audit and offline rule suggestions.',
       ),
     ).toBeVisible();
-    // English has no config module yet: every key falls back per key.
-    expect(screen.getByRole('button', { name: '保存并应用' })).toBeVisible();
-    expect(screen.getByText('文件修订 file-7')).toBeVisible();
-    expect(screen.getByText('内容快照 cfg-abc123')).toBeVisible();
-    expect(saveStatus()).toHaveTextContent('草稿未保存；当前生效配置未改变。');
+    // Since #23 the config module is a declared translation, so the save bar
+    // and its interpolated identities are English too.
+    expect(
+      screen.getByRole('button', { name: 'Save and apply' }),
+    ).toBeVisible();
+    expect(screen.getByText('File revision file-7')).toBeVisible();
+    expect(screen.getByText('Content snapshot cfg-abc123')).toBeVisible();
+    expect(saveStatus()).toHaveTextContent(
+      'The draft is unsaved; the effective configuration has not changed.',
+    );
     expect(document.body.textContent).not.toMatch(
       /config\.[a-zA-Z]|undefined|\[object Object\]/,
     );

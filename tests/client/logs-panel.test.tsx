@@ -911,15 +911,14 @@ describe('log list locale wiring', () => {
     expect(screen.queryByText('review-deny')).toBeNull();
   });
 
-  test('falls back per key to Chinese when the host switches to English', async () => {
+  test('renders the released English catalog and keeps Chinese for an undeclared host', async () => {
     server.use(listHandler(SEEDED));
     const view = renderClient(<LogsPanel />, { locale: 'en' });
-    // English has no logs module yet, so every key falls back to Chinese.
-    expect(await screen.findByText('共 60 条')).toBeInTheDocument();
-    expect(screen.getByText('最终裁决')).toBeInTheDocument();
+    // Since #23 logs is a declared English translation.
+    expect(await screen.findByText('60 in total')).toBeInTheDocument();
+    expect(screen.getByText('Final verdict')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('logs.');
-    view.i18n.translate('logs.pager.next');
-    expect(view.i18n.translate('logs.pager.next')).toBe('下一页');
+    expect(view.i18n.translate('logs.pager.next')).toBe('Next page');
   });
 
   test('marks a record whose format is newer than this build', async () => {

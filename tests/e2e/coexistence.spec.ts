@@ -153,6 +153,59 @@ async function openHost(page: Page, host: DshHost): Promise<void> {
   }
 }
 
+/** Switch the host's own UI language through its settings dialog. */
+async function switchHostLanguage(
+  page: Page,
+  target: '中文' | 'English',
+): Promise<void> {
+  await page
+    .getByRole('button', { name: /账号菜单|Account menu/u })
+    .first()
+    .click();
+  await page.getByText(/^(设置|Settings)$/u).click();
+  await page
+    .getByRole('button', { name: /^(中文|English)$/u })
+    .first()
+    .click();
+  await page.getByText(target, { exact: true }).click();
+  await page.getByRole('button', { name: /^(Close|关闭)$/u }).click();
+  await expect(page.locator('html')).toHaveAttribute(
+    'lang',
+    target === 'English' ? /^en/ : /^zh/,
+  );
+}
+
+/**
+ * Report text that an element actually clips.
+ *
+ * A container that hides overflow and cannot fit its content would make the
+ * translated guidance unreadable; a flex child painting wider than a zero-width
+ * parent is normal layout. Form controls scroll their own value by design.
+ */
+async function clippedText(
+  page: Page,
+  selector: string,
+): Promise<readonly string[]> {
+  return page.evaluate((rootSelector: string) => {
+    const root = document.querySelector(rootSelector);
+    if (root === null) return ['root not found'];
+    const offenders: string[] = [];
+    for (const element of root.querySelectorAll('*')) {
+      if (!(element instanceof HTMLElement)) continue;
+      if (/^(?:INPUT|TEXTAREA|SELECT|PRE|CODE)$/.test(element.tagName))
+        continue;
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const clips = style.overflowX === 'hidden' || style.overflowX === 'clip';
+      if (clips && element.scrollWidth > element.clientWidth + 2)
+        offenders.push(
+          `${element.tagName.toLowerCase()} scroll=${String(element.scrollWidth)} client=${String(element.clientWidth)}`,
+        );
+    }
+    return offenders.slice(0, 8);
+  }, selector);
+}
+
 /** Run one fixture turn that issues exactly one real `bash` call. */
 async function runOneCall(
   page: Page,
@@ -256,6 +309,47 @@ test(
       // that a modal backdrop would swallow.
       await page.getByRole('button', { name: '规则', exact: true }).click();
       await expect(alert).toBeVisible();
+
+      // #23 AC5: the same alert in English, in this real conflict composition.
+      // Switching the host language must retranslate the alert in place, keep
+      // its provider identity and its long guidance readable, and leave the page
+      // operable — no reload, no re-triggered conflict.
+      await switchHostLanguage(page, 'English');
+      const englishAlert = page.getByRole('alertdialog', {
+        name: 'A conflicting approval provider exists',
+      });
+      await expect(englishAlert).toBeVisible();
+      // The provider it names is a stable identifier and stays verbatim.
+      await expect(englishAlert).toContainText(OFFICIAL);
+      await expect(englishAlert).toContainText('Open plugin management');
+      await expect(englishAlert).toContainText('no new session is taken over');
+      // Nothing fell back to Chinese or to a key in the alert's own copy.
+      expect(await englishAlert.innerText()).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(await englishAlert.innerText()).not.toMatch(
+        /coexistence\.|\{\w+\}|undefined/u,
+      );
+      expect(
+        await clippedText(page, '[data-arbiter-coexistence-alert]'),
+      ).toEqual([]);
+      // The card is still a corner card: inside the viewport, and the page
+      // underneath still switches tabs.
+      const box = await englishAlert.boundingBox();
+      const viewport = page.viewportSize();
+      expect(box).not.toBeNull();
+      if (box !== null && viewport !== null) {
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+      }
+      await page.getByRole('button', { name: 'Rules', exact: true }).click();
+      await expect(englishAlert).toBeVisible();
+
+      // Back to Chinese: the alert retranslates again on the same host.
+      await switchHostLanguage(page, '中文');
+      await expect(
+        page.getByRole('alertdialog', { name: '存在冲突的审批提供者' }),
+      ).toBeVisible();
 
       // The guidance carries a real shortcut, not just words: it opens the
       // host's own plugin panel, and opening it is not an acknowledgement.

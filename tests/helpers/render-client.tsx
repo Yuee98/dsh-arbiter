@@ -8,7 +8,9 @@ import { createTestLocale } from './test-locale.js';
 
 export function renderClient(
   ui: ReactElement,
-  options: { readonly locale?: 'zh' | 'en' } = {},
+  // A declared language selects its catalog; an undeclared one keeps the
+  // per-key Chinese fallback, which more than one contract still asserts.
+  options: { readonly locale?: string } = {},
 ) {
   const locale = createTestLocale(options.locale);
   const i18n = createArbiterI18n(locale);

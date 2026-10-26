@@ -4,6 +4,99 @@
 
 状态：**首轮完整功能版本已实现并在评审返修后可在隔离 DSH 0.2.1-rc.2 profile 中试用**。宿主接入、规则、真实 reviewer、三档模式、配置页、审计与离线建议均已接入真实服务；未用 mock 代替审查或权限结论。评审 R1–R9 的返修与剩余缺口见[返修记录](implementation-review-remediation-2026-10-21.md)。
 
+> **本文是 2026-10-21 的历史报告，按原样保留。** 当前首版交付状态、正式验收结论与已知限制见[首版验收报告](#first-release-acceptance)（2026-10-26，head `3141b88`+本 PR）。文中 DSH 0.2.1-rc.2、离线规则建议与「英文未补齐」等描述属于当时的记录，不由后续工作改写。
+
+## 首版验收报告（2026-10-26，issue #23）
+
+本节回填 #23「完成首版正式插件集成验收与交付说明」。前置 21 个叶子 issue（#3–#22）已全部合并到 main，验收基于 `3141b88` 及其上的本 PR。
+
+### A. 环境与固定 head
+
+| 项 | 值 |
+|---|---|
+| 验收 head | 基线 `3141b88`（= `origin/main`）；**被执行与被验证的测试树是提交 `9e0084a`**（`test(release): verify the combined release journey and both locales`）及其后的 `tests/e2e` 变更提交，本报告随文档提交回填 |
+| DSH 版本 | **0.2.1-rc.3**，取自 `tests/e2e/runtime/package.json` + `package-lock.json`（与 PR／main 同一清单，不在 release 中解析 `latest`） |
+| 运行方式 | `DSH_E2E_CLI=/tmp/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js DSH_E2E_VERSION=0.2.1-rc.3` |
+| 平台（本轮实际执行） | macOS 27.0.1 / arm64（基准系统） |
+| 隔离度 | 每个用例独立 `DSH_HOME`、独立 profile、独立 workspace、OS 分配端口；不读写日常 `~/.dsh` |
+| 模型 | 确定性 fixture adapter（`tests/e2e/dsh/fixture-llm.ts`），无凭据、无外网请求 |
+
+### B. 逐项验收结论
+
+| # | 验收条件 | 结论 | 证据 |
+|---|---|---|---|
+| 1 | 发布流程复用 PR／main 同一 DSH 版本，不临时解析 `latest` | **passed** | `tests/e2e/runtime/package.json`／`package-lock.json` 固定 rc.3；`tooling/ci/dsh-platforms.mjs` 与 `tests/tooling/dsh-platforms.test.ts`；本 PR 未改动该清单 |
+| 2 | 升级 PR 三平台 smoke、候选复用同一清单、各声明系统分别验证产品行为 | **partial** — 三平台 `@smoke` 兼容：passed（历史证据）；各声明系统的产品级验证：**仅基准系统 macOS 完成，Ubuntu／Windows not-run** | 平台矩阵与逐平台结论见 **E 节第 1 条**；历史证据见 `validation/engineering/2026-10-25-dsh-hosted/REPORT.md`（macos-15／ubuntu-24.04／windows-2025 各 3 passed，同为 DSH 0.2.1-rc.3）与 `2026-10-25-dsh-updates/REPORT.md`。smoke 不证明文件边界／沙箱、冷恢复、停用／卸载；self-hosted runner 未部署 |
+| 3 | 自动审批用真实宿主／插件 + 确定性 Reviewer；真实模型质量与真人点击单列 | **passed（自动路径）／真实模型与真人部分见 #8、#12 状态** | `tests/e2e/first-release-acceptance.spec.ts`、`session-admission.spec.ts`、`coexistence.spec.ts`；日常 CI 不依赖模型密钥或人工等待 |
+| 4 | 首版发布前补齐 `locale/en/` 全部 UI 文案，通过共享 schema 与全语言校验 | **passed** | `pnpm check:i18n:release` 退出 0；14 模块 705 key 全覆盖；`src/client/i18n/resources.ts` 同步登记 |
+| 5 | 正式宿主中验证中英文切换与长文本／换行／截断／弹窗布局 | **passed** | `locale-smoke.spec.ts`（配置框架 zh→en→zh + 刷新）；`locale-surfaces.spec.ts`（规则编辑、规则测试区、**真实打开的 Reviewer 连接测试弹窗**（含失败材料展开与关闭）、日志列表、共用详情、会话拒绝反馈；逐面「实际裁剪」检查）；`permission-selector.spec.ts`（插槽与英文菜单不越界、经英文菜单启用仍落到后端）；`coexistence.spec.ts`（**真实官方 Auto Review 冲突**下中英切换，校验双语标题、引导文案、提供者标识、无中文残留、卡片在视口内且不裁剪，切回中文再验证一次） |
+| 6 | 切换语言不改写用户内容、工具输入、模型返回、历史审计原文；稳定协议值不变 | **passed** | `locale-surfaces.spec.ts` 在同一 `callId` 上取「原始材料」的持久化 JSON（工具输入、snapshot、config、templates）与裁决原因原文，zh→en→zh 前后逐字比对相等；已保存规则名跨语言不变；日志行仍显示协议裁决值；`tests/client/denials.test.tsx` 断言 Agent 收到的拒绝原因原文不变。模型返回原文的比对受限于本条调用未发模型请求（`not-run`，见 E 节） |
+| 7 | `pnpm check:release` 通过（含 `check:i18n:release`、`verify`、完整真实 DSH 用例），逐项列出状态 | **passed** | 见 C 节逐项记录；未运行项在 D 节单列，不以探针或历史报告充当结论 |
+| 8 | 默认空规则、安装不接管；模式契约确定性回归；目标 Reviewer 小样本合法输出与延迟，不声称误放率／阈值已完美校准 | **passed（有界）** | `tests/e2e/first-release-acceptance.spec.ts` 的 `installation does not take over` 用例（**以 `arbiterConfig: 'unset'` 真正省略用户配置行**，并先断言 profile 文档里没有 `config` 字段；再验空规则、无 admission、无裁决、工具正常执行）+ `config-lifecycle.spec.ts` 首次安装默认值；模式契约见 `tests/policy*.test.ts`、`tests/regression`；真实 Reviewer 样本复用 [#22 评测记录](../validation/arbiter-integration/2026-10-26-policy-calibration/REPORT.md)：17 样例、72 次真实 chat 请求、0 解析失败；延迟中位数 102 ms（64 ms–1139 ms，缓存命中后的稳态；首次请求 1.9–5.2 s）。该报告同时记录三个边界样例的方差。报告曾指出 `chat.maxTokens=400` 会让会 thinking 的模型把预算耗在思考上并产出空正文；**该问题已由 #52 修复，当前发布默认是 `src/config/defaults.ts` 的 `maxTokens: 10_000`**，本报告按现行默认值记录。**不声称误放率或阈值已完美校准**，也没有 decision 侧样本 |
+| 9 | 未运行项不宣布交付完成；提供准确 head／环境／证据与剩余风险；关闭 parent/milestone、发布、合并另行授权 | **passed（本报告）** | 本报告 D／E 节；关闭与合并由 coordinator 执行 |
+
+### C. `pnpm check:release` 逐项记录
+
+| 子命令 | 结果 |
+|---|---|
+| `check:i18n:release` | passed — `Locale validation passed (release).` |
+| `check:peers` | passed — no peer dependency issues |
+| `typecheck` | passed |
+| `lint`（工程 + Testing Library 两遍，零警告） | passed |
+| `format:check` | passed |
+| `check:unused`（Knip） | passed |
+| `check:dependencies`（运行时循环依赖） | passed |
+| `check:workflows`（actionlint + zizmor） | passed |
+| `check:i18n`（开发口径） | passed |
+| `test`（unit + integration + ui） | passed — 721 unit、395 integration、258 ui |
+| `build` | passed |
+| `check:build`（publint + 离线消费者） | passed |
+| `check:regressions`（R1–R9、S1–S3） | passed（R8 按契约记录为「候选保持 pending、未加规则、accept 路由不可达」） |
+| `test:e2e:dsh`（完整真实 DSH 套件） | 见 D 节；本轮新增 2 个用例，全量重跑 |
+
+### D. 新增与复用的真实宿主证据
+
+**新增（本 PR）**
+
+| 文件 | 覆盖 | 结果 |
+|---|---|---|
+| `tests/e2e/first-release-acceptance.spec.ts` | 单会话跨模块旅程：配置（经真实 UI 保存规则）→ 权限选择器启用 → 规则拒绝（独立 callId、裁决归属、**被拒命令的文件效果不存在**，并有同形状 allow 命令确实写盘的正对照）→ 确定性 Reviewer 的 `review-allow`（工具确实执行）→ 会话拒绝 marker + 共用详情 → **进程重启**后内容快照／规则恢复、admission 恢复、同类调用仍被拒绝且文件仍未生成；另含「裸安装不接管」用例 | passed |
+| `tests/e2e/first-release-uninstall.spec.ts` | 在固定版本上执行**真实卸载**（宿主插件管理器的「卸载」按钮）：状态路由消失、配置页消失、设置文件与审计库保留、重启不复活、会话可重开且权限插槽回到宿主 | passed |
+| `tests/e2e/coexistence.spec.ts`（扩写） | 真实冲突下中英切换与告警卡布局 | passed |
+| `tests/e2e/locale-smoke.spec.ts`（重写） | zh → en → zh 切换 + 刷新后保持；英文页无中文残留、无裸 key／占位符 | passed（`@smoke`） |
+| `tests/e2e/locale-surfaces.spec.ts` | 逐面语言切换与布局：规则编辑、规则测试区、Reviewer 入口与连接测试弹窗、日志列表、共用详情、会话拒绝反馈、实际裁剪检查 | passed |
+| `tests/e2e/permission-selector.spec.ts`（语言用例重写） | 权限插槽随宿主语言切换、英文菜单项不越界、经英文菜单启用仍落到后端 | passed |
+
+**复用（未重跑或按需重跑）**：`session-admission.spec.ts`（含停用窗口生产 trace／barrier、冷重启、trusted 收窄、subagent 继承）、`session-denial.spec.ts`（marker 放置、同 step 拒绝与成功并存、沙箱失败不误标）、`coexistence.spec.ts`（官方 Auto Review 阻断与清除、第三方仅告警）、`config-lifecycle.spec.ts`、`context-sources.spec.ts`（run_code 外层／内层）、`gate-real.spec.ts`（真实 `tools/pre-execute` 与规则测试一致）、`history-recovery.spec.ts`（冷读）、`logs-pagination.spec.ts`、`rule-test-panel.spec.ts`、`reviewer-connection-test.spec.ts`、`rules-editor.spec.ts`、`rules-v2.spec.ts`、`accessibility.spec.ts`。
+
+### E. 已知限制与未运行项（不得记为通过）
+
+1. **平台 —— 逐平台结论**：
+
+   | 平台 | 三平台 `@smoke` 兼容 | 产品级验收（文件边界／沙箱、命令、启动退出、冷恢复、真实停用／卸载） |
+   |---|---|---|
+   | macOS 27.0.1 / arm64 | 历史 head 3 passed | **本轮已完成**：完整真实 DSH 套件（含跨进程冷恢复与真实卸载）在固定 rc.3 上通过 |
+   | Ubuntu 24.04 | 历史 head 3 passed | **not-run** |
+   | Windows 2025 | 历史 head 3 passed | **not-run**；路径／启动器／进程树清理无本轮证据 |
+
+   smoke 不能升级为产品级支持声明。self-hosted runner 未部署；Windows／Ubuntu 若要声明完整支持，需按上表逐项补测。macOS 是唯一有产品级证据的平台，**但它同样不等于所有历史叶子证据都在本轮重跑**（见下方 3、4、6）。
+2. **decision 后端真实网络**：自定义 JSON 协议，官方 Anthropic endpoint 不兼容，需要 serving 层。**not-run**（用户明确延后）。相关路径只有协议单元测试。
+3. **#14 真实 provider 成功路径**：现有宿主证据用 MSW／本地端口失败路径覆盖；真实 provider 成功返回 **not-run**。
+4. **#19 并发隔离性**：bash 非 concurrency-safe，验证止于「同 step 内拒绝与成功并存」，更广义的并发安全 **not-run**。
+5. **#12 真人点击与 PTC 取消**：历史 2026-10-22 报告记录了本人点击「允许一次」与「拒绝」以及宿主因沙箱模式改变取消的真实 `run_code`（DSH 0.2.1-rc.2 head）。**本轮未重跑真人点击**；PTC 的宿主中止不等于人工 abort，仍单列。跨版本复用需说明差异。
+6. **#51 两条挂起项**：边界样例探针定义模糊（`bulk`／`destructive` 对递归删除的措辞）、R5 缺「既有对象删除」操作事实。**未修**，属后续 issue。
+7. **真实模型质量与阈值校准**：有 #22 的有界 chat 样本（见 B 节 #8），不构成误放率结论，decision 侧无样本。
+8. **模型返回原文的跨语言不变性未直接比对**：AC6 覆盖了工具输入、审查快照、配置快照、模板与拒绝原因原文；本条验收旅程的调用没有发出模型请求，因此「模型返回原文」一项在真实宿主中 **not-run**（该内容在 UI 中只经 `JsonBlock` 原样渲染，架构上不参与翻译）。
+9. **`chat.maxTokens` 的历史问题已修复**：#22 记录的 400 默认值致空正文已由 #52 修正为 `10_000`（`src/config/defaults.ts`）。本轮不重复验证真实 thinking 模型，`not-run`。
+
+### F. 迁移与升级说明
+
+- **本版无配置 schema 破坏性变更**：`arbiter-config-v2` 与 `arbiter-config-v1` 的读取规则未变；`format` 未声明的旧文档继续按旧前缀语义解析（页面显示「未声明，沿用旧前缀语义」）。
+- 从「英文未补齐」的开发版本升级：`locale/en/` 从 2 个 key 变为完整 705 key。宿主语言为英文的部署升级后会看到英文界面，此前是中文回退；这是预期变化，不是回归。
+- 会话记录 `plugin:arbiter/admission`／`plugin:arbiter/decision` 的字段与版本号未变，冷恢复读取路径未变。
+- 审计库（`$DSH_HOME/arbiter/arbiter.db`）结构未变，无需迁移。
+
+
 ## 1. 已实现的用户流程
 
 1. 在隔离 profile 中安装并启用插件，选择主会话／子任务审批模式与 reviewer。

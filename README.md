@@ -2,13 +2,27 @@
 
 面向 DSH 的独立权限与自动审查插件，将命令规则与 auto review 放在同一套产品中。
 
+## 首版交付状态（2026-10-26）
+
+**首版验收在基准系统上完成，逐项状态与限制如下。** 前置 21 个叶子 issue（#3–#22）全部合并；本轮在固定 head `3141b88` 及其上的验收分支完成正式插件集成验收。下表只列证据能支持的范围：macOS 以外的平台、decision 真实网络、真实 provider 成功路径、本轮真人点击与 PTC 取消均未运行，不能记为通过。
+
+| 项       | 结论                                                                                                                                                                                                                                                                                                                                            |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 支持版本 | **DSH 0.2.1-rc.3**，取自 `tests/e2e/runtime/package.json` + `package-lock.json`（与 PR／main 同一清单，发布不解析 `latest`）                                                                                                                                                                                                                    |
+| 支持平台 | **基准系统 macOS 27.0.1 / arm64**：本轮在该平台完成产品级验收（含跨进程冷恢复与**真实卸载**）。Ubuntu 24.04 与 Windows 2025 有历史三平台 `@smoke` 兼容证据（同 head 各 3 passed），但 smoke 不证明文件边界／沙箱、冷恢复、停用／卸载，**这两者的产品级验收本轮 not-run**。首版只把 macOS 记为完成产品级验收的系统，其余仅声明通过基础兼容 smoke |
+| 界面语言 | **中文与英文均为完整资源**：`locale/zh/` 与 `locale/en/` 各 14 模块、705 key，`pnpm check:i18n:release` 退出 0。中英切换与布局在真实宿主逐面验收（含真实冲突告警卡与真实 Reviewer 弹窗）                                                                                                                                                        |
+| 发布入口 | `pnpm check:release` 通过（i18n 发布门禁 + `pnpm verify` + 完整真实 DSH 套件，57/57 真实 DSH 用例通过）                                                                                                                                                                                                                                         |
+| 默认行为 | 空命令规则表、chat + 跟随会话模型、guarded、主会话 normal／子任务 strict；**安装不接管任何会话**                                                                                                                                                                                                                                                |
+
+完整逐项结论、环境、命令与未运行项见[首版验收报告](docs/implementation-report.md#首版验收报告2026-10-26issue-23)。**已知限制（不得记为通过）**：decision 后端的真实网络行为（自定义 JSON 协议，官方 Anthropic endpoint 不兼容，需要 serving 层，用户明确延后）、`#14` 真实 provider 成功路径、`#19` 更广义的并发隔离、`#12` 本轮真人点击与 PTC 取消、`#51` 两条边界探针挂起项、self-hosted DSH runner 未部署。
+
 **首版范围更新（2026-10-23）**：聚焦审批、会话启停与执行边界、规则管理和测试、配置、日志与恢复。离线规则建议及其入口、生成、验证和审核流程移到后续版本，待真实日志积累后重新设计。下文首轮报告中的相关功能是已有原型记录，不作为当前首版交付要求，见[产品范围](docs/requirements.md#first-release-scope)。
 
 **首版入口收敛（2026-10-25 已实现）**：配置页不再注册“离线建议”页签，也不提供生成候选、批量审核或确认接纳的按钮；对应的公开路由 `/api/arbiter/suggestions`、`/api/arbiter/analyze`、`/api/arbiter/replay` 与 `/api/arbiter/suggestions/act` 均已移除，宿主不再返回处理结果，因此没有任何入口能启动分析或让候选改动生效配置。`src/suggestions.ts` 及候选存储表保留为原型参考与历史数据，不构成首版产品承诺；已有调用日志、规则、候选行与 `validation/` 原始验证证据都不因本次收敛被删除。首版内仍完整提供规则管理、规则测试、Reviewer 配置、日志与完整数据采集。
 
 **首版默认值（2026-10-24 已确认）**：chat + 跟随会话模型、guarded、主会话 normal／子任务 strict、空命令规则表；安装不自动接管会话。预设规则留待实际使用后评估，正文与实施验收见[初始默认值](docs/configuration-and-audit.md#initial-defaults)。
 
-状态（2026-10-21，返修后）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，历史 R1–R9 脚本与结果保持不变，R8 所覆盖的接纳流程不再属于首版，改由独立的 `validation/first-release-scope/` 回归验证当前契约）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
+状态（2026-10-21，返修后的历史记录；当前状态见上方「首版交付状态」）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，历史 R1–R9 脚本与结果保持不变，R8 所覆盖的接纳流程不再属于首版，改由独立的 `validation/first-release-scope/` 回归验证当前契约）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
 
 后续已确认采用[同位置 arbiter 权限选择器](docs/architecture.md#permission-selector-contract)：菜单控制会话启停，trusted / guarded 在插件配置页选择。U1–U4 已验证基础接入与探针收尾。
 
@@ -68,7 +82,13 @@
 
 ## 本地安装与试用
 
-目标运行时：DSH desktop **0.2.1-rc.2**（macOS）。以下步骤均使用隔离的 `DSH_HOME`，不会修改日常 `~/.dsh`。
+目标运行时：**DSH 0.2.1-rc.3**（本轮产品级验证在 macOS / arm64 执行，见上方「首版交付状态」）。以下步骤均使用隔离的 `DSH_HOME`，不会修改日常 `~/.dsh`。
+
+**版本与迁移说明**
+
+- 安装前确认宿主版本与 `tests/e2e/runtime/package.json` 一致；需要新版本时先走独立的 DSH 升级 PR（三平台 smoke + 人工审核），不要在安装或发布时临时换版本。
+- 从早期开发版升级到本版：**配置格式无需迁移**。`arbiter-config-v2` 与 `arbiter-config-v1` 的读取规则未变，未声明 `format` 的旧文档继续按旧前缀语义解析。会话记录 `plugin:arbiter/admission`／`plugin:arbiter/decision` 与审计库 `$DSH_HOME/arbiter/arbiter.db` 的结构均未变，无需迁移或重建。
+- 唯一可见变化：宿主语言为英文时，界面由「中文回退」变为**英文**（本轮补齐了 `locale/en/` 全部 705 个 key）。这是预期变化，不是回归。
 
 1. 从 shipped Web 模板创建隔离 profile（本机 CLI 入口见下方说明）：
 
@@ -118,29 +138,29 @@ mise exec -- pnpm install --frozen-lockfile
 mise exec -- pnpm verify
 ```
 
-| 命令                                           | 检查内容                                                          |
-| ---------------------------------------------- | ----------------------------------------------------------------- |
-| `pnpm typecheck`                               | 严格检查源码、测试、脚本与 TSX 客户端                             |
-| `pnpm lint`                                    | 顺序运行工程与 Testing Library 两遍 ESLint，均要求零警告          |
-| `pnpm lint:code`                               | 严格类型、React 与工程检查，禁止行内禁用与 focused/disabled tests |
-| `pnpm lint:testing-library`                    | 对 RTL 测试与 render helper 运行完整 React 推荐规则               |
-| `pnpm lint:fix`                                | 两套配置分别自动修复，再运行完整 lint 复查                        |
-| `pnpm format:check`                            | 检查格式；`pnpm format` 单独执行格式化                            |
-| `pnpm check:unused`                            | Knip 检查未使用文件、导出与依赖                                   |
-| `pnpm check:workflows`                         | actionlint 与 zizmor 离线检查 GitHub Actions／Dependabot          |
-| `pnpm check:pr-title "ci: validate PR titles"` | 本地校验英文 Conventional Commits 标题，与 CI／合并共用实现       |
-| `pnpm pr:merge NUMBER --dry-run`               | 检查 CI 与最终 squash 消息并预览；去掉 dry-run 才会合并           |
-| `pnpm check:dependencies`                      | 检查源码运行时循环依赖，类型引用不计入                            |
-| `pnpm check:i18n`                              | 遍历全部语言，检查共享 schema、key／结构／插值与资源登记一致性    |
-| `pnpm check:i18n:release`                      | 在上述检查外要求所有已声明语言完整覆盖中文                        |
-| `pnpm test`                                    | 运行 unit、integration 与 UI 三个 Vitest 项目                     |
-| `pnpm test:coverage`                           | 全量源码覆盖率报告，无百分比门槛和过渡名单                        |
-| `pnpm test:e2e:dsh:smoke`                      | 构建后在真实隔离 DSH 中运行 `@smoke` 浏览器用例                   |
-| `pnpm test:e2e:dsh`                            | 构建后运行全部已实现的真实 DSH 场景                               |
-| `pnpm build`                                   | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧  |
-| `pnpm check:build`                             | publint 检查 tarball，并由离线消费者验证类型、工厂与打包资源      |
-| `pnpm check:regressions`                       | 运行历史 R1–R9 与首版范围 S1–S3 复现脚本（夹具，不启动 DSH）      |
-| `pnpm verify`                                  | 以上检查、peer 兼容性、i18n、构建与 R1–R9／S1–S3 回归             |
+| 命令                                           | 检查内容                                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `pnpm typecheck`                               | 严格检查源码、测试、脚本与 TSX 客户端                                          |
+| `pnpm lint`                                    | 顺序运行工程与 Testing Library 两遍 ESLint，均要求零警告                       |
+| `pnpm lint:code`                               | 严格类型、React 与工程检查，禁止行内禁用与 focused/disabled tests              |
+| `pnpm lint:testing-library`                    | 对 RTL 测试与 render helper 运行完整 React 推荐规则                            |
+| `pnpm lint:fix`                                | 两套配置分别自动修复，再运行完整 lint 复查                                     |
+| `pnpm format:check`                            | 检查格式；`pnpm format` 单独执行格式化                                         |
+| `pnpm check:unused`                            | Knip 检查未使用文件、导出与依赖                                                |
+| `pnpm check:workflows`                         | actionlint 与 zizmor 离线检查 GitHub Actions／Dependabot                       |
+| `pnpm check:pr-title "ci: validate PR titles"` | 本地校验英文 Conventional Commits 标题，与 CI／合并共用实现                    |
+| `pnpm pr:merge NUMBER --dry-run`               | 检查 CI 与最终 squash 消息并预览；去掉 dry-run 才会合并                        |
+| `pnpm check:dependencies`                      | 检查源码运行时循环依赖，类型引用不计入                                         |
+| `pnpm check:i18n`                              | 遍历全部语言，检查共享 schema、key／结构／插值与资源登记一致性                 |
+| `pnpm check:i18n:release`                      | 在上述检查外要求所有已声明语言完整覆盖中文（首版已通过，中文／英文各 705 key） |
+| `pnpm test`                                    | 运行 unit、integration 与 UI 三个 Vitest 项目                                  |
+| `pnpm test:coverage`                           | 全量源码覆盖率报告，无百分比门槛和过渡名单                                     |
+| `pnpm test:e2e:dsh:smoke`                      | 构建后在真实隔离 DSH 中运行 `@smoke` 浏览器用例                                |
+| `pnpm test:e2e:dsh`                            | 构建后运行全部已实现的真实 DSH 场景                                            |
+| `pnpm build`                                   | 清理 `lib/` 后输出 ESM JS／声明文件，并用 esbuild 生成浏览器半侧               |
+| `pnpm check:build`                             | publint 检查 tarball，并由离线消费者验证类型、工厂与打包资源                   |
+| `pnpm check:regressions`                       | 运行历史 R1–R9 与首版范围 S1–S3 复现脚本（夹具，不启动 DSH）                   |
+| `pnpm verify`                                  | 以上检查、peer 兼容性、i18n、构建与 R1–R9／S1–S3 回归                          |
 
 真实 DSH 集成证据：`validation/arbiter-integration/2026-10-21-arbiter-01/`（14 个用例，含真实 pre-execute、真实会话记录、真实 SQLite、模拟人工审批单独标注）。运行：
 
@@ -152,7 +172,7 @@ node scripts/check.mjs
 
 现有设计专题、归档与 `validation/` 资料不纳入工程的格式、Lint、类型与 Knip 检查。构建只包含 `src/`；`lib/`、依赖目录与测试产物不提交。
 
-文案按 `locale/<语言>/<功能模块>.json` 分文件，内部使用嵌套对象，所有语言共用 `locale/schema.json`。组件保留点号 key；新增资源同步登记到 `src/client/i18n/resources.ts`。开发允许缺少译文并逐条回退中文，发布前补齐英文及其他已声明语言，详见[资源组织与校验](docs/development-baseline.md#i18n-的开发与发布检查)。
+文案按 `locale/<语言>/<功能模块>.json` 分文件，内部使用嵌套对象，所有语言共用 `locale/schema.json`。组件保留点号 key；新增资源同步登记到 `src/client/i18n/resources.ts`。开发允许缺少译文并逐条回退中文，发布前补齐英文及其他已声明语言；**首版已补齐 `locale/en/` 的 14 个模块、705 个 key**，`pnpm check:i18n:release` 退出 0，语言切换与布局在真实宿主中由 `tests/e2e/locale-smoke.spec.ts` 与 `tests/e2e/locale-surfaces.spec.ts` 验收。详见[资源组织与校验](docs/development-baseline.md#i18n-的开发与发布检查)与[首版验收报告](docs/implementation-report.md#首版验收报告2026-10-26issue-23)。
 
 CI 在所有 PR、main 推送和手动触发时并行执行独立检查，最终由 `Verify` 汇总。Dependabot 每周分别检查根目录 npm 依赖、DSH 独立运行时与 Actions 更新，通过 PR 验证，不自动合并。
 

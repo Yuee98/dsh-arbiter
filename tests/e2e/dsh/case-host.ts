@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startDshHost, type DshHost } from './host.js';
+import type { SeededModelGroup } from './profile.js';
 import { readSessionLogs } from './session-log.js';
 import type { LoggedSession } from './session-log.js';
 
@@ -19,8 +20,16 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
 export interface CaseHost {
   readonly current: () => DshHost;
-  /** Stop the process, keep the home, and start a new one on it. */
-  readonly restart: () => Promise<DshHost>;
+  /**
+   * Stop the process, keep the home, and start a new one on it.
+   *
+   * `pluginRemoved` is for a case that has just uninstalled the plugin: the next
+   * start must observe the removal, so the missing link is expected rather than
+   * treated as fixture damage.
+   */
+  readonly restart: (options?: {
+    readonly pluginRemoved?: boolean;
+  }) => Promise<DshHost>;
   /** Final teardown: stop the process and remove the isolated home. */
   readonly dispose: () => Promise<void>;
   readonly logs: () => Promise<readonly LoggedSession[]>;
@@ -59,6 +68,15 @@ function fixtureRow(options: CaseOptions): Record<string, unknown> {
 export interface CaseOptions {
   /** The arbiter row's own configuration (rules, boundary, modes). */
   readonly arbiterRowConfig?: Record<string, unknown>;
+  /**
+   * How the arbiter row is seeded in a fresh profile.
+   *
+   * `unset` omits the user configuration entirely, which is what a real first
+   * install looks like; the default keeps the explicit empty object that the
+   * older cases assume. A case that claims to test a bare install must pass
+   * `unset`, or it is only testing an explicit `{}`.
+   */
+  readonly arbiterConfig?: 'empty' | 'unset';
   /** The plugin's read-only lifecycle trace, for barrier-driven cases. */
   readonly tracePath?: string;
   /** Review-barrier directory for the model fixture. */
@@ -80,6 +98,13 @@ export interface CaseOptions {
    * official bundle or a local plugin file) into the same isolated profile.
    */
   readonly extraRows?: readonly Record<string, unknown>[];
+  /**
+   * Hand-declared model routes for the host catalog.
+   *
+   * A case that drives the Reviewer model picker needs a real catalog entry; a
+   * route pointing at a closed local port fails fast without a credential.
+   */
+  readonly modelGroups?: readonly SeededModelGroup[];
 }
 
 export async function createCaseHost(
@@ -88,12 +113,18 @@ export async function createCaseHost(
 ): Promise<CaseHost> {
   const options = {
     extraRows: [fixtureRow(caseOptions), ...(caseOptions.extraRows ?? [])],
+    ...(caseOptions.arbiterConfig === undefined
+      ? {}
+      : { arbiterConfig: caseOptions.arbiterConfig }),
     ...(caseOptions.arbiterRowConfig === undefined
       ? {}
       : { arbiterRowConfig: caseOptions.arbiterRowConfig }),
     ...(caseOptions.tracePath === undefined
       ? {}
       : { env: { ARBITER_TRACE_PATH: caseOptions.tracePath } }),
+    ...(caseOptions.modelGroups === undefined
+      ? {}
+      : { modelGroups: caseOptions.modelGroups }),
   };
   let host = await startDshHost(repoRoot, artifacts, options);
   let home = host.home;
@@ -108,13 +139,19 @@ export async function createCaseHost(
   return {
     current: () => host,
     logs: () => readSessionLogs(home),
-    restart: async () => {
+    restart: async (restartOptions = {}) => {
       // Keep the home on the first stop, then start a new process on it; the
       // case's final dispose removes the home.
       await host.stop({ keepHome: true });
       host = await startDshHost(repoRoot, join(artifacts, 'restart'), {
         ...options,
-        restart: { root, home },
+        restart: {
+          root,
+          home,
+          ...(restartOptions.pluginRemoved === true
+            ? { pluginRemoved: true }
+            : {}),
+        },
       });
       home = host.home;
       root = host.root;

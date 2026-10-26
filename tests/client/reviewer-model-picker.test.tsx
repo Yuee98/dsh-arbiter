@@ -1,8 +1,9 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, test } from 'vitest';
 
 import { ArbiterPage } from '../../src/client/index.js';
+import { createLocaleCatalogs } from '../../src/client/i18n/catalog.js';
 import { setupApiMock } from '../helpers/api-mock.js';
 import { effectiveState } from '../helpers/client-state.js';
 import { renderClient } from '../helpers/render-client.js';
@@ -78,15 +79,24 @@ function modelRequests(requests: readonly string[]): readonly string[] {
   return requests.filter((path) => MODEL_REQUESTS.includes(path));
 }
 
-async function openReviewer(locale?: 'zh' | 'en') {
+/**
+ * Open the Reviewer tab under one host language.
+ *
+ * `en` is a declared catalog since #23, so the heading is English there; an
+ * undeclared language keeps the Chinese fallback. The host's own tab label is
+ * `Reviewer` in both, which is why the helper can wait for it either way.
+ */
+async function openReviewer(locale?: string) {
   const view = renderClient(<ArbiterPage />, {
     ...(locale === undefined ? {} : { locale }),
   });
   await view.user.click(
     await screen.findByRole('button', { name: 'Reviewer' }),
   );
-  await screen.findByRole('heading', { name: 'Reviewer 类型' });
-  return Object.assign(view.user, { i18n: view.i18n });
+  await screen.findByRole('heading', {
+    name: locale === 'en' ? 'Reviewer type' : 'Reviewer 类型',
+  });
+  return Object.assign(view.user, { i18n: view.i18n, locale: view.locale });
 }
 
 function modelSelect(): HTMLElement {
@@ -889,7 +899,7 @@ describe('reviewer credential status outcomes', () => {
 });
 
 describe('reviewer localization', () => {
-  test('an English host falls back to Chinese per key without bare keys', async () => {
+  test('an English host renders the released translation without bare keys', async () => {
     server.use(
       http.get('*/api/arbiter/state', () =>
         HttpResponse.json(effectiveState()),
@@ -898,15 +908,16 @@ describe('reviewer localization', () => {
       catalogHandler(),
     );
     const user = await openReviewer('en');
-    // English declares only `common`, so every reviewer key falls back to the
-    // Chinese message instead of the translation key, a blank or `undefined`.
-    expect(screen.getByRole('searchbox', { name: '搜索模型' })).toBeVisible();
-    expect(screen.getByRole('combobox', { name: '模型' })).toBeVisible();
-    expect(screen.getByText('高级参数')).toBeVisible();
-    expect(screen.getByText('跟随会话模型')).toBeInTheDocument();
+    // Since #23 reviewer is a declared English translation rather than a gap.
+    expect(
+      screen.getByRole('searchbox', { name: 'Search models' }),
+    ).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeVisible();
+    expect(screen.getByText('Advanced parameters')).toBeVisible();
+    expect(screen.getByText('Follow the session model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        '选择「跟随会话模型」时使用发起本次调用的会话模型；具体模型仍保存为 provider / model。',
+        'Choosing "follow the session model" uses the model of the session that made this call; the concrete model is still saved as provider / model.',
       ),
     ).toBeVisible();
     const text = document.body.textContent;
@@ -914,48 +925,49 @@ describe('reviewer localization', () => {
     expect(text).not.toContain('undefined');
     expect(text).not.toContain('[object');
     expect(
-      screen.getByRole('heading', { name: 'Reviewer 类型' }).textContent,
-    ).toBe('Reviewer 类型');
+      screen.getByRole('heading', { name: 'Reviewer type' }).textContent,
+    ).toBe('Reviewer type');
     // An interpolated message keeps its parameter and never leaks the key.
+    expect(
+      user.i18n.translate('reviewer.model.providerFailed', { provider: 'X' }),
+    ).toBe('Reading the model list for X failed.');
+
+    // Switching back to Chinese retranslates the same mounted panel in place.
+    act(() => {
+      user.locale.setLocale('zh');
+    });
+    expect(screen.getByText('跟随会话模型')).toBeInTheDocument();
     expect(
       user.i18n.translate('reviewer.model.providerFailed', { provider: 'X' }),
     ).toBe('X 的模型列表读取失败。');
   });
 
-  test('a partially translated reviewer group falls back per key, not per file', async () => {
-    server.use(
-      http.get('*/api/arbiter/state', () =>
-        HttpResponse.json(effectiveState()),
-      ),
-      credentialsHandler(),
-      catalogHandler(),
-    );
-    const user = await openReviewer('en');
-    // Simulate a language that translated some reviewer keys and no others:
-    // the per-key fallback must hold for grouped, plain and interpolated text.
-    expect(user.i18n.translate('reviewer.model.session')).toBe('跟随会话模型');
-    expect(user.i18n.translate('reviewer.model.unsupported')).toBe(
-      '当前 composition 没有 LLM 服务，无法列出宿主模型。',
-    );
-    expect(
-      user.i18n.translate('reviewer.model.unlisted', {
-        provider: 'p',
-        model: 'm',
-      }),
-    ).toBe('p / m（不在当前目录）');
-    await user.click(
-      screen.getByRole('radio', { name: 'decision（分布 + 四探针）' }),
-    );
-    // The decision fields and the advanced disclosure are localized too.
-    expect(screen.getByLabelText('URL')).toBeVisible();
-    expect(
-      screen.getByLabelText('凭据引用 (apiKeyRef)', { exact: false }),
-    ).toBeVisible();
-    expect(screen.getByText('高级参数')).toBeInTheDocument();
-    // jsdom hides collapsed disclosure content, so assert presence and reveal
-    // the group the way a user would before checking the advanced labels.
-    expect(screen.getByText('成本标记')).toBeInTheDocument();
-    await user.click(screen.getByText('高级参数'));
-    expect(screen.getByText('成本标记')).toBeVisible();
+  test('an incomplete catalog falls back per key, not per file', () => {
+    // The per-key fallback is a catalog property, not a component one: a
+    // partially translated module keeps its translated leaves and borrows the
+    // rest from Chinese. Exercised directly so completing English cannot make
+    // the rule untestable.
+    const catalogs = createLocaleCatalogs({
+      zh: {
+        reviewer: {
+          advanced: { title: '高级参数' },
+          model: {
+            session: '跟随会话模型',
+            unlisted: '{provider} / {model}（不在当前目录）',
+          },
+        },
+      },
+      en: {
+        reviewer: {
+          advanced: { title: 'Advanced parameters' },
+          model: { session: 'Follow the session model' },
+        },
+      },
+    });
+    expect(catalogs['en']).toEqual({
+      'reviewer.advanced.title': 'Advanced parameters',
+      'reviewer.model.session': 'Follow the session model',
+      'reviewer.model.unlisted': '{provider} / {model}（不在当前目录）',
+    });
   });
 });

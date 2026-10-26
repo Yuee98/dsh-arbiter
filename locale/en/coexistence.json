@@ -1,0 +1,49 @@
+{
+  "title": "Approval provider coexistence",
+  "description": "Arbiter replaces the official Auto Review; other plugins are reported through observable capability hints, and no plugin is disabled automatically.",
+  "officialState": "Official Auto Review: {state} (running state {phase})",
+  "autoSlotState": "Auto slot: {slot}",
+  "detection": {
+    "complete": "The readable public interfaces are complete; the conclusion is based on this run's state.",
+    "partial": "Some public interfaces are unavailable ({surfaces}); only observed conflicts are reported."
+  },
+  "official": {
+    "running": "Running",
+    "stopped": "Installed but not running",
+    "absent": "Not installed",
+    "noPhase": "Unknown"
+  },
+  "slot": {
+    "arbiter": "Held by Arbiter",
+    "other": "Held by another provider",
+    "unknown": "Cannot be confirmed"
+  },
+  "severity": {
+    "blocking": "Blocking",
+    "warning": "Warning"
+  },
+  "reason": {
+    "officialRunning": "The official Auto Review ({source}) is actually running, so Arbiter will not take over any new session.",
+    "autoSlotTaken": "The Auto slot is already held by another provider ({source}): {error}",
+    "approvalHook": "{source} registered {capability}, which may affect approval outcomes."
+  },
+  "entry": " (plugin entry {entry})",
+  "none": "No approval provider that might conflict was detected.",
+  "blockedGuidance": "Turn off the official Auto Review ({source}) in plugin management and confirm it has stopped running, then reload this page and enable the session.",
+  "warningGuidance": "The following items are informational only: Arbiter keeps reviewing in the current mode, and existing gates and other host guards stay unchanged.",
+  "notice": {
+    "blockingTitle": "A conflicting approval provider exists",
+    "blockingBody": "The official Auto Review ({source}) was detected running, so no new session is taken over and no permission was expanded.",
+    "blockingGuidance": "How to turn it off: click \"Open plugin management\" below, disable the official Auto Review plugin and confirm its running state becomes not running; then reload this page and enable the session. Settings, rule tests, history and diagnostics stay available.",
+    "warningTitle": "Another plugin may affect approvals",
+    "warningBody": "{source} registered {capability}; Arbiter keeps reviewing in the current mode.",
+    "dismiss": "Got it",
+    "acknowledge": "Got it",
+    "detectionOnly": "Only observed conflicts are shown; when some interfaces are unavailable the full state cannot be confirmed.",
+    "openManager": "Open plugin management"
+  },
+  "autoSlotProblem": {
+    "failed": "Auto slot registration failed, so Arbiter did not take over that entry: {error}. Reload this plugin and confirm the state again.",
+    "unavailable": "This host does not provide an Auto slot, so Arbiter cannot take over at that entry."
+  }
+}

@@ -255,7 +255,7 @@ describe('arbiter permission selector', () => {
     expect(user).toBeDefined();
   });
 
-  test('falls back to Chinese when the host language has no arbiter module', async () => {
+  test('retranslates the mounted slot in place when the host language changes', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
     );
@@ -270,11 +270,11 @@ describe('arbiter permission selector', () => {
       locale.setLocale('en');
       await Promise.resolve();
     });
-    // The English catalog has no `permission` module: the Chinese text must
-    // remain, never a raw key or `undefined`.
-    expect(screen.getByRole('button', { name: /未启用自动审查/u })).toBe(
-      trigger,
-    );
+    // Since #23 the `permission` module is translated: the same mounted control
+    // keeps its identity and now reads in English.
+    expect(
+      screen.getByRole('button', { name: /Auto review not enabled/u }),
+    ).toBe(trigger);
     const text = document.body.textContent;
     expect(text).not.toMatch(/permission\./u);
     expect(text).not.toMatch(/undefined/u);

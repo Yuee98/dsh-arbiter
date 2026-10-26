@@ -514,19 +514,23 @@ describe('shared call detail', () => {
 });
 
 describe('call detail localization', () => {
-  test('missing English falls back to Chinese per key, with no bare keys', async () => {
+  test('renders the released English catalog with no bare keys', async () => {
     mockDetail(auditDetailBody());
     const { locale } = renderClient(<CallDetailPanel callId="call-1" />, {
       locale: 'en',
     });
-    await screen.findByRole('region', { name: '最终裁决' });
-    // English has no callDetail module yet, so every key falls back to Chinese
-    // rather than rendering the key itself.
-    expect(screen.getByText('判定依据')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: '调用概览' })).toBeInTheDocument();
+    // Since #23 the callDetail module is a declared translation, not a gap: the
+    // released English text is what the panel must render.
+    await screen.findByRole('region', { name: 'Final verdict' });
+    expect(screen.getByText('Basis for the decision')).toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Call overview' }),
+    ).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(
       /callDetail\.[a-zA-Z]|undefined|\[object Object\]/u,
     );
+    // A stored protocol value is not part of the catalog and stays verbatim.
+    expect(document.body.textContent).toContain('R7');
 
     // Switching the host language rerenders the mounted view in place.
     act(() => {
