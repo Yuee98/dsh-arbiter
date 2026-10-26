@@ -265,14 +265,36 @@ function backupDatabase(db: DatabaseSync, path: string): string {
   return backupPath;
 }
 
+/**
+ * Backup versions this plugin can produce, including 0.
+ *
+ * Version 0 is a real case: a populated file that never had the stamp written
+ * is backed up as `.backup-v0` before it is upgraded. Pruning and the capacity
+ * accounting both read this list, so a new version cannot be created in one
+ * place and forgotten in another.
+ */
+const BACKUP_VERSIONS: readonly number[] = Array.from(
+  { length: 9 },
+  (_, index) => index,
+);
+
+/**
+ * Every migration-backup path that could exist for this database.
+ *
+ * Exported so the store's capacity accounting enumerates the same set pruning
+ * does, instead of hard-coding a subset.
+ */
+export function backupPaths(path: string): readonly string[] {
+  return BACKUP_VERSIONS.map((version) => `${path}.backup-v${String(version)}`);
+}
+
 /** Keep only the newest few backups, so they cannot accumulate without bound. */
 export function pruneBackups(
   path: string,
   keep = BACKUP_KEEP,
 ): readonly string[] {
   const removed: string[] = [];
-  const candidates = Array.from({ length: 8 }, (_, index) => index + 1)
-    .map((version) => `${path}.backup-v${String(version)}`)
+  const candidates = backupPaths(path)
     .filter((candidate) => existsSync(candidate))
     .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
   for (const stale of candidates.slice(keep)) {

@@ -5,6 +5,7 @@ import {
   readFile,
   rm,
   stat,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,6 +17,7 @@ import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
+import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';
 
@@ -1581,6 +1583,57 @@ describe('the upgrade recipe covers every addition', () => {
       expect(tables.has(table)).toBe(true);
     }
     after.close();
+  });
+});
+
+describe('version-0 backups join the same retention and accounting', () => {
+  test('pruning keeps the newest two across v0, v1 and v2', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-prune0-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+    // Three real backups with distinct mtimes, so "newest" is unambiguous.
+    for (const [version, age] of [
+      [0, 3_000],
+      [1, 2_000],
+      [2, 1_000],
+    ] as const) {
+      const backup = `${path}.backup-v${String(version)}`;
+      await writeFile(backup, `backup-${String(version)}`);
+      const when = new Date(Date.now() - age);
+      await utimes(backup, when, when);
+    }
+
+    const removed = pruneBackups(path);
+    // The oldest (v0) goes; the two newest survive, matching BACKUP_KEEP.
+    expect(removed).toEqual([`${path}.backup-v0`]);
+    expect(existsSync(`${path}.backup-v0`)).toBe(false);
+    expect(existsSync(`${path}.backup-v1`)).toBe(true);
+    expect(existsSync(`${path}.backup-v2`)).toBe(true);
+  });
+
+  test('a version-0 backup counts toward the storage the store reports', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-account0-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    // A backup the previous accounting never enumerated. Its size must reach
+    // both the reported total and the auxiliary deduction, or retention
+    // overestimates the budget it may fill.
+    const backup = `${path}.backup-v0`;
+    await writeFile(backup, 'x'.repeat(4_096));
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const withoutBackup = store.databaseBytes;
+    // Grow only the version-0 backup, so the delta in the reported footprint
+    // can come from nowhere else. A hard-coded `backup-v1`/`backup-v2` list
+    // makes this delta zero.
+    await writeFile(backup, 'x'.repeat(64_000));
+    // One allocation unit of slack: the exact size is the file system's, but a
+    // hard-coded v1/v2 list reports no change at all here.
+    expect(store.databaseBytes - withoutBackup).toBeGreaterThanOrEqual(32_000);
+    store.close();
   });
 });
 
