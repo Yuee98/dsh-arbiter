@@ -250,6 +250,22 @@ test(
       await expect(alert).toContainText(OFFICIAL);
       await expect(alert).toContainText('插件管理');
 
+      // The reminder is a corner card, not a scrim. The page underneath must
+      // stay operable while it is on screen, because the notice never waits for
+      // an answer before work proceeds: switching tabs is a real interaction
+      // that a modal backdrop would swallow.
+      await page.getByRole('button', { name: '规则', exact: true }).click();
+      await expect(alert).toBeVisible();
+
+      // The guidance carries a real shortcut, not just words: it opens the
+      // host's own plugin panel, and opening it is not an acknowledgement.
+      await page.getByRole('button', { name: '打开插件管理' }).click();
+      await expect(
+        page.getByRole('button', { name: '插件', exact: true }),
+      ).toHaveAttribute('aria-current', 'page');
+      // Navigation is not acknowledgement: the conflict stays visible.
+      await expect(alert).toBeVisible();
+
       // Turning the official plugin off is a real stop: a profile without the
       // bundle row must report no conflict and allow the takeover.
       const clearedCase: CaseHost = await createCaseHost(
