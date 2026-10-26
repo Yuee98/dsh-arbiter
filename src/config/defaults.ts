@@ -67,8 +67,13 @@ export const DEFAULT_CONFIG: ArbiterConfig = {
       provider: 'session',
       model: '',
       temperature: 0,
-      maxTokens: 400,
-      timeoutMs: 8_000,
+      // Thinking and the answer share this output budget. At 400 the model spent
+      // every token reasoning and returned no JSON at all, so every review
+      // failed closed (validation/arbiter-integration model-run, #22).
+      maxTokens: 10_000,
+      // First requests measured 1.9-5.2s on the real backend; a long reasoning
+      // pass plus one format-repair retry needs more than the old 8s.
+      timeoutMs: 20_000,
       maxRepairRetries: 1,
     },
     decision: {

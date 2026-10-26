@@ -25,6 +25,15 @@ export interface StreamOptionsLike {
   }[];
   readonly temperature?: number;
   readonly maxTokens?: number;
+  /**
+   * Adapter-owned reasoning effort for this exact request.
+   *
+   * Omitted entirely when the caller has no opinion, because the host then
+   * falls back to its own chain (`reasoningEffort ?? defaults.reasoningEffort
+   * ?? thinking === "disabled" ? "off" : "high"`). Sending an explicit value
+   * would silently override a deployment's choice.
+   */
+  readonly reasoningEffort?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -130,6 +139,14 @@ export interface ChatRunContext {
   readonly chat: ChatReviewerConfig;
   readonly thresholds: PolicyThresholds;
   readonly signal: AbortSignal;
+  /**
+   * Reasoning effort to request, or undefined to inherit the host's default.
+   *
+   * This is a capability, not a policy: nothing in the shipped configuration
+   * sets it yet. Closing thinking is only safe once measurements show the
+   * verdicts hold, so the default path stays "ask the host".
+   */
+  readonly reasoningEffort?: string;
 }
 
 interface ChatRequest {
@@ -191,6 +208,34 @@ function chatAttemptBase(
   };
 }
 
+/**
+ * The one place a request leaves this adapter.
+ *
+ * `reasoningEffort` is added only when the caller supplied one: the key must be
+ * absent, not `undefined`, because the host falls back to its own chain when it
+ * is missing and would otherwise treat an explicit value as a decision.
+ */
+function streamOptions(
+  route: { readonly provider: string; readonly model: string },
+  request: ChatRequest,
+  messages: StreamOptionsLike['messages'],
+  ctx: ChatRunContext,
+  signal: AbortSignal,
+): StreamOptionsLike {
+  const base: StreamOptionsLike = {
+    provider: route.provider,
+    model: route.model,
+    system: request.system,
+    messages,
+    temperature: ctx.chat.temperature,
+    maxTokens: ctx.chat.maxTokens,
+    signal,
+  };
+  return ctx.reasoningEffort === undefined
+    ? base
+    : { ...base, reasoningEffort: ctx.reasoningEffort };
+}
+
 export async function runChatReviewer(
   ctx: ChatRunContext,
   _snapshot: ReviewSnapshot,
@@ -220,15 +265,7 @@ export async function runChatReviewer(
     // would tell the operator the wrong thing.
     const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
     const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
-    const options: StreamOptionsLike = {
-      provider: route.provider,
-      model: route.model,
-      system: request.system,
-      messages,
-      temperature: ctx.chat.temperature,
-      maxTokens: ctx.chat.maxTokens,
-      signal: attemptSignal,
-    };
+    const options = streamOptions(route, request, messages, ctx, attemptSignal);
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
       const parsed = parseChatText(collected.text);

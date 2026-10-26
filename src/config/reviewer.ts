@@ -29,15 +29,17 @@ function parseChat(
     ),
     maxTokens: asInteger(
       chatValue['maxTokens'],
-      400,
+      10_000,
       16,
-      4_000,
+      // Reasoning tokens and the answer draw on one budget, so the ceiling has
+      // to leave room for a long thinking pass before the JSON starts.
+      32_000,
       'reviewer.chat.maxTokens',
       errors,
     ),
     timeoutMs: asInteger(
       chatValue['timeoutMs'],
-      8_000,
+      20_000,
       500,
       120_000,
       'reviewer.chat.timeoutMs',

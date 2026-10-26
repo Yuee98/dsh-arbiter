@@ -369,7 +369,9 @@ function ChatAdvanced({
         <NumberInput
           value={draft.reviewer.chat.maxTokens}
           min={16}
-          max={4000}
+          // Must match the parser's ceiling: thinking and the answer share this
+          // budget, so the control has to accept the same range the config does.
+          max={32000}
           onChange={(value) => {
             onDraft((next) => {
               next.reviewer.chat.maxTokens = value;

@@ -756,6 +756,22 @@ describe('reviewer decision fields', () => {
       screen.getByLabelText('修复重试次数', { exact: false }),
     ).toBeInTheDocument();
   });
+
+  test('the token control accepts the parser range, not the old ceiling', async () => {
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json(effectiveState()),
+      ),
+      credentialsHandler(),
+      catalogHandler(),
+    );
+    await openReviewer();
+    // Thinking and the answer share one output budget, so the shipped default
+    // is 10,000. A control capped at 4,000 would reject its own default.
+    const maxTokens = screen.getByLabelText('maxTokens');
+    expect(maxTokens).toHaveAttribute('max', '32000');
+    expect(maxTokens).toHaveAttribute('min', '16');
+  });
 });
 
 describe('reviewer credential status outcomes', () => {
