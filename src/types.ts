@@ -6,6 +6,7 @@
  */
 
 import type { ShellParse } from './shell/parse.js';
+import type { NormalizationDetail } from './shell/types.js';
 
 export type ApprovalMode = 'normal' | 'strict' | 'progress';
 export type SubagentMode = 'strict' | 'progress';
@@ -661,9 +662,23 @@ export interface RuleTestResult {
     readonly unresolved: readonly string[];
   };
   readonly argv: readonly string[];
+  /**
+   * Original command, matched text, per-word status and structural issues.
+   *
+   * Optional so a caller that only needs the verdict can ignore it; the host
+   * route always sends it so the tester can show why a word was not normalized.
+   */
+  readonly normalization?: NormalizationDetail | null;
   readonly shadowed: readonly string[];
   readonly error?: string;
 }
+
+export type {
+  NormalizationCommand,
+  NormalizationDetail,
+  NormalizationIssue,
+  NormalizationWord,
+} from './shell/types.js';
 
 export interface RuleEvaluation {
   readonly path: RulePath;
@@ -671,6 +686,8 @@ export interface RuleEvaluation {
   readonly rules: readonly RuleResult[];
   readonly parse: ShellParse;
   readonly argv: readonly string[];
+  /** How the command text was normalized, for explanations and the tester. */
+  readonly normalization: NormalizationDetail | null;
   readonly facts: DerivedFacts | null;
   readonly shadowed: readonly string[];
 }

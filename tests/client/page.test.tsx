@@ -100,6 +100,26 @@ describe('prototype page after panel extraction', () => {
                 unresolved: [],
               },
               argv: ['pwd'],
+              normalization: {
+                raw: 'pwd',
+                completeness: 'complete',
+                issues: [],
+                commands: [
+                  {
+                    text: 'pwd',
+                    raw: 'pwd',
+                    words: [
+                      {
+                        raw: 'pwd',
+                        text: 'pwd',
+                        status: 'static',
+                        reasons: [],
+                        value: 'pwd',
+                      },
+                    ],
+                  },
+                ],
+              },
               shadowed: [],
             },
           ],
@@ -120,6 +140,14 @@ describe('prototype page after panel extraction', () => {
     expect(
       await screen.findByText('review(default)', { exact: true }),
     ).toBeInTheDocument();
+    // The explanation carries the normalization evidence the server sent: the
+    // matched text and the per-word status, not only the final verdict.
+    // The explanation is a native `<details>`; opening its summary is what a reader
+    // does, and the word-level evidence must be there once it is open.
+    await user.click(screen.getByText('查看详细解释'));
+    const detail = await screen.findByTestId('rule-test-normalization');
+    expect(detail).toHaveTextContent('匹配文本：pwd');
+    expect(detail).toHaveTextContent('pwd → pwd（静态）');
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       samples: [{ tool: 'bash', args: { command: 'pwd' } }],

@@ -71,6 +71,8 @@ interface Harness {
   ) => Promise<{ readonly kind: string; readonly reason?: string }>;
   readonly documentPath: string;
   readonly session: StubSession;
+  /** The stored audit row, read back through the same route the UI uses. */
+  readonly callDetail: (callId: string) => Promise<Record<string, unknown>>;
 }
 
 interface StubSession {
@@ -197,6 +199,38 @@ async function createHarness(config: unknown): Promise<Harness> {
     routes,
     documentPath,
     session,
+    callDetail: async (callId) => {
+      const route = routes.get('/api/arbiter/log');
+      if (route === undefined) throw new Error('log route was not registered');
+      // The store writes through an asynchronous queue, so the row appears once
+      // that write drains. Waiting for it is a bounded wait on a real condition,
+      // not a fixed delay.
+      const deadline = Date.now() + 5_000;
+      for (;;) {
+        const response = await route.fetch(
+          new Request(`http://fixture/api/arbiter/log?callId=${callId}`),
+        );
+        const body: unknown = await response.json();
+        if (body !== null && typeof body === 'object') {
+          // The route answers with the shared call-detail view; the audit effect
+          // travels under its `basis`. A detail built from the in-memory entry
+          // carries no effect, so waiting for a non-null effect is waiting for the
+          // stored row this case is about.
+          const detail: unknown = Reflect.get(body, 'detail');
+          if (detail !== null && typeof detail === 'object') {
+            const basis: unknown = Reflect.get(detail, 'basis');
+            const effect: unknown =
+              basis !== null && typeof basis === 'object'
+                ? Reflect.get(basis, 'effect')
+                : null;
+            if (effect !== null && effect !== undefined) return { effect };
+          }
+        }
+        if (Date.now() > deadline)
+          throw new Error(`call ${callId} was not written to the audit store`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
     gate: (execution) => {
       if (gate === undefined) throw new Error('gate was not registered');
       return gate(execution);
@@ -266,6 +300,229 @@ async function stateRoute(harness: Harness): Promise<Record<string, unknown>> {
 function gateVerdict(decision: { readonly kind: string }): string {
   return decision.kind;
 }
+
+const SHELL_FORMAT = 'arbiter-config-v2';
+
+/** One shell allow, so the gate and the tester must agree on the same text. */
+const SHELL_ALLOW = {
+  id: 'echo-quoted',
+  conditions: [
+    {
+      target: 'command',
+      kind: 'exact',
+      pattern: "echo 'a b'",
+    },
+  ],
+  verdict: 'allow',
+};
+
+const NESTED_ALLOW = {
+  id: 'both-commands',
+  conditions: [
+    { target: 'command', kind: 'exact', pattern: 'echo hi' },
+    { target: 'command', kind: 'exact', pattern: 'echo $(date)' },
+    { target: 'command', kind: 'exact', pattern: 'date' },
+  ],
+  verdict: 'allow',
+};
+
+function shellExecution(
+  session: StubSession,
+  command: string,
+  callId = 'call-shell',
+): ToolExecutionLike {
+  return executionOf('bash', { command }, session, callId);
+}
+
+async function testShellRoute(
+  harness: Harness,
+  command: string,
+  rules: readonly unknown[] = [],
+): Promise<Record<string, unknown>> {
+  const payload = await testRoute(harness, {
+    inputs: [JSON.stringify({ tool: 'bash', args: { command } })],
+    ...(rules.length === 0 ? {} : { rules }),
+  });
+  const results: unknown = payload['results'];
+  if (!Array.isArray(results) || results.length === 0)
+    throw new TypeError('results must be a non-empty array');
+  const first: unknown = results[0];
+  if (first === null || typeof first !== 'object')
+    throw new TypeError('result must be an object');
+  return { ...first };
+}
+
+describe('shell normalization agreement', () => {
+  test('a quoted argument is allowed only as the text it normalizes to', async () => {
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      rules: [SHELL_ALLOW],
+    });
+    const allowed = await harness.gate(
+      shellExecution(harness.session, 'echo "a b"'),
+    );
+    expect(gateVerdict(allowed)).toBe('allow');
+
+    const tested = await testShellRoute(harness, 'echo "a b"');
+    expect(tested['path']).toBe('allow');
+    const normalization = tested['normalization'];
+    if (normalization === null || typeof normalization !== 'object')
+      throw new TypeError('normalization must be an object');
+    expect(Reflect.get(normalization, 'raw')).toBe('echo "a b"');
+    expect(Reflect.get(normalization, 'commands')).toEqual([
+      expect.objectContaining({ text: "echo 'a b'" }),
+    ]);
+  });
+
+  test('two arguments are not the quoted argument in either path', async () => {
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      rules: [SHELL_ALLOW],
+    });
+    const denied = await harness.gate(
+      shellExecution(harness.session, 'echo a b', 'call-two-args'),
+    );
+    expect(gateVerdict(denied)).not.toBe('allow');
+    const tested = await testShellRoute(harness, 'echo a b');
+    expect(tested['path']).toBe('review(default)');
+  });
+
+  test('a compound call needs complete allow coverage of every command', async () => {
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      rules: [NESTED_ALLOW],
+    });
+    const covered = await harness.gate(
+      shellExecution(harness.session, 'echo hi; echo $(date)', 'call-covered'),
+    );
+    expect(gateVerdict(covered)).toBe('allow');
+
+    const partialRules = [SHELL_ALLOW];
+    const partialHarness = await createHarness({
+      format: SHELL_FORMAT,
+      rules: partialRules,
+    });
+    const partial = await partialHarness.gate(
+      shellExecution(
+        partialHarness.session,
+        'echo "a b"; echo $(rm -rf /)',
+        'call-partial',
+      ),
+    );
+    expect(gateVerdict(partial)).not.toBe('allow');
+    const tested = await testShellRoute(
+      partialHarness,
+      'echo "a b"; echo $(rm -rf /)',
+      partialRules,
+    );
+    expect(tested['path']).toBe('review(default)');
+  });
+
+  test('a textual allow cannot mask missing structure in either path', async () => {
+    // A command allow covers the text it matched, not the source nobody read. A
+    // tool-wide allow is different: it is an explicit authorization of the whole
+    // tool, which is why this case uses a command condition.
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      rules: [
+        {
+          id: 'prefix-allow',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'echo ok' },
+          ],
+          verdict: 'allow',
+        },
+      ],
+    });
+    const gated = await harness.gate(
+      shellExecution(harness.session, 'echo ok; echo (', 'call-gap'),
+    );
+    expect(gateVerdict(gated)).not.toBe('allow');
+
+    const tested = await testShellRoute(harness, 'echo ok; echo (');
+    expect(tested['path']).toBe('review(default)');
+    const parse = tested['parse'];
+    if (parse === null || typeof parse !== 'object')
+      throw new TypeError('parse must be an object');
+    expect(Reflect.get(parse, 'completeness')).toBe('partial');
+  });
+
+  test('the call detail carries the normalization the decision used', async () => {
+    // The audit row must keep the evidence, not only the verdict: a later reader
+    // has to be able to see which text was matched and why a word was dynamic.
+    const harness = await createHarness({
+      format: SHELL_FORMAT,
+      audit: {
+        enabled: true,
+        retentionDays: 30,
+        retentionBytes: 1024 * 1024,
+      },
+      rules: [
+        {
+          id: 'quoted',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: "echo 'a b'" },
+          ],
+          verdict: 'allow',
+        },
+      ],
+    });
+    const decision = await harness.gate(
+      shellExecution(harness.session, 'echo "a b"', 'call-detail'),
+    );
+    expect(gateVerdict(decision)).toBe('allow');
+    const record = await harness.callDetail('call-detail');
+    const effect = record['effect'];
+    if (effect === null || typeof effect !== 'object')
+      throw new TypeError('the record must carry effect evidence');
+    const normalization: unknown = Reflect.get(effect, 'normalization');
+    if (normalization === null || typeof normalization !== 'object')
+      throw new TypeError('the effect evidence must carry normalization');
+    expect(Reflect.get(normalization, 'raw')).toBe('echo "a b"');
+    expect(Reflect.get(normalization, 'commands')).toEqual([
+      expect.objectContaining({ text: "echo 'a b'" }),
+    ]);
+  });
+
+  test('a dynamic word keeps its expression and stays matchable', async () => {
+    const rules = [
+      {
+        id: 'relay-send',
+        conditions: [
+          {
+            target: 'command',
+            kind: 'exact',
+            pattern: 'gpt-relay send $CONTENT',
+          },
+        ],
+        verdict: 'allow',
+      },
+    ];
+    const harness = await createHarness({ format: SHELL_FORMAT, rules });
+    const gated = await harness.gate(
+      shellExecution(
+        harness.session,
+        'gpt-relay send $CONTENT',
+        'call-dynamic',
+      ),
+    );
+    expect(gateVerdict(gated)).toBe('allow');
+    const tested = await testShellRoute(
+      harness,
+      'gpt-relay send $CONTENT',
+      rules,
+    );
+    expect(tested['path']).toBe('allow');
+
+    // The quoted form is a different text, so it is not silently allowed.
+    const quoted = await testShellRoute(
+      harness,
+      'gpt-relay send "$CONTENT"',
+      rules,
+    );
+    expect(quoted['path']).toBe('review(default)');
+  });
+});
 
 describe('rule tester and real gate agreement', () => {
   test('a canonical tool-argument rule denies in both paths', async () => {

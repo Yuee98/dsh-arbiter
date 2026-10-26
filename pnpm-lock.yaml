@@ -20,6 +20,9 @@ importers:
       tokenx:
         specifier: 2.2.0
         version: 2.2.0
+      unbash:
+        specifier: 6.0.1
+        version: 6.0.1
     devDependencies:
       '@axe-core/playwright':
         specifier: 4.14.0
@@ -2267,6 +2270,10 @@ packages:
     resolution: {integrity: sha512-vD5CvvFLVQDhXdNyNEPPa/tHPCK3HLySddOine+OZLDYIH1cMImGNgnw9+NkizToaPsFsQlwiyPGMiK+uwtYVw==}
     engines: {node: '>=14'}
 
+  unbash@6.0.1:
+    resolution: {integrity: sha512-0db9eS5iqybux41zLkX69nk90KTci7F7eZ+gXzEG/Q7E0tAqEBhRh5fkZvk1N7jT7QkGWqq34i8SFGPFEe1V8A==}
+    engines: {node: '>=14'}
+
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
@@ -4483,6 +4490,8 @@ snapshots:
   typescript@6.0.3: {}
 
   unbash@6.0.0: {}
+
+  unbash@6.0.1: {}
 
   undici-types@7.24.6: {}
 

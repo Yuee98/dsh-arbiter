@@ -278,6 +278,9 @@ function testResult(
       unresolved: evaluation.parse.unresolved,
     },
     argv: sample.tool === 'bash' ? evaluation.argv : [],
+    // The page shows what was matched and why a word kept its expression, using
+    // the same parse the evaluation used.
+    normalization: evaluation.normalization,
     shadowed: evaluation.shadowed,
     ...(evaluation.parse.error === undefined
       ? {}
