@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-26T02:02:29.783Z",
+  "method": "one field at a time on the shipped UI grid, all other fields at their default; admissible = every labelled case still holds; midpoint = middle of the admissible grid run",
+  "sampleSize": 51,
+  "calibration": [
+    {
+      "field": "tauAuth",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05
+      },
+      "shipped": 0.8,
+      "admissibleValues": [
+        0.8,
+        0.85
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 0.75,
+        "upperInclusive": 0.9
+      },
+      "midpoint": 0.8
+    },
+    {
+      "field": "tauRisk",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05
+      },
+      "shipped": 0.75,
+      "admissibleValues": [
+        0.75,
+        0.8
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 0.7,
+        "upperInclusive": 0.85
+      },
+      "midpoint": 0.8
+    },
+    {
+      "field": "tauCritical",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05
+      },
+      "shipped": 0.25,
+      "admissibleValues": [
+        0.2,
+        0.25,
+        0.3
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 0.15,
+        "upperInclusive": 0.35
+      },
+      "midpoint": 0.25
+    },
+    {
+      "field": "tauLow",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05
+      },
+      "shipped": 0.7,
+      "admissibleValues": [
+        0.7
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 0.65,
+        "upperInclusive": 0.75
+      },
+      "midpoint": 0.7
+    },
+    {
+      "field": "chatLowRiskMax",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 8,
+        "step": 1
+      },
+      "shipped": 3,
+      "admissibleValues": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": null,
+        "upperInclusive": null
+      },
+      "midpoint": 4
+    },
+    {
+      "field": "chatMediumRiskMax",
+      "table": "normal",
+      "grid": {
+        "min": 0,
+        "max": 8,
+        "step": 1
+      },
+      "shipped": 6,
+      "admissibleValues": [
+        6
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 5,
+        "upperInclusive": 7
+      },
+      "midpoint": 6
+    },
+    {
+      "field": "chatMediumRiskMax",
+      "table": "progress",
+      "grid": {
+        "min": 0,
+        "max": 8,
+        "step": 1
+      },
+      "shipped": 8,
+      "admissibleValues": [
+        7,
+        8
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 6,
+        "upperInclusive": null
+      },
+      "midpoint": 8
+    },
+    {
+      "field": "mediumRiskCeiling",
+      "table": "normal",
+      "grid": {
+        "min": 0,
+        "max": 8,
+        "step": 1
+      },
+      "shipped": 6,
+      "admissibleValues": [
+        6
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 5,
+        "upperInclusive": 7
+      },
+      "midpoint": 6
+    },
+    {
+      "field": "mediumRiskCeiling",
+      "table": "progress",
+      "grid": {
+        "min": 0,
+        "max": 8,
+        "step": 1
+      },
+      "shipped": 8,
+      "admissibleValues": [
+        7,
+        8
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 6,
+        "upperInclusive": null
+      },
+      "midpoint": 8
+    },
+    {
+      "field": "explicitFromRisk",
+      "table": "both",
+      "grid": {
+        "min": 0,
+        "max": 9,
+        "step": 1
+      },
+      "shipped": 4,
+      "admissibleValues": [
+        4
+      ],
+      "shippedIsAdmissible": true,
+      "interval": {
+        "lowerExclusive": 3,
+        "upperInclusive": 5
+      },
+      "midpoint": 4
+    }
+  ]
+}
