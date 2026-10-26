@@ -200,14 +200,34 @@ async function rawDetailText(page: Page): Promise<readonly string[]> {
   return (await blocks.allInnerTexts()).map((text) => text.trim());
 }
 
-/** The recorded verdict reason a detail shows, without its translated labels. */
+/**
+ * The recorded verdict reason a detail shows, without its translated labels.
+ *
+ * The reason is the last child of the verdict section: the first row holds the
+ * translated heading and the verdict word, so slicing by line count is wrong —
+ * a two-line region yields `''`, and comparing two empty strings would pass
+ * without asserting anything. The section carries a stable data attribute, so
+ * the reason is located structurally. A blank result throws instead of
+ * travelling on as a vacuous comparison.
+ */
 async function verdictText(page: Page, regionName: string): Promise<string> {
-  const region = page.getByRole('region', { name: regionName, exact: true });
-  await expect(region).toBeVisible();
-  // The heading and the verdict word are UI copy and legitimately translate; the
-  // reason below them is the persisted agent-facing text, which must not.
-  const lines = (await region.innerText()).trim().split('\n');
-  return lines.slice(2).join('\n').trim();
+  const region = page.locator('[data-call-detail-verdict]').filter({
+    has: page.getByRole('region', { name: regionName, exact: true }),
+  });
+  const target =
+    (await region.count()) > 0
+      ? region.first()
+      : page.getByRole('region', { name: regionName, exact: true });
+  await expect(target).toBeVisible();
+  const reason = target.locator('div').last();
+  const text = (await reason.innerText()).trim();
+  // A blank reason cannot carry an assertion: every comparison below would be
+  // vacuously true. Fail loudly instead of passing on empty strings.
+  expect(
+    text.length,
+    'the recorded verdict reason is empty; the comparison would be vacuous',
+  ).toBeGreaterThan(0);
+  return text;
 }
 
 /** No raw key, no unresolved placeholder and no `undefined` in the given text. */
@@ -320,6 +340,29 @@ test('every plugin surface switches between the released Chinese and English cop
       plugin.getByText(zhReviewer.test.sessionDisabled, { exact: true }),
     ).toBeVisible();
     expectNoLeak(await plugin.innerText());
+
+    // ---- AC6 baseline: captured in Chinese, BEFORE the first switch ------
+    // Comparing two English-side readings would miss a rewrite that happened
+    // on the way into English: both sides would already hold the damaged
+    // value. The comparison therefore starts from the Chinese original.
+    await plugin
+      .getByRole('button', { name: zhPage.logs, exact: true })
+      .click();
+    await expect(
+      plugin.getByRole('heading', { name: zhLogs.title, exact: true }),
+    ).toBeVisible();
+    const zhLogRow = plugin
+      .getByRole('list', { name: zhLogs.title, exact: true })
+      .getByRole('button')
+      .first();
+    await expect(zhLogRow).toBeVisible();
+    await zhLogRow.click();
+    const baselineRaw = await rawDetailText(page);
+    const baselineVerdict = await verdictText(page, zhCallDetail.finalVerdict);
+    expect(baselineRaw.length).toBeGreaterThan(0);
+    expect(baselineRaw.join('\n')).toContain('locale-denied-one');
+    // Return to the configuration frame; the journey continues from there.
+    await openConfiguration(page);
 
     // ---- English: the same surfaces, translated --------------------------
     await switchLanguage(page, 'English');
@@ -468,15 +511,13 @@ test('every plugin surface switches between the released Chinese and English cop
       }),
     ).toBeVisible();
     expectNoLeak(await english.innerText());
-    // ---- AC6: switching the language rewrites no stored raw data ---------
-    // Read the detail's own raw material in English, then again after switching
-    // back, and compare: the tool input and the recorded decision text are
-    // persisted values, so they must be byte-identical in both languages.
+    // ---- AC6: the English read still matches the Chinese baseline --------
+    // The values below were captured before the first switch, so a rewrite on
+    // the way into English would show up as a difference here.
     const rawInEnglish = await rawDetailText(page);
     const verdictInEnglish = await verdictText(page, enCallDetail.finalVerdict);
-    expect(rawInEnglish.length).toBeGreaterThan(0);
-    // The tool input the plugin stored is in there; it is a persisted value.
-    expect(rawInEnglish.join('\n')).toContain('locale-denied-one');
+    expect(rawInEnglish).toEqual(baselineRaw);
+    expect(verdictInEnglish).toEqual(baselineVerdict);
 
     // The coexistence alert needs a real conflicting provider, so its bilingual
     // rendering is asserted where that composition exists: `coexistence.spec.ts`
@@ -557,11 +598,13 @@ test('every plugin surface switches between the released Chinese and English cop
         exact: true,
       }),
     ).toBeVisible();
-    // The same call's persisted material, read in Chinese, equals what the
-    // English view showed: only the labels changed.
-    expect(await rawDetailText(page)).toEqual(rawInEnglish);
+    // Back in Chinese, the same call's persisted material and recorded reason
+    // must still equal the ORIGINAL Chinese baseline: zh → en → zh is a full
+    // round trip, so comparing only against the English read would not prove
+    // the original survived.
+    expect(await rawDetailText(page)).toEqual(baselineRaw);
     expect(await verdictText(page, zhCallDetail.finalVerdict)).toEqual(
-      verdictInEnglish,
+      baselineVerdict,
     );
     expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
     await openConfiguration(page);
