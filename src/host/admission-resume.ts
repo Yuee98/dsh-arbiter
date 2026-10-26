@@ -14,31 +14,56 @@
  */
 
 import { restrictedWrites } from './admission-narrow.js';
-import type { RecordState } from '../records.js';
 import type { AdmissionFailure } from './admission-veto.js';
-import type { ExecutionBoundary } from '../types.js';
+import { narrowWrites } from './boundary-writes.js';
+import type { AdmissionScope, ExecutionBoundary } from '../types.js';
 import type { SessionLike } from '../snapshot.js';
-import type { HostEnvironment, KnobWrite } from './types.js';
+import type { AdmissionAdapters } from './admission-adapters.js';
+import type { HostEnvironment } from './types.js';
 
-/** What the admission service must expose for a resume refusal to be applied. */
-export interface ResumeTargets {
-  /** Sessions a resume would cover, with their own records, already discovered. */
-  resumeTargets(): readonly (readonly [string, SessionLike])[];
-  /** Write one admission record and report whether it committed. */
-  writeAdmission(
-    session: SessionLike,
-    enabled: boolean,
-    boundary: ExecutionBoundary,
-  ): RecordState;
-  /** Write knob events for one session. */
-  writeSessionKnobs(session: SessionLike, writes: readonly KnobWrite[]): void;
-  /** Whether the session's sandbox is at a value this plugin calls safe. */
-  atSafeSandbox(session: SessionLike): boolean;
-  /** Mark a session whose rollback could not be confirmed. */
-  markFailingClosed(sessionId: string): void;
-  /** Drop a session from coverage. */
-  dropCoverage(sessionId: string): void;
+/**
+ * Answer a call from a session that restored after coverage was refused.
+ *
+ * Such a session never took part in the refusal's cleanup, so a sandbox an
+ * earlier trusted run left it with is taken back here. If that cannot be
+ * confirmed the call is refused: a fail-closed marker for later calls cannot
+ * protect the call already in flight.
+ */
+export function refuseLateRestore(
+  host: HostEnvironment,
+  targets: ResumeTargets,
+  id: string,
+  session: SessionLike,
+  recorded: ExecutionBoundary | undefined,
+): AdmissionScope {
+  // Only a sandbox this plugin granted is taken back; `read-only` stays.
+  if (recorded === 'trusted') {
+    targets.writeSessionKnobs(session, narrowWrites(session));
+  }
+  targets.dropCoverage(id);
+  if (!targets.atSafeSandbox(session)) {
+    targets.markFailingClosed(id);
+    host.ctx.logger.error(
+      'arbiter: session %s could not be narrowed after a refused resume',
+      id,
+    );
+    return {
+      managed: false,
+      reason: 'boundary-unconfirmed',
+      admission: null,
+      unresolvedParent: null,
+    };
+  }
+  return {
+    managed: false,
+    reason: 'coverage-refused',
+    admission: null,
+    unresolvedParent: null,
+  };
 }
+
+/** What a resume refusal needs: the admission service's write primitives. */
+export type ResumeTargets = AdmissionAdapters;
 
 /**
  * Refuse a resume: take back what this plugin widened, then close the records.

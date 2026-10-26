@@ -44,7 +44,10 @@ export function activationOf(
   wasManaged: boolean,
 ): Activation {
   const writes = boundaryWrites(session, requested);
-  if (!wasManaged || !conflict) {
+  // Withholding only applies to something that would actually widen. A
+  // narrowing must be applied and recorded as what it is, even during a
+  // conflict: refusing to strengthen a boundary is not a takeover.
+  if (!wasManaged || !conflict || !writes.some(widens)) {
     return { boundary: requested, writes, withheld: false };
   }
   return {

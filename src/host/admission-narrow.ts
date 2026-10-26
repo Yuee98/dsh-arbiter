@@ -7,10 +7,26 @@
  * read-only sandbox or an approval policy tighter than `ask` stays untouched.
  */
 
-import { knobsOf, narrowWrites } from './boundary-writes.js';
+import { boundaryWrites, knobsOf, narrowWrites } from './boundary-writes.js';
 import type { ExecutionBoundary } from '../types.js';
 import type { SessionLike } from '../snapshot.js';
 import type { KnobWrite } from './types.js';
+
+/**
+ * The writes a normal exit performs.
+ *
+ * This is the confirmed #4 lifecycle target for an ordinary disable — master
+ * switch off, or an explicit API disable — and it deliberately differs from
+ * `restrictedWrites`: a normal exit must reach the documented
+ * `workspace-write + ask` end state so the session is usable afterwards. Only
+ * the *refusal* path is monotonic, because there the plugin never had the right
+ * to change the session at all.
+ */
+export function exitWrites(session: SessionLike): readonly KnobWrite[] {
+  return session.header?.parentSession === undefined
+    ? boundaryWrites(session, 'guarded')
+    : narrowWrites(session);
+}
 
 /** Approval values tighter than, or as tight as, `ask`. */
 const NOT_WIDER_THAN_ASK = new Set(['ask', 'never']);

@@ -68,6 +68,8 @@ interface StubSession {
   readonly events: SessionEventLike[];
   readonly append: (type: string, data: unknown) => void;
   readonly snapshotEvents: () => readonly SessionEventLike[];
+  /** Refuse `sandbox/mode` appends, as a host publishing another commit does. */
+  refuseSandboxWrites?: boolean;
 }
 
 function makeSession(id: string): StubSession {
@@ -80,6 +82,9 @@ function makeSession(id: string): StubSession {
     header: { id, cwd: process.cwd() },
     events,
     append(type, data) {
+      if (this.refuseSandboxWrites === true && type === 'sandbox/mode') {
+        throw new Error('append refused while the host is publishing');
+      }
       events.push({
         type,
         seq: events.length,
@@ -950,7 +955,7 @@ describe('a refused resume covers sessions restored later', () => {
 });
 
 describe('refusal never widens a stricter host choice', () => {
-  test('a read-only session stays read-only when the resume is refused', () => {
+  test('a read-only session stays read-only when the resume is refused', async () => {
     const session = makeSession('s-readonly');
     appendRecord(session, 'plugin:arbiter/admission', {
       version: 1,
@@ -962,16 +967,16 @@ describe('refusal never widens a stricter host choice', () => {
     });
     session.append('sandbox/mode', { mode: 'read-only' });
     session.append('approval/policy', { policy: 'never' });
-    const harness = createHarness([session], { ...ALLOW_ECHO, enabled: false });
+    // The session is not live while the plugin starts and refuses, so the only
+    // writes it can receive are the refusal's own cleanup when it restores.
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
     try {
       harness.official.activate();
       harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
-      // Neither knob may move after the fixture's own history: the refusal only
-      // withdraws what this plugin granted, and a stricter host choice was never
-      // its to change.
-      expect(modeEvents(session).at(-1)).toEqual({ mode: 'read-only' });
-      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'never' });
-      // Nothing was appended at all, so the initial values are still the latest.
+      harness.addSession(session);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      // Nothing was appended: the refusal only withdraws what this plugin
+      // granted, and a stricter host choice was never its to change.
       expect(modeEvents(session)).toEqual([
         { mode: 'workspace-write' },
         { mode: 'read-only' },
@@ -980,6 +985,201 @@ describe('refusal never widens a stricter host choice', () => {
         { policy: 'ask' },
         { policy: 'never' },
       ]);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a cold-restored admission is an activation too', () => {
+  test('a guarded record under a trusted configuration is not widened', async () => {
+    const session = makeSession('s-cold-mismatch');
+    // The retained record is guarded; the configuration now asks for trusted.
+    // Nothing has synchronized them yet, which is the unheld window.
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-cold-mismatch',
+      rootSessionId: 's-cold-mismatch',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      // The conflict appears before the first gated call, so no hold was ever
+      // established by an explicit enable.
+      harness.official.activate();
+      expect((await harness.gate(call(session, 'cold'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+      expect(admissions(session).at(-1)?.['boundary']).toBe('guarded');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('with no conflict the same cold restore still widens', async () => {
+    const session = makeSession('s-cold-clear');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-cold-clear',
+      rootSessionId: 's-cold-clear',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a narrowing is recorded as applied even during a conflict', async () => {
+    const session = makeSession('s-narrow-record');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-narrow-record',
+      rootSessionId: 's-narrow-record',
+      enabled: true,
+      // A trusted record whose real sandbox is wide; the configuration is now
+      // guarded, so the sync narrows rather than widens.
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'guarded',
+    });
+    try {
+      harness.official.activate();
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      // The record must not keep claiming a boundary the host does not have.
+      expect(admissions(session).at(-1)?.['boundary']).toBe('guarded');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a refusal survives an unrelated configuration save', () => {
+  test('another enabled save does not revoke the refusal', async () => {
+    const session = makeSession('s-save-late');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-save-late',
+      rootSessionId: 's-save-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      // An unrelated edit while the provider still runs must not revoke it.
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true, review: undefined });
+      harness.addSession(session);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(decisions(session)).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('an explicit enable cannot revive a refused admission', async () => {
+    const session = makeSession('s-enable-late');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-enable-late',
+      rootSessionId: 's-enable-late',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      harness.addSession(session);
+      // The retained record must not count as a running gate for the API.
+      const response = await enable(harness, 's-enable-late');
+      expect(response.status).toBe(409);
+      expect(admissions(session).at(-1)?.['enabled']).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a failed late-restore rollback refuses the call', () => {
+  test('the first call is denied rather than allowed wide', async () => {
+    const session = makeSession('s-rollback-fail');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-rollback-fail',
+      rootSessionId: 's-rollback-fail',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('sandbox/mode', { mode: 'danger-full-access' });
+    session.refuseSandboxWrites = true;
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      harness.addSession(session);
+      // The gate must refuse, not hand the call back, because the sandbox is
+      // still wide: only a later call may retry the recovery.
+      expect((await harness.gate(call(session), allow)).kind).toBe('deny');
+      expect(decisions(session)).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a normal exit still reaches the usable boundary', () => {
+  test('an API disable restores ask even when the policy was never', async () => {
+    const session = makeSession('s-exit-policy');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-exit-policy',
+      rootSessionId: 's-exit-policy',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    session.append('approval/policy', { policy: 'never' });
+    const harness = createHarness([session], ALLOW_ECHO);
+    try {
+      const disabled = await harness.request('/api/arbiter/sessions', {
+        method: 'POST',
+        body: { sessionId: 's-exit-policy', action: 'disable' },
+      });
+      expect(disabled.status).toBe(200);
+      // The documented exit target, so the session remains usable.
+      expect(approvalEvents(session).at(-1)).toEqual({ policy: 'ask' });
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
     } finally {
       harness.dispose();
     }

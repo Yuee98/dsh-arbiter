@@ -9,12 +9,10 @@
 
 import { atSafeSandbox } from './boundary-writes.js';
 import type { SessionLike } from '../snapshot.js';
-import type { KnobWrite } from './types.js';
+import type { AdmissionAdapters } from './admission-adapters.js';
 
 /** The write path a retry needs, kept narrow so it cannot do more than narrow. */
-export interface NarrowWriter {
-  writeSessionKnobs(session: SessionLike, writes: readonly KnobWrite[]): void;
-}
+export type NarrowWriter = Pick<AdmissionAdapters, 'writeSessionKnobs'>;
 
 /**
  * Force a safe sandbox on one session, retrying.
