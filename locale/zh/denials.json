@@ -1,0 +1,19 @@
+{
+  "badge": "Arbiter 已拒绝",
+  "sourceLabel": "来源",
+  "source": {
+    "rule": "规则拒绝",
+    "review": "审查拒绝",
+    "fallback": "无人工审批通道",
+    "human": "用户拒绝",
+    "abort": "审批未决结束",
+    "boundary": "边界未确认",
+    "unattributed": "记录未写明来源"
+  },
+  "reasonMissing": "该拒绝未记录原因；可打开调用详情查看最小裁决记录。",
+  "truncated": "原因已截断，完整内容见调用详情",
+  "action": {
+    "detail": "查看详情",
+    "closeDetail": "收起详情"
+  }
+}
