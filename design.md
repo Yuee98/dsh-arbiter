@@ -16,6 +16,7 @@
 | [审查上下文](docs/review-context.md) | 事实、授权证据、历史、变量展开、token 预算 |
 | [审查后端与判定](docs/reviewer.md) | 后端协议、prompt、IR、判定、reason、运行时控制 |
 | [配置与审计](docs/configuration-and-audit.md) | 配置 UI、凭据、规则测试、日志、离线调优 |
+| [交接与项目索引](docs/handover.md) | 现有实现的代码地图、调用链路、测试分层、常见改动步骤、已知缺口与调试入口 |
 | [实施与验证](docs/implementation.md) | 原 P0–P11 路线与待验证项 |
 | [权限 UI 验证任务](docs/permission-ui-validation.md) | 同位置控件覆盖、原生命令同步、重连及停用／卸载恢复四组验证与结果回填 |
 | [冷恢复修复与生命周期补测](docs/permission-recovery-followup.md) | 已授权的正式写入修复、原生 auto 拒绝、真实管理器、新调用、人工答复与 PTC 取消补测 |
