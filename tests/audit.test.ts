@@ -1584,6 +1584,74 @@ describe('the upgrade recipe covers every addition', () => {
   });
 });
 
+describe('an unstamped file is not assumed to be new', () => {
+  test('a populated file without a version stamp is not recreated as empty', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+    // A database that never had the pragma written reports 0 even though it
+    // holds real rows. Recreating a table it lost would erase that history.
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE stages');
+    db.exec('PRAGMA user_version = 0');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health()).toMatchObject({
+      state: 'unavailable',
+      lastError: expect.stringContaining('missing the stages table') as unknown,
+    });
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    const tables = after
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(tables).not.toContain('stages');
+    // Nothing was migrated and nothing was stamped: the file is as it was.
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(0);
+    // The history that is still there was never touched.
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
+  });
+
+  test('an unstamped file with a complete structure is upgraded with a backup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-ok-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // Same genuine v1 content, but the stamp was never written. It has every
+    // established table, so this is an ordinary upgrade, not a damaged file.
+    buildV1Database(path);
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA user_version = 0');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
+      'review-deny',
+    );
+    store.enqueue(
+      record({ callId: 'unstamped-upgrade', result: 'review-allow' }),
+    );
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(2);
+    store.close();
+    // Version 0 is not "fresh", so the file is backed up before it is touched.
+    expect(existsSync(`${path}.backup-v0`)).toBe(true);
+  });
+});
+
 describe('a stamped version with a drifted structure', () => {
   test('is repaired in place, keeps its rows and writes again', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-'));

@@ -291,11 +291,6 @@ export function pruneBackups(
  * migrate inside one transaction, verify, then prune old backups. The entry
  * point and its rules live with `migrateAudit` below.
  */
-/** Whether a migrating database must be backed up before it is touched. */
-function needsBackup(db: DatabaseSync): boolean {
-  return userVersion(db) > 0;
-}
-
 /** Verify the structure after the DDL, before the transaction commits. */
 function verifyMigration(
   db: DatabaseSync,
@@ -408,11 +403,25 @@ function applyStep(db: DatabaseSync, from: number): void {
 }
 
 /**
+ * Whether this file is genuinely new.
+ *
+ * `user_version = 0` is not proof: SQLite sets that pragma to 0 on any file that
+ * never had it written, including one that already holds this plugin's tables
+ * and records. A file is fresh only when the version says so **and** no
+ * application table exists yet; anything else is an existing database that
+ * happens to lack the stamp.
+ */
+function isFreshDatabase(db: DatabaseSync): boolean {
+  if (userVersion(db) !== 0) return false;
+  return tableNames(db).size === 0;
+}
+
+/**
  * Refuse a file whose established tables are gone.
  *
  * Recreating them would report an empty history as a complete one; the file is
- * either damaged or not one this plugin wrote. A fresh file is exempt because
- * the DDL is about to create every table for the first time.
+ * either damaged or not one this plugin wrote. A genuinely fresh file is exempt
+ * because the DDL is about to create every table for the first time.
  */
 function refuseMissingHistory(db: DatabaseSync, fresh: boolean): void {
   if (fresh) return;
@@ -476,12 +485,16 @@ export function migrateAudit(db: DatabaseSync, path?: string): void {
     );
   }
   // A fresh file has none of these tables yet; the DDL is about to create them.
-  const fresh = currentVersion === 0;
+  // The version alone cannot say that: an unstamped file may already hold
+  // history, and recreating its missing tables would erase that history.
+  const fresh = isFreshDatabase(db);
   refuseMissingHistory(db, fresh);
   if (currentVersion === SCHEMA_VERSION && isComplete(db)) return;
 
+  // Any existing file is backed up before it is touched, including an
+  // unstamped one: it may hold history even though it carries no version.
   const backupPath =
-    needsBackup(db) && path !== undefined ? backupDatabase(db, path) : null;
+    !fresh && path !== undefined ? backupDatabase(db, path) : null;
   const before = {
     calls: fresh ? 0 : rowCount(db, 'calls'),
     activations: fresh ? 0 : rowCount(db, 'config_activations'),
