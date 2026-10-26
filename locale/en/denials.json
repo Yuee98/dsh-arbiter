@@ -1,0 +1,20 @@
+{
+  "badge": "Arbiter denied",
+  "sourceLabel": "Source",
+  "source": {
+    "rule": "Rule denial",
+    "review": "Review denial",
+    "fallback": "Fallback denial",
+    "human": "User denial",
+    "abort": "Approval ended unresolved",
+    "boundary": "Boundary unconfirmed",
+    "unattributed": "The record does not state a source"
+  },
+  "reasonMissing": "This denial recorded no reason; open the call detail for the minimal verdict record.",
+  "truncated": "The reason was truncated; the call detail has the full text",
+  "action": {
+    "detail": "View details",
+    "closeDetail": "Collapse details"
+  },
+  "minimalSource": "Current session record"
+}

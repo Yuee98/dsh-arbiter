@@ -1,0 +1,18 @@
+{
+  "trialTitle": "Trial steps",
+  "trialDescription": "Use an isolated profile; do not change your daily profile first.",
+  "trialCommands": "# 1. Install into an isolated profile\ndsh plugin --profile arbiter add /Volumes/sandisk/code/dsh-arbiter\n\n# 2. Start that profile\ndsh --profile arbiter web\n\n# 3. Open the sidebar: Plugins → dsh-arbiter → configuration page\n# 4. Pick a reviewer, create an allow / force-review rule, and run /arbiter status or the rule test\n# 5. Check the logs page to see why each call was allowed or denied",
+  "executionPrefix": "Current execution mode: ",
+  "executionExplanation": ". The plugin does not modify host internals, does not switch your daily profile, and never answers sandbox escalation prompts on your behalf.",
+  "boundaries": "Verified boundaries",
+  "connected": "Wired up",
+  "notIndividual": "Not covered item by item",
+  "lifecycle": "Stopping and uninstalling",
+  "lifecycleDescription": "After the plugin is disabled it adds no new verdicts; rules, candidates and audit records already written are retained. Uninstalling does not clean up SQLite automatically and does not switch existing sessions back to another preset; migrating a managed auto preset behaves like the official auto review, so confirm it in an isolated profile first.",
+  "limits": "Known limitations",
+  "calibrationLimit": "Thresholds and the extra progress auto-approval scope are not calibrated; logs only give a lower bound on the failure rate, and the false-allow rate needs manual review.",
+  "surfaceLimit": "Real human approval, surfaces other than Web, external-backend subtasks, MCP dynamic tool lists and background workflow composition were not validated in this round.",
+  "subagentLimit": "Subtasks have no human channel; a call that would need one enters fallback-deny and only that call ends.",
+  "projectRulesLimit": "Project rule files are treated as review guidance only by default; they are not human authorization and do not override plugin policy.",
+  "orderLimit": "`prepend` does not guarantee that this plugin runs before other reviewers; internally the plugin guarantees that rules run before its own reviewer."
+}
