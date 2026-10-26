@@ -54,7 +54,7 @@ describe('prototype page after panel extraction', () => {
     });
   });
 
-  test('sends the disabled rule draft to the rule tester and renders the decoded result', async () => {
+  test('sends the disabled rule draft to the rule tester and renders both conclusions', async () => {
     const requests: unknown[] = [];
     server.use(
       http.get('*/api/arbiter/state', () =>
@@ -68,7 +68,9 @@ describe('prototype page after panel extraction', () => {
             {
               input: 'pwd',
               tool: 'bash',
+              cwd: '/workspace',
               path: 'review(default)',
+              pathDetail: { kind: 'review-default', reason: 'no-match' },
               rule: null,
               matches: [],
               rules: [
@@ -108,7 +110,10 @@ describe('prototype page after panel extraction', () => {
     await user.click(await screen.findByRole('button', { name: '规则' }));
     await user.click(screen.getByRole('button', { name: '新建规则' }));
     await user.click(screen.getByRole('checkbox', { name: /^启用规则/ }));
-    const input = screen.getByRole('textbox', { name: '输入' });
+    // The test area is collapsed by default; its own entry opens it, and a row's
+    // "测试" action focuses one rule without running anything.
+    await user.click(screen.getByRole('button', { name: '展开测试区' }));
+    const input = screen.getByRole('textbox', { name: '命令' });
     await user.clear(input);
     await user.type(input, 'pwd');
     await user.click(screen.getByRole('button', { name: '运行测试' }));
@@ -117,8 +122,9 @@ describe('prototype page after panel extraction', () => {
     ).toBeInTheDocument();
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      inputs: ['pwd'],
+      samples: [{ tool: 'bash', args: { command: 'pwd' } }],
       rules: [{ id: 'rule-1', enabled: false }],
+      identity: 'main',
     });
   });
 
