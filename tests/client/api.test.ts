@@ -211,10 +211,13 @@ describe('typed browser response boundaries', () => {
       ok: false,
       errors: [{ path: 'rules[0]', message: 'invalid' }],
     });
+    // An unavailable store decodes as a failed page, not as a successful one
+    // that happens to be empty; the panel distinguishes the two.
     await expect(getJson('/logs', logsResponse)).resolves.toMatchObject({
       ok: false,
       code: 'audit-unavailable',
       rows: [],
+      total: 0,
     });
   });
 });

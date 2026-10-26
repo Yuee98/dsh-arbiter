@@ -5,21 +5,22 @@ import { DatabaseSync } from 'node:sqlite';
 import type { ArbiterConfig, ReviewSignals } from './types.js';
 import type {
   AuditHealth,
-  CallRecord,
   CallFilter,
-  CallSummary,
+  CallPage,
+  CallRecord,
   CandidateRecord,
   StoredCall,
 } from './audit/types.js';
 export type {
   AuditHealth,
-  CallRecord,
   CallFilter,
-  CallSummary,
+  CallPage,
+  CallRecord,
   CandidateRecord,
   StoredCall,
 } from './audit/types.js';
 import { hash, json, rowChanges } from './audit/rows.js';
+import { clampPageSize } from './audit/call-list.js';
 import { migrateAudit } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
 import {
@@ -456,22 +457,28 @@ export class AuditStore {
     }
   }
 
-  listCalls(filter: CallFilter = {}): {
-    readonly rows: CallSummary[];
-    readonly total: number;
-    /** True when the stored structure could not be read. */
-    readonly unreadable?: boolean;
-  } {
-    return this.readGuard<{
-      readonly rows: CallSummary[];
-      readonly total: number;
-      readonly unreadable?: boolean;
-    }>(
-      () => {
-        const listed = listCalls(this.db, filter);
-        return { rows: [...listed.rows], total: listed.total };
+  /**
+   * One page of the call list, plus the cursors that continue it.
+   *
+   * A degraded read answers with no rows and no cursor, so a caller cannot
+   * mistake "storage failed" for "this traversal ended".
+   */
+  listCalls(
+    filter: CallFilter = {},
+  ): CallPage & { readonly unreadable?: boolean } {
+    return this.readGuard<CallPage & { readonly unreadable?: boolean }>(
+      () => listCalls(this.db, filter),
+      {
+        rows: [],
+        total: 0,
+        limit: clampPageSize(filter.limit),
+        nextCursor: null,
+        prevCursor: null,
+        anchor: filter.anchor ?? null,
+        newer: 0,
+        remaining: 0,
+        unreadable: true,
       },
-      { rows: [], total: 0, unreadable: true },
     );
   }
 

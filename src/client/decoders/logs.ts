@@ -1,4 +1,4 @@
-import type { LogDetail, LogRow } from '../view-types.js';
+import type { LogAnchor, LogDetail, LogPage, LogRow } from '../view-types.js';
 import {
   array,
   boolean,
@@ -12,6 +12,9 @@ import {
   unknownValue,
 } from './values.js';
 
+/** The page size the client asks for when it has no reason to ask otherwise. */
+export const LOG_PAGE_SIZE = 25;
+
 function logRow(value: unknown): LogRow {
   const source = object(value);
   return {
@@ -22,19 +25,47 @@ function logRow(value: unknown): LogRow {
     tool: field(source, 'tool', text),
     command: field(source, 'command', text),
     result: field(source, 'result', text),
-    reason: field(source, 'reason', text),
     ruleId: field(source, 'ruleId', nullable(text)),
-    approvalMode: field(source, 'approvalMode', text),
-    decisionRules: field(source, 'decisionRules', strings),
+    unreadable: field(source, 'unreadable', boolean),
   };
 }
 
-export function logsResponse(value: unknown) {
+/**
+ * One list page.
+ *
+ * `limit` and `offset` are decoded with a fallback rather than required: the
+ * host echoes the window it actually read, and an older or unavailable store
+ * answers without one. Falling back to the requested page keeps the pager
+ * usable instead of failing the whole list over an advisory field.
+ */
+function anchor(value: unknown): LogAnchor | null {
+  if (value === null) return null;
   const source = object(value);
   return {
+    ts: field(source, 'ts', number),
+    callId: field(source, 'callId', text),
+  };
+}
+
+export function logsResponse(value: unknown): LogPage {
+  const source = object(value);
+  const rows = field(source, 'rows', array(logRow));
+  return {
     ok: field(source, 'ok', boolean),
-    rows: field(source, 'rows', array(logRow)),
+    rows,
     total: field(source, 'total', number),
+    limit: field(source, 'limit', optional(number)) ?? LOG_PAGE_SIZE,
+    // A page with no row has no cursor to continue from, so absence and null
+    // mean the same thing here; the pager checks the row count as well.
+    nextCursor: field(source, 'nextCursor', optional(anchor)) ?? null,
+    prevCursor: field(source, 'prevCursor', optional(anchor)) ?? null,
+    anchor: field(source, 'anchor', optional(anchor)) ?? null,
+    newer: field(source, 'newer', optional(number)) ?? 0,
+    // An older host that does not report continuation: fall back to "the page was
+    // full", which is the most its window implies.
+    remaining:
+      field(source, 'remaining', optional(number)) ??
+      (rows.length === LOG_PAGE_SIZE ? LOG_PAGE_SIZE : 0),
     code: field(source, 'code', optional(text)),
   };
 }
