@@ -26,7 +26,7 @@ export function effectiveState(): StateResponse {
       stats: { calls: 0, modelCalls: 0, bytes: 0, results: [] },
     },
     coverage: { gated: ['native tools'], notGated: ['tool internals'] },
-    policyVersion: 'arbiter-policy-v1',
+    policyVersion: 'arbiter-policy-v2',
     modes: { main: 'normal', subagent: 'strict' },
     executionMode: 'guarded',
     reviewerType: 'chat',

@@ -140,7 +140,7 @@ describe('configuration', () => {
   });
 
   test('default configuration remains the fallback shape', () => {
-    expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v1');
+    expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v2');
     expect(DEFAULT_CONFIG.rules).toEqual([]);
   });
 });

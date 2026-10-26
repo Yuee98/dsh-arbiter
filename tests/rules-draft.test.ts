@@ -71,7 +71,7 @@ function draft(rules: readonly DraftRule[] = []): Draft {
       },
     },
     policy: {
-      version: 'arbiter-policy-v1',
+      version: 'arbiter-policy-v2',
       normal: {
         tauAuth: 0.8,
         tauRisk: 0.75,

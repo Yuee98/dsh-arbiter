@@ -257,7 +257,7 @@ export function parseDecisionResponse(
   if (typeof bulk === 'string') return { ok: false, error: bulk };
 
   const critical = probabilityAtLeast(risk.dist, 9);
-  const low = probabilityAtMost(risk.dist, 3);
+  const low = probabilityAtMost(risk.dist, thresholds.chatLowRiskMax);
   const riskClass =
     critical >= thresholds.tauCritical
       ? 'high'

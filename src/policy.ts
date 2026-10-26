@@ -109,6 +109,19 @@ function riskGate(
       observed: `P(risk<=${String(thresholds.mediumRiskCeiling)})=${medium.toFixed(2)}`,
     };
   }
+  // A distribution that fails this gate has not produced an identified risk: it
+  // produced a reading whose mass is spread across the scale. Reporting that as
+  // R5 would tell the human a risk was measured when the honest answer is that
+  // the signal was not decisive, so it is reported as R8.
+  //
+  // Note the consequence for the decision protocol, recorded as a limitation in
+  // the calibration report rather than hidden: `riskClass === 'high'` is exactly
+  // `P(risk>=9) >= tauCritical`, which R2 already denies, so a decision call can
+  // never reach this gate with an identified risk and R5 is unreachable for that
+  // protocol. R5 needs the operation-class facts the matrix names (production
+  // change, security-control change, irreversible delete), which the signal model
+  // does not yet carry; adding them changes the reviewer contract and is out of
+  // scope for a threshold-calibration issue.
   return {
     passed: false,
     rule: 'R8',
@@ -247,6 +260,17 @@ function fixedDecision(context: DecisionContext): PolicyDecision | null {
   return null;
 }
 
+/**
+ * The authorization level a call needs before the plugin may delegate it.
+ *
+ * Both protocols have to reach the same answer for the same facts, so the two
+ * branches below are two spellings of one rule rather than two policies: the
+ * chat point comparison and the decision class comparison must not drift apart.
+ * The rule itself is unchanged by #22 — the calibration only measures the
+ * probability gates and the risk ceilings against a labelled sample set, and the
+ * `implied` authorization band that this rule leaves unused above the low-risk
+ * boundary is recorded as a limitation rather than silently redefined here.
+ */
 function requiredAuthorization(
   signals: ReviewSignals,
   thresholds: PolicyThresholds,
@@ -312,9 +336,17 @@ function riskDecision(context: DecisionContext): PolicyDecision {
   }
   const gate = riskGate(signals, thresholds);
   if (!gate.passed) {
+    // The gate distinguishes two different findings. A failure because the
+    // observed risk sits above the ceiling is an identified risk (R5); a failure
+    // because the signal itself does not clear the probability gate is an
+    // unresolved uncertainty (R8). Reporting both as R5 would tell the human that
+    // a risk was measured when the honest answer is that the model was not
+    // confident enough to measure one — so the gate's own rule is carried out.
     return escalate(
-      'R5',
-      `risk exceeds the selected ceiling (${gate.observed})`,
+      gate.rule,
+      gate.rule === 'R8'
+        ? `the available signals did not clear the risk gate (${gate.observed})`
+        : `risk exceeds the selected ceiling (${gate.observed})`,
       strategy,
       signals,
       thresholds,
@@ -439,7 +471,7 @@ export function reclassifySignals(
     return total > 0 ? sum / total : null;
   };
   const critical = atLeast(signals.riskDist, 9);
-  const low = atMost(signals.riskDist, 3);
+  const low = atMost(signals.riskDist, thresholds.chatLowRiskMax);
   const riskClass =
     critical !== null && critical >= thresholds.tauCritical
       ? 'high'
