@@ -336,8 +336,7 @@ test.describe('session denial feedback', () => {
             candidate.events.some(
               (event) =>
                 event.type === 'turn/end' &&
-                (typeof event.data === 'object' &&
-                event.data !== null
+                (typeof event.data === 'object' && event.data !== null
                   ? Reflect.get(event.data, 'turn')
                   : null) === refusedTurn,
             )
