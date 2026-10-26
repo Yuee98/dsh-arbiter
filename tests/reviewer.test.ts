@@ -12,6 +12,7 @@ import {
 } from '../src/reviewer.js';
 import { decideReview } from '../src/policy.js';
 import type { ReviewSnapshot } from '../src/types.js';
+import type { StreamOptionsLike } from '../src/reviewer/chat.js';
 
 const thresholds = DEFAULT_CONFIG.policy.normal;
 
@@ -264,6 +265,82 @@ describe('chat reviewer run', () => {
     );
     expect(result.ok).toBe(false);
     expect(result.attempts).toHaveLength(1);
+  });
+
+  test('forwards reasoning effort when the caller supplies one', async () => {
+    const seen: StreamOptionsLike[] = [];
+    const llm = {
+      stream: (options: StreamOptionsLike) => {
+        seen.push({ ...options });
+        return streamOf([
+          {
+            type: 'text-delta',
+            text: '{"risk":1,"authorized":8,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+          },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      },
+    };
+    await runChatReviewer(
+      {
+        llm,
+        session,
+        chat: {
+          provider: 'session',
+          model: '',
+          temperature: 0,
+          maxTokens: 300,
+          timeoutMs: 1000,
+          maxRepairRetries: 0,
+        },
+        thresholds,
+        signal: new AbortController().signal,
+        reasoningEffort: 'off',
+      },
+      snapshot,
+      { system: 'sys', user: 'user', estimatedInputTokens: 5 },
+      'call-1',
+    );
+    expect(seen[0]?.reasoningEffort).toBe('off');
+  });
+
+  test('leaves reasoning effort absent when the caller has no opinion', async () => {
+    const seen: StreamOptionsLike[] = [];
+    const llm = {
+      stream: (options: StreamOptionsLike) => {
+        seen.push({ ...options });
+        return streamOf([
+          {
+            type: 'text-delta',
+            text: '{"risk":1,"authorized":8,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+          },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      },
+    };
+    await runChatReviewer(
+      {
+        llm,
+        session,
+        chat: {
+          provider: 'session',
+          model: '',
+          temperature: 0,
+          maxTokens: 300,
+          timeoutMs: 1000,
+          maxRepairRetries: 0,
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { system: 'sys', user: 'user', estimatedInputTokens: 5 },
+      'call-1',
+    );
+    // The host falls back to its own chain when the key is missing. An explicit
+    // `undefined` is still a present key to code that inspects presence, so the
+    // assertion is absence rather than `undefined` equality.
+    expect(Object.hasOwn(seen[0] ?? {}, 'reasoningEffort')).toBe(false);
   });
 });
 
