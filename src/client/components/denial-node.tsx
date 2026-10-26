@@ -86,6 +86,29 @@ function seqOf(event: unknown): number | null {
 }
 
 /**
+ * The seq of the `tool/call` this result answers, when it recorded one.
+ *
+ * The host persists the correlation in `sourceEventSeqs`, and it is the call's
+ * own position — not the result's — that the tool card is anchored at. Two
+ * parallel calls can therefore finish out of order: with only the result seq, a
+ * denial for call B would sort after call C's result and render below C even
+ * though it belongs to B.
+ */
+function callSeqOf(event: unknown): number | null {
+  const outer = recordOf(event);
+  if (outer === null) return null;
+  const cited = outer['sourceEventSeqs'];
+  if (!Array.isArray(cited) || cited.length === 0) return null;
+  const seqs = cited.filter(
+    (value: unknown): value is number =>
+      typeof value === 'number' && Number.isFinite(value),
+  );
+  // The call is cited first; a compaction-style citation would name the shadowed
+  // surface instead, which cannot be this result's own call.
+  return seqs.length === 1 ? (seqs[0] ?? null) : null;
+}
+
+/**
  * The conversation Definition contributed for one call's denial.
  *
  * `buildViewNode` anchors at the result's own seq, so a parallel call's row is
@@ -112,7 +135,13 @@ export const denialDefinition: ConversationDefinitionPort<
   },
   buildViewNode(context) {
     if (context.state === undefined || context.start === undefined) return null;
-    const anchorSeq = seqOf(context.start.event);
+    // Anchor at the call this result answers, so the row renders directly after
+    // that tool card even when a parallel call finished later. The fractional
+    // offset keeps it immediately after the call and before any later result;
+    // a record that does not cite its call falls back to the result's own seq.
+    const callSeq = callSeqOf(context.start.event);
+    const anchorSeq =
+      callSeq === null ? seqOf(context.start.event) : callSeq + 0.5;
     if (anchorSeq === null) return null;
     return {
       key: context.key,

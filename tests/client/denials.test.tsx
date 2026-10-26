@@ -489,14 +489,24 @@ describe('the session Definition', () => {
         start,
       });
     };
-    const a = nodeOf(first, 12, { kind: 'step', ...step });
-    const b = nodeOf(second, 15, { kind: 'step', ...step });
+    // Results cite their own call through `sourceEventSeqs`; the row anchors at
+    // that call, not at the result's arrival order.
+    const a = nodeOf({ ...first, sourceEventSeqs: [10] }, 12, {
+      kind: 'step',
+      ...step,
+    });
+    const b = nodeOf({ ...second, sourceEventSeqs: [11] }, 15, {
+      kind: 'step',
+      ...step,
+    });
     expect(a?.id).toBe('call-first');
     expect(b?.id).toBe('call-second');
     // Each row sorts by its own result seq and keeps its own tool, so an
     // interleaved parallel call cannot inherit the other's marker.
-    expect(a?.anchorSeq).toBe(12);
-    expect(b?.anchorSeq).toBe(15);
+    // Anchored just after each call seq (10 and 11), so a later result (15)
+    // cannot push the first row below a parallel call that started after it.
+    expect(a?.anchorSeq).toBe(10.5);
+    expect(b?.anchorSeq).toBe(11.5);
     expect(a?.data.tool).toBe('bash');
     expect(b?.data.tool).toBe('read');
     // The engine's Turn/Step placement travels through unchanged, so the row
@@ -505,6 +515,35 @@ describe('the session Definition', () => {
     expect(a?.location).toEqual({ kind: 'step', ...step });
     expect(b?.location).toEqual({ kind: 'step', ...step });
     expect(a?.kind).toBe(DENIAL_NODE_KIND);
+  });
+
+  test('falls back to the result seq when a record does not cite its call', () => {
+    const state = denialDefinition.start(
+      {},
+      {
+        event: arbiterResult({
+          callId: 'call-old',
+          tool: 'bash',
+          reason: RULE_REASON,
+        }),
+      },
+    );
+    const node = denialDefinition.buildViewNode({
+      key: 'arbiter-denial:call-old',
+      id: 'call-old',
+      state,
+      start: {
+        event: arbiterResult({
+          callId: 'call-old',
+          tool: 'bash',
+          reason: RULE_REASON,
+        }),
+        location: { kind: 'session' },
+      },
+    });
+    // The fixture result sits at seq 7 and cites nothing, so the result's own
+    // position is the only honest anchor.
+    expect(node?.anchorSeq).toBe(7);
   });
 
   test('renders the registered node through the plugin dictionary', () => {
