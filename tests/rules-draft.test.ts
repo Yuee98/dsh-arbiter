@@ -71,13 +71,12 @@ function draft(rules: readonly DraftRule[] = []): Draft {
       },
     },
     policy: {
-      version: 'arbiter-policy-v1',
+      version: 'arbiter-policy-v2',
       normal: {
         tauAuth: 0.8,
         tauRisk: 0.75,
         tauCritical: 0.25,
         tauLow: 0.7,
-        chatLowRiskMax: 3,
         chatMediumRiskMax: 6,
         mediumRiskCeiling: 6,
         explicitFromRisk: 4,
@@ -88,7 +87,6 @@ function draft(rules: readonly DraftRule[] = []): Draft {
         tauRisk: 0.75,
         tauCritical: 0.25,
         tauLow: 0.7,
-        chatLowRiskMax: 3,
         chatMediumRiskMax: 8,
         mediumRiskCeiling: 8,
         explicitFromRisk: 4,

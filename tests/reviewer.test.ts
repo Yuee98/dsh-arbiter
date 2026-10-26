@@ -10,6 +10,7 @@ import {
   runChatReviewer,
   runDecisionReviewer,
 } from '../src/reviewer.js';
+import { decideReview } from '../src/policy.js';
 import type { ReviewSnapshot } from '../src/types.js';
 
 const thresholds = DEFAULT_CONFIG.policy.normal;
@@ -499,4 +500,84 @@ describe('reviewer transport credential boundary', () => {
     expect(result.ok).toBe(false);
     expect(result.attempts[0]?.responseText).toBe(body);
   });
+});
+
+describe('calibrated cross-protocol parity', () => {
+  // The unified authorization standard is a claim about *facts*, not about
+  // spellings: the two protocols must reach one verdict for one set of facts.
+  // Each pair below states the same authorization and risk situation twice, once
+  // as chat point values and once as a decision distribution.
+  const pairs = [
+    {
+      name: 'explicit authorization on a medium in-project write',
+      chat: { risk: 5, authorized: 9 },
+      decision: {
+        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
+        authorized: { probabilities: { '8': 0.85, '9': 0.15 } },
+      },
+      expected: 'review-allow',
+    },
+    {
+      name: 'no authorization on the same write',
+      chat: { risk: 5, authorized: 1 },
+      decision: {
+        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
+        authorized: { probabilities: { '1': 0.9, '3': 0.1 } },
+      },
+      expected: 'review-escalate',
+    },
+    {
+      name: 'a goal-level hint on the same write',
+      chat: { risk: 5, authorized: 6 },
+      decision: {
+        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
+        authorized: { probabilities: { '5': 0.9, '6': 0.1 } },
+      },
+      expected: 'review-escalate',
+    },
+  ] as const;
+
+  test.each(pairs.map((pair) => [pair.name, pair] as const))(
+    '%s reaches one verdict in both protocols',
+    (_name, pair) => {
+      const chatSignals = signalsFromChat(
+        {
+          risk: pair.chat.risk,
+          authorized: pair.chat.authorized,
+          secrets: false,
+          destructive: false,
+          egress: false,
+          bulk: false,
+        },
+        0,
+      );
+      const parsed = parseDecisionResponse(
+        {
+          response: {
+            risk: {
+              type: 'score',
+              probabilities: pair.decision.risk.probabilities,
+            },
+            authorized: {
+              type: 'score',
+              probabilities: pair.decision.authorized.probabilities,
+            },
+            secrets: { type: 'noul', noul: 0.02 },
+            destructive: { type: 'noul', noul: 0.05 },
+            egress: { type: 'noul', noul: 0.05 },
+            bulk: { type: 'noul', noul: 0.1 },
+          },
+        },
+        thresholds,
+      );
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) throw new Error(parsed.error);
+
+      const chat = decideReview(chatSignals, 'normal', thresholds);
+      const decision = decideReview(parsed.signals, 'normal', thresholds);
+      expect(decision.verdict).toBe(pair.expected);
+      expect(chat.verdict).toBe(pair.expected);
+      expect(decision.decisionRules).toEqual(chat.decisionRules);
+    },
+  );
 });
