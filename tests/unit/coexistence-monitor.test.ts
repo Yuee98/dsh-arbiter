@@ -41,6 +41,8 @@ interface Harness {
   readonly setAutoSlot: (slot: AutoSlot) => void;
   /** `other` is a foreign approval-capable listener; `self` is Arbiter's own. */
   readonly setHooks: (owner: 'other' | 'self' | null) => void;
+  /** Replace the foreign listeners with one distinct owner per index. */
+  readonly setManyHooks: (count: number) => void;
   readonly setLoaderReadable: (readable: boolean) => void;
 }
 
@@ -49,6 +51,7 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
   let hooks: 'other' | 'self' | null = null;
   let slot: AutoSlot = 'arbiter';
   let loaderReadable = true;
+  let manyHooks: number | null = null;
   const hostFiber = options.selfFiber ?? { name: 'arbiter' };
   const loader = {
     *entries() {
@@ -73,6 +76,26 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
       // The host's own listener record carries the owning context, so identity
       // is what distinguishes this plugin's gate from a competing one.
       // Identity is the discriminator, so the same object must be reused.
+      if (manyHooks !== null) {
+        return {
+          'tools/pre-execute': Array.from(
+            { length: manyHooks },
+            (_value, index) => ({
+              ctx: {
+                fiber: {
+                  state: 2,
+                  inject: { approval: true },
+                  entry: {
+                    id: `third-party-${String(index)}`,
+                    options: { name: `third-party-${String(index)}` },
+                  },
+                },
+              },
+              callback: () => undefined,
+            }),
+          ),
+        };
+      }
       const fiber = hooks === 'self' ? hostFiber : foreignFiber;
       return {
         'tools/pre-execute': [{ ctx: { fiber }, callback: () => undefined }],
@@ -109,7 +132,11 @@ function harness(options: { readonly selfFiber?: unknown } = {}): Harness {
       slot = next;
     },
     setHooks: (owner) => {
+      manyHooks = null;
       hooks = owner;
+    },
+    setManyHooks: (count) => {
+      manyHooks = count;
     },
     setLoaderReadable: (readable) => {
       loaderReadable = readable;
@@ -392,5 +419,24 @@ describe('provider state distinguishes absent from unseen', () => {
     test_.setLoaderReadable(false);
     expect(test_.monitor.providerState()).toBe('stopped');
     expect(test_.monitor.read('blind').detection).toBe('partial');
+  });
+});
+
+describe('a burst of warnings cannot evict the blocking reminder', () => {
+  test('the official notice survives alongside many warning capabilities', () => {
+    const test_ = harness();
+    test_.setOfficial('active');
+    test_.setHooks('other');
+    // One observation: the official conflict plus a distinct warning per hook
+    // owner. The blocking notice is created first, so a plain tail-slice would
+    // drop it while its conflict id stayed active — and it would never return.
+    test_.setManyHooks(24);
+    const view = test_.monitor.read('burst');
+    expect(view.blocked).toBe(true);
+    const blocking = view.notices.filter(
+      (notice) => notice.severity === 'blocking' && !notice.acknowledged,
+    );
+    expect(blocking).toHaveLength(1);
+    expect(blocking[0]?.conflictId).toBe('official-auto-review');
   });
 });

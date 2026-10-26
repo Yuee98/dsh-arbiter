@@ -550,3 +550,28 @@ describe('provenance, not a plugin list', () => {
     ]);
   });
 });
+
+describe('a duplicate official entry does not hide the running one', () => {
+  test('an active copy behind a disabled one still blocks', () => {
+    // A profile can hold a stale disabled row before the live one; selecting the
+    // first match would report "not running" and allow a takeover.
+    const result = assess(
+      observation({
+        entries: [
+          entry(OFFICIAL_AUTO_REVIEW_MODULE, {
+            entryId: 'auto-review-stale',
+            enabled: false,
+            phase: 'disposed',
+          }),
+          entry(OFFICIAL_AUTO_REVIEW_MODULE, { entryId: 'auto-review-live' }),
+        ],
+      }),
+    );
+    expect(result.official).toMatchObject({ running: true, phase: 'active' });
+    expect(result.blocked).toBe(true);
+    expect(result.conflicts[0]).toMatchObject({
+      id: 'official-auto-review',
+      entryId: 'auto-review-live',
+    });
+  });
+});

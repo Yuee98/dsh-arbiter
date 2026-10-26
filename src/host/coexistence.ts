@@ -137,7 +137,7 @@ export class CoexistenceMonitor {
   private readonly options: MonitorOptions;
   private readonly activeConflictIds = new Set<string>();
   private noticeSequence = 0;
-  private notices: CoexistenceNotice[] = [];
+  private notices: readonly CoexistenceNotice[] = [];
   private observations = 0;
   /** Whether this runtime has ever observed the official provider running. */
   private everBlocked = false;
@@ -277,6 +277,34 @@ export class CoexistenceMonitor {
   }
 
   /**
+   * Bound the notice history without letting a *new* reminder be evicted.
+   *
+   * One observation can discover the blocking official conflict together with
+   * many distinct warning capabilities. A plain tail-slice would drop the
+   * blocking notice — created first, then pushed out — while its conflict id
+   * stays active, so it would never be recreated and the required alert would
+   * never appear. The newest notice is therefore always kept, and the tail is
+   * trimmed around it.
+   */
+  private bounded(
+    notices: readonly CoexistenceNotice[],
+    added: CoexistenceNotice,
+  ): readonly CoexistenceNotice[] {
+    if (notices.length <= MAX_NOTICES) return notices;
+    // Unread blocking reminders are never evicted: they are the ones the
+    // contract requires the user to see. Warnings and settled history are what
+    // the cap is allowed to drop.
+    const keep = notices.filter(
+      (notice) =>
+        notice.id === added.id ||
+        (notice.severity === 'blocking' && !notice.acknowledged),
+    );
+    const rest = notices.filter((notice) => !keep.includes(notice));
+    const room = Math.max(0, MAX_NOTICES - keep.length);
+    return [...rest.slice(Math.max(0, rest.length - room)), ...keep];
+  }
+
+  /**
    * Whether one conflict's evidence comes from a surface that was unreadable.
    *
    * The Auto-slot conflict is internal, so it is always provable; a hook row and
@@ -303,7 +331,7 @@ export class CoexistenceMonitor {
       at: Date.now(),
       acknowledged: false,
     };
-    this.notices = [...this.notices, notice].slice(-MAX_NOTICES);
+    this.notices = this.bounded([...this.notices, notice], notice);
     this.host.ctx.logger.warn(
       'arbiter: coexisting approval provider detected (%s: %s, %s); arbitration stays as configured',
       conflict.severity,

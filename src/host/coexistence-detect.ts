@@ -440,9 +440,15 @@ function hookConflicts(hooks: readonly ObservedHook[]): CoexistenceConflict[] {
 export function assess(
   observation: CoexistenceObservation,
 ): CoexistenceAssessment {
-  const officialEntry = observation.entries.find(
+  // A profile can list the same module twice — a stale disabled row ahead of the
+  // live one. `find()` would then report the inactive copy and miss the running
+  // provider, so an active instance wins wherever it appears in the list.
+  const officialEntries = observation.entries.filter(
     (entry) => entry.moduleName === OFFICIAL_AUTO_REVIEW_MODULE,
   );
+  const officialEntry =
+    officialEntries.find((entry) => entry.phase === 'active') ??
+    officialEntries[0];
   const official: OfficialProvider = {
     present: officialEntry !== undefined,
     module: OFFICIAL_AUTO_REVIEW_MODULE,
