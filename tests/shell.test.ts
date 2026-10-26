@@ -374,6 +374,48 @@ describe('redirects, assignments and cwd', () => {
     ).toBe('/workspace');
   });
 
+  test('an elif body starts in the directory its own condition produced', () => {
+    // `elif cd /tmp; then …` runs its body in /tmp; using the state before the
+    // condition would report the write at the caller's directory instead.
+    expect(
+      parseShell(
+        'if false; then :; elif cd /tmp; then echo hi > out.txt; fi',
+        '/workspace',
+      ).redirects[0]?.cwd,
+    ).toBe('/tmp');
+    // The condition's own state also carries into a later `else`.
+    expect(
+      parseShell(
+        'if false; then :; elif cd /tmp; then :; else echo hi > o.txt; fi',
+        '/workspace',
+      ).redirects[0]?.cwd,
+    ).toBe('/tmp');
+  });
+
+  test('a relative path inside a repeated body is not confirmed', () => {
+    // The loop may run again after its own `cd`, so the second pass would write
+    // somewhere else. The first pass's directory is real, but not the whole truth.
+    const loop = parseShell(
+      'for i in 1 2; do echo hi > out.txt; cd /tmp; done',
+      '/workspace',
+    );
+    expect(loop.redirects[0]).toMatchObject({
+      target: 'out.txt',
+      cwd: '/workspace',
+      unresolved: true,
+    });
+    // An absolute target does not depend on how many passes ran.
+    expect(
+      parseShell('for i in 1 2; do echo hi > /tmp/abs.txt; done', '/workspace')
+        .redirects[0]?.unresolved,
+    ).toBe(false);
+    // A body that runs once is unaffected.
+    expect(
+      parseShell('{ echo hi > out.txt; }', '/workspace').redirects[0]
+        ?.unresolved,
+    ).toBe(false);
+  });
+
   test('a compound redirect resolves from the directory on entry', () => {
     // The shell opens the redirect before the body runs, so a `cd` inside the
     // group must not move where the file is written.
@@ -567,6 +609,21 @@ describe('effect facts', () => {
     // `sh` after `--output` is a filename, not an interpreter receiving stdout.
     expect(
       factsOf('curl --output sh https://example.test').facts.observed
+        .pipelineExec,
+    ).toEqual([]);
+  });
+
+  test('a compound stage does not inherit an inner command', () => {
+    // The inner curl redirects its output to a file, so nothing reaches `sh`
+    // through the pipe. Reporting the inner command as the stage would invent an
+    // execution relationship.
+    const parse = parseShell('{ curl https://example.test > out.txt; } | sh');
+    expect(parse.commands.map((command) => command.pipeTarget)).toEqual([
+      null,
+      null,
+    ]);
+    expect(
+      factsOf('{ curl https://example.test > out.txt; } | sh').facts.observed
         .pipelineExec,
     ).toEqual([]);
   });

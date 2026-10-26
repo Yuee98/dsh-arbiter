@@ -142,7 +142,9 @@ function structuralSubjects(inputs: SubjectInputs): Subject[] {
     // `/workspace/$REL` can expand to `../../etc/passwd`. Only a static target can
     // be resolved, and only a relative one depends on the directory being known.
     const absolute = !redirect.dynamic && redirect.target.startsWith('/');
-    const unresolved = redirect.dynamic || (!absolute && redirect.cwd === null);
+    // The adapter has already decided whether the target is confirmed; a repeated
+    // body or an unknown directory both make a relative path unconfirmed.
+    const unresolved = redirect.unresolved;
     subjects.push({
       target: 'file_redirect',
       text:

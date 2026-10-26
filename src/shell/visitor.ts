@@ -68,14 +68,6 @@ function parseErrors(script: Script): { message: string; pos: number }[] {
   return parsed;
 }
 
-/** Constructs whose body may not run at all, so zero passes is a real path. */
-const REPEATED = new Set<CompoundCommand['type']>([
-  'For',
-  'Select',
-  'While',
-  'ArithmeticFor',
-]);
-
 /**
  * The one directory every path out of a construct agrees on, or null.
  *
@@ -284,7 +276,7 @@ class AstVisitor implements ExpansionSink {
       raw: this.source.slice(redirection.pos, redirection.end),
       commandIndex,
       dynamic: reading?.status === 'dynamic',
-      unresolved: unresolvedTarget(reading, frame.cwd),
+      unresolved: unresolvedTarget(reading, frame.cwd, frame.repeated),
       cwd: frame.cwd,
       kind: redirectKind(redirection),
     });
@@ -489,10 +481,17 @@ class AstVisitor implements ExpansionSink {
   private stageCommand(element: PipelineNode, frame: Frame): number {
     const previous = this.ownCommand;
     this.ownCommand = null;
-    this.node(element, { cwd: frame.cwd, pipeline: frame.pipeline + 1 });
+    this.node(element, {
+      cwd: frame.cwd,
+      pipeline: frame.pipeline + 1,
+      repeated: frame.repeated,
+    });
     const own = this.takeOwnCommand(previous);
-    // A stage that produced no command of its own (an assignment, a compound, a
-    // construct whose own command never materialised) does not confirm a pipe.
+    // Only a stage that *is* a command can represent the pipe's output. A compound
+    // stage recurses into the same visitor, so one of its inner commands would
+    // otherwise be reported as the stage: `{ curl … > out.txt; } | sh` writes curl's
+    // output to a file and pipes nothing.
+    if (element.type !== 'Command') return -1;
     return own === null ? -1 : own;
   }
 
@@ -535,7 +534,11 @@ class AstVisitor implements ExpansionSink {
     // The construct's redirects are opened before its body runs, so they resolve
     // from the directory on entry — `{ cd /tmp; } > out` writes to the caller's
     // `out`, not to `/tmp/out`.
-    const entry: Frame = { cwd: frame.cwd, pipeline: frame.pipeline };
+    const entry: Frame = {
+      cwd: frame.cwd,
+      pipeline: frame.pipeline,
+      repeated: frame.repeated,
+    };
     this.node(node.command, frame);
     // They target the construct rather than the last command inside it, so no
     // command claims to write them and no subject is lost.
@@ -561,19 +564,21 @@ class AstVisitor implements ExpansionSink {
       this.recordWord(node.name, frame);
       this.collected.subshells += 1;
     }
-    this.nodeOrList(node.body, { cwd: frame.cwd, pipeline: frame.pipeline });
+    this.nodeOrList(node.body, {
+      cwd: frame.cwd,
+      pipeline: frame.pipeline,
+      repeated: frame.repeated,
+    });
     this.flushPending();
     this.cover(node.pos, node.end);
   }
 
   private compound(node: CompoundCommand, frame: Frame): void {
-    const entry = frame.cwd;
     this.compoundBody(node, frame);
     // Each construct decides its own join, because it alone knows which paths
-    // through it exist. `if` and `case` compare their arms inside; a loop may run
-    // zero times, so its body's exit has to agree with the entry state; a subshell
+    // through it exist: `if`, `case` and the repeated bodies compare their paths
+    // where they walk them. A brace group has a single ordered path, and a subshell
     // cannot move the caller at all.
-    if (REPEATED.has(node.type) && frame.cwd !== entry) frame.cwd = null;
     this.flushPending();
     this.cover(node.pos, node.end);
   }
@@ -594,8 +599,12 @@ class AstVisitor implements ExpansionSink {
       this.statementList(node.body, { ...frame });
       return;
     }
-    if (node.type === 'BraceGroup' || node.type === 'ArithmeticFor') {
+    if (node.type === 'BraceGroup') {
       this.statementList(node.body, frame);
+      return;
+    }
+    if (node.type === 'ArithmeticFor') {
+      this.repeatedBody(node.body, frame);
       return;
     }
     if (node.type === 'If') {
@@ -604,12 +613,12 @@ class AstVisitor implements ExpansionSink {
     }
     if (node.type === 'For' || node.type === 'Select') {
       for (const word of node.wordlist ?? []) this.recordWord(word, frame);
-      this.statementList(node.body, frame);
+      this.repeatedBody(node.body, frame);
       return;
     }
     if (node.type === 'While') {
       this.statementList(node.clause, frame);
-      this.statementList(node.body, frame);
+      this.repeatedBody(node.body, frame);
       return;
     }
     if (node.type === 'Case') {
@@ -625,6 +634,20 @@ class AstVisitor implements ExpansionSink {
     }
   }
 
+  /**
+   * Walk a body that may run zero or more times.
+   *
+   * The body sees a frame marked repeated, so a relative path inside it is reported
+   * as unconfirmed: the second pass may resolve it against the directory the first
+   * pass moved to. Afterwards the caller's directory is the join of "ran once" and
+   * "never ran", because zero passes is a real path.
+   */
+  private repeatedBody(body: CompoundList, frame: Frame): void {
+    const inner: Frame = { ...frame, repeated: true };
+    this.statementList(body, inner);
+    frame.cwd = inner.cwd === frame.cwd ? frame.cwd : null;
+  }
+
   private caseNode(
     node: Extract<CompoundCommand, { readonly type: 'Case' }>,
     frame: Frame,
@@ -634,7 +657,11 @@ class AstVisitor implements ExpansionSink {
     const outcomes: (string | null)[] = [];
     for (const item of node.items) {
       for (const pattern of item.pattern) this.recordWord(pattern, frame);
-      const arm: Frame = { cwd: entry, pipeline: frame.pipeline };
+      const arm: Frame = {
+        cwd: entry,
+        pipeline: frame.pipeline,
+        repeated: frame.repeated,
+      };
       this.statementList(item.body, arm);
       outcomes.push(arm.cwd);
     }
@@ -643,34 +670,60 @@ class AstVisitor implements ExpansionSink {
     frame.cwd = joinOutcomes(outcomes);
   }
 
+  /**
+   * Walk an `if`/`elif`/`else` chain.
+   *
+   * Each condition is evaluated from the state the previous conditions left, and a
+   * body starts from the state *its own* condition produced: `elif cd /tmp; then …`
+   * really does run its body in `/tmp`. The construct's exit is the join of every
+   * arm plus the path where no arm runs, because the directory after an `if` is not
+   * the directory of whichever arm the walk happened to visit last.
+   */
   private ifNode(
     node: Extract<CompoundCommand, { readonly type: 'If' }>,
     frame: Frame,
   ): void {
-    // The condition runs first and is the only part every path shares.
-    this.statementList(node.clause, frame);
-    const afterCondition = frame.cwd;
     const outcomes: (string | null)[] = [];
-    // Each arm starts from the directory the condition left, so a `cd` in one arm
-    // cannot contaminate another arm's redirects.
-    const branch = (list: CompoundList): void => {
-      const inner: Frame = { cwd: afterCondition, pipeline: frame.pipeline };
-      this.statementList(list, inner);
-      outcomes.push(inner.cwd);
+    // The first condition runs unconditionally.
+    this.statementList(node.clause, frame);
+    const firstEntry = frame.cwd;
+    const thenArm: Frame = {
+      cwd: firstEntry,
+      pipeline: frame.pipeline,
+      repeated: frame.repeated,
     };
-    branch(node.then);
+    this.statementList(node.then, thenArm);
+    outcomes.push(thenArm.cwd);
+    // After `elif`, the condition is another command sequence that starts where the
+    // previous one finished — whether or not it succeeded.
+    let conditionState = firstEntry;
     for (const arm of node.elif) {
-      this.statementList(arm.clause, {
-        cwd: afterCondition,
+      const clause: Frame = {
+        cwd: conditionState,
         pipeline: frame.pipeline,
-      });
-      branch(arm.then);
+        repeated: frame.repeated,
+      };
+      this.statementList(arm.clause, clause);
+      conditionState = clause.cwd;
+      const body: Frame = {
+        cwd: clause.cwd,
+        pipeline: frame.pipeline,
+        repeated: frame.repeated,
+      };
+      this.statementList(arm.then, body);
+      outcomes.push(body.cwd);
     }
     if (node.else !== undefined) {
-      branch(node.else);
+      const elseArm: Frame = {
+        cwd: conditionState,
+        pipeline: frame.pipeline,
+        repeated: frame.repeated,
+      };
+      this.statementList(node.else, elseArm);
+      outcomes.push(elseArm.cwd);
     } else {
-      // No `else` means "nothing happens", which leaves the directory as it was.
-      outcomes.push(afterCondition);
+      // No `else`: taking no arm leaves the directory where the conditions left it.
+      outcomes.push(conditionState);
     }
     frame.cwd = joinOutcomes(outcomes);
   }
@@ -715,6 +768,10 @@ export function walkScript(
   cwd: string | null,
 ): WalkResult {
   const collected = new Collected();
-  new AstVisitor(collected, source).walkScript(script, { cwd, pipeline: 0 });
+  new AstVisitor(collected, source).walkScript(script, {
+    cwd,
+    pipeline: 0,
+    repeated: false,
+  });
   return collected.result();
 }

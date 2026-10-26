@@ -49,8 +49,9 @@ export interface ShellRedirect {
   /** The target word is an expansion, so no path value is known. */
   readonly dynamic: boolean;
   /**
-   * The effective path cannot be confirmed: the target is dynamic, or it is
-   * relative and the working directory is unknown.
+   * The effective path cannot be confirmed: the target is dynamic, it is relative
+   * and the working directory is unknown, or it is relative and written in a body
+   * that may run more than once.
    */
   readonly unresolved: boolean;
   /** Effective working directory for this redirect, or null when unknown. */

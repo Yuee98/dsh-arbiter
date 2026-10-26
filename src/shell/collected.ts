@@ -71,8 +71,12 @@ export function resolveCd(
 export function unresolvedTarget(
   reading: ShellWord | null,
   cwd: string | null,
+  repeated = false,
 ): boolean {
   if (reading === null || reading.status === 'dynamic') return true;
+  // A relative path in a body that may run more than once resolves against a
+  // different directory on a later pass, so even a known cwd does not confirm it.
+  if (repeated) return !wordValue(reading).startsWith('/');
   return !wordValue(reading).startsWith('/') && cwd === null;
 }
 
@@ -163,4 +167,11 @@ export class Collected {
 export interface Frame {
   cwd: string | null;
   pipeline: number;
+  /**
+   * True while walking a body that can run more than once.
+   *
+   * A relative path written there may resolve against a different directory on a
+   * later pass, so it cannot be confirmed even when this pass looks deterministic.
+   */
+  repeated: boolean;
 }
