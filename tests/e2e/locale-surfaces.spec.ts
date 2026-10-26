@@ -214,34 +214,87 @@ async function rawDetailText(page: Page): Promise<readonly string[]> {
  * travelling on as a vacuous comparison.
  */
 /**
- * The stored model responses a call detail renders.
+ * The recorded detail for one call, read from the formal API.
  *
- * Model output is user-visible raw material: switching the interface language
- * must not rewrite it. A call that reached the reviewer has at least one
- * attempt, and the helper fails when it finds none, so the comparison can never
- * pass on two empty lists.
+ * The panel renders several `<pre>` blocks per attempt (request, response,
+ * parsed, error, usage), so scraping the DOM cannot distinguish "a model
+ * response exists" from "a request exists". The API carries the fields by name.
  */
-async function modelResponseText(page: Page): Promise<readonly string[]> {
-  const raw = page.locator('[data-call-detail-raw]');
-  await expect(raw).toBeVisible();
-  // Attempt groups are collapsed like every other material block.
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const collapsed = raw.locator('button[aria-expanded="false"]');
-    if ((await collapsed.count()) === 0) break;
-    await collapsed
-      .first()
-      .click()
-      .catch(() => undefined);
+async function callDetailOf(
+  host: DshHost,
+  callId: string | null,
+): Promise<StoredDetail> {
+  if (callId === null) throw new Error('no callId to read');
+  const response = await fetch(
+    `${host.origin}/api/arbiter/log?callId=${encodeURIComponent(callId)}`,
+    { headers: { cookie: `${host.cookie.name}=${host.cookie.value}` } },
+  );
+  expect(response.status).toBe(200);
+  const body: unknown = await response.json();
+  if (!isRecord(body) || body['ok'] !== true) {
+    throw new Error('the detail API did not return ok:true');
   }
-  const blocks = page.locator('[data-call-detail-attempt] pre');
-  const texts = (await blocks.allInnerTexts())
-    .map((text) => text.trim())
-    .filter((text) => text.length > 0);
+  const detail = body['detail'];
+  if (!isRecord(detail)) throw new Error('the detail API returned no detail');
+  const raw = isRecord(detail['raw']) ? detail['raw'] : {};
+  const attemptsValue = raw['modelAttempts'];
+  const attempts = Array.isArray(attemptsValue) ? attemptsValue : [];
+  return {
+    raw: {
+      arguments: raw['arguments'],
+      modelAttempts: attempts.flatMap((attempt) => {
+        if (!isRecord(attempt)) return [];
+        const responseText = attempt['responseText'];
+        return [
+          {
+            responseText:
+              typeof responseText === 'string' ? responseText : null,
+          },
+        ];
+      }),
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The callId of the tool result whose command mentions `reviewed-sample`. */
+function reviewedCallIdOf(session: unknown): string | null {
+  if (!isRecord(session) || !Array.isArray(session['events'])) return null;
+  for (const event of session['events']) {
+    if (!isRecord(event) || event['type'] !== 'tool/result') continue;
+    if (!JSON.stringify(event['data']).includes('reviewed-sample')) continue;
+    const data = isRecord(event['data']) ? event['data'] : {};
+    const message = isRecord(data['message']) ? data['message'] : {};
+    const source = isRecord(message['source']) ? message['source'] : {};
+    const callId = source['callId'];
+    if (typeof callId === 'string') return callId;
+  }
+  return null;
+}
+
+/** The parts of a stored detail this case compares across languages. */
+interface StoredDetail {
+  readonly raw: {
+    readonly arguments: unknown;
+    readonly modelAttempts: readonly {
+      readonly responseText: string | null;
+    }[];
+  };
+}
+
+/** The model answers a detail stores; fails when there is nothing to compare. */
+function modelResponses(detail: StoredDetail): readonly string[] {
+  const answers = detail.raw.modelAttempts.flatMap((attempt) =>
+    attempt.responseText === null ? [] : [attempt.responseText],
+  );
   expect(
-    texts.length,
-    'this call rendered no model response; the invariance check would be vacuous',
+    answers.length,
+    'this call stored no model response; the invariance check would be vacuous',
   ).toBeGreaterThan(0);
-  return texts;
+  return answers;
 }
 
 async function verdictText(page: Page, regionName: string): Promise<string> {
@@ -335,6 +388,8 @@ test('every plugin surface switches between the released Chinese and English cop
       120_000,
     );
     expect(reviewed).not.toBeNull();
+    const reviewedCallId = reviewedCallIdOf(reviewed);
+    expect(typeof reviewedCallId).toBe('string');
     await composer.click();
     await page.keyboard.insertText('LOCALE-DENY RUN echo locale-denied-one');
     await page.keyboard.press('Enter');
@@ -419,7 +474,8 @@ test('every plugin surface switches between the released Chinese and English cop
     await expect(page.locator('[data-call-detail-raw]')).toBeVisible();
     const baselineRaw = await rawDetailText(page);
     const baselineVerdict = await verdictText(page, zhCallDetail.finalVerdict);
-    const baselineModel = await modelResponseText(page);
+    const baselineDetail = await callDetailOf(host, reviewedCallId);
+    const baselineModel = modelResponses(baselineDetail);
     expect(baselineRaw.length).toBeGreaterThan(0);
     expect(baselineRaw.join('\n')).toContain('reviewed-sample');
     // Return to the configuration frame; the journey continues from there.
@@ -581,12 +637,18 @@ test('every plugin surface switches between the released Chinese and English cop
     // the way into English would show up as a difference here.
     const rawInEnglish = await rawDetailText(page);
     const verdictInEnglish = await verdictText(page, enCallDetail.finalVerdict);
-    // The tool input is a persisted value and must survive the switch. The
-    // block COUNT is not compared: it tracks how many disclosures happened to
-    // be expanded when the panel was read, which is view state, not data.
+    // The tool input is compared by VALUE, not by "the marker is somewhere in
+    // the text": a rewrite that changed another field while keeping the marker
+    // would pass the weaker form. The block COUNT is still not compared — it
+    // tracks how many disclosures happened to be open, which is view state.
     expect(rawInEnglish.join('\n')).toContain('reviewed-sample');
+    expect((await callDetailOf(host, reviewedCallId)).raw.arguments).toEqual(
+      baselineDetail.raw.arguments,
+    );
     expect(verdictInEnglish).toEqual(baselineVerdict);
-    expect(await modelResponseText(page)).toEqual(baselineModel);
+    expect(modelResponses(await callDetailOf(host, reviewedCallId))).toEqual(
+      baselineModel,
+    );
 
     // The coexistence alert needs a real conflicting provider, so its bilingual
     // rendering is asserted where that composition exists: `coexistence.spec.ts`
@@ -675,10 +737,15 @@ test('every plugin surface switches between the released Chinese and English cop
     // round trip, so comparing only against the English read would not prove
     // the original survived.
     expect((await rawDetailText(page)).join('\n')).toContain('reviewed-sample');
+    expect((await callDetailOf(host, reviewedCallId)).raw.arguments).toEqual(
+      baselineDetail.raw.arguments,
+    );
     expect(await verdictText(page, zhCallDetail.finalVerdict)).toEqual(
       baselineVerdict,
     );
-    expect(await modelResponseText(page)).toEqual(baselineModel);
+    expect(modelResponses(await callDetailOf(host, reviewedCallId))).toEqual(
+      baselineModel,
+    );
     expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
     await openConfiguration(page);
     const back = page.locator('[data-arbiter-root]');

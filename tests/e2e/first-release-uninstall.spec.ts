@@ -322,9 +322,11 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     //   1. no Arbiter route remains (`/api/arbiter/state` and `/sessions` 404)
     //   2. no plugin code remains installed (all three records gone), so there
     //      is no gate left that could decide anything
-    // The in-flight/uninstall-window behaviour is owned by
-    // `session-admission.spec.ts`, which drives a real uninstall with a live
-    // barrier; that case is the evidence for the ordering requirement.
+    // NOT verified here, and NOT claimed: a tool call made after removal, and
+    // in-flight behaviour during `removeBundle`. `session-admission.spec.ts`
+    // exercises the manager's enable/disable switch (`startManagerDisable`),
+    // which is a disable/drain window, not an uninstall window. The acceptance
+    // table reports both as not-run.
     await page.reload();
     await expect(page.locator('[contenteditable="true"]').first()).toBeVisible({
       timeout: 60_000,
