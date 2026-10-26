@@ -107,6 +107,15 @@ export interface CoexistenceBlockDetail {
   readonly [key: string]: unknown;
 }
 
+/**
+ * What this runtime can currently prove about the official provider.
+ *
+ * `blocked` is not enough for a decision that outlives one request: a failed
+ * read is *not* evidence that a provider stopped, so an established restriction
+ * must survive it. These three answers are what the admission paths distinguish.
+ */
+export type ProviderState = 'running' | 'stopped' | 'unknown';
+
 /** The refusal `enableBlock()` returns; `ok` is added by the admission service. */
 export interface CoexistenceBlock {
   readonly code: 'coexistence-blocked';
@@ -130,6 +139,8 @@ export class CoexistenceMonitor {
   private noticeSequence = 0;
   private notices: CoexistenceNotice[] = [];
   private observations = 0;
+  /** Whether this runtime has ever observed the official provider running. */
+  private everBlocked = false;
   private view: CoexistenceView;
 
   constructor(host: HostEnvironment, options: MonitorOptions) {
@@ -199,6 +210,10 @@ export class CoexistenceMonitor {
       );
     }
     this.observations += 1;
+    // Remember a provider this runtime has actually seen running: only then can
+    // a later unreadable surface be `unknown` rather than "nothing to protect".
+    if (assessment.blocked || assessment.official.running)
+      this.everBlocked = true;
     this.view = {
       detection: assessment.detection,
       missing: assessment.missing,
@@ -333,6 +348,25 @@ export class CoexistenceMonitor {
    * plugin's startup, and a cached "no conflict" would let the takeover widen a
    * session under a second reviewer. Nothing is written by this call.
    */
+  /**
+   * The tri-state provider answer, re-read from the host.
+   *
+   * `unknown` means a public surface needed to see the provider could not be
+   * read. It must never be treated as `stopped`: the contract says a disk switch
+   * cannot prove a provider stopped, and neither can a failed read.
+   */
+  providerState(): ProviderState {
+    const view = this.refresh('provider-state');
+    if (view.blocked || view.official.running) return 'running';
+    if (view.detection === 'complete') return 'stopped';
+    // An unreadable surface is only *unknown* about a provider this runtime has
+    // actually seen. On a host that never exposed that surface there is no
+    // established restriction for `unknown` to protect, and refusing every
+    // activation there would block a deployment the detector simply cannot
+    // inspect (the reader reports the limitation separately).
+    return this.everBlocked ? 'unknown' : 'stopped';
+  }
+
   enableBlock(): CoexistenceBlock | null {
     const view = this.refresh('enable');
     if (!view.blocked) return null;

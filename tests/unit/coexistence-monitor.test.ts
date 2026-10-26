@@ -369,3 +369,28 @@ describe('a retired reminder stays retired', () => {
     expect(pending[0]?.id).not.toBe(first.notices[0]?.id);
   });
 });
+
+describe('provider state distinguishes absent from unseen', () => {
+  test('a conflict this runtime has seen is unknown while the Loader is blind', () => {
+    const test_ = harness();
+    expect(test_.monitor.providerState()).toBe('stopped');
+    test_.setOfficial('active');
+    expect(test_.monitor.providerState()).toBe('running');
+    // The Loader becomes unreadable: the provider was never confirmed stopped.
+    test_.setLoaderReadable(false);
+    expect(test_.monitor.providerState()).toBe('unknown');
+    // Only a complete read may report `stopped`.
+    test_.setLoaderReadable(true);
+    test_.setOfficial(null);
+    expect(test_.monitor.providerState()).toBe('stopped');
+  });
+
+  test('an unreadable surface on a host that never showed the provider is stopped', () => {
+    // A deployment whose Loader this plugin cannot inspect never established a
+    // restriction, so `unknown` would protect nothing and block every start.
+    const test_ = harness();
+    test_.setLoaderReadable(false);
+    expect(test_.monitor.providerState()).toBe('stopped');
+    expect(test_.monitor.read('blind').detection).toBe('partial');
+  });
+});

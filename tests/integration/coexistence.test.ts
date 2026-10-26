@@ -121,6 +121,8 @@ interface Harness {
   readonly dispose: () => void;
   /** Make one more session live, as reopening a stored session does. */
   readonly addSession: (session: StubSession) => void;
+  /** Make the Loader throw, as a host publishing another commit does. */
+  readonly setLoaderUnreadable: (unreadable: boolean) => void;
   /** Activate a new configuration through the production activation path. */
   readonly reconfigure: (config: unknown) => void;
   /** Add a foreign approval-capable pre-execute listener to the load-time view. */
@@ -167,6 +169,7 @@ function createHarness(
   const foreign: { moduleName: string }[] = [];
   const selfFiber = { name: 'arbiter', state: 2 };
   let officialPhase: 'active' | 'failed' | null = null;
+  let loaderUnreadable = false;
 
   const officialEntries = (): readonly unknown[] =>
     officialPhase === null
@@ -180,6 +183,7 @@ function createHarness(
         ];
   const loader = {
     *entries(): Generator {
+      if (loaderUnreadable) throw new Error('loader is publishing a commit');
       yield* officialEntries();
     },
   };
@@ -340,6 +344,9 @@ function createHarness(
     },
     addSession: (session) => {
       sessions.push(session);
+    },
+    setLoaderUnreadable: (unreadable) => {
+      loaderUnreadable = unreadable;
     },
     reconfigure: (next) => {
       // Same path a UI save or file reload takes: parse, commit, notify.
@@ -1180,6 +1187,77 @@ describe('a normal exit still reaches the usable boundary', () => {
       // The documented exit target, so the session remains usable.
       expect(approvalEvents(session).at(-1)).toEqual({ policy: 'ask' });
       expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('an unreadable Loader keeps an established restriction', () => {
+  test('a held widening survives a blind read and applies once cleared', async () => {
+    const session = makeSession('s-blind-hold');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-blind-hold',
+      rootSessionId: 's-blind-hold',
+      enabled: true,
+      boundary: 'guarded',
+      at: Date.now(),
+    });
+    const harness = createHarness([session], {
+      ...ALLOW_ECHO,
+      boundary: 'trusted',
+    });
+    try {
+      harness.official.activate();
+      // Confirming under a conflict withholds the widening.
+      expect((await enable(harness, 's-blind-hold')).status).toBe(200);
+      expect(modeEvents(session).at(-1)).toEqual({ mode: 'workspace-write' });
+      // The Loader becomes unreadable; the provider never stopped.
+      harness.setLoaderUnreadable(true);
+      expect((await harness.gate(call(session, 'blind'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(
+        modeEvents(session).filter(
+          (event) => isRecord(event) && event['mode'] === 'danger-full-access',
+        ),
+      ).toEqual([]);
+      // A readable Loader that proves the provider stopped releases the hold.
+      harness.setLoaderUnreadable(false);
+      harness.official.remove();
+      expect((await harness.gate(call(session, 'clear'), allow)).kind).toBe(
+        'allow',
+      );
+      expect(modeEvents(session).at(-1)).toEqual({
+        mode: 'danger-full-access',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a refused resume survives a blind read and never gates the session', async () => {
+    const session = makeSession('s-blind-refusal');
+    appendRecord(session, 'plugin:arbiter/admission', {
+      version: 1,
+      sessionId: 's-blind-refusal',
+      rootSessionId: 's-blind-refusal',
+      enabled: true,
+      boundary: 'trusted',
+      at: Date.now(),
+    });
+    const harness = createHarness([], { ...ALLOW_ECHO, enabled: false });
+    try {
+      harness.official.activate();
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      harness.setLoaderUnreadable(true);
+      // An unrelated save while blind must not revoke the refusal.
+      harness.reconfigure({ ...ALLOW_ECHO, enabled: true });
+      harness.setLoaderUnreadable(false);
+      harness.addSession(session);
+      expect((await harness.gate(call(session), allow)).kind).toBe('allow');
+      expect(decisions(session)).toEqual([]);
     } finally {
       harness.dispose();
     }

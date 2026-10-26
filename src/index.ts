@@ -59,6 +59,9 @@ export function apply(ctx: ContextLike, rawConfig: unknown): HostEnvironment {
     selfFiber: ctx.fiber,
   });
   admissions.setEnableGuard(() => coexistence.enableBlock());
+  // The veto answers one request; this answers whether an established
+  // restriction may be released, which needs the tri-state.
+  admissions.setProviderState(() => coexistence.providerState());
   // The host observes on its own schedule: a conflict appearing while no
   // settings page is open must still open one notice and reach the log. The
   // interval only reads inventory; gate decisions never wait on it.

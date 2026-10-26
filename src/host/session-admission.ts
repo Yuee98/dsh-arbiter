@@ -33,8 +33,12 @@ import {
   toAdmission,
 } from './admission.js';
 import type { FoldedAdmission } from './admission.js';
-import { refuseLateRestore, refuseResume } from './admission-resume.js';
+import { refuseLateRestore } from './admission-resume.js';
 import { activationOf } from './activation.js';
+import { sessionView } from './admission-view.js';
+import { releaseLateSession } from './admission-release.js';
+import { applyBoundary } from './boundary-sync.js';
+import type { BoundarySync } from './boundary-sync.js';
 import { exitWrites } from './admission-narrow.js';
 import {
   descendantOf,
@@ -48,6 +52,7 @@ import { narrowWithRetry } from './narrow-retry.js';
 import { CoverageHold } from './coverage-hold.js';
 import { admissionSummary } from './admission-summary.js';
 import { refuseEnable } from './admission-veto.js';
+import type { ProviderState } from './coexistence.js';
 import type { AdmissionFailure, EnableGuard } from './admission-veto.js';
 import type { HostEnvironment, KnobWrite } from './types.js';
 
@@ -79,6 +84,8 @@ export class SessionAdmissions {
   private readonly failingClosed = new Set<string>();
   /** A coexistence veto consulted before a takeover writes anything. */
   private enableGuard: EnableGuard | null = null;
+  /** A tri-state reader, which can tell `unknown` from `stopped`. */
+  private providerState: (() => ProviderState) | null = null;
   /** Whether this runtime currently takes over sessions (not master-off). */
   private active = false;
   /** The activation decisions that must outlive the request that made them. */
@@ -97,6 +104,30 @@ export class SessionAdmissions {
    */
   setEnableGuard(guard: EnableGuard | null): void {
     this.enableGuard = guard;
+  }
+
+  /**
+   * The tri-state provider answer. A veto that returns `null` only says "not
+   * refused"; it cannot distinguish a cleared conflict from a failed read.
+   */
+  setProviderState(read: (() => ProviderState) | null): void {
+    this.providerState = read;
+  }
+
+  /**
+   * Whether an established restriction may be released.
+   *
+   * Only positive evidence releases it; `unknown` is missing evidence, and the
+   * contract forbids reading that as resolution.
+   */
+  private releasable(): boolean {
+    const state = this.providerState?.();
+    return state === undefined ? !this.conflictPresent() : state === 'stopped';
+  }
+
+  /** Whether coverage must not begin because the provider is unprovable. */
+  private startUnprovable(): boolean {
+    return this.providerState?.() === 'unknown';
   }
 
   /** Remember one session object so parent links and folds stay readable. */
@@ -141,6 +172,22 @@ export class SessionAdmissions {
       parentOf: (id) => this.sessionFor(id)?.header?.parentSession,
       known: (id) => this.known(id),
     };
+  }
+
+  /** The backend-confirmed view for one session. */
+  view(id: string, revision: string): SessionAdmissionView | null {
+    return sessionView(
+      {
+        known: (item) => this.known(item),
+        lookup: () => this.lookup(),
+        admissionOf: (item) => this.admissionOf(item),
+        rootOf: (item) => this.rootOf(item),
+        boundary: () => configuredBoundary(this.host.runtime.config),
+        refused: () => this.hold.refusalStands && !this.releasable(),
+      },
+      id,
+      revision,
+    );
   }
 
   /** The session's own admission, or `null` when it has no valid record. */
@@ -191,18 +238,15 @@ export class SessionAdmissions {
       this.releaseOnDrop(id, session);
       return scope;
     }
-    // A refused resume keeps refusing: a session restored later still carries
-    // its enabled record, and gating it now is the takeover the conflict forbade.
+    // A refused resume keeps refusing; gating a restored session now is the
+    // takeover the conflict forbade.
     if (this.hold.refusalStands) {
-      if (this.conflictPresent())
-        return this.refuseCoverage(id, session, scope);
+      if (!this.releasable()) return this.refuseCoverage(id, session, scope);
       this.hold.clear();
     }
     this.covered.set(id, session);
-    // A cold restart can follow a configuration edit that changed the
-    // boundary while the plugin was unloaded. Re-apply it here, lazily, so the
-    // first gated call already runs under the configured boundary instead of
-    // the one recorded when the session was enabled.
+    // A cold restart can follow a configuration edit. Re-apply it here so the
+    // first gated call already runs under the configured boundary.
     if (!this.syncOne(id, session)) {
       // Guarded is configured but the host will not confine this session, so a
       // review-allow would still execute outside the workspace. Refuse instead
@@ -219,11 +263,21 @@ export class SessionAdmissions {
     return scope;
   }
 
+  /** Whether this session's withheld widening still applies. */
+  private holdStill(
+    id: string,
+    recorded: ExecutionBoundary,
+    configured: ExecutionBoundary,
+  ): boolean {
+    if (recorded === configured) return false;
+    if (this.hold.isHeld(id) && !this.releasable()) return true;
+    this.hold.release(id);
+    return false;
+  }
+
   /**
-   * Align one covered session with the effective boundary, on the first covered
-   * call after a reload. A session with its own record follows the configured
-   * boundary; an inherited scope is only ever narrowed, because the host
-   * captured its sandbox at delegation and this plugin never widened a child.
+   * Align one covered session with the effective boundary on the first covered
+   * call after a reload. An inherited scope is only ever narrowed.
    */
   private syncOne(id: string, session: SessionLike): boolean {
     const boundary = configuredBoundary(this.host.runtime.config);
@@ -236,14 +290,13 @@ export class SessionAdmissions {
       return boundary !== 'guarded' || this.atSafeBoundary(session);
     }
     if (!folded.enabled) return true;
-    // The record is not evidence that the host is confined: a guarded enable
-    // can have committed its record and then failed to write the sandbox. Only
-    // the live host value proves the boundary is in force.
+    // The record is not evidence of confinement: a guarded enable can commit
+    // its record and then fail the sandbox write.
     const narrow = boundary === 'guarded' && !atSafeSandbox(session);
     if (folded.boundary === boundary && !narrow) return true;
-    // A cold-restored admission becoming effective is an activation too, so it
-    // uses the same decision `enable()` does: an unheld session cannot be
-    // widened while a conflict runs, and a narrowing is recorded as applied.
+    if (this.holdStill(id, folded.boundary, boundary)) return true;
+    // A cold restore is an activation too, so it uses the same decision as
+    // `enable()`: no widening under a conflict, narrowing recorded as applied.
     const activation = activationOf(
       session,
       boundary,
@@ -296,26 +349,6 @@ export class SessionAdmissions {
         id,
       );
     }
-  }
-
-  /** The backend-confirmed view for one session, under one config revision. */
-  view(id: string, revision: string): SessionAdmissionView | null {
-    if (!this.known(id)) return null;
-    const scope = resolveScope(id, this.lookup());
-    const admission = this.admission(id);
-    return {
-      sessionId: id,
-      rootSessionId: this.rootOf(id),
-      enabled: admission?.enabled ?? false,
-      boundary:
-        admission?.boundary ?? configuredBoundary(this.host.runtime.config),
-      revision,
-      admissionRevision: admission?.admissionRevision ?? null,
-      seq: admission?.seq ?? null,
-      at: admission?.at ?? null,
-      reason: scope.reason,
-      managed: scope.managed,
-    };
   }
 
   /** Write the knob events, reporting whether every one committed. */
@@ -374,12 +407,7 @@ export class SessionAdmissions {
     };
   }
 
-  /**
-   * Everything `enable` must know before its first write, or the refusal: an
-   * unknown session, a disabled plugin, a stopping runtime and a *new* takeover
-   * under a running conflict are all refusals, and none may leave a record or a
-   * widened knob behind.
-   */
+  /** Everything `enable` must know before its first write, or the refusal. */
   private prepareEnable(id: string):
     | AdmissionFailure
     | {
@@ -526,10 +554,8 @@ export class SessionAdmissions {
     const current = this.admissionOf(id);
     const boundary =
       current?.boundary ?? configuredBoundary(this.host.runtime.config);
-    // An API disable removes gate protection, so the host boundary must be
-    // confirmed FIRST. A narrowing the host refuses must not be papered over by
-    // a committed disable record: the next call would then run wide and
-    // ungated. The gate stays in place until the narrowing is real.
+    // An API disable removes gate protection, so the boundary is confirmed
+    // first: a refused narrowing must not be papered over by a record.
     if (trigger === 'api' && this.needsNarrowing(id, current)) {
       this.narrowCovered(session);
       if (!this.subtreeSafe(id, session)) {
@@ -579,8 +605,7 @@ export class SessionAdmissions {
     // delegated child carrying a sandbox wider than full access — the captured
     // privilege a parent's exit can leave behind without ever covering it here.
     const delegated = session.header?.parentSession !== undefined;
-    if (!covered && !delegated) return;
-    if (this.atSafeBoundary(session)) return;
+    if ((!covered && !delegated) || this.atSafeBoundary(session)) return;
     if (!this.narrowSession(session)) this.markFailingClosed(id);
   }
 
@@ -638,8 +663,6 @@ export class SessionAdmissions {
 
   /** Narrow one covered session and every covered session inheriting it. */
   private narrowCovered(root: SessionLike): void {
-    // A live descendant may never have reached the gate, so pick up the branch
-    // instead of trusting only what has been observed.
     this.discover();
     const rootId = root.id ?? '';
     this.writeKnobs(root, exitWrites(root));
@@ -649,80 +672,49 @@ export class SessionAdmissions {
     }
   }
 
-  /**
-   * Re-apply the effective boundary after a configuration activation. A boundary
-   * change never enables a session and never rewrites one that left.
-   */
+  /** Re-apply the effective boundary after a configuration activation. */
   syncBoundary(config: ArbiterConfig): void {
-    if (!config.enabled) {
-      // The switch turning off stops the gate, so a widened session would run
-      // ungated while keeping the permission. Narrow first, as teardown does.
-      this.active = false;
-      this.hold.clear();
-      this.releaseManagedScope();
-      return;
-    }
-    // Starting or resuming coverage is a takeover, even when the records were
-    // retained: while the switch was off this plugin did not gate these
-    // sessions, so a running provider must not let it begin.
-    if (!this.active) {
-      this.active = true;
-      const veto = this.enableGuard?.() ?? null;
-      if (veto !== null) {
-        this.hold.refuse();
-        refuseResume(this.host, this.adapters(), veto);
-        return;
-      }
-    }
-    // A refusal outlives an unrelated save: only a read proving the conflict is
-    // gone may end it, which is what the veto above established.
-    if (this.hold.refusalStands && !this.conflictPresent()) this.hold.clear();
-    const boundary = configuredBoundary(config);
-    for (const [id, session] of this.covered) {
-      this.syncCovered(id, session, boundary);
-    }
+    applyBoundary(this.host, this.boundaryView(), config);
   }
 
-  /** Bring one covered session to the configured boundary, or leave it held. */
-  private syncCovered(
-    id: string,
-    session: SessionLike,
-    boundary: ExecutionBoundary,
-  ): void {
-    const folded = this.admissionOf(id);
-    if (folded === null) {
-      // An inherited scope has no record of its own: when its root narrows, the
-      // sandbox the host captured at delegation must narrow with it.
-      if (boundary !== 'trusted')
-        this.writeKnobs(session, narrowWrites(session));
-      return;
-    }
-    if (!folded.enabled || folded.boundary === boundary) return;
-    const activation = activationOf(
-      session,
-      boundary,
-      folded.boundary,
-      this.conflictPresent(),
-      true,
-    );
-    if (activation.writes.length === 0) return;
-    if (activation.withheld) this.hold.hold(id);
-    else this.hold.release(id);
-    this.writeKnobs(session, activation.writes);
-    const state = this.writeRecord(session, true, activation.boundary);
-    if (state !== 'written') {
-      this.host.ctx.logger.warn(
-        'arbiter: boundary sync for session %s failed: %s',
-        id,
-        state,
-      );
-      return;
-    }
-    this.host.ctx.logger.info(
-      'arbiter: session %s moved to boundary %s',
-      id,
-      activation.boundary,
-    );
+  /** The view the configuration sync reads; each member forwards to this. */
+  private boundaryView(): BoundarySync {
+    return {
+      ...this.adapters(),
+      covered: this.covered,
+      active: this.active,
+      refusalStands: this.hold.refusalStands,
+      releasable: () => this.releasable(),
+      vetoPresent: () => this.conflictPresent(),
+      triState: () => this.providerState !== null,
+      unprovable: () => this.startUnprovable(),
+      veto: () => this.enableGuard?.() ?? null,
+      setActive: (next) => {
+        this.active = next;
+      },
+      hold: (id) => {
+        this.hold.hold(id);
+      },
+      release: (id) => {
+        this.hold.release(id);
+      },
+      isHeld: (id) => this.hold.isHeld(id),
+      refuse: () => {
+        this.hold.refuse();
+      },
+      clearRefusal: () => {
+        this.hold.clear();
+      },
+      retained: (id) => {
+        const folded = this.admissionOf(id);
+        return folded === null
+          ? null
+          : { enabled: folded.enabled, boundary: folded.boundary };
+      },
+      releaseManagedScope: () => {
+        this.releaseManagedScope();
+      },
+    };
   }
 
   /**
@@ -758,36 +750,24 @@ export class SessionAdmissions {
     return found;
   }
 
-  /**
-   * Bring one session back to a safe boundary without writing a record, for a
-   * session that became live after the reconcile ran.
-   *
-   * @returns `safe` when nothing was needed, `narrowed` when the host confirmed
-   * the write, `unsafe` when it is still wide and must not proceed.
-   */
+  /** Bring one late-restored session back to a safe boundary, or report it. */
   releaseOne(session: SessionLike): 'safe' | 'narrowed' | 'unsafe' {
-    this.observe(session);
-    const id = session.id;
-    if (id === undefined) return 'safe';
-    const scope = resolveScope(id, this.lookup());
-    // Only a session that would be managed needs narrowing; ordinary
-    // unadmitted sessions are never subject to this plugin's permission.
-    if (!scope.managed && !this.covered.has(id)) return 'safe';
-    if (this.atSafeBoundary(session)) return 'safe';
-    const narrowed = this.narrowSession(session);
-    if (!this.atSafeBoundary(session)) return 'unsafe';
-    return narrowed ? 'narrowed' : 'safe';
+    return releaseLateSession(session, {
+      observe: (item) => {
+        this.observe(item);
+      },
+      lookup: () => this.lookup(),
+      covered: this.covered,
+      atSafeBoundary: (item) => this.atSafeBoundary(item),
+      narrowSession: (item) => this.narrowSession(item),
+    });
   }
 
   /** Sessions covered by an enabled admission at this moment. */
   coveredSessions(): readonly (readonly [string, SessionLike])[] {
     return [...this.covered];
   }
-
-  /**
-   * Everything teardown must restore: a covered session whose own record does
-   * not already say "disabled". A session that left keeps its own permission.
-   */
+  /** Everything teardown must restore, as the sync and release paths read it. */
   teardownTargets(): readonly (readonly [string, SessionLike])[] {
     return [...this.covered].filter(([id]) => {
       const folded = this.admissionOf(id);
