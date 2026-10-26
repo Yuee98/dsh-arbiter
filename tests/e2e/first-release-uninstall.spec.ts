@@ -11,7 +11,8 @@
  * It is deliberately one focused case: the in-flight/drain-window behaviour is
  * already owned by `session-admission.spec.ts`, and this does not repeat it.
  */
-import { access } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
+import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -54,6 +55,99 @@ async function routeStatus(host: DshHost, path: string): Promise<number> {
     headers: { cookie: `${host.cookie.name}=${host.cookie.value}` },
   });
   return response.status;
+}
+
+/**
+ * The call id an Arbiter denial belongs to.
+ *
+ * The host persists the refusal on the tool result, so the id is read from the
+ * record instead of being guessed from event order: a parallel call could
+ * otherwise be blamed for this denial.
+ */
+function callIdOf(event: unknown): string | null {
+  if (typeof event !== 'object' || event === null) return null;
+  const data = isRecord(event) ? event['data'] : undefined;
+  if (!isRecord(data)) return null;
+  // The host nests the identity under `message.source`; `data.callId` does not
+  // exist, which is why guessing the shape silently produced nothing before.
+  const message = isRecord(data['message']) ? data['message'] : undefined;
+  const source = isRecord(message?.['source']) ? message['source'] : undefined;
+  const callId = source?.['callId'];
+  if (typeof callId === 'string') return callId;
+  const fallback = data['callId'];
+  return typeof fallback === 'string' ? fallback : null;
+}
+
+/**
+ * Whether the audit database still holds the row for one call.
+ *
+ * Read through SQLite, not the plugin's HTTP route: after removal the route is
+ * gone by design, so asking it would conflate "the row was deleted" with "the
+ * plugin stopped serving". Only the database can answer which happened.
+ */
+function auditRowFor(host: DshHost, callId: string | null): number {
+  if (callId === null) return 0;
+  const db = new DatabaseSync(join(host.home, 'arbiter', 'arbiter.db'));
+  try {
+    const row = db
+      .prepare('SELECT call_id FROM calls WHERE call_id = ?')
+      .get(callId);
+    return row === undefined ? 0 : 1;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The settings document exactly as written.
+ *
+ * Compared byte-for-byte across the uninstall. Extracting rule ids was too weak
+ * in two ways: it ignored every other field of the saved rule, and the fixture
+ * writes this file with `JSON.stringify`, whose `"id"` keys do not match a
+ * YAML-style `id:` scan — so the extraction could compare two empty lists.
+ *
+ * The project contract is semantic preservation of user rules and logs, not a
+ * promise that serialization never changes. In this controlled case nothing
+ * legitimately rewrites the file: the user's rules live here, while dependency
+ * and bundle selection live in `package.json`, and no save is performed between
+ * the two reads.
+ */
+async function settingsContent(host: DshHost): Promise<string> {
+  return readFile(host.documentPath, 'utf8');
+}
+
+/** The three places a profile install is recorded. */
+async function installState(host: DshHost): Promise<{
+  readonly dependencies: string;
+  readonly bundles: string;
+  readonly linked: boolean;
+}> {
+  const profileDir = join(host.home, 'profiles', 'arbiter-e2e');
+  const parsed: unknown = JSON.parse(
+    await readFile(join(profileDir, 'package.json'), 'utf8'),
+  );
+  const manifest = isRecord(parsed) ? parsed : {};
+  const dependencies = isRecord(manifest['dependencies'])
+    ? Object.keys(manifest['dependencies']).join(',')
+    : '';
+  const dsh = isRecord(manifest['dsh']) ? manifest['dsh'] : {};
+  const profile = isRecord(dsh['profile']) ? dsh['profile'] : {};
+  const bundles = Array.isArray(profile['bundles'])
+    ? profile['bundles'].filter(
+        (item): item is string => typeof item === 'string',
+      )
+    : [];
+  return {
+    dependencies,
+    bundles: bundles.join(','),
+    linked: await access(join(profileDir, 'node_modules', 'dsh-arbiter'))
+      .then(() => true)
+      .catch(() => false),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 test('uninstalling through the plugin manager stops the gate and survives a restart', async ({
@@ -112,12 +206,75 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     expect(enable.status).toBe(200);
     expect(await routeStatus(host, '/api/arbiter/state')).toBe(200);
 
+    // ---- The "before" state must be a real refusal ------------------------
+    // A removal is only meaningful if the gate was actually deciding calls.
+    // The command names the file by ABSOLUTE path: a session's working
+    // directory is not necessarily `host.workspace`, so a relative target could
+    // land elsewhere and make "the file is absent" prove nothing about the
+    // refusal. An unmatched call below proves this directory is writable.
+    const deniedFile = join(host.workspace, 'uninstall-denied.txt');
+    const allowedFile = join(host.workspace, 'uninstall-allowed.txt');
+    await expect(access(deniedFile)).rejects.toThrow();
+    await expect(access(allowedFile)).rejects.toThrow();
+    await sendPrompt(page, `UNINSTALL-DENY RUN touch ${deniedFile}`);
+    const beforeRemoval = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.events.filter((event) => event.type === 'turn/end').length >=
+          2 &&
+        candidate.events.some(
+          (event) =>
+            event.type === 'tool/result' &&
+            JSON.stringify(event.data).includes('ARBITER_DENIED'),
+        ),
+      120_000,
+    );
+    expect(beforeRemoval).not.toBeNull();
+    const denial = beforeRemoval?.events.find(
+      (event) =>
+        event.type === 'tool/result' &&
+        JSON.stringify(event.data).includes('ARBITER_DENIED'),
+    );
+    expect(denial).toBeDefined();
+    const deniedCallId = callIdOf(denial);
+    expect(typeof deniedCallId).toBe('string');
+    // A refusal whose command still ran would be indistinguishable from an
+    // execution that merely failed, so the absent effect is the evidence.
+    await expect(access(deniedFile)).rejects.toThrow();
+
+    // Positive control in the SAME directory with the same shape: an allowed
+    // call really does create its file. Without this, "the denied file is
+    // absent" could be explained by the directory being unwritable.
+    await sendPrompt(page, `UNINSTALL-ALLOW RUN touch ${allowedFile}`);
+    const allowedTurn = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.events.filter((event) => event.type === 'turn/end').length >=
+          3 && candidate.events.some((event) => event.type === 'turn/end'),
+      120_000,
+    );
+    expect(allowedTurn).not.toBeNull();
+    await expect(access(allowedFile)).resolves.toBeUndefined();
+
     // The settings file and the audit database exist before removal, so the
     // "state is preserved" assertion afterwards is about preservation and not
     // about a directory that was never written.
     await expect(access(host.documentPath)).resolves.toBeUndefined();
     const auditPath = join(host.home, 'arbiter', 'arbiter.db');
     await expect(access(auditPath)).resolves.toBeUndefined();
+    // That refusal left a row; "preserved" below means this row survives.
+    expect(auditRowFor(host, deniedCallId)).toBe(1);
+
+    // The install is present, so "removed" is a change and not a state the
+    // profile never had. Assert all three places an install lives.
+    const settingsBefore = await settingsContent(host);
+    // The rule really is in the document, so the byte comparison below cannot
+    // pass on two identical-but-empty files.
+    expect(settingsBefore).toContain('uninstall-deny');
+    const installBefore = await installState(host);
+    expect(installBefore.dependencies).toContain('dsh-arbiter');
+    expect(installBefore.bundles).toContain('dsh-arbiter');
+    expect(installBefore.linked).toBe(true);
 
     // ---- The real uninstall, through the host's own plugin manager --------
     await page
@@ -136,19 +293,56 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     });
     if (await confirm.isVisible().catch(() => false)) await confirm.click();
 
-    // The plugin's public surface is gone: the state route no longer answers.
+    // The plugin's public surface is gone: the state route answers 404, not
+    // merely "something other than 200". A 500 would mean the plugin still ran
+    // and crashed, which is a different fact from "removed".
     await expect
       .poll(async () => routeStatus(host, '/api/arbiter/state'), {
         timeout: 60_000,
       })
-      .not.toBe(200);
+      .toBe(404);
+    await expect(routeStatus(host, '/api/arbiter/sessions')).resolves.toBe(404);
     // The configuration page is gone too, so nothing can be edited silently.
     await expect(page.locator('[data-arbiter-root]')).toHaveCount(0);
 
+    // The install itself is really gone, in all three places it lived.
+    const installAfter = await installState(host);
+    expect(installAfter.dependencies).not.toContain('dsh-arbiter');
+    expect(installAfter.bundles).not.toContain('dsh-arbiter');
+    expect(installAfter.linked).toBe(false);
+
+    // ---- A NEW call after removal ----------------------------------------
+    // Recorded limitation: after removal the plugin page is gone, and driving a
+    // further model turn from this fixture no longer produces a committed
+    // `turn/end` (the reload returns to a fresh conversation whose turns the
+    // fixture's scripted model does not serve). The requirement "a call made
+    // after removal is not decided by Arbiter" is therefore asserted through
+    // the two facts this harness CAN observe, and the rest is reported as not
+    // verified rather than claimed:
+    //   1. no Arbiter route remains (`/api/arbiter/state` and `/sessions` 404)
+    //   2. no plugin code remains installed (all three records gone), so there
+    //      is no gate left that could decide anything
+    // NOT verified here, and NOT claimed: a tool call made after removal, and
+    // in-flight behaviour during `removeBundle`. `session-admission.spec.ts`
+    // exercises the manager's enable/disable switch (`startManagerDisable`),
+    // which is a disable/drain window, not an uninstall window. The acceptance
+    // table reports both as not-run.
+    await page.reload();
+    await expect(page.locator('[contenteditable="true"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+
     // The files it did not own are preserved: an uninstall must not delete the
-    // user's settings document or the audit database behind their back.
+    // user's settings document or the audit database behind their back. File
+    // existence alone would not prove the saved rule survived, so the settings
+    // content is compared as well.
     await expect(access(host.documentPath)).resolves.toBeUndefined();
     await expect(access(auditPath)).resolves.toBeUndefined();
+    // Byte-for-byte: the whole saved rule survives, not just a remembered id.
+    expect(await settingsContent(host)).toBe(settingsBefore);
+    // The refusal recorded before removal is still readable: removal stopped
+    // deciding, it did not rewrite history.
+    expect(auditRowFor(host, deniedCallId)).toBe(1);
 
     // ---- Restart does not resurrect the removed plugin -------------------
     // The plugin was just uninstalled, so the next start must observe its
