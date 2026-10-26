@@ -400,7 +400,7 @@ describe('reviewer connection test dialog', () => {
 });
 
 describe('reviewer connection test localization', () => {
-  test('an English host falls back to Chinese per key without bare keys', async () => {
+  test('an English host renders the released dialog without bare keys', async () => {
     baseHandlers();
     server.use(
       http.post('*/api/arbiter/reviewer-test', () =>
@@ -411,25 +411,31 @@ describe('reviewer connection test localization', () => {
     await view.user.click(
       await screen.findByRole('button', { name: 'Reviewer' }),
     );
-    await screen.findByRole('heading', { name: 'Reviewer 类型' });
-    expect(screen.getByRole('button', { name: '测试 Reviewer' })).toBeVisible();
+    await screen.findByRole('heading', { name: 'Reviewer type' });
+    expect(screen.getByRole('button', { name: 'Test reviewer' })).toBeVisible();
+    // Since #23 the reviewer test surface is a declared English translation.
     expect(
-      screen.getByText('测试会发送模型请求，可能产生费用。'),
+      screen.getByText('The test sends a model request and may incur cost.'),
     ).toBeVisible();
-    await openTestDialog(view.user);
-    const panel = dialog();
-    expect(within(panel).getByText('Reviewer 连接测试')).toBeVisible();
-    expect(within(panel).getByRole('button', { name: '关闭' })).toBeVisible();
+    await view.user.click(
+      screen.getByRole('button', { name: 'Test reviewer' }),
+    );
+    const panel = screen.getByRole('dialog', {
+      name: 'Reviewer connection test',
+    });
+    expect(within(panel).getByRole('button', { name: 'Close' })).toBeVisible();
     // The run starts on open, so the localized running or result state is what
     // proves the dialog body is translated rather than the idle placeholder.
     expect(
       within(panel).getByText(
-        /正在请求|已通过：首次返回即符合输出契约。|未通过：/,
+        /Requesting|Passed: the first response already matched the output contract\.|Failed:/,
       ),
     ).toBeVisible();
     const text = document.body.textContent;
     expect(text).not.toContain('reviewer.');
     expect(text).not.toContain('undefined');
+    // The state material the probe returned is a protocol value, not UI copy.
+    expect(text).toContain('chat');
   });
 
   test('per-key fallback holds for interpolated status text', async () => {

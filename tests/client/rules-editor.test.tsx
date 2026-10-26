@@ -778,23 +778,24 @@ describe('rule list header and inline editing', () => {
   });
 });
 
-describe('locale fallback', () => {
-  test('an English host falls back to Chinese per missing rules key, never a bare key', async () => {
+describe('locale handling', () => {
+  test('an English host renders the released rules editor, never a bare key', async () => {
     baseHandlers();
     const view = renderClient(<ArbiterPage />, { locale: 'en' });
-    await view.user.click(await screen.findByRole('button', { name: '规则' }));
-    // en only carries common.json, so the whole rules module falls back to zh.
-    await screen.findByRole('heading', { name: '规则' });
-    await view.user.click(screen.getByRole('button', { name: '新建规则' }));
+    // Since #23 the rules module is a declared English translation, so the tab,
+    // the heading and the editor controls read in English.
+    await view.user.click(await screen.findByRole('button', { name: 'Rules' }));
+    await screen.findByRole('heading', { name: 'Rules' });
+    await view.user.click(screen.getByRole('button', { name: 'New rule' }));
     expect(
-      screen.getByRole('textbox', { name: '显示名称' }),
+      screen.getByRole('textbox', { name: 'Display name' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /^行为/ })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: /^Behavior/ })).toHaveValue(
       'force-review',
     );
-    expect(screen.getByText('满足以下任一条件')).toBeVisible();
+    expect(screen.getByText('Matches any of the following')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: '添加条件（或）' }),
+      screen.getByRole('button', { name: 'Add condition (or)' }),
     ).toBeVisible();
     // No raw key, blank label or undefined placeholder anywhere in the editor.
     expect(document.body.textContent).not.toMatch(

@@ -245,7 +245,7 @@ describe('interpolation and Chinese fallback', () => {
     }
   });
 
-  test('a missing English key falls back to Chinese per entry', async () => {
+  test('an English host renders the released translation per entry', async () => {
     useState(blocking());
     const { i18n, locale } = renderHostSurfaces();
     await screen.findByRole('alertdialog', {
@@ -253,14 +253,16 @@ describe('interpolation and Chinese fallback', () => {
     });
     locale.setLocale('en');
     await waitFor(() => {
-      // English has no coexistence module yet: every leaf falls back to the
-      // Chinese sentence instead of a key, a blank or `undefined`.
+      // Since #23 coexistence is a declared English translation: the sentence
+      // is English, never a key, a blank or `undefined`.
       const alert = screen.getByRole('alertdialog');
-      expect(alert).toHaveTextContent('存在冲突的审批提供者');
+      expect(alert).toHaveTextContent('A conflicting approval provider exists');
       expect(alert.textContent).not.toMatch(/coexistence\./);
       expect(alert.textContent).not.toContain('undefined');
     });
-    expect(i18n.translate('coexistence.title')).toBe('审批提供者共存');
+    expect(i18n.translate('coexistence.title')).toBe(
+      'Approval provider coexistence',
+    );
     // A key with no translation anywhere still renders as the key, never blank.
     expect(i18n.translate('coexistence.missing.key')).toBe(
       'coexistence.missing.key',

@@ -52,9 +52,11 @@ describe('locale catalog contract', () => {
     const locale = createTestLocale('en');
     const i18n = createArbiterI18n(locale);
     expect(i18n.translate('summary')).toBe(localeResources.en.common.summary);
+    // Interpolation happens once: braces inside a parameter stay literal and
+    // are never resolved against the dictionary again.
     expect(
       i18n.translate('config.loadFailed', { error: '<untrusted> {another}' }),
-    ).toBe('无法读取 Arbiter 配置：<untrusted> {another}');
+    ).toBe('Cannot read Arbiter configuration: <untrusted> {another}');
     i18n.dispose();
     expect(i18n.translate('config.save')).toBe('config.save');
   });

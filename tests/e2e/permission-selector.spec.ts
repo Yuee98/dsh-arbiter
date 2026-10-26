@@ -954,7 +954,7 @@ test('an external same-value slash exit updates the selector without focus', asy
   }
 });
 
-test('the real slot keeps Chinese copy when the host language changes', async ({
+test('the real slot follows the released Chinese and English catalogs', async ({
   page,
 }, testInfo) => {
   const steps = new Steps();
@@ -974,27 +974,78 @@ test('the real slot keeps Chinese copy when the host language changes', async ({
       ),
     ).not.toBeNull();
 
-    // Chinese host language: the control's own copy is Arbiter's.
+    // Chinese host language: the control's own copy is Arbiter's source text.
     await expect(
       arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
     ).toBeVisible();
+    const chinese = await arbiterControl(page).innerText();
+    steps.add('chinese', { copy: chinese });
 
-    // Switch the real host language to English. The arbiter catalog has no
-    // English module yet (#23), so the same slot must fall back to Chinese —
-    // never a raw key, a blank label or `undefined`.
-    await page.getByRole('button', { name: '账号菜单', exact: true }).click();
-    await page.getByText('设置', { exact: true }).click();
-    await page.getByRole('button', { name: '中文', exact: true }).click();
+    // Switch the real host language to English. Since #23 the slot renders its
+    // own English catalog instead of falling back to Chinese; the mounted
+    // control still shows the same backend-confirmed admission.
+    await page
+      .getByRole('button', { name: /账号菜单|Account menu/u })
+      .first()
+      .click();
+    await page.getByText(/^(设置|Settings)$/u).click();
+    await page
+      .getByRole('button', { name: /^(中文|English)$/u })
+      .first()
+      .click();
     await page.getByText('English', { exact: true }).click();
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: /^(Close|关闭)$/u }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', /^en/);
 
     const copy = await arbiterControl(page).innerText();
-    expect(copy).toContain('未启用自动审查');
+    expect(copy).toContain('Auto review not enabled');
     expect(copy).not.toMatch(/permission\./u);
+    expect(copy).not.toMatch(/\{\w+\}/u);
     expect(copy).not.toMatch(/undefined/u);
-    steps.add('english-fallback', { copy });
-    await testInfo.attach('english-fallback.png', {
+    steps.add('english', { copy });
+    await testInfo.attach('english-slot.png', {
+      body: await arbiterControl(page).screenshot(),
+      contentType: 'image/png',
+    });
+
+    // The open menu is translated too, and it still drives the same action:
+    // enabling through the English menu reaches the backend unchanged.
+    await arbiterControl(page)
+      .getByRole('button', { name: /Auto review not enabled/u })
+      .click();
+    const menu = arbiterControl(page).getByRole('menu', {
+      name: 'Session permission',
+    });
+    await expect(menu).toBeVisible();
+    // A long English item must stay inside the menu instead of overflowing it.
+    const menuBox = await menu.boundingBox();
+    for (const item of await menu.getByRole('menuitemradio').all()) {
+      const box = await item.boundingBox();
+      if (box === null || menuBox === null) continue;
+      expect(box.x).toBeGreaterThanOrEqual(menuBox.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(
+        menuBox.x + menuBox.width + 1,
+      );
+    }
+    await menu
+      .getByRole('menuitemradio', { name: 'Auto review (Arbiter)' })
+      .click();
+    expect(
+      await waitForAdmission(
+        host,
+        session.sessionId,
+        (admission) => admission['enabled'] === true,
+      ),
+    ).not.toBeNull();
+    await expect(
+      arbiterControl(page).getByRole('button', {
+        name: /Auto review \(Arbiter · Workspace write\)/u,
+      }),
+    ).toBeVisible();
+    steps.add('enabled-in-english', {
+      copy: await arbiterControl(page).innerText(),
+    });
+    await testInfo.attach('english-enabled.png', {
       body: await arbiterControl(page).screenshot(),
       contentType: 'image/png',
     });

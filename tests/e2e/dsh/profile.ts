@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   stat,
@@ -217,6 +218,19 @@ export async function createIsolatedProfile(
   );
   await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages: []\n');
   await writeFile(join(profile, 'cordis.yml'), '[]\n');
+  /**
+   * A reused profile keeps the document the previous process left behind.
+   *
+   * A restart case is a cold restore, not a re-install: the plugin settings are
+   * part of the durable state under test. Rewriting the patch from the case
+   * options would silently discard a save the running host performed, which is
+   * exactly the state a recovery assertion has to observe.
+   */
+  const documentPath = join(profile, 'cordis.patch.yml');
+  if (options.reuse !== undefined) {
+    const existing = await readFile(documentPath, 'utf8').catch(() => null);
+    if (existing !== null) return { root, home, workspace, documentPath };
+  }
   const arbiterRow =
     options.arbiterConfig === 'unset'
       ? { id: 'arbiter', name: 'dsh-arbiter' }
@@ -253,10 +267,5 @@ export async function createIsolatedProfile(
       ...(options.extraRows ?? []),
     ]),
   );
-  return {
-    root,
-    home,
-    workspace,
-    documentPath: join(profile, 'cordis.patch.yml'),
-  };
+  return { root, home, workspace, documentPath };
 }
