@@ -368,6 +368,7 @@ class AstVisitor implements ExpansionSink {
         pipelineIndex: frame.pipeline,
         pipeTarget: null,
         cwd: frame.cwd,
+        repeated: frame.repeated,
       };
       this.collected.commands.push(command);
       this.ownCommand = commandIndex;

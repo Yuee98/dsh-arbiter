@@ -20,7 +20,7 @@ import {
 } from './constants.js';
 import { normalizePath, resolvePath } from './paths.js';
 import { isPlainPathValue } from './quote.js';
-import type { ShellCommand, ShellParse } from './types.js';
+import type { ShellCommand, ShellParse, ShellRedirect } from './types.js';
 
 export interface FactsOptions {
   readonly cwd: string;
@@ -73,25 +73,45 @@ function writeTargetAt(
   const value = word.value ?? '';
   return {
     target: value,
-    dynamic: !isPlainPathValue(value),
+    // A relative target written in a repeated body may resolve elsewhere on the
+    // next pass, so it is not reported as one confirmed path.
+    dynamic:
+      !isPlainPathValue(value) || (command.repeated && !value.startsWith('/')),
     cwd: command.cwd,
   };
+}
+
+/** Operators that redirect an input descriptor. */
+const INPUT_OPERATORS = new Set(['<', '<<', '<<-', '<<<', '<&', '<>']);
+
+/** Operators that redirect both stdout and stderr. */
+const BOTH_OPERATORS = new Set(['&>', '&>>']);
+
+/**
+ * Which descriptors one redirect takes away from an inherited pipe.
+ *
+ * The descriptor the operator acts on decides this, not the operator's
+ * characters: `1<&2` duplicates descriptor 2 onto stdout and so takes stdout off
+ * the pipe, while `2<file` reopens descriptor 2 and leaves stdin alone. A missing
+ * descriptor means the operator's default, which is stdin for an input operator
+ * and stdout otherwise.
+ */
+function affectedDescriptors(redirect: ShellRedirect): readonly number[] {
+  if (BOTH_OPERATORS.has(redirect.op)) return [1, 2];
+  if (redirect.descriptor !== null) return [redirect.descriptor];
+  return [INPUT_OPERATORS.has(redirect.op) ? 0 : 1];
 }
 
 /**
  * Whether this command's stdout still reaches the pipe it writes to.
  *
- * A redirect on stdout — the default descriptor for an output operator — sends the
- * bytes to a file instead, and a duplication `1>&2` moves stdout onto stderr. A
- * duplication `2>&1` moves stderr *onto* stdout and leaves stdout on the pipe.
+ * Any redirect acting on descriptor 1 takes stdout away — a file target
+ * (`> out`), a duplication (`1>&2`, `1<&2`) or a close. A duplication `2>&1`
+ * acts on descriptor 2 and leaves stdout on the pipe.
  */
 function pipeReceivesStdout(command: ShellCommand): boolean {
   for (const redirect of command.redirects) {
-    if (!redirect.op.includes('>')) continue;
-    if (redirect.descriptor !== null && redirect.descriptor !== 1) continue;
-    if (redirect.kind === 'file') return false;
-    // `1>&2`, `1>&-` and `>&2` take stdout away from the pipe too.
-    return false;
+    if (affectedDescriptors(redirect).includes(1)) return false;
   }
   return true;
 }
@@ -100,14 +120,12 @@ function pipeReceivesStdout(command: ShellCommand): boolean {
  * Whether the receiving command still reads its stdin from the pipe.
  *
  * `curl … | sh < script` builds the pipe, but `sh` reads the file instead of the
- * download. A here-string or here-doc on stdin replaces it the same way.
+ * download. A here-string or here-doc on stdin replaces it the same way, while
+ * `sh 2< /dev/null` reopens descriptor 2 and changes nothing about stdin.
  */
 function pipeFeedsStdin(command: ShellCommand): boolean {
   for (const redirect of command.redirects) {
-    if (redirect.op.startsWith('<<')) return false;
-    // An input redirect on the default descriptor (stdin) or on 0 replaces it.
-    if (redirect.op.includes('<') && !redirect.op.includes('>')) return false;
-    if (redirect.descriptor === 0) return false;
+    if (affectedDescriptors(redirect).includes(0)) return false;
   }
   return true;
 }
@@ -355,6 +373,9 @@ function factCompleteness(
   if (parse.completeness !== 'complete') return 'partial';
   if (parse.opaque) return 'partial';
   if (parse.unresolved.length > 0) return 'partial';
+  // A reported expansion risk means some write target could not be pinned to one
+  // location, so the observed set is not exhaustive even without a parse gap.
+  if (collected.expansionRisk !== null) return 'partial';
   if (collected.wordGap) return 'partial';
   if (collected.truncated) return 'partial';
   return 'complete';

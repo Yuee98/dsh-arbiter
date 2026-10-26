@@ -429,6 +429,22 @@ describe('redirects, assignments and cwd', () => {
     ).toBe('/tmp');
   });
 
+  test('a loop body write target is not one known path', () => {
+    // The same rule applies to a command argument, not only to a redirect: the
+    // second pass of this loop writes /tmp/out.txt.
+    const loop = factsOf(
+      'for i in 1 2; do touch out.txt; cd /tmp; done',
+      '/workspace',
+    );
+    expect(loop.facts.observed.writes).toEqual(['out.txt']);
+    expect(loop.facts.completeness).not.toBe('complete');
+    // An absolute argument is unaffected by the iteration.
+    expect(
+      factsOf('for i in 1 2; do touch /tmp/o.txt; done', '/workspace').facts
+        .observed.writes,
+    ).toEqual(['/tmp/o.txt']);
+  });
+
   test('a loop body write is not one known path', () => {
     // The structural subject is unconfirmed, and the facts layer must not report a
     // single confirmed path for it either.

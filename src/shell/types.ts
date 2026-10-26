@@ -100,6 +100,13 @@ export interface ShellCommand {
   readonly pipeTarget: number | null;
   /** Effective working directory when this command runs, or null when unknown. */
   readonly cwd: string | null;
+  /**
+   * True when this command sits in a body that may run more than once.
+   *
+   * Its relative write targets then resolve against a directory the previous pass
+   * may have moved, so they are not one confirmed path.
+   */
+  readonly repeated: boolean;
 }
 
 /** One reason the adapter could not account for the whole source. */
