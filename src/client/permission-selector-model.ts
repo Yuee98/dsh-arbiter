@@ -23,6 +23,7 @@ import {
   confirmed,
   confirmedWhileWriting,
   failed,
+  failedWhileWriting,
   failureFromAnswer,
   failureOf,
   queueRead,
@@ -79,8 +80,36 @@ interface FlowOps {
   readonly markError: (ticket: Ticket, error: unknown) => void;
   /** Apply a confirmation without releasing an in-flight mutation's busy flags. */
   readonly applyWhileWriting: (answer: SessionAdmissionResponse) => void;
+  /** Record a refusal without releasing an in-flight mutation's busy flags. */
+  readonly failWhileWriting: (failure: AdmissionFailure) => void;
   /** Release the busy flags: only the owning mutation may do this. */
   readonly markSettled: () => void;
+}
+
+/** Answers that arrive while a mutation owns the barrier. */
+function useWhileWriting(
+  setState: (update: (old: AdmissionState) => AdmissionState) => void,
+): {
+  readonly applyWhileWriting: (answer: SessionAdmissionResponse) => void;
+  readonly failWhileWriting: (failure: AdmissionFailure) => void;
+} {
+  const applyWhileWriting = useCallback(
+    (answer: SessionAdmissionResponse): void => {
+      if (!answer.ok) {
+        setState((old) => failed(old, failureFromAnswer(answer)));
+        return;
+      }
+      setState((old) => confirmedWhileWriting(old, answer.admission));
+    },
+    [setState],
+  );
+  const failWhileWriting = useCallback(
+    (failure: AdmissionFailure): void => {
+      setState((old) => failedWhileWriting(old, failure));
+    },
+    [setState],
+  );
+  return { applyWhileWriting, failWhileWriting };
 }
 
 /** Ticket-guarded answers; a superseded answer is dropped, never replayed. */
@@ -129,16 +158,7 @@ function useFlow(sessionId: string | undefined): {
   const markFailed = useCallback((failure: AdmissionFailure): void => {
     setState((old) => failed(old, failure));
   }, []);
-  const applyWhileWriting = useCallback(
-    (answer: SessionAdmissionResponse): void => {
-      if (!answer.ok) {
-        setState((old) => failed(old, failureFromAnswer(answer)));
-        return;
-      }
-      setState((old) => confirmedWhileWriting(old, answer.admission));
-    },
-    [],
-  );
+  const { applyWhileWriting, failWhileWriting } = useWhileWriting(setState);
   const markSettled = useCallback((): void => {
     setState((old) => settled(old));
   }, []);
@@ -161,11 +181,13 @@ function useFlow(sessionId: string | undefined): {
       markFailed,
       markError,
       applyWhileWriting,
+      failWhileWriting,
       markSettled,
     }),
     [
       apply,
       applyWhileWriting,
+      failWhileWriting,
       current,
       markError,
       markFailed,
@@ -293,8 +315,10 @@ async function reconcileSwitch(options: {
 
 interface Barrier {
   readonly writing: () => boolean;
-  readonly opened: () => void;
-  readonly closed: () => boolean;
+  /** Whether this ticket is the barrier's current owner. */
+  readonly owned: (ticket: Ticket) => boolean;
+  readonly opened: (ticket: Ticket) => void;
+  readonly closed: (ticket: Ticket) => boolean;
   readonly queue: () => void;
   /** Drop a queued read: the caller already reconciled authoritatively. */
   readonly clear: () => void;
@@ -338,7 +362,7 @@ function useAdmissionWrites(options: {
         return;
       }
       const ticket = ops.next();
-      barrier.opened();
+      barrier.opened(ticket);
       ops.markWriting();
       try {
         const answer = await setAdmission(sessionId, action);
@@ -347,8 +371,11 @@ function useAdmissionWrites(options: {
       } catch (error) {
         ops.markError(ticket, error);
       } finally {
-        if (barrier.closed()) await read();
-        if (ops.current(ticket)) ops.markSettled();
+        const owed = barrier.closed(ticket);
+        if (ops.current(ticket)) {
+          if (owed) await read();
+          ops.markSettled();
+        }
       }
     },
     [barrier, ops, read, sessionId],
@@ -370,7 +397,7 @@ function useAdmissionWrites(options: {
       // whether an admission exit is part of the expected outcome.
       const wasEnabled = view()?.enabled === true;
       const ticket = ops.next();
-      barrier.opened();
+      barrier.opened(ticket);
       ops.markWriting();
       setBusy(true);
       try {
@@ -401,14 +428,14 @@ function useAdmissionWrites(options: {
         ops.markError(ticket, error);
         return;
       } finally {
-        setBusy(false);
+        if (barrier.owned(ticket)) setBusy(false);
         // The switch already reconciled through `reconcile`; any read queued
         // during it is redundant and would clear the refusal just recorded.
-        barrier.clear();
-        barrier.closed();
-        // Ownership: an operation superseded by a newer one must not release
-        // the newer one's busy state.
-        if (ops.current(ticket)) ops.markSettled();
+        if (barrier.owned(ticket)) {
+          barrier.clear();
+          barrier.closed(ticket);
+          ops.markSettled();
+        }
       }
     },
     [barrier, bridge, ops, read, reconcileFor, sessionId, view],
@@ -475,7 +502,8 @@ function useReads(options: {
         // state, so an intermediate answer cannot make the control actionable.
         ops.applyWhileWriting(answer);
       } catch (error) {
-        ops.markError(ticket, error);
+        // Still the mutation's own decision: keep it busy.
+        if (ops.current(ticket)) ops.failWhileWriting(failureOf(error));
       }
     },
     [enabled, ops, sessionId],
@@ -507,19 +535,33 @@ export function useAdmission(options: {
    */
   const writingRef = useRef(false);
   const queuedRef = useRef(false);
+  /**
+   * Which mutation owns the barrier.
+   *
+   * Release is ownership-aware: an operation whose ticket has been superseded
+   * must not close a barrier that a newer operation now holds.
+   */
+  const ownerRef = useRef<Ticket | null>(null);
 
   /** The barrier: a read waits for the write and is then run exactly once. */
-  const barrier = useMemo(
+  const barrier = useMemo<Barrier>(
     () => ({
       writing: () => writingRef.current,
-      opened: () => {
+      owned: (ticket: Ticket) => ownerRef.current?.value === ticket.value,
+      opened: (ticket: Ticket) => {
         writingRef.current = true;
         queuedRef.current = false;
+        ownerRef.current = ticket;
       },
-      closed: (): boolean => {
+      closed: (ticket: Ticket): boolean => {
+        if (ownerRef.current?.value !== ticket.value) {
+          // Superseded: the barrier belongs to a newer mutation now.
+          return false;
+        }
         const owed = queuedRef.current;
         writingRef.current = false;
         queuedRef.current = false;
+        ownerRef.current = null;
         return owed;
       },
       queue: () => {

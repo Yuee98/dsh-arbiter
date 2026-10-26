@@ -1110,6 +1110,72 @@ describe('arbiter permission selector', () => {
     ).toBeInTheDocument();
   });
 
+  test('a failed reconciliation read keeps the control busy until the switch resolves', async () => {
+    let reads = 0;
+    let admitted = true;
+    let applied = false;
+    server.use(
+      http.get('*/api/arbiter/sessions', () => {
+        reads += 1;
+        // The first reconciliation read fails transiently; the switch has not
+        // been confirmed yet, so the control must not become actionable.
+        if (reads === 2) {
+          return HttpResponse.json(
+            { message: 'temporarily unavailable' },
+            { status: 500 },
+          );
+        }
+        return HttpResponse.json(
+          admitted
+            ? admission({ enabled: true, reason: 'session-enabled' })
+            : admission({ enabled: false }),
+        );
+      }),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          selectPreset: () => Promise.resolve(true),
+          hostPreset: () => ({
+            currentValue: applied ? 'read-only' : 'workspace-write',
+          }),
+        })}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
+    );
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        name: '只读',
+      }),
+    );
+
+    // During the failed read the control is still the mutation's: busy.
+    await waitFor(() => {
+      expect(reads).toBeGreaterThanOrEqual(2);
+    });
+    expect(
+      screen.getByRole('button', { name: '正在应用…' }),
+    ).toBeDisabled();
+
+    // The next read confirms the switch; the control becomes interactive once.
+    admitted = false;
+    applied = true;
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('button', { name: /未启用自动审查（只读）/u }),
+        ).toBeEnabled();
+      },
+      { timeout: 10_000 },
+    );
+    expect(
+      screen.queryByRole('button', { name: '正在应用…' }),
+    ).toBeNull();
+  }, 20_000);
+
   test('offers the host presets but never the auto or derived entries', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),

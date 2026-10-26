@@ -150,6 +150,21 @@ export function settled(state: AdmissionState): AdmissionState {
   return { ...state, pending: false, writing: false, readQueued: false };
 }
 
+/**
+ * A read inside a mutation failed.
+ *
+ * The refusal is recorded, but the mutation is still deciding: releasing the
+ * busy flags here would make the control actionable while its own bounded
+ * confirmation is still running, which is exactly the overlap the barrier
+ * exists to prevent. Only the owning mutation's settle releases them.
+ */
+export function failedWhileWriting(
+  state: AdmissionState,
+  failure: AdmissionFailure,
+): AdmissionState {
+  return { ...state, pending: true, failure, writing: true };
+}
+
 /** A failure keeps the last confirmed view: the requested value never lands. */
 export function failed(
   state: AdmissionState,
