@@ -7,6 +7,8 @@ import { Button, Section } from '../components/controls.js';
 import { RuleList } from '../components/rules/rule-list.js';
 import { RuleTest } from '../components/rules/rule-test.js';
 import { addRule, nextRuleId } from '../components/rules/draft.js';
+import { focusConditionField } from '../components/rules/rule-issue-locate.js';
+import type { LocateRequest } from '../components/rules/rule-issue-locate.js';
 
 /**
  * Rule management: the list, the inline editor and the tester entry.
@@ -22,6 +24,11 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [locateRequest, setLocateRequest] = useState<LocateRequest>({
+    ruleId: null,
+    conditionIndex: null,
+    nonce: 0,
+  });
 
   // A row is identified by its stable id, so reordering keeps it open; only
   // removing the rule clears the selection.
@@ -35,6 +42,17 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
 
   const focusedRule: DraftRule | null =
     draft.rules.find((rule) => rule.id === focusedId) ?? null;
+
+  // Selecting the rule expands its editor; this puts the caret in the field the
+  // rejected issue actually names. It runs after the expanded body is rendered,
+  // and only reads the editor's own row and accessible labels.
+  useEffect(() => {
+    if (locateRequest.nonce === 0) return;
+    focusConditionField(locateRequest, {
+      condition: (index) => t('rules.conditionIndex', { index: index + 1 }),
+      jsonPath: t('rules.jsonPath'),
+    });
+  }, [locateRequest, t]);
 
   return (
     <>
@@ -81,6 +99,19 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
         draft={draft}
         focusedRule={focusedRule}
         focusRequest={focusRequest}
+        // A rejected selector names its rule by stable id, resolved when the
+        // error arrived, so a later insert or reorder cannot retarget it.
+        // Selecting the rule expands its editor, which owns the condition
+        // fields and their focus.
+        onLocateIssue={(target) => {
+          if (target.ruleId === null) return;
+          setSelectedId(target.ruleId);
+          setLocateRequest({
+            ruleId: target.ruleId,
+            conditionIndex: target.conditionIndex,
+            nonce: locateRequest.nonce + 1,
+          });
+        }}
       />
     </>
   );

@@ -26,7 +26,13 @@ export interface RuleDraftResult {
 }
 
 /**
- * Validate draft rules submitted to the rule tester.
+ * Validate the draft rules submitted to the rule tester.
+ *
+ * The whole array is parsed once, as one canonical document, because rule errors
+ * are not always local: a duplicate id is only visible across rules, and the
+ * reported path (`rules[N]...`) must be the rule's real position. Parsing each
+ * rule in isolation would both miss that conflict and renumber every later rule
+ * to index 0, so the page would point at the wrong condition.
  *
  * A draft is canonical by definition, so it is declared as the canonical format
  * instead of being parsed as an undeclared (legacy) document. Parsing it as
@@ -39,7 +45,22 @@ export interface RuleDraftResult {
  * visible failure.
  */
 export function asRuleDraft(value: unknown): RuleDraftResult {
-  const parsed = parseConfig({ format: CONFIG_FORMAT_V2, rules: [value] });
+  // A supplied but non-array `rules` is a malformed request, not a draft with no
+  // rules: falling back to the effective rules would test a configuration the
+  // user never submitted.
+  if (!Array.isArray(value)) {
+    return {
+      rules: [],
+      errors: [
+        {
+          path: 'rules',
+          message: 'must be an array',
+          code: 'type.array',
+        },
+      ],
+    };
+  }
+  const parsed = parseConfig({ format: CONFIG_FORMAT_V2, rules: value });
   return {
     rules: parsed.errors.length > 0 ? [] : parsed.config.rules,
     errors: parsed.errors,

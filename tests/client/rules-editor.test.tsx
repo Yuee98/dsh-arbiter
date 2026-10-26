@@ -767,8 +767,13 @@ describe('rule list header and inline editing', () => {
     );
     await user.click(within(row(id)).getByRole('button', { name: '测试' }));
 
-    expect(await screen.findByText('聚焦规则：只读查询')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: '输入' })).toHaveFocus();
+    // The tester is only a focus request: the block opens, carries the rule it
+    // answers about, and no sample is submitted until the operator asks.
+    expect(await screen.findByTestId('rule-test-body')).toBeVisible();
+    expect(screen.getByTestId('rule-test-body')).toHaveFocus();
+    expect(screen.getByTestId('rule-test-target')).toHaveTextContent(
+      '只读查询',
+    );
     expect(tests).toBe(0);
   });
 });
@@ -1158,5 +1163,84 @@ describe('rule validation feedback', () => {
     expect(screen.getByTestId('arbiter-save-status')).toHaveTextContent(
       '保存或应用失败；当前生效配置未改变。',
     );
+  });
+});
+
+/**
+ * The rule tester's rejected-selector action, through the real panel.
+ *
+ * The tester reports `rules[N].conditions[M].path`; this proves the action from
+ * the tester reaches the editor that owns that field — the rule expands and the
+ * JSONPath input for that exact condition takes focus. It is the integration
+ * point between the two components, not a second test of either one.
+ */
+describe('rule tester selector location', () => {
+  test('a rejected selector focuses the condition that owns it', async () => {
+    baseHandlers();
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          {
+            ok: false,
+            code: 'invalid-rule',
+            message: 'the submitted rules are not valid',
+            errors: [
+              {
+                // The second rule's second condition, so a wrong index would be
+                // visible as the wrong rule or the wrong condition.
+                path: 'rules[1].conditions[1].path',
+                message: 'invalid JSONPath: unexpected token',
+                code: 'rule.path-invalid',
+              },
+            ],
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+    const user = await openRules();
+
+    // Two rules, each with two OR conditions; the second condition of the second
+    // rule is the one the backend rejects.
+    const first = await addRule(user);
+    await user.click(
+      within(row(first)).getByRole('button', { name: '添加条件（或）' }),
+    );
+    const second = await addRule(user);
+    await user.click(
+      within(row(second)).getByRole('button', { name: '添加条件（或）' }),
+    );
+    const groups = conditionGroups(second);
+    expect(groups).toHaveLength(2);
+    const target = groups[1];
+    if (target === undefined) throw new Error('missing second condition');
+    await user.selectOptions(
+      within(target).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    const jsonPath = within(target).getByRole('textbox', { name: 'JSONPath' });
+    await user.click(jsonPath);
+    await user.paste('$.');
+
+    // Run from the tester for the first rule; the rejection belongs to the
+    // second one, so locating it has to move as well as expand.
+    await user.click(within(row(first)).getByRole('button', { name: '测试' }));
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    const locate = await screen.findByRole('button', {
+      name: '定位到 rules[1].conditions[1].path',
+    });
+    await user.click(locate);
+
+    // The owning rule is expanded and the exact condition's JSONPath field has
+    // focus; neither the first rule nor the first condition would do.
+    await waitFor(() => {
+      expect(
+        within(row(second)).getByRole('textbox', { name: 'JSONPath' }),
+      ).toBeVisible();
+    });
+    expect(jsonPath).toHaveFocus();
+    expect(
+      within(row(first)).queryByRole('textbox', { name: 'JSONPath' }),
+    ).toBeNull();
   });
 });

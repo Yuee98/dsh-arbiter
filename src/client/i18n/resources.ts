@@ -6,6 +6,7 @@ import zhAdvanced from '../../../locale/zh/advanced.json' with { type: 'json' };
 import zhLogs from '../../../locale/zh/logs.json' with { type: 'json' };
 import zhReviewer from '../../../locale/zh/reviewer.json' with { type: 'json' };
 import zhRules from '../../../locale/zh/rules.json' with { type: 'json' };
+import zhRuleTest from '../../../locale/zh/ruleTest.json' with { type: 'json' };
 import zhStatus from '../../../locale/zh/status.json' with { type: 'json' };
 import enCommon from '../../../locale/en/common.json' with { type: 'json' };
 
@@ -20,6 +21,7 @@ export const localeResources = {
     logs: zhLogs,
     reviewer: zhReviewer,
     rules: zhRules,
+    ruleTest: zhRuleTest,
     status: zhStatus,
   },
   en: {

@@ -1,5 +1,10 @@
 import type { ComponentType } from 'react';
-import type { ArbiterConfig, CommandRule } from '../types.js';
+import type {
+  ArbiterConfig,
+  CommandRule,
+  RulePath,
+  RuleTestResult,
+} from '../types.js';
 import type { LocaleService } from './i18n.js';
 import type { ConfigIssueView } from './view-issues.js';
 
@@ -13,6 +18,19 @@ export type Mutable<T> = {
 
 export type Draft = Mutable<ArbiterConfig>;
 export type DraftRule = Mutable<CommandRule>;
+
+/**
+ * One tester answer.
+ *
+ * `pathDetail` is the evaluator's structured rule path; the host sends it next
+ * to the legacy `path` word so the page can explain a `review(default)` reason
+ * without re-deriving priority. `cwd` is the directory the evaluation actually
+ * used, so a relative-path answer is reproducible.
+ */
+export interface RuleTestResultView extends RuleTestResult {
+  readonly pathDetail: RulePath;
+  readonly cwd: string;
+}
 
 export interface AuditHealthView {
   readonly state: 'ok' | 'degraded' | 'unavailable' | 'disabled';

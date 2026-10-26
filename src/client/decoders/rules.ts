@@ -1,9 +1,10 @@
 import type {
   RuleConditionResult,
   RuleMatchDetail,
+  RulePath,
   RuleResult,
-  RuleTestResult,
 } from '../../types.js';
+import type { RuleTestResultView } from '../view-types.js';
 import { ruleKind, ruleMulti, ruleTarget, ruleVerdict } from './config.js';
 import {
   array,
@@ -108,18 +109,50 @@ function ruleMatch(value: unknown): RuleMatchDetail {
   };
 }
 
-function ruleTest(value: unknown): RuleTestResult {
+/**
+ * The structured rule path.
+ *
+ * It is required, not optional: the word alone cannot tell `no-match` from
+ * `incomplete`, `unresolved` or `partial-allow`, and the page must not invent
+ * one of those reasons. The bundled client and host are deployed together, so a
+ * missing `pathDetail` is a broken response rather than an older-version case.
+ */
+function rulePath(value: unknown): RulePath {
+  const source = object(value);
+  if (field(source, 'kind', text) === 'rule') {
+    const hint = field(source, 'hint', optional(text));
+    return {
+      kind: 'rule',
+      verdict: field(source, 'verdict', ruleVerdict),
+      ruleId: field(source, 'ruleId', text),
+      ...(hint === undefined ? {} : { hint }),
+    };
+  }
+  return {
+    kind: 'review-default',
+    reason: field(
+      source,
+      'reason',
+      choice('no-match', 'incomplete', 'unresolved', 'partial-allow'),
+    ),
+  };
+}
+
+function ruleTest(value: unknown): RuleTestResultView {
   const source = object(value);
   const parse = field(source, 'parse', object);
   const error = field(source, 'error', optional(text));
+  const path = field(
+    source,
+    'path',
+    choice('allow', 'deny', 'force-ask', 'force-review', 'review(default)'),
+  );
   return {
     input: field(source, 'input', text),
     tool: field(source, 'tool', text),
-    path: field(
-      source,
-      'path',
-      choice('allow', 'deny', 'force-ask', 'force-review', 'review(default)'),
-    ),
+    path,
+    pathDetail: rulePath(source['pathDetail']),
+    cwd: field(source, 'cwd', text),
     rule: field(source, 'rule', nullable(ruleMatch)),
     matches: field(source, 'matches', array(ruleMatch)),
     rules: field(source, 'rules', array(ruleResult)),
