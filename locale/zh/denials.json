@@ -4,7 +4,7 @@
   "source": {
     "rule": "规则拒绝",
     "review": "审查拒绝",
-    "fallback": "无人工审批通道",
+    "fallback": "兜底拒绝",
     "human": "用户拒绝",
     "abort": "审批未决结束",
     "boundary": "边界未确认",
@@ -15,5 +15,6 @@
   "action": {
     "detail": "查看详情",
     "closeDetail": "收起详情"
-  }
+  },
+  "minimalSource": "当前会话记录"
 }

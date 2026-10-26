@@ -64,7 +64,15 @@ export function DenialRow(props: {
         display: 'flex',
         flexDirection: 'column',
         gap: 6,
+        // A Chat row is placed inside the host's own flow item, whose body may
+        // be a zero-height container. Owning an explicit block size and margin
+        // keeps the row measurable and clickable there instead of relying on a
+        // parent that collapses.
+        margin: '4px 0',
         padding: '6px 10px',
+        minHeight: 32,
+        boxSizing: 'border-box',
+        alignSelf: 'stretch',
         // Amber is the requested "Arbiter refused this" cue. It is derived from
         // the host's own warning tone so light and dark themes both keep a
         // readable contrast instead of pinning one literal orange.
@@ -140,7 +148,19 @@ export function DenialRow(props: {
       </div>
       {open ? (
         <div id={regionId} style={{ paddingTop: 4 }}>
-          <CallDetailPanel callId={props.callId} />
+          <CallDetailPanel
+            callId={props.callId}
+            // The row already holds this call's recorded tool and reason. When
+            // the audit store and the decision history both lack the call (a
+            // boundary refusal or a teardown fallback never writes one), the
+            // panel shows these as the minimal verdict rather than only saying
+            // the record is gone.
+            fallback={{
+              tool: props.tool,
+              sourceLabel: t('denials.minimalSource'),
+              reason: props.denial.fullReason ?? t('denials.reasonMissing'),
+            }}
+          />
         </div>
       ) : null}
     </div>

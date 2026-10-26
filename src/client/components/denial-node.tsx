@@ -20,7 +20,10 @@ import type { ReactNode } from 'react';
 
 import type { ArbiterI18n } from '../i18n.js';
 import { ArbiterI18nProvider } from '../i18n-provider.js';
-import type { ConversationDefinitionPort } from '../view-types.js';
+import type {
+  ConversationDefinitionPort,
+  ConversationLocationPort,
+} from '../view-types.js';
 import { denialOf } from '../decoders/denials.js';
 import { DenialRow } from './denial-row.js';
 
@@ -41,7 +44,8 @@ export interface SessionDenialNode {
   readonly id: string;
   readonly target: string;
   readonly anchorSeq: number;
-  readonly location: { readonly kind: 'session' };
+  /** The engine's own Turn/Step placement, so the row folds with its Turn. */
+  readonly location: ConversationLocationPort;
   readonly visibility: 'visible';
   readonly data: SessionDenialData;
 }
@@ -116,7 +120,10 @@ export const denialDefinition: ConversationDefinitionPort<
       id: context.id,
       target: 'chat',
       anchorSeq,
-      location: { kind: 'session' },
+      // Carry the engine's placement through unchanged. Reporting `session`
+      // here would detach the row from the Turn that issued the call, so Turn
+      // folding could not reach it and it would outlive the collapsed process.
+      location: context.start.location ?? { kind: 'unresolved' },
       visibility: 'visible',
       data: context.state,
     };

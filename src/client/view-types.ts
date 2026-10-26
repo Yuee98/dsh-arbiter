@@ -501,6 +501,20 @@ export interface SlotProps {
  * `chat` target. The engine owns paging, Turn/Step placement and incremental
  * assembly, so the plugin never folds session events itself.
  */
+/**
+ * The Turn/Step a matched event was placed in, as the engine resolved it.
+ *
+ * `anchorSeq` alone only orders a row; the host groups and folds rows by their
+ * Turn/Step membership, so a row that reports no placement is treated as a
+ * session-level node and escapes its Turn's collapsing. This plugin therefore
+ * carries the engine's own location through instead of substituting a constant.
+ */
+export type ConversationLocationPort =
+  | { readonly kind: 'session' }
+  | { readonly kind: 'turn'; readonly turn: unknown }
+  | { readonly kind: 'step'; readonly turn: unknown; readonly step: unknown }
+  | { readonly kind: 'unresolved' };
+
 export interface ConversationDefinitionPort<State, Node> {
   readonly kind: string;
   readonly target: string;
@@ -511,7 +525,16 @@ export interface ConversationDefinitionPort<State, Node> {
     readonly key: string;
     readonly id: string;
     readonly state: State | undefined;
-    readonly start: { readonly event: unknown } | undefined;
+    readonly start:
+      | {
+          readonly event: unknown;
+          /**
+           * Resolved placement; absent only if a caller omits it, which the
+           * engine never does for a matched event.
+           */
+          readonly location?: ConversationLocationPort;
+        }
+      | undefined;
   }): Node | null;
 }
 

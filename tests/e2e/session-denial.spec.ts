@@ -19,7 +19,7 @@
  *     their own committed results rather than by timing.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -29,6 +29,31 @@ import type { DshHost } from './dsh/host.js';
 import { waitForSession, type LoggedSession } from './dsh/session-log.js';
 
 const FORMAT = 'arbiter-config-v2';
+
+/**
+ * Wait until one recorded model request contains `predicate`.
+ *
+ * The fixture writes one JSON file per conversation request, so the agent's
+ * actual next request is a durable observation rather than a timing guess.
+ */
+async function waitForFile(
+  directory: string,
+  predicate: (text: string) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const files = await readdir(directory).catch(() => [] as string[]);
+    for (const file of files.sort()) {
+      const text = await readFile(join(directory, file), 'utf8').catch(
+        () => '',
+      );
+      if (predicate(text)) return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
+}
 
 /** A deny rule for the fixture's marked `bash` command. */
 function denyCommandRule(id: string, pattern: string): Record<string, unknown> {
@@ -75,6 +100,58 @@ async function sendPrompt(page: Page, text: string): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
+/**
+ * Reveal one settled Turn's process rows through the host's own controls.
+ *
+ * A completed Turn folds its calls behind two disclosures: the Turn-level
+ * "worked / finished" control, then the step-process group header. Both are the
+ * host's normal reading interactions, and the denial row is inside that group
+ * because it carries the same Turn/Step placement as the call it marks — which
+ * is exactly the behaviour this case needs to observe.
+ */
+async function revealTurnProcess(page: Page, callId: string): Promise<void> {
+  // The group header is the first control inside the group root; the tool rows
+  // and the denial row's own button are descendants, so scope the click to the
+  // header instead of picking any button in the group.
+  const state = () =>
+    page.evaluate((id: string) => {
+      const row = document.querySelector(`[data-arbiter-row="${id}"]`);
+      const item = row?.closest('[data-turn-process-member]');
+      const group = row?.closest('[data-step-process]');
+      const body = group?.querySelector('[data-step-process-body]');
+      const header = group?.querySelector(':scope > div:first-child button');
+      return {
+        hidden: item?.hasAttribute('hidden') ?? true,
+        bodyHidden: body?.hasAttribute('hidden') ?? true,
+        headerExpanded: header?.getAttribute('aria-expanded') ?? null,
+      };
+    }, callId);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const current = await state();
+    if (!current.hidden && !current.bodyHidden) return;
+    if (current.hidden) {
+      // The completed Turn is folded at the Turn level first.
+      const outer = page
+        .getByRole('button', {
+          name: /已完成，用时|进行中|Finished in|Worked/u,
+        })
+        .last();
+      if (await outer.isVisible().catch(() => false))
+        await outer.click({ timeout: 5000 }).catch(() => undefined);
+      continue;
+    }
+    // Then the step-process group itself is collapsed.
+    const header = page
+      .locator('[data-step-process]')
+      .last()
+      .locator(':scope > div:first-child button')
+      .first();
+    if (await header.isVisible().catch(() => false))
+      await header.click({ timeout: 5000 }).catch(() => undefined);
+  }
+}
+
 /** Wait for the session carrying `marker` and for its turn to settle. */
 async function settledSession(
   host: DshHost,
@@ -98,6 +175,36 @@ async function settledSession(
     timeoutMs,
   );
   return settled ?? started;
+}
+
+/**
+ * Whether one recorded result is a failure.
+ *
+ * The host records that on the tool message (`data.message.isError`), beside the
+ * role and the call identity — not on the event data itself. Reading the wrong
+ * level would let a failed-but-not-denied call pass as a success.
+ */
+function isFailedResult(result: Readonly<Record<string, unknown>>): boolean {
+  const message = result['message'];
+  if (typeof message !== 'object' || message === null) return false;
+  const bag: Readonly<Record<string, unknown>> = { ...message };
+  return bag['isError'] === true;
+}
+
+/** The text one recorded result carried, as the log stored it. */
+function resultText(result: Readonly<Record<string, unknown>>): string {
+  const message = result['message'];
+  if (typeof message !== 'object' || message === null) return '';
+  const bag: Readonly<Record<string, unknown>> = { ...message };
+  const content = bag['content'];
+  if (!Array.isArray(content)) return '';
+  return content
+    .flatMap((block: unknown) => {
+      if (typeof block !== 'object' || block === null) return [];
+      const blockBag: Readonly<Record<string, unknown>> = { ...block };
+      return typeof blockBag['text'] === 'string' ? [blockBag['text']] : [];
+    })
+    .join('\n');
 }
 
 /**
@@ -232,6 +339,16 @@ test.describe('session denial feedback', () => {
       expect(denial.reason).toContain('deny-rule');
       expect(denial.reason).toContain('a deny rule matched this call');
 
+      // Reveal the settled Turn's process rows first. The row carries the same
+      // Turn/Step placement as the call it belongs to, so the host's own
+      // "worked" disclosure contains it — that shared membership is what makes
+      // it a marker on this call rather than a session-level notice.
+      await revealTurnProcess(page, denial.callId);
+      // The row is now inside a rendered Turn body, not merely in the DOM.
+      await expect(
+        page.locator(`[data-arbiter-row="${denial.callId}"]`),
+      ).toBeVisible();
+
       // The marker renders in the real conversation at that call position.
       const marker = page.locator('[data-arbiter-denial]');
       await expect(marker).toHaveCount(1);
@@ -250,7 +367,7 @@ test.describe('session denial feedback', () => {
 
       // The detail entry opens the same component the log list opens, for this
       // exact call id.
-      await row.getByRole('button', { name: '查看详情' }).click();
+      await page.locator('[data-arbiter-row] button').click({ timeout: 8000 });
       await expect(page.getByText(`调用详情 · ${denial.callId}`)).toBeVisible();
       // The session record is the minimal verdict: the shared panel must say
       // which layers are missing instead of rendering an empty detail.
@@ -311,7 +428,7 @@ test.describe('session denial feedback', () => {
             return placed.some(
               (executed) =>
                 denialOf(executed.result) === null &&
-                executed.result['isError'] !== true &&
+                !isFailedResult(executed.result) &&
                 executed.turn === refused.turn &&
                 executed.step === refused.step &&
                 executed.callId !== refused.callId,
@@ -335,27 +452,53 @@ test.describe('session denial feedback', () => {
       const sibling = placed.find(
         (entry) =>
           denialOf(entry.result) === null &&
-          entry.result['isError'] !== true &&
+          !isFailedResult(entry.result) &&
           entry.turn === refusal.turn &&
           entry.step === refusal.step &&
           entry.callId !== refusal.callId,
       );
       expect(sibling).toBeDefined();
-      expect(sibling?.callId).not.toBe(refusal.callId);
-      const refused = refusedPlaced.map((entry) => entry.result);
+      if (sibling === undefined) throw new Error('no sibling call in step');
+      expect(sibling.callId).not.toBe(refusal.callId);
 
-      // The turn continued to completion rather than being ended by the denial.
-      expect(session.events.some((event) => event.type === 'turn/end')).toBe(
-        true,
+      // The sibling genuinely executed: it recorded output of its own command,
+      // so "parallel calls keep running" is not inferred from a silent success.
+      expect(resultText(sibling.result)).toContain(
+        'arbiter-parallel-allowed-two',
       );
+
+      // The denial belongs to this turn, and *this* turn reached its own end
+      // event: a warm-up turn's `turn/end` must not satisfy this.
+      expect(refusal.turn).not.toBeNull();
+      const endedTurn = session.events.some((event) => {
+        if (event.type !== 'turn/end') return false;
+        const data: unknown = event.data;
+        return (
+          typeof data === 'object' &&
+          data !== null &&
+          Reflect.get(data, 'turn') === refusal.turn
+        );
+      });
+      expect(endedTurn).toBe(true);
 
       // The agent received the refusal text and went on: the tool result the
       // model saw carries the stage tag, not an empty or generic error.
-      const modelFacing = refused.map((result) => JSON.stringify(result));
-      expect(modelFacing.some((text) => text.includes('Not executed'))).toBe(
+      const refusedTexts = refusedPlaced.map((entry) =>
+        resultText(entry.result),
+      );
+      expect(refusedTexts.some((text) => text.includes('Not executed'))).toBe(
         true,
       );
-      expect(modelFacing.some((text) => text.includes('deny-rule'))).toBe(true);
+      expect(refusedTexts.some((text) => text.includes('deny-rule'))).toBe(
+        true,
+      );
+      // The next model request proves the reason reached the agent.
+      const nextRequest = await waitForFile(
+        join(testInfo.outputPath('dsh-parallel'), 'requests'),
+        (text) => text.includes('Not executed') || text.includes('deny-rule'),
+        120_000,
+      );
+      expect(nextRequest).toBe(true);
 
       // Only the refused call has a marker; the executed one has none.
       await expect(page.locator('[data-arbiter-denial]')).toHaveCount(1);

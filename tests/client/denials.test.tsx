@@ -34,7 +34,10 @@ import {
 } from '../../src/client/components/denial-node.js';
 import { createArbiterI18n } from '../../src/client/i18n.js';
 import { createTestLocale } from '../helpers/test-locale.js';
-import type { ArbiterDenialView } from '../../src/client/view-types.js';
+import type {
+  ArbiterDenialView,
+  ConversationLocationPort,
+} from '../../src/client/view-types.js';
 
 const server = setupApiMock();
 
@@ -304,9 +307,12 @@ describe('the denial row', () => {
     expect(screen.queryByText('用户拒绝')).toBeNull();
   });
 
-  test('distinguishes an unavailable channel from a person saying no', () => {
+  test('names a fallback denial without presuming which channel failed', () => {
+    // A fallback covers a missing approval channel *and* a teardown whose
+    // boundary could not be restored, so the generic label must not claim the
+    // first cause; the recorded reason explains which one it was.
     renderDenial({ reason: FALLBACK_REASON });
-    expect(screen.getByText('无人工审批通道')).toBeInTheDocument();
+    expect(screen.getByText('兜底拒绝')).toBeInTheDocument();
     expect(screen.queryByText(/用户拒绍|用户拒绝/u)).toBeNull();
     expect(document.body.textContent).not.toMatch(/用户拒绍|用户拒绝/u);
   });
@@ -468,8 +474,13 @@ describe('the session Definition', () => {
       tool: 'read',
       reason: REVIEW_REASON,
     });
-    const nodeOf = (event: Record<string, unknown>, seq: number) => {
-      const start = { event: { ...event, seq } };
+    const step = { turn: { turn: 3 }, step: { step: 2 } };
+    const nodeOf = (
+      event: Record<string, unknown>,
+      seq: number,
+      location: ConversationLocationPort,
+    ) => {
+      const start = { event: { ...event, seq }, location };
       const state = denialDefinition.start({}, start);
       return denialDefinition.buildViewNode({
         key: `arbiter-denial:${state.callId}`,
@@ -478,8 +489,8 @@ describe('the session Definition', () => {
         start,
       });
     };
-    const a = nodeOf(first, 12);
-    const b = nodeOf(second, 15);
+    const a = nodeOf(first, 12, { kind: 'step', ...step });
+    const b = nodeOf(second, 15, { kind: 'step', ...step });
     expect(a?.id).toBe('call-first');
     expect(b?.id).toBe('call-second');
     // Each row sorts by its own result seq and keeps its own tool, so an
@@ -488,6 +499,11 @@ describe('the session Definition', () => {
     expect(b?.anchorSeq).toBe(15);
     expect(a?.data.tool).toBe('bash');
     expect(b?.data.tool).toBe('read');
+    // The engine's Turn/Step placement travels through unchanged, so the row
+    // participates in its Turn's grouping and folding rather than sitting at
+    // session level.
+    expect(a?.location).toEqual({ kind: 'step', ...step });
+    expect(b?.location).toEqual({ kind: 'step', ...step });
     expect(a?.kind).toBe(DENIAL_NODE_KIND);
   });
 
@@ -513,6 +529,38 @@ describe('the session Definition', () => {
 });
 
 describe('the denial detail fallback', () => {
+  test('a boundary refusal with no audit or decision record still explains itself', async () => {
+    // `boundary-unconfirmed` (and a teardown fallback) return `deny()` without
+    // settling, so neither an audit row nor a decision record exists. The row's
+    // own recorded facts must still reach the shared panel.
+    server.use(
+      http.get('*/api/arbiter/log', () =>
+        HttpResponse.json(
+          { ok: false, code: 'record-unavailable' },
+          { status: 404 },
+        ),
+      ),
+    );
+    const reason =
+      'Not executed [boundary-unconfirmed]: the guarded boundary could not be confirmed on this session, so this call is refused rather than approved under a wider host permission.';
+    const { user } = renderDenial({ callId: 'call-boundary', reason });
+    expect(screen.getByText('边界未确认')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看详情' }));
+    expect(await screen.findByText(/没有找到这条调用/u)).toBeInTheDocument();
+    // The minimal verdict is the session's own record, labelled as such and
+    // free of invented stages or materials.
+    const fallback = await screen.findByText('最小裁决记录');
+    expect(fallback).toBeInTheDocument();
+    expect(screen.getByText(/当前会话记录 · bash/u)).toBeInTheDocument();
+    // The reason appears twice on purpose: once on the row, once in the minimal
+    // verdict. Neither is a paraphrase.
+    expect(
+      screen.getAllByText(/boundary could not be confirmed/u),
+    ).toHaveLength(2);
+    // No fabricated chain section appears for a call that has no stored one.
+    expect(screen.queryByText('判定依据')).toBeNull();
+  });
+
   test('a session-sourced minimal record still explains the verdict', async () => {
     mockDetail('call-min', 'review-deny');
     const { user } = renderDenial({
