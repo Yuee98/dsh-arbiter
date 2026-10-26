@@ -546,15 +546,22 @@ describe('missing approval channel', () => {
 describe('parallel independent calls', () => {
   test('two calls in one session settle independently', async () => {
     const session = makeSession('p-session');
-    const answers: ((answer: 'allowed-once' | 'rejected') => void)[] = [];
+    // Key answers by call id, not by arrival position: both calls are in flight
+    // at once, and which one reaches the approval channel first is not part of
+    // the contract. Ordering by index made this test depend on scheduler
+    // timing, so an early arrival for p2 was answered as if it were p1.
+    const answers = new Map<
+      string,
+      (answer: 'allowed-once' | 'rejected') => void
+    >();
     const harness = createHarness({
       sessions: [session],
       llm: chatAnswer({ risk: 7, authorized: 2 }),
       approval: {
         config: { policy: 'ask' },
-        request: () =>
+        request: (request) =>
           new Promise((resolve) => {
-            answers.push((answer) => {
+            answers.set(String(request.callId), (answer) => {
               resolve(answer);
             });
           }),
@@ -563,13 +570,15 @@ describe('parallel independent calls', () => {
     try {
       const first = harness.gate(call(session, 'p1'), allowNext);
       const second = harness.gate(call(session, 'p2'), allowNext);
-      for (let attempt = 0; attempt < 100 && answers.length < 2; attempt += 1) {
+      for (let attempt = 0; attempt < 100 && answers.size < 2; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      expect(answers).toHaveLength(2);
-      // Answer them in the opposite order they were asked.
-      answers[1]?.('rejected');
-      answers[0]?.('allowed-once');
+      expect(answers.size).toBe(2);
+      // Answer them in the opposite order they were asked, addressed by call
+      // id so arrival order cannot decide which call gets which answer.
+      expect([...answers.keys()].sort()).toEqual(['p1', 'p2']);
+      answers.get('p2')?.('rejected');
+      answers.get('p1')?.('allowed-once');
       expect((await first).kind).toBe('allow');
       expect((await second).kind).toBe('deny');
       expect(await storedTrace('p1')).toContain('human-allow');
