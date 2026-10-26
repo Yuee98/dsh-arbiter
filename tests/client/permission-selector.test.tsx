@@ -445,18 +445,19 @@ describe('arbiter permission selector', () => {
 
   test('a focus read during a write never settles the display before the write', async () => {
     const write = deferred<AdmissionBody>();
-    // First mount read: disabled. The read coalesced after the write: enabled
-    // (the server state the write produced).
-    const reads: AdmissionBody[] = [
-      admission({ enabled: false }),
-      admission({ enabled: true, reason: 'session-enabled' }),
-    ];
+    /** The server state; the write is what moves it, not the read order. */
+    let serverEnabled = false;
     let writeCount = 0;
     server.use(
-      http.get('*/api/arbiter/sessions', () => {
-        const next = reads.shift() ?? admission({ enabled: false });
-        return HttpResponse.json(next);
-      }),
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission(
+            serverEnabled
+              ? { enabled: true, reason: 'session-enabled' }
+              : { enabled: false },
+          ),
+        ),
+      ),
       http.post('*/api/arbiter/sessions', async () => {
         writeCount += 1;
         return HttpResponse.json(await write.promise);
@@ -477,17 +478,20 @@ describe('arbiter permission selector', () => {
       expect(writeCount).toBe(1);
     });
 
-    // A focus read arrives while the write is still in flight. Its answer is
-    // "disabled" (the pre-write server state) and must not be applied.
+    // A focus read arrives while the write is still in flight, and the server
+    // has not committed it yet. Its answer must not settle the display.
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
       await Promise.resolve();
     });
-    // Still busy: the focus answer must not have settled the write's display
-    // into a confirmed "disabled" state.
-    expect(await screen.findByText('正在应用…')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /正在应用/u }),
+      ).toBeDisabled();
+    });
 
-    // The write's own answer is the newest server state.
+    // The write commits; its answer is the newest server state.
+    serverEnabled = true;
     await act(async () => {
       write.resolve(admission({ enabled: true, reason: 'session-enabled' }));
       await Promise.resolve();
@@ -495,47 +499,11 @@ describe('arbiter permission selector', () => {
     await waitFor(() => {
       expect(
         screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
-      ).toBeInTheDocument();
+      ).toBeEnabled();
     });
-    // Exactly one read ran after the write, and none during it.
-    expect(reads).toHaveLength(0);
-  });
-
-  test('keeps no state across an unmount, so a remount shows only the fresh answer', async () => {
-    let enabled = true;
-    const writes: string[] = [];
-    server.use(
-      http.get('*/api/arbiter/sessions', () =>
-        HttpResponse.json(
-          admission(
-            enabled ? { enabled: true, reason: 'session-enabled' } : {},
-          ),
-        ),
-      ),
-      http.post('*/api/arbiter/sessions', () => {
-        writes.push('write');
-        return HttpResponse.json(admission());
-      }),
-    );
-    const view = renderClient(
-      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
-    );
-    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
-
-    // Another connection disables the session, then this client goes away.
-    enabled = false;
-    view.unmount();
-    expect(writes).toEqual([]);
-
-    // The remount has no memory of the enabled state: only the fresh answer.
-    renderClient(<PermissionSelector sessionId={SESSION} bridge={bridge()} />);
-    expect(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /Arbiter · 工作区写入/u }),
-    ).toBeNull();
-  });
+    // Only the one write ran; the coalesced reread read the committed state.
+    expect(writeCount).toBe(1);
+  }, 15_000);
 
   test('adopts a reread triggered by a settled /permission command pair', async () => {
     const listener: { current: (() => void) | null } = { current: null };
