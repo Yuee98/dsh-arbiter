@@ -1156,9 +1156,7 @@ describe('arbiter permission selector', () => {
     await waitFor(() => {
       expect(reads).toBeGreaterThanOrEqual(2);
     });
-    expect(
-      screen.getByRole('button', { name: '正在应用…' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
 
     // The next read confirms the switch; the control becomes interactive once.
     admitted = false;
@@ -1171,9 +1169,7 @@ describe('arbiter permission selector', () => {
       },
       { timeout: 10_000 },
     );
-    expect(
-      screen.queryByRole('button', { name: '正在应用…' }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: '正在应用…' })).toBeNull();
   }, 20_000);
 
   test('offers the host presets but never the auto or derived entries', async () => {
