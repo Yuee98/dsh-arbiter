@@ -1,5 +1,13 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +17,7 @@ import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
+import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';
 
@@ -1255,6 +1264,23 @@ const V1_ACTIVATIONS_SQL = `CREATE TABLE config_activations (
   id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, activated_at INTEGER NOT NULL,
   entry TEXT NOT NULL, scope TEXT NOT NULL, revision TEXT NOT NULL)`;
 
+const V1_SNAPSHOTS_SQL = `CREATE TABLE snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+  content_hash TEXT NOT NULL, content TEXT NOT NULL,
+  format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`;
+
+const V1_CANDIDATES_SQL = `CREATE TABLE candidates (
+  candidate_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
+  status TEXT NOT NULL, rule TEXT NOT NULL, stats TEXT NOT NULL,
+  evidence TEXT NOT NULL, window_start INTEGER NOT NULL,
+  window_end INTEGER NOT NULL, note TEXT)`;
+
+const V1_ANALYSIS_SQL = `CREATE TABLE analysis_runs (
+  id TEXT PRIMARY KEY, ran_at INTEGER NOT NULL, window_start INTEGER NOT NULL,
+  window_end INTEGER NOT NULL, considered INTEGER NOT NULL,
+  created INTEGER NOT NULL)`;
+
 const V1_META_SQL =
   'CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)';
 
@@ -1265,6 +1291,9 @@ function buildV1Database(path: string): void {
   db.exec(V1_CALLS_SQL);
   db.exec(V1_STAGES_SQL);
   db.exec(V1_MODELS_SQL);
+  db.exec(V1_SNAPSHOTS_SQL);
+  db.exec(V1_CANDIDATES_SQL);
+  db.exec(V1_ANALYSIS_SQL);
   db.exec(V1_META_SQL);
   db.prepare(
     'INSERT INTO config_snapshots(snapshot_id, content_hash, content, format_version, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -1440,9 +1469,11 @@ describe('a real v1 database', () => {
     blocker.close();
     const failing = new AuditStore(path2, DEFAULT_CONFIG.audit);
     expect(failing.paused).toBe(true);
+    // A missing established table is refused before any DDL runs: recreating it
+    // would report an empty history as a complete one.
     expect(failing.health()).toMatchObject({
       state: 'unavailable',
-      lastError: expect.stringContaining('migration failed') as unknown,
+      lastError: expect.stringContaining('missing the stages table') as unknown,
     });
     // Writes are refused and the original structure is intact.
     expect(failing.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
@@ -1459,8 +1490,359 @@ describe('a real v1 database', () => {
       ),
     ).toBe(1);
     after.close();
-    // The backup survives a failed migration for recovery.
-    expect(existsSync(`${path2}.backup-v1`)).toBe(true);
+    // No backup is written for this case: the file is rejected before the
+    // migration starts, so nothing was touched and there is nothing to restore.
+    // (A migration that fails mid-transaction keeps its backup; that is
+    // exercised separately.)
+    expect(existsSync(`${path2}.backup-v1`)).toBe(false);
+  });
+});
+
+/**
+ * A file that carries the v1 structure but is stamped with the current version.
+ *
+ * Built from the genuine v1 fixture so the stored row keeps its real v1
+ * provenance: `record_format_version` is absent rather than invented, and the
+ * repair must leave that row readable as a v1 record. The `templates` table and
+ * the seven columns this version adds are then absent exactly as they would be
+ * on a file some build stamped before applying its own additions.
+ */
+function buildDriftedV2Database(path: string): void {
+  buildV1Database(path);
+  const db = new DatabaseSync(path);
+  db.exec('PRAGMA user_version = 2');
+  db.close();
+}
+
+describe('a failed backup keeps the previous copy', () => {
+  test('an interrupted VACUUM INTO does not destroy the existing backup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-backup-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildDriftedV2Database(path);
+    // A previous backup of this version already exists; it is the operator's
+    // only way back if the next upgrade fails.
+    const previous = `${path}.backup-v2`;
+    await writeFile(previous, 'previous-backup-content');
+
+    // Make VACUUM INTO fail by occupying its staging target with a directory,
+    // which SQLite cannot write over.
+    await mkdir(`${previous}.staging`, { recursive: true });
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    store.close();
+    // The earlier backup is untouched, byte for byte, and the failed staging
+    // target was never promoted over it.
+    expect(await readFile(previous, 'utf8')).toBe('previous-backup-content');
+  });
+});
+
+describe('the upgrade recipe covers every addition', () => {
+  test('a file stripped to the v1 structure is repairable and writable', async () => {
+    // `ADDED_COLUMNS` is both the v1 upgrade recipe and the completeness check
+    // for a stamped file, so an addition missing from it would leave a drifted
+    // file looking complete. Take a real v1 file, stamp it current, and prove
+    // the opener repairs whatever differs and then accepts a record: if the
+    // recipe ever falls behind the schema, this write fails.
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-recipe-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildDriftedV2Database(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    store.enqueue(record({ callId: 'recipe-covers', result: 'review-allow' }));
+    await store.flush();
+    expect(stringField(store.getCall('recipe-covers'), 'result')).toBe(
+      'review-allow',
+    );
+    store.close();
+
+    // Every table the current build writes now exists, so no writer prepares
+    // against a table the repair did not create.
+    const after = new DatabaseSync(path, { readOnly: true });
+    const tables = new Set(
+      after
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => recordField(row, 'name')),
+    );
+    for (const table of [
+      'config_snapshots',
+      'config_activations',
+      'templates',
+      'calls',
+      'stages',
+      'snapshots',
+      'model_calls',
+      'candidates',
+      'analysis_runs',
+      'meta',
+    ]) {
+      expect(tables.has(table)).toBe(true);
+    }
+    after.close();
+  });
+});
+
+describe('version-0 backups join the same retention and accounting', () => {
+  test('pruning keeps the newest two across v0, v1 and v2', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-prune0-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+    // Three real backups with distinct mtimes, so "newest" is unambiguous.
+    for (const [version, age] of [
+      [0, 3_000],
+      [1, 2_000],
+      [2, 1_000],
+    ] as const) {
+      const backup = `${path}.backup-v${String(version)}`;
+      await writeFile(backup, `backup-${String(version)}`);
+      const when = new Date(Date.now() - age);
+      await utimes(backup, when, when);
+    }
+
+    const removed = pruneBackups(path);
+    // The oldest (v0) goes; the two newest survive, matching BACKUP_KEEP.
+    expect(removed).toEqual([`${path}.backup-v0`]);
+    expect(existsSync(`${path}.backup-v0`)).toBe(false);
+    expect(existsSync(`${path}.backup-v1`)).toBe(true);
+    expect(existsSync(`${path}.backup-v2`)).toBe(true);
+  });
+
+  test('a version-0 backup counts toward the storage the store reports', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-account0-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    // A backup the previous accounting never enumerated. Its size must reach
+    // both the reported total and the auxiliary deduction, or retention
+    // overestimates the budget it may fill.
+    const backup = `${path}.backup-v0`;
+    await writeFile(backup, 'x'.repeat(4_096));
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const withoutBackup = store.databaseBytes;
+    // Grow only the version-0 backup, so the delta in the reported footprint
+    // can come from nowhere else. A hard-coded `backup-v1`/`backup-v2` list
+    // makes this delta zero.
+    await writeFile(backup, 'x'.repeat(64_000));
+    // One allocation unit of slack: the exact size is the file system's, but a
+    // hard-coded v1/v2 list reports no change at all here.
+    expect(store.databaseBytes - withoutBackup).toBeGreaterThanOrEqual(32_000);
+    store.close();
+  });
+});
+
+describe('an unstamped file is not assumed to be new', () => {
+  test('a populated file without a version stamp is not recreated as empty', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildV1Database(path);
+    // A database that never had the pragma written reports 0 even though it
+    // holds real rows. Recreating a table it lost would erase that history.
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE stages');
+    db.exec('PRAGMA user_version = 0');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health()).toMatchObject({
+      state: 'unavailable',
+      lastError: expect.stringContaining('missing the stages table') as unknown,
+    });
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    const tables = after
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(tables).not.toContain('stages');
+    // Nothing was migrated and nothing was stamped: the file is as it was.
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(0);
+    // The history that is still there was never touched.
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
+  });
+
+  test('an unstamped file with a complete structure is upgraded with a backup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-ok-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // Same genuine v1 content, but the stamp was never written. It has every
+    // established table, so this is an ordinary upgrade, not a damaged file.
+    buildV1Database(path);
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA user_version = 0');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
+      'review-deny',
+    );
+    store.enqueue(
+      record({ callId: 'unstamped-upgrade', result: 'review-allow' }),
+    );
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(2);
+    store.close();
+    // Version 0 is not "fresh", so the file is backed up before it is touched.
+    expect(existsSync(`${path}.backup-v0`)).toBe(true);
+  });
+});
+
+describe('a stamped version with a drifted structure', () => {
+  test('is repaired in place, keeps its rows and writes again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildDriftedV2Database(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // The store no longer accepts the stamp as proof of the structure.
+    expect(store.health()).toMatchObject({
+      state: 'ok',
+      lastError: null,
+    });
+    expect(store.paused).toBe(false);
+    // The legacy row survived and still reads through the old-format adapter.
+    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
+      'review-deny',
+    );
+    // A new record actually reaches the database: this is the failure the
+    // drift caused, so the test must observe storage, not just health.
+    store.enqueue(record({ callId: 'after-repair', result: 'review-allow' }));
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(2);
+    expect(stringField(store.getCall('after-repair'), 'result')).toBe(
+      'review-allow',
+    );
+    store.close();
+
+    // The version did not move: this is a repair, not a downgrade.
+    const repaired = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(
+        repaired.prepare('PRAGMA user_version').get(),
+        'user_version',
+      ),
+    ).toBe(2);
+    const callColumns = repaired
+      .prepare('PRAGMA table_info(calls)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(callColumns).toContain('arguments_schema');
+    const stageColumns = repaired
+      .prepare('PRAGMA table_info(stages)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(stageColumns).toContain('config_snapshot_id');
+    repaired.close();
+    // A structure change is still a migration: the pre-repair copy is kept.
+    expect(existsSync(`${path}.backup-v2`)).toBe(true);
+  });
+
+  test('a single missing column is repaired without touching the rest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-one-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // A complete current file, then exactly one column removed: the narrowest
+    // possible drift, which must not need a wider rewrite to recover.
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    const db = new DatabaseSync(path);
+    db.exec('ALTER TABLE calls DROP COLUMN arguments_schema');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(false);
+    store.enqueue(record({ callId: 'one-column', result: 'review-allow' }));
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(1);
+    store.close();
+  });
+
+  test('a missing established table pauses writes instead of being recreated', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-table-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildDriftedV2Database(path);
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE calls');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Recreating the table would report an empty history as a complete one, and
+    // accepting the file for writes would drop every record against the missing
+    // table. Both are refused at start-up, before a single record is lost.
+    expect(store.paused).toBe(true);
+    expect(store.health()).toMatchObject({
+      state: 'unavailable',
+      lastError: expect.stringContaining('missing the calls table') as unknown,
+    });
+    store.enqueue(record({ callId: 'refused', result: 'review-allow' }));
+    await store.flush();
+    // Reads still answer and claim nothing about the missing history.
+    const listed = store.listCalls({});
+    expect(listed.unreadable).toBe(true);
+    expect(listed.rows).toEqual([]);
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    const tables = after
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(tables).not.toContain('calls');
+    // The stamp is untouched: nothing was migrated.
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(2);
+    after.close();
+  });
+
+  test('a stamped file missing one established table is not migrated at all', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-stage-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // Complete current structure, then one established table removed while
+    // `calls` and its history stay intact: the case where a write would fail
+    // later, one record at a time, if the file were accepted.
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.enqueue(record({ callId: 'kept-row', result: 'review-deny' }));
+    await seed.flush();
+    seed.close();
+    const db = new DatabaseSync(path);
+    db.exec('DROP TABLE stages');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('missing the stages table');
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
   });
 });
 
@@ -1495,14 +1877,20 @@ describe('write containment covers every entry point', () => {
     db.exec('DROP TABLE calls');
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Start-up refuses the file instead of accepting it as writable, so the
+    // failure is reported before any record can be dropped.
+    expect(reopened.paused).toBe(true);
+    expect(reopened.health()).toMatchObject({
+      state: 'unavailable',
+      lastError: expect.stringContaining('missing the calls table') as unknown,
+    });
+    // Reads still answer without throwing, and claim nothing about history.
     expect(() => reopened.listCalls({})).not.toThrow();
     const listed = reopened.listCalls({});
     expect(listed.unreadable).toBe(true);
     expect(listed.rows).toEqual([]);
     expect(() => reopened.getCall('anything')).not.toThrow();
     expect(reopened.getCall('anything')).toBeNull();
-    // The store degraded and explains why.
-    expect(reopened.health().state).toBe('degraded');
     reopened.close();
   });
 });

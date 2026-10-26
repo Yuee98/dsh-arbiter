@@ -21,7 +21,7 @@ export type {
 } from './audit/types.js';
 import { hash, json, rowChanges } from './audit/rows.js';
 import { clampPageSize } from './audit/call-list.js';
-import { migrateAudit } from './audit/schema.js';
+import { backupPaths, migrateAudit } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
 import {
   configHistory,
@@ -211,8 +211,7 @@ export class AuditStore {
     for (const candidate of [
       `${this.path}-wal`,
       `${this.path}-shm`,
-      `${this.path}.backup-v1`,
-      `${this.path}.backup-v2`,
+      ...backupPaths(this.path),
     ]) {
       try {
         total += statSync(candidate).size;
@@ -236,8 +235,7 @@ export class AuditStore {
       this.path,
       `${this.path}-wal`,
       `${this.path}-shm`,
-      `${this.path}.backup-v1`,
-      `${this.path}.backup-v2`,
+      ...backupPaths(this.path),
     ]) {
       try {
         total += statSync(candidate).size;
