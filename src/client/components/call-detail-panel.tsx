@@ -11,17 +11,35 @@
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
-import { Button, Notice } from './controls.js';
+import { Button, Notice, Section } from './controls.js';
 import { useCallDetail } from './use-call-detail.js';
 import type { CallDetailState } from '../view-types.js';
+
+/**
+ * The facts a caller already holds for a call no source can locate.
+ *
+ * A session row knows the call it is about: the id, the tool and the reason the
+ * decision recorded. When the audit store and the runtime history both lack the
+ * call — a boundary refusal or a teardown fallback never writes a decision
+ * record — that knowledge is still true, so the panel shows it as the minimal
+ * verdict instead of only saying the record is gone. It is explicitly labelled
+ * as the session record and fabricates no stage chain or materials.
+ */
+export interface CallDetailFallback {
+  readonly tool: string;
+  readonly sourceLabel: string;
+  readonly reason: string;
+}
 
 /** The absent or failed states, each with its own sentence. */
 function AbsentState({
   state,
   onRetry,
+  fallback,
 }: {
   readonly state: CallDetailState;
   readonly onRetry: () => void;
+  readonly fallback: CallDetailFallback | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   switch (state.kind) {
@@ -35,6 +53,19 @@ function AbsentState({
       return (
         <div data-call-detail-state="record-unavailable">
           <Notice kind="info" text={t('callDetail.recordUnavailable')} />
+          {fallback === undefined ? null : (
+            <div data-call-detail-fallback={fallback.tool}>
+              <Section
+                title={t('callDetail.minimalVerdict')}
+                description={t('callDetail.minimalVerdictHint')}
+              >
+                <p style={{ margin: 0, fontSize: 12.5 }}>
+                  {`${fallback.sourceLabel} · ${fallback.tool}`}
+                </p>
+                <p style={{ margin: 0, fontSize: 12.5 }}>{fallback.reason}</p>
+              </Section>
+            </div>
+          )}
         </div>
       );
     case 'audit-unavailable':
@@ -65,6 +96,13 @@ function AbsentState({
 export function CallDetailPanel(props: {
   readonly callId: string;
   readonly onClose?: () => void;
+  /**
+   * The caller's own recorded facts, shown only when no source holds the call.
+   *
+   * A session entry passes these so a denial that never produced an audit or
+   * decision record still explains its verdict; the log list omits them.
+   */
+  readonly fallback?: CallDetailFallback;
 }): ReactNode {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
@@ -80,7 +118,7 @@ export function CallDetailPanel(props: {
           <Button onClick={props.onClose}>{t('callDetail.close')}</Button>
         </div>
       )}
-      <AbsentState state={state} onRetry={reload} />
+      <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
     </div>
   );
 }

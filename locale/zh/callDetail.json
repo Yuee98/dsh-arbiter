@@ -134,5 +134,7 @@
   "conflictObserved": "两种读数",
   "conflictsTruncated": "更多不一致超出单条记录可表示的范围，只保留了前两条读数。",
   "noEvidenceNotNeeded": "这次调用没有发出模型请求，因此没有送审证据。",
-  "noAttemptsNotNeeded": "这次调用没有发出模型请求，因此没有模型尝试。"
+  "noAttemptsNotNeeded": "这次调用没有发出模型请求，因此没有模型尝试。",
+  "minimalVerdict": "最小裁决记录",
+  "minimalVerdictHint": "审计与裁决历史都没有这条调用；下列内容来自当前会话记录，不包含阶段链与原始材料。"
 }

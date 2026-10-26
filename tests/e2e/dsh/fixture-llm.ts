@@ -75,14 +75,25 @@ interface RequestedTurn {
   readonly text: string;
   /** The `RUN <command>` marker of this turn, when present. */
   readonly command: string | null;
+  /**
+   * Commands of one step that issues several independent calls.
+   *
+   * A `RUN2 <command>` line adds a second `bash` call to the same assistant
+   * message, so a case can observe two calls whose outcomes differ inside one
+   * step instead of racing two separate turns.
+   */
+  readonly commands: readonly string[];
   /** The `DELEGATE <task>` marker of this turn, when present. */
   readonly delegate: string | null;
   /** The `ASK <question>` marker of this turn, when present. */
   readonly ask: string | null;
 }
 
-function markerValue(text: string, marker: string): string | null {
-  const at = text.lastIndexOf(marker);
+function markerValue(
+  text: string,
+  marker: string,
+  at = text.lastIndexOf(marker),
+): string | null {
   if (at === -1) return null;
   const rest = text.slice(at + marker.length);
   const line = rest.split(/\r?\n/u)[0] ?? '';
@@ -95,12 +106,22 @@ function requestedTurn(messages: readonly ChatMessage[]): RequestedTurn {
     if (message === undefined || message.role !== 'user') continue;
     const text = textOfBlocks(message.content);
     const command = markerValue(text, 'RUN ');
+    const second = markerValue(text, 'RUN2 ');
     const delegate = markerValue(text, 'DELEGATE ');
     const ask = markerValue(text, 'ASK ');
     if (command === null && delegate === null && ask === null) continue;
-    return { text, command, delegate, ask };
+    return {
+      text,
+      command,
+      commands: [
+        ...(command === null ? [] : [command]),
+        ...(second === null ? [] : [second]),
+      ],
+      delegate,
+      ask,
+    };
   }
-  return { text: '', command: null, delegate: null, ask: null };
+  return { text: '', command: null, commands: [], delegate: null, ask: null };
 }
 
 /** Whether the user turn carrying `text` already produced a tool call. */
@@ -277,8 +298,47 @@ class FixtureAdapter {
     }
     this.recordRequest(options);
     const messages = options.messages ?? [];
-    const { text, command, delegate, ask } = requestedTurn(messages);
-    if (ask !== null && !alreadyCalled(messages, text)) {
+    const { text, command, commands, delegate, ask } = requestedTurn(messages);
+    // A turn that already produced its calls falls through to the plain reply,
+    // so every command is issued exactly once.
+    const issuing = alreadyCalled(messages, text) ? [] : commands;
+    if (issuing.length > 1) {
+      // Several independent calls in one assistant step: the host schedules
+      // them by its own concurrency rule, so a case can observe one refusal and
+      // one successful execution without racing two turns.
+      yield { type: 'block-start', index: 0, blockType: 'text' };
+      yield {
+        type: 'text-delta',
+        index: 0,
+        text: 'Running the requested calls.',
+      };
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'text', text: 'Running the requested calls.' },
+      };
+      for (const [offset, entry] of issuing.entries()) {
+        const id = `fx-${String(Date.now())}-${String(offset)}-${String(Math.trunc(Math.random() * 1e6))}`;
+        const args = JSON.stringify({
+          command: entry,
+          description: 'fixture call',
+        });
+        const index = offset + 1;
+        yield { type: 'block-start', index, blockType: 'tool-call' };
+        yield {
+          type: 'tool-call-delta',
+          index,
+          id,
+          name: 'bash',
+          argumentsDelta: args,
+        };
+        yield {
+          type: 'block-end',
+          index,
+          block: { type: 'tool-call', id, name: 'bash', arguments: args },
+        };
+      }
+    } else if (ask !== null && !alreadyCalled(messages, text)) {
       // A real `ask_user_question` call: the answer card, the answerer
       // waterfall and the recorded reply are all the host's own path.
       const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;

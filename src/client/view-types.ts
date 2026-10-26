@@ -300,6 +300,40 @@ export interface CallDetailView {
 }
 
 /**
+ * The decision stage that ended one call, as the session log still says it.
+ *
+ * The stages are distinct because the agent and the user are told different
+ * things: a rule, a model review, an unavailable approval channel, a person's
+ * refusal and an abandoned question are not interchangeable, and none of the
+ * last three may read as "the user rejected this". `boundary` is the guarded
+ * refusal the gate records when the host boundary could not be confirmed.
+ */
+export type ArbiterDenialSource =
+  | 'rule'
+  | 'review'
+  | 'fallback'
+  | 'human'
+  | 'abort'
+  | 'boundary'
+  | 'unattributed';
+
+/**
+ * One Arbiter denial as a session row may report it.
+ *
+ * `reason` is the display line (bounded), `fullReason` the recorded text, and
+ * `truncated` states that the bound was actually applied — a row explains that
+ * it shortened something rather than silently dropping it. `reason` is `null`
+ * when the record carries no usable text, which is a fact about the record and
+ * not an invitation to invent one.
+ */
+export interface ArbiterDenialView {
+  readonly source: ArbiterDenialSource;
+  readonly reason: string | null;
+  readonly truncated: boolean;
+  readonly fullReason: string | null;
+}
+
+/**
  * What one detail request settled at.
  *
  * The absence cases are distinct on purpose: "no source holds this call" is a
@@ -572,14 +606,76 @@ export interface SlotProps {
   readonly bridge?: HostBridge;
 }
 
+/**
+ * One contributed Conversation event Definition.
+ *
+ * Only the surface this plugin actually uses is declared: a match on a durable
+ * event, a start that adopts the business state, and a view node built for the
+ * `chat` target. The engine owns paging, Turn/Step placement and incremental
+ * assembly, so the plugin never folds session events itself.
+ */
+/**
+ * The Turn/Step a matched event was placed in, as the engine resolved it.
+ *
+ * `anchorSeq` alone only orders a row; the host groups and folds rows by their
+ * Turn/Step membership, so a row that reports no placement is treated as a
+ * session-level node and escapes its Turn's collapsing. This plugin therefore
+ * carries the engine's own location through instead of substituting a constant.
+ */
+export type ConversationLocationPort =
+  | { readonly kind: 'session' }
+  | { readonly kind: 'turn'; readonly turn: unknown }
+  | { readonly kind: 'step'; readonly turn: unknown; readonly step: unknown }
+  | { readonly kind: 'unresolved' };
+
+export interface ConversationDefinitionPort<State, Node> {
+  readonly kind: string;
+  readonly target: string;
+  match(event: unknown): { readonly id: string; readonly role: 'start' } | null;
+  start(context: unknown, match: { readonly event: unknown }): State;
+  update(context: { readonly state: State }): State;
+  buildViewNode(context: {
+    readonly key: string;
+    readonly id: string;
+    readonly state: State | undefined;
+    readonly start:
+      | {
+          readonly event: unknown;
+          /**
+           * Resolved placement; absent only if a caller omits it, which the
+           * engine never does for a matched event.
+           */
+          readonly location?: ConversationLocationPort;
+        }
+      | undefined;
+  }): Node | null;
+}
+
 export interface ClientContext {
   readonly locale: LocaleService;
   effect(callback: () => () => void, label?: string): unknown;
   /** Read one host client service without declaring it as a dependency. */
   get(name: string): unknown;
+  /**
+   * Start a child plugin once an optional service becomes available.
+   *
+   * This keeps an optional dependency optional: the parent plugin still mounts
+   * without it, and the child's registrations belong to the child's lifetime.
+   */
+  inject(
+    services: readonly string[],
+    callback: (scoped: ConversationScopedContext) => void,
+  ): unknown;
   readonly slots: {
     inject(name: string, callback: () => unknown): void;
-    register(
+    /**
+     * Register one component into a slot.
+     *
+     * The props are the slot's own owner currency, so the component type is
+     * generic here: a keyed Chat Node receives `node`, a config slot receives
+     * `view`. Each registration site names the props it really receives.
+     */
+    register<P extends object>(
       options: {
         readonly name: string;
         readonly key?: string;
@@ -588,7 +684,25 @@ export interface ClientContext {
         readonly locale?: string;
         readonly inject?: (sessionId: string) => SlotProps;
       },
-      component: ComponentType<SlotProps>,
+      component: ComponentType<P>,
     ): () => void;
   };
+}
+
+/**
+ * The conversation half's event registry.
+ *
+ * Declared on its own because it is injected optionally: a composition without
+ * a conversation surface still loads this plugin, and only the session row
+ * stays inactive.
+ */
+export interface ConversationEventPort {
+  readonly events: {
+    register(definition: unknown): () => void;
+  };
+}
+
+/** The narrowed child context an optional `uiConversation` injection yields. */
+export interface ConversationScopedContext extends ClientContext {
+  readonly uiConversation: ConversationEventPort;
 }
