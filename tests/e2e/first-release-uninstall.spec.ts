@@ -99,23 +99,21 @@ function auditRowFor(host: DshHost, callId: string | null): number {
 }
 
 /**
- * The rule ids the user's settings document currently holds.
+ * The settings document exactly as written.
  *
- * Compared across the uninstall: the file existing is not the same fact as the
- * saved rule surviving, and only the content can tell them apart.
+ * Compared byte-for-byte across the uninstall. Extracting rule ids was too weak
+ * in two ways: it ignored every other field of the saved rule, and the fixture
+ * writes this file with `JSON.stringify`, whose `"id"` keys do not match a
+ * YAML-style `id:` scan — so the extraction could compare two empty lists.
+ *
+ * The project contract is semantic preservation of user rules and logs, not a
+ * promise that serialization never changes. In this controlled case nothing
+ * legitimately rewrites the file: the user's rules live here, while dependency
+ * and bundle selection live in `package.json`, and no save is performed between
+ * the two reads.
  */
-async function settingsRuleIds(host: DshHost): Promise<readonly string[]> {
-  // The settings document is YAML (`cordis.patch.yml`), not JSON. Only the rule
-  // ids matter here, so they are read textually instead of pulling a parser
-  // dependency into the E2E harness. Any rewrite of the saved rule changes this
-  // list, which is the fact the comparison is after.
-  const text = await readFile(host.documentPath, 'utf8');
-  const ids: string[] = [];
-  for (const match of text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gmu)) {
-    const id = match[1];
-    if (id !== undefined && id.length > 0) ids.push(id);
-  }
-  return ids;
+async function settingsContent(host: DshHost): Promise<string> {
+  return readFile(host.documentPath, 'utf8');
 }
 
 /** The three places a profile install is recorded. */
@@ -123,7 +121,6 @@ async function installState(host: DshHost): Promise<{
   readonly dependencies: string;
   readonly bundles: string;
   readonly linked: boolean;
-  readonly ruleIds: readonly string[];
 }> {
   const profileDir = join(host.home, 'profiles', 'arbiter-e2e');
   const parsed: unknown = JSON.parse(
@@ -146,7 +143,6 @@ async function installState(host: DshHost): Promise<{
     linked: await access(join(profileDir, 'node_modules', 'dsh-arbiter'))
       .then(() => true)
       .catch(() => false),
-    ruleIds: await settingsRuleIds(host),
   };
 }
 
@@ -271,6 +267,10 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
 
     // The install is present, so "removed" is a change and not a state the
     // profile never had. Assert all three places an install lives.
+    const settingsBefore = await settingsContent(host);
+    // The rule really is in the document, so the byte comparison below cannot
+    // pass on two identical-but-empty files.
+    expect(settingsBefore).toContain('uninstall-deny');
     const installBefore = await installState(host);
     expect(installBefore.dependencies).toContain('dsh-arbiter');
     expect(installBefore.bundles).toContain('dsh-arbiter');
@@ -338,7 +338,8 @@ test('uninstalling through the plugin manager stops the gate and survives a rest
     // content is compared as well.
     await expect(access(host.documentPath)).resolves.toBeUndefined();
     await expect(access(auditPath)).resolves.toBeUndefined();
-    expect(await settingsRuleIds(host)).toEqual(installBefore.ruleIds);
+    // Byte-for-byte: the whole saved rule survives, not just a remembered id.
+    expect(await settingsContent(host)).toBe(settingsBefore);
     // The refusal recorded before removal is still readable: removal stopped
     // deciding, it did not rewrite history.
     expect(auditRowFor(host, deniedCallId)).toBe(1);
