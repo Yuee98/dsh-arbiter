@@ -42,8 +42,10 @@ E2E 需要一个 `dsh`：
 pnpm test:e2e:dsh
 
 # 方式二：用与 CI 相同的锁定版本
-mkdir -p /tmp/dsh-runtime && cp tests/e2e/runtime/package*.json /tmp/dsh-runtime/
-cd /tmp/dsh-runtime && npm ci
+# 从仓库根执行；安装放子 shell，避免把当前目录留在 runtime 包里
+mkdir -p /tmp/dsh-runtime
+cp tests/e2e/runtime/package*.json /tmp/dsh-runtime/
+( cd /tmp/dsh-runtime && npm ci )
 DSH_E2E_CLI=/tmp/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js \
 DSH_E2E_VERSION=0.2.1-rc.3 pnpm test:e2e:dsh
 ```
