@@ -275,6 +275,37 @@ function reviewedCallIdOf(session: unknown): string | null {
   return null;
 }
 
+/**
+ * The rendered payload blocks of the reviewed attempt, in reading order.
+ *
+ * The API comparison proves the record did not change; this one proves the
+ * client still renders the same values. Both are needed: a rendering change
+ * that trims or reorders material would leave the record untouched. Blocks are
+ * read from one attempt (`[data-call-detail-attempt]`) so a different number of
+ * open disclosures elsewhere cannot shift the comparison; the attempt's own
+ * groups are expanded before reading.
+ */
+async function renderedAttemptBlocks(page: Page): Promise<readonly string[]> {
+  const attempt = page.locator('[data-call-detail-attempt]').first();
+  await expect(attempt).toBeVisible();
+  for (let pass = 0; pass < 20; pass += 1) {
+    const collapsed = attempt.locator('button[aria-expanded="false"]');
+    if ((await collapsed.count()) === 0) break;
+    await collapsed
+      .first()
+      .click()
+      .catch(() => undefined);
+  }
+  const blocks = (await attempt.locator('pre').allInnerTexts())
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+  expect(
+    blocks.length,
+    'the attempt rendered no payload block to compare',
+  ).toBeGreaterThan(0);
+  return blocks;
+}
+
 /** The parts of a stored detail this case compares across languages. */
 interface StoredDetail {
   readonly raw: {
@@ -483,6 +514,7 @@ test('every plugin surface switches between the released Chinese and English cop
       'reviewed-sample',
     );
     expect(baselineModel.some((text) => text.trim().length > 0)).toBe(true);
+    const baselineRendered = await renderedAttemptBlocks(page);
     expect(baselineRaw.length).toBeGreaterThan(0);
     expect(baselineRaw.join('\n')).toContain('reviewed-sample');
     // Return to the configuration frame; the journey continues from there.
@@ -656,6 +688,9 @@ test('every plugin surface switches between the released Chinese and English cop
     expect(modelResponses(await callDetailOf(host, reviewedCallId))).toEqual(
       baselineModel,
     );
+    // The record is unchanged; this proves the panel still renders the same
+    // payload values, which a rendering-only change could otherwise slip past.
+    expect(await renderedAttemptBlocks(page)).toEqual(baselineRendered);
 
     // The coexistence alert needs a real conflicting provider, so its bilingual
     // rendering is asserted where that composition exists: `coexistence.spec.ts`
@@ -753,6 +788,9 @@ test('every plugin surface switches between the released Chinese and English cop
     expect(modelResponses(await callDetailOf(host, reviewedCallId))).toEqual(
       baselineModel,
     );
+    // The record is unchanged; this proves the panel still renders the same
+    // payload values, which a rendering-only change could otherwise slip past.
+    expect(await renderedAttemptBlocks(page)).toEqual(baselineRendered);
     expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
     await openConfiguration(page);
     const back = page.locator('[data-arbiter-root]');
