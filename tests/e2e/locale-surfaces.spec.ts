@@ -476,6 +476,13 @@ test('every plugin surface switches between the released Chinese and English cop
     const baselineVerdict = await verdictText(page, zhCallDetail.finalVerdict);
     const baselineDetail = await callDetailOf(host, reviewedCallId);
     const baselineModel = modelResponses(baselineDetail);
+    // Both guards below keep the later equality assertions from passing on
+    // absent data: an empty response string satisfies a length check, and two
+    // identical `null` argument values satisfy a deep-equal check.
+    expect(JSON.stringify(baselineDetail.raw.arguments)).toContain(
+      'reviewed-sample',
+    );
+    expect(baselineModel.some((text) => text.trim().length > 0)).toBe(true);
     expect(baselineRaw.length).toBeGreaterThan(0);
     expect(baselineRaw.join('\n')).toContain('reviewed-sample');
     // Return to the configuration frame; the journey continues from there.
