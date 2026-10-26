@@ -211,8 +211,9 @@ async function fetchPage(input: FetchInput): Promise<void> {
     if (needsCorrection(response, input.options)) {
       // The reader's page lost its rows. The last page is the only position that
       // still exists after a deletion from the tail, and it is reached by name
-      // rather than by a count the deletion invalidated.
-      input.passed.current = 0;
+      // rather than by a count the deletion invalidated. The position is not
+      // reset eagerly: the corrective read sets it when it commits, so a failed
+      // correction leaves the reader's label intact.
       await fetchPage({
         ...input,
         where: LAST_PAGE,
@@ -428,7 +429,10 @@ export function useLogPages(): LogPages {
 
   const startOver = useCallback(
     (next: LogQuery): void => {
-      passed.current = 0;
+      // The position is not reset here: the commit for a successful first-page
+      // read sets it to zero. Resetting eagerly would relabel the page the reader
+      // is still on as page one if this request fails, and a later refresh would
+      // then commit that wrong position.
       run(next, FIRST_PAGE, { keepAnchor: null, index: 0 });
     },
     [run],

@@ -438,6 +438,46 @@ describe('log list paging', () => {
     expect(rowButtonFor('echo 0')).toBeInTheDocument();
   });
 
+  test('a failed filter change keeps the page the reader is actually on', async () => {
+    // Page two is displayed when a filter change fails. The label must stay at
+    // page two, and a later refresh must not commit a position the reader never
+    // reached.
+    let failFiltered = false;
+    server.use(
+      http.get('*/api/arbiter/logs', ({ request }) => {
+        const url = new URL(request.url);
+        if (failFiltered && url.searchParams.get('q') !== null) {
+          return HttpResponse.json(
+            { ok: false, code: 'audit-unavailable', rows: [], total: 0 },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(pageOf(SEEDED, url));
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    await screen.findByText('第 1 / 3 页');
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('第 2 / 3 页');
+    failFiltered = true;
+    const search = screen.getByRole('textbox', { name: '搜索' });
+    await user.type(search, 'echo 1');
+    await user.click(screen.getByRole('button', { name: '应用筛选' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '审计存储不可用',
+    );
+    // The rows and the label still describe page two.
+    expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
+    failFiltered = false;
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+    // The refresh re-reads the page the reader is on, so the label stays correct.
+    expect(screen.getByText('第 2 / 3 页')).toBeInTheDocument();
+    expect(screen.getByText('第 26–50 条')).toBeInTheDocument();
+  });
+
   test('a failed navigation stays failed through a later successful refresh', async () => {
     // Page one succeeds, Next fails, and then Refresh succeeds. The abandoned
     // move must not be committed by that unrelated success: Previous has to stay

@@ -171,7 +171,21 @@ export function epochOfDate(
   if (start.getMonth() !== Number(month) - 1 || start.getDate() !== Number(day))
     return undefined;
   if (edge === 'start') return start.getTime();
-  return start.getTime() + 24 * 60 * 60 * 1000 - 1;
+  // The day's end is the next local midnight minus a millisecond, not "start plus
+  // 24 hours": a daylight-saving transition makes a local day 23 or 25 hours
+  // long, and a fixed duration would include an hour of the next day or drop the
+  // last one.
+  const next = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day) + 1,
+    0,
+    0,
+    0,
+    0,
+  );
+  if (Number.isNaN(next.getTime())) return undefined;
+  return next.getTime() - 1;
 }
 
 /**
