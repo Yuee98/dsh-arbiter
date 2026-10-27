@@ -1,8 +1,10 @@
+import { Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RuleKind, RuleTarget } from '../../../types.js';
 import { useArbiterTranslation } from '../../i18n-provider.js';
-import { Button, Select, TextInput, inputClassName } from '../controls.js';
+import { Select, TextInput, inputClassName } from '../controls.js';
+import { IconButton } from '../ui/button.js';
 import {
   convertExactPattern,
   exactType,
@@ -206,11 +208,84 @@ export function RuleConditionEditor(props: {
           />
           {t('rules.caseInsensitive')}
         </label>
-        <Button onClick={props.onRemove} tone="plain">
-          {t('rules.removeCondition')}
-        </Button>
+        <InlineDeleteConditionButton
+          index={props.index}
+          onRemove={props.onRemove}
+        />
       </div>
     </div>
+  );
+}
+
+function InlineDeleteConditionButton(props: {
+  readonly index: number;
+  readonly onRemove: () => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const [isArmed, setIsArmed] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isArmed) return;
+
+    const timer = window.setTimeout(() => {
+      setIsArmed(false);
+    }, 3000);
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        buttonRef.current &&
+        event.target instanceof Node &&
+        !buttonRef.current.contains(event.target)
+      ) {
+        setIsArmed(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsArmed(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isArmed]);
+
+  if (isArmed) {
+    return (
+      <button
+        ref={buttonRef}
+        type="button"
+        data-confirming="true"
+        aria-label={t('rules.confirmDeleteCondition', {
+          index: props.index + 1,
+        })}
+        onClick={props.onRemove}
+        className="arb:inline-flex arb:h-[30px] arb:items-center arb:gap-1.5 arb:rounded-md arb:border arb:border-error arb:bg-error/15 arb:px-2.5 arb:text-xs arb:font-medium arb:text-error arb:transition-colors arb:hover:bg-error/25 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-error"
+      >
+        <Trash2 className="arb:h-3.5 arb:w-3.5" />
+        <span>{t('rules.confirmDeleteShort')}</span>
+      </button>
+    );
+  }
+
+  return (
+    <IconButton
+      ref={buttonRef}
+      label={t('rules.removeCondition')}
+      icon={Trash2}
+      className="arb:text-error hover:arb:bg-error/10"
+      onClick={() => {
+        setIsArmed(true);
+      }}
+    />
   );
 }
 

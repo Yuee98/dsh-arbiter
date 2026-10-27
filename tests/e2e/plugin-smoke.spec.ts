@@ -101,9 +101,7 @@ test(
     await expect(
       plugin.getByRole('heading', { name: '规则', exact: true }),
     ).toBeVisible();
-    await plugin
-      .getByRole('button', { name: '展开测试区', exact: true })
-      .click();
+    await plugin.getByRole('button', { name: '规则测试', exact: true }).click();
     const tester = page.getByRole('dialog', { name: '规则测试' });
     await expect(tester).toBeVisible();
     const [ruleTest] = await Promise.all([
@@ -119,9 +117,7 @@ test(
     await expect(tester.getByRole('textbox', { name: '命令' })).toHaveValue(
       'gh pr view 42',
     );
-    await tester
-      .getByRole('button', { name: '收起测试区', exact: true })
-      .click();
+    await tester.getByRole('button', { name: '关闭', exact: true }).click();
     await expect(plugin.getByRole('status')).toHaveCount(0);
 
     await plugin.getByRole('button', { name: 'Reviewer', exact: true }).click();

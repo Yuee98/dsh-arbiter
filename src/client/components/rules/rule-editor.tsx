@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { isStructuralTarget } from '../../../types.js';
@@ -5,7 +6,7 @@ import type { Translate } from '../../i18n.js';
 import { useArbiterTranslation } from '../../i18n-provider.js';
 import type { DraftRule } from '../../view-types.js';
 import { issueText } from '../../view-issues.js';
-import { Button, Select, TextInput } from '../controls.js';
+import { Button, RadioGroup, TextInput } from '../controls.js';
 import { cn } from '../ui/cn.js';
 import {
   addCondition,
@@ -69,27 +70,31 @@ export function RuleEditor(props: {
         className="arb:flex arb:flex-col arb:gap-2.5"
         aria-label={t('rules.conditions')}
       >
-        <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
-          {rule.conditions.length > 1
-            ? t('rules.combineHeading')
-            : t('rules.oneConditionHeading')}
-        </h4>
         {rule.conditions.length > 1 ? (
-          <Select
-            ariaLabel={t('rules.combine')}
-            value={rule.combine ?? 'all'}
-            options={['all', 'any'] as const}
-            labels={{
-              all: t('rules.combineOption.all'),
-              any: t('rules.combineOption.any'),
-            }}
-            onChange={(value) => {
-              onChange((next) => {
-                next.combine = value;
-              });
-            }}
-          />
-        ) : null}
+          <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-3">
+            <span className="arb:text-xs arb:font-semibold arb:text-primary">
+              {t('rules.combine')}
+            </span>
+            <RadioGroup
+              name={`combine-${rule.id}`}
+              value={rule.combine ?? 'all'}
+              options={['all', 'any'] as const}
+              labels={{
+                all: t('rules.combineOption.all'),
+                any: t('rules.combineOption.any'),
+              }}
+              onChange={(value) => {
+                onChange((next) => {
+                  next.combine = value;
+                });
+              }}
+            />
+          </div>
+        ) : (
+          <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
+            {t('rules.oneConditionHeading')}
+          </h4>
+        )}
         {rule.conditions.length > 1 &&
         (rule.combine ?? 'all') === 'all' &&
         crossesStructuralTargets(rule) ? (
@@ -129,13 +134,15 @@ export function RuleEditor(props: {
         ))}
         <div>
           <Button
+            className="arb:inline-flex arb:items-center arb:gap-1.5"
             onClick={() => {
               onChange((next) => {
                 addCondition(next.conditions);
               });
             }}
           >
-            {t('rules.addCondition')}
+            <Plus className="arb:h-3.5 arb:w-3.5" />
+            <span>{t('rules.addCondition')}</span>
           </Button>
         </div>
       </section>

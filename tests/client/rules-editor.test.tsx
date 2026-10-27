@@ -164,10 +164,7 @@ describe('rule list header and inline editing', () => {
     const user = await openRules();
     const id = await addRule(user);
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
-    await user.selectOptions(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-      'any',
-    );
+    await user.click(within(row(id)).getByRole('radio', { name: '任一满足' }));
     await user.click(within(row(id)).getByRole('button', { name: /^复制/ }));
 
     const copyId = rows()[1]?.getAttribute('data-rule-row') ?? '';
@@ -181,8 +178,8 @@ describe('rule list header and inline editing', () => {
       within(row(copyId)).getByRole('button', { name: /编辑规则/ }),
     );
     expect(
-      within(row(copyId)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('any');
+      within(row(copyId)).getByRole('radio', { name: '任一满足' }),
+    ).toBeChecked();
     expect(conditionGroups(copyId)).toHaveLength(2);
   });
 
@@ -291,24 +288,28 @@ describe('rule list header and inline editing', () => {
     // A new rule starts on "all": adding a condition narrows it.
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(conditionGroups(id)).toHaveLength(2);
-    expect(within(row(id)).getByText('满足以下全部条件')).toBeVisible();
-    const combine = within(row(id)).getByRole('combobox', {
-      name: '条件组合方式',
+    expect(within(row(id)).getByText('条件组合方式')).toBeVisible();
+    const allRadio = within(row(id)).getByRole('radio', {
+      name: '全部满足',
     });
-    expect(combine).toHaveValue('all');
+    expect(allRadio).toBeChecked();
 
     // Switch to "any", drop back to one condition, then add another: the value
     // must survive the round trip instead of being reset to the default.
-    await user.selectOptions(combine, 'any');
+    const anyRadio = within(row(id)).getByRole('radio', {
+      name: '任一满足',
+    });
+    await user.click(anyRadio);
     const second = conditionGroups(id)[1];
     if (second === undefined)
       throw new Error('the second condition is missing');
     await user.click(within(second).getByRole('button', { name: '删除条件' }));
+    await user.click(within(second).getByRole('button', { name: /确认删除/ }));
     expect(conditionGroups(id)).toHaveLength(1);
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('any');
+      within(row(id)).getByRole('radio', { name: '任一满足' }),
+    ).toBeChecked();
   });
 
   test('multi-value mode, case-insensitivity and the path reach the save body', async () => {
@@ -924,6 +925,7 @@ describe('rule validation feedback', () => {
     const [first] = conditionGroups(id);
     if (first === undefined) throw new Error('the condition is missing');
     await user.click(within(first).getByRole('button', { name: '删除条件' }));
+    await user.click(within(first).getByRole('button', { name: /确认删除/ }));
 
     // The draft stays editable and explains why it cannot be applied.
     expect(screen.getByText(/没有匹配条件/)).toBeInTheDocument();
@@ -1361,12 +1363,12 @@ describe('condition combining', () => {
     // One condition: both values judge identically, so offering the choice would
     // ask a question that has no consequence.
     expect(
-      within(row(id)).queryByRole('combobox', { name: '条件组合方式' }),
+      within(row(id)).queryByRole('radiogroup', { name: '条件组合方式' }),
     ).toBeNull();
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('all');
+      within(row(id)).getByRole('radio', { name: '全部满足' }),
+    ).toBeChecked();
   });
 
   test('a conjunction over two kinds of structure states its limitation', async () => {
@@ -1383,10 +1385,7 @@ describe('condition combining', () => {
     expect(within(row(id)).getByText(/可能来自不同的语句/)).toBeVisible();
 
     // Switching to "any" removes the claim, so the note must go with it.
-    await user.selectOptions(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-      'any',
-    );
+    await user.click(within(row(id)).getByRole('radio', { name: '任一满足' }));
     expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
   });
 
@@ -1555,14 +1554,14 @@ describe('source warnings after a save', () => {
   test('closing rule tester restores focus to toolbar opener button', async () => {
     baseHandlers();
     const user = await openRules();
-    const testToolbarBtn = screen.getByRole('button', { name: '展开测试区' });
+    const testToolbarBtn = screen.getByRole('button', { name: '规则测试' });
     testToolbarBtn.focus();
     await user.click(testToolbarBtn);
 
     const dialog = await screen.findByRole('dialog', { name: '规则测试' });
     expect(dialog).toBeInTheDocument();
 
-    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
     await user.click(closeBtn);
 
     await waitFor(() => {
@@ -1584,7 +1583,7 @@ describe('source warnings after a save', () => {
     const dialog = await screen.findByRole('dialog', { name: '规则测试' });
     expect(dialog).toBeInTheDocument();
 
-    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
     await user.click(closeBtn);
 
     await waitFor(() => {
@@ -1596,7 +1595,7 @@ describe('source warnings after a save', () => {
   test('closing rule tester when opener is removed safely falls back to surviving button', async () => {
     baseHandlers();
     const user = await openRules();
-    const testToolbarBtn = screen.getByRole('button', { name: '展开测试区' });
+    const testToolbarBtn = screen.getByRole('button', { name: '规则测试' });
     await user.click(testToolbarBtn);
 
     const dialog = await screen.findByRole('dialog', { name: '规则测试' });
@@ -1605,7 +1604,7 @@ describe('source warnings after a save', () => {
     // Disconnect toolbar button
     testToolbarBtn.remove();
 
-    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
     await user.click(closeBtn);
 
     await waitFor(() => {

@@ -3,7 +3,13 @@ import type { Translate } from '../i18n.js';
 import type { ReactNode } from 'react';
 
 import { CoexistenceSection } from '../components/coexistence.js';
-import { Field, Notice, Section, Select } from '../components/controls.js';
+import {
+  Field,
+  Notice,
+  RadioGroup,
+  Section,
+  Select,
+} from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { formatTime } from '../view-helpers.js';
 import { issuesText } from '../view-issues.js';
@@ -34,24 +40,33 @@ export function StatusPanel(props: {
   return (
     <>
       <Section title={t('status.title')} description={t('status.description')}>
-        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-2 arb:text-xs arb:text-primary">
+        <label className="arb:flex arb:cursor-pointer arb:items-start arb:gap-2.5 arb:text-xs arb:text-primary">
           <input
             type="checkbox"
+            aria-label={t('status.enabled')}
             checked={draft.enabled}
-            className="arb:rounded arb:border-border-default arb:accent-accent"
+            className="arb:mt-0.5 arb:h-4 arb:w-4 arb:cursor-pointer arb:rounded arb:border-border-default arb:accent-accent"
             onChange={(event) => {
               onDraft((next) => {
                 next.enabled = event.target.checked;
               });
             }}
           />
-          {t('status.enabled')}
+          <div className="arb:flex arb:flex-col arb:gap-0.5">
+            <span className="arb:font-medium arb:text-primary">
+              {t('status.enabled')}
+            </span>
+            <span className="arb:text-[11px] arb:text-tertiary">
+              {t('status.enabledHelp')}
+            </span>
+          </div>
         </label>
-        <Field
-          label={t('status.boundaryLabel')}
-          hint={boundaryHelp(t)[draft.boundary] ?? '—'}
-        >
-          <Select
+        <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-xs">
+          <span className="arb:text-secondary">
+            {t('status.boundaryLabel')}
+          </span>
+          <RadioGroup
+            name="status-boundary"
             value={draft.boundary}
             options={['guarded', 'trusted'] as const}
             labels={{
@@ -64,8 +79,11 @@ export function StatusPanel(props: {
               });
             }}
           />
-        </Field>
-        <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
+          <span className="arb:text-[11px] arb:text-tertiary">
+            {boundaryHelp(t)[draft.boundary] ?? '—'}
+          </span>
+        </div>
+        <div className="arb:grid arb:grid-cols-1 arb:gap-3 sm:arb:grid-cols-2">
           <Field
             label={t('status.mainMode')}
             hint={modeHelp(t)[draft.modes.main] ?? '—'}

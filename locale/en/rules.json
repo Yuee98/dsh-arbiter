@@ -108,6 +108,7 @@
   "combineCrossTarget": "These conditions are checked across the whole call: the matching command and redirect may belong to different statements. The rule does not claim they describe one operation.",
   "unknownField": "Unknown field: {field}",
   "confirmDeleteRule": "Confirm delete rule: {name}",
+  "confirmDeleteCondition": "Confirm delete condition {index}",
   "confirmDeleteShort": "Confirm",
   "dragRule": "Drag to reorder rule: {name}",
   "duplicateRule": "Duplicate rule: {name}",

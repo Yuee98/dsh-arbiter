@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Field,
   NumberInput,
+  RadioGroup,
   Section,
   Select,
   TextInput,
@@ -105,22 +106,22 @@ function PolicySettings({
           />
           {t('advanced.bulkEgress')}
         </label>
-        <div className="arb:w-48">
-          <Field label={t('advanced.probeMode')}>
-            <Select
-              value={draft.policy.probeMode}
-              options={['assist', 'override'] as const}
-              labels={{
-                assist: t('advanced.assist'),
-                override: t('advanced.override'),
-              }}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.policy.probeMode = value;
-                });
-              }}
-            />
-          </Field>
+        <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-xs">
+          <span className="arb:text-secondary">{t('advanced.probeMode')}</span>
+          <RadioGroup
+            name="advanced-probe-mode"
+            value={draft.policy.probeMode}
+            options={['assist', 'override'] as const}
+            labels={{
+              assist: t('advanced.assist'),
+              override: t('advanced.override'),
+            }}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.policy.probeMode = value;
+              });
+            }}
+          />
         </div>
       </div>
     </Section>

@@ -359,15 +359,6 @@ function RuleRowToolbar(props: {
       </div>
 
       <IconButton
-        label={t('rules.testRule', { name })}
-        icon={FlaskConical}
-        onClick={(event) => {
-          onDisarmDelete();
-          onTest(rule.id, event.currentTarget);
-        }}
-      />
-
-      <IconButton
         label={
           expanded
             ? t('rules.collapseRule', { name })
@@ -379,6 +370,15 @@ function RuleRowToolbar(props: {
         onClick={() => {
           onDisarmDelete();
           onSelect(expanded ? null : rule.id);
+        }}
+      />
+
+      <IconButton
+        label={t('rules.testRule', { name })}
+        icon={FlaskConical}
+        onClick={(event) => {
+          onDisarmDelete();
+          onTest(rule.id, event.currentTarget);
         }}
       />
 

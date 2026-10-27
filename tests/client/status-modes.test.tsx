@@ -119,15 +119,16 @@ describe('approval-mode settings', () => {
   test('shows both execution boundaries with their real sandbox consequence', async () => {
     usePageHandlers({ writes: [] });
     const { user } = renderClient(<ArbiterPage />);
-    const boundary = await screen.findByLabelText('执行边界', { exact: false });
-    expect(boundary).toHaveValue('guarded');
+    const guardedRadio = await screen.findByRole('radio', { name: 'guarded' });
+    const trustedRadio = screen.getByRole('radio', { name: 'trusted' });
+    expect(guardedRadio).toBeChecked();
     expect(
       screen.getByText(/调用仍受宿主工作区文件沙箱约束/u),
     ).toBeInTheDocument();
 
-    await user.selectOptions(boundary, 'trusted');
+    await user.click(trustedRadio);
     await waitFor(() => {
-      expect(boundary).toHaveValue('trusted');
+      expect(trustedRadio).toBeChecked();
     });
     expect(screen.getByText(/不施加工作区文件沙箱/u)).toBeInTheDocument();
     // Changing the option is a draft edit, not an admission switch.
@@ -155,8 +156,8 @@ describe('approval-mode settings', () => {
       ),
     );
     const { user } = renderClient(<ArbiterPage />);
-    const boundary = await screen.findByLabelText('执行边界', { exact: false });
-    await user.selectOptions(boundary, 'trusted');
+    const trustedRadio = await screen.findByRole('radio', { name: 'trusted' });
+    await user.click(trustedRadio);
     await user.selectOptions(
       screen.getByLabelText('主会话审批模式', { exact: false }),
       'progress',

@@ -80,9 +80,7 @@ test(
       plugin.getByRole('heading', { name: '规则', exact: true }),
     ).toBeVisible();
 
-    await plugin
-      .getByRole('button', { name: '展开测试区', exact: true })
-      .click();
+    await plugin.getByRole('button', { name: '规则测试', exact: true }).click();
     const testerDialog = page.getByRole('dialog', { name: '规则测试' });
     await expect(testerDialog).toBeVisible();
 
@@ -105,7 +103,7 @@ test(
 
     // Close Rule Tester Dialog
     await testerDialog
-      .getByRole('button', { name: '收起测试区', exact: true })
+      .getByRole('button', { name: '关闭', exact: true })
       .click();
     await expect(testerDialog).toBeHidden();
 

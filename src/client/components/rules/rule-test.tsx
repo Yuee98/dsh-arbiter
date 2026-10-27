@@ -126,7 +126,6 @@ export function RuleTest(props: {
           data-rule-tester-dialog=""
           surface="rule-test-dialog"
           closeLabel={t('ruleTest.close')}
-          showCloseButton={false}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             bodyRef.current?.focus();
@@ -166,16 +165,7 @@ export function RuleTest(props: {
             data-rule-test=""
             className="arb:flex arb:flex-col arb:gap-3"
           >
-            <div className="arb:flex arb:items-center arb:justify-between arb:gap-2">
-              <Notice kind="info" text={t('ruleTest.draftNotice')} />
-              <Button
-                onClick={() => {
-                  setOpen(false);
-                }}
-              >
-                {t('ruleTest.close')}
-              </Button>
-            </div>
+            <Notice kind="info" text={t('ruleTest.draftNotice')} />
 
             {props.focusedRule !== null ? (
               <div

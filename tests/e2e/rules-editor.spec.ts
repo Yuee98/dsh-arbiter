@@ -244,6 +244,7 @@ test.describe('rule editing in the real host', () => {
     await plugin.getByRole('button', { name: '新建规则', exact: true }).click();
     const row = plugin.locator('[data-rule-row]');
     await row.getByRole('button', { name: '删除条件', exact: true }).click();
+    await row.locator('[data-confirming="true"]').click();
     await expect(plugin.getByText(/没有匹配条件/)).toBeVisible();
     await expect(
       row.getByRole('button', { name: '添加条件', exact: true }),

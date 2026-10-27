@@ -142,6 +142,51 @@ export function Select<T extends string>(props: {
   );
 }
 
+export function RadioGroup<T extends string>(props: {
+  readonly value: T;
+  readonly options: readonly T[];
+  readonly labels?: Readonly<Record<string, string>> | undefined;
+  readonly ariaLabel?: string | undefined;
+  readonly name?: string | undefined;
+  readonly disabled?: boolean | undefined;
+  readonly onChange: (value: T) => void;
+  readonly className?: string | undefined;
+}): ReactNode {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={props.ariaLabel}
+      className={cn(
+        'arb:flex arb:flex-wrap arb:items-center arb:gap-4',
+        props.className,
+      )}
+    >
+      {props.options.map((option) => {
+        const isChecked = option === props.value;
+        return (
+          <label
+            key={option}
+            className="arb:inline-flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary"
+          >
+            <input
+              type="radio"
+              name={props.name}
+              value={option}
+              checked={isChecked}
+              disabled={props.disabled}
+              onChange={() => {
+                props.onChange(option);
+              }}
+              className="arb:cursor-pointer arb:accent-accent arb:disabled:cursor-not-allowed"
+            />
+            <span>{props.labels?.[option] ?? option}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export interface ButtonProps {
   readonly children: ReactNode;
   readonly onClick?:

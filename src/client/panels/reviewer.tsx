@@ -223,7 +223,7 @@ function ChatBasics({
     <div
       role="group"
       aria-label={t('reviewer.model.label')}
-      className="arb:flex arb:flex-col arb:gap-1"
+      className="arb:flex arb:max-w-xl arb:flex-col arb:gap-1"
     >
       <span className="arb:text-xs arb:text-secondary">
         {t('reviewer.model.label')}
@@ -304,7 +304,7 @@ function AdvancedGroup(props: {
       <div className="arb:text-xs arb:font-medium arb:text-secondary">
         {props.title}
       </div>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3 sm:arb:grid-cols-2 arb:max-w-2xl">
         {props.children}
       </div>
     </div>

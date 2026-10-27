@@ -132,7 +132,7 @@ describe('prototype page after panel extraction', () => {
     await user.click(screen.getByRole('checkbox', { name: /^启用规则/ }));
     // The test area is collapsed by default; its own entry opens it, and a row's
     // "测试" action focuses one rule without running anything.
-    await user.click(screen.getByRole('button', { name: '展开测试区' }));
+    await user.click(screen.getByRole('button', { name: '规则测试' }));
     const input = screen.getByRole('textbox', { name: '命令' });
     await user.clear(input);
     await user.type(input, 'pwd');
