@@ -30,6 +30,7 @@ export const ruleTarget = choice(
 );
 export const ruleKind = choice('exact', 'regex', 'glob');
 export const ruleMulti = choice('any', 'all');
+export const ruleCombine = choice('all', 'any');
 
 /** A pattern keeps the JSON type it was written with. */
 function rulePattern(value: unknown): string | number | boolean | null {
@@ -75,10 +76,19 @@ export function commandRule(value: unknown): CommandRule {
   const enabled = field(source, 'enabled', optional(boolean));
   const hint = field(source, 'hint', optional(text));
   const scope = field(source, 'scope', optional(ruleScope));
+  const conditions = field(source, 'conditions', array(ruleCondition));
+  // An older host answers without the field. Deriving the connective from the
+  // condition count keeps that answer's meaning: several conditions meant the
+  // alternative reading there, and defaulting to `all` would narrow a rule the
+  // user never edited.
+  const combine =
+    field(source, 'combine', optional(ruleCombine)) ??
+    (conditions.length > 1 ? 'any' : 'all');
   return {
     id: field(source, 'id', text),
+    combine,
     verdict: field(source, 'verdict', ruleVerdict),
-    conditions: field(source, 'conditions', array(ruleCondition)),
+    conditions,
     ...(name === undefined ? {} : { name }),
     ...(comment === undefined ? {} : { comment }),
     ...(enabled === undefined ? {} : { enabled }),

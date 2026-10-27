@@ -40,11 +40,16 @@ export function parseConfigV1(raw: Record<string, unknown>): ConfigParseResult {
   rulesRaw.forEach((value, index) => {
     const canonicalKey = canonicalKeyUsed(value);
     if (canonicalKey !== null) {
+      // `combine` is newer than the canonical v2 model, so name the format that
+      // actually defines it instead of sending the user to a format that would
+      // reject it again.
+      const required =
+        canonicalKey === 'combine' ? 'arbiter-config-v3' : 'arbiter-config-v2';
       errors.push({
         path: `rules[${String(index)}]`,
-        message: `"${canonicalKey}" requires format "arbiter-config-v2"; the legacy format only accepts a single "match" object`,
+        message: `"${canonicalKey}" requires format "${required}"; the legacy format only accepts a single "match" object`,
         code: 'rule.format-mismatch',
-        params: { format: 'arbiter-config-v2', field: canonicalKey },
+        params: { format: required, field: canonicalKey },
       });
       return;
     }

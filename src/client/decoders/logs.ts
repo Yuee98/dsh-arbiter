@@ -1,4 +1,9 @@
 import type {
+  RuleConjunctWitness,
+  RuleConjunctionEvidence,
+  RuleConjunctionGroup,
+} from '../../types.js';
+import type {
   CallDetailMissingCode,
   CallDetailModelAttemptView,
   CallDetailStageView,
@@ -7,6 +12,7 @@ import type {
   LogPage,
   LogRow,
 } from '../view-types.js';
+import { ruleTarget } from './config.js';
 import {
   array,
   boolean,
@@ -131,7 +137,48 @@ function stage(value: unknown): CallDetailStageView {
     decisionRules: field(source, 'decisionRules', strings),
     configRevision: field(source, 'configRevision', nullable(text)),
     configSnapshotId: field(source, 'configSnapshotId', nullable(text)),
+    // An older host answers without the field at all, so absence means "no
+    // witness", the same as an explicit null. A present value must still decode.
+    conjunction:
+      field(source, 'conjunction', optional(nullable(conjunction))) ?? null,
     ts: field(source, 'ts', nullable(number)),
+  };
+}
+
+/**
+ * The stored conjunction witness.
+ *
+ * Decoded strictly like every other field: a shape this build cannot read is a
+ * decoder error rather than a silently empty witness, because an empty witness
+ * would read as "the rule used no conjunction".
+ */
+function conjunction(value: unknown): RuleConjunctionEvidence {
+  const source = object(value);
+  return {
+    combine: field(source, 'combine', choice('all')),
+    groups: field(source, 'groups', array(group)),
+  };
+}
+
+function group(value: unknown): RuleConjunctionGroup {
+  const source = object(value);
+  const witness = field(source, 'witnessText', optional(text));
+  return {
+    target: field(source, 'target', ruleTarget),
+    conditionIndices: field(source, 'conditionIndices', array(number)),
+    outcome: field(source, 'outcome', choice('match', 'no-match', 'unknown')),
+    ...(witness === undefined ? {} : { witnessText: witness }),
+    ...(source['witnessValues'] === undefined
+      ? {}
+      : { witnessValues: field(source, 'witnessValues', array(conjunct)) }),
+  };
+}
+
+function conjunct(value: unknown): RuleConjunctWitness {
+  const source = object(value);
+  return {
+    conditionIndex: field(source, 'conditionIndex', number),
+    text: field(source, 'text', text),
   };
 }
 

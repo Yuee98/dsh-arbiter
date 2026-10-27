@@ -453,10 +453,10 @@ test('editing a legacy document saves canonical rules instead of failing', async
   await waitFor(() => {
     expect(bodies).toHaveLength(1);
   });
-  // Saving canonical rules requires the canonical declaration, otherwise the
-  // document would be re-read as legacy and rejected.
+  // Saving canonical rules requires the declaration this build writes, otherwise
+  // the document would be re-read as an older format and lose the connective.
   expect(bodies[0]).toMatchObject({
-    config: { format: 'arbiter-config-v2', modes: { main: 'strict' } },
+    config: { format: 'arbiter-config-v3', modes: { main: 'strict' } },
   });
 });
 

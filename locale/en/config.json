@@ -68,7 +68,9 @@
     "ruleNameEmpty": "The custom name must not be empty.",
     "ruleToolsEmpty": "The tool scope must not be an empty list.",
     "ruleToolEmpty": "A name in the tool scope must not be empty.",
-    "ruleFormatMismatch": "This rule uses the new structure and needs format: {format} declared.",
-    "ruleNotConvertible": "The old rule \"{id}\" cannot be proven equivalent and was not converted automatically: {reason}"
+    "ruleFormatMismatch": "\"{field}\" requires format {format}, which this document does not declare.",
+    "ruleNotConvertible": "The old rule \"{id}\" cannot be proven equivalent and was not converted automatically: {reason}",
+    "ruleCombineRequired": "A rule with several conditions must state how they combine (combine: all or any).",
+    "ruleUnknownField": "Unknown field \"{field}\": it has no effect, and the rule keeps the meaning it declares."
   }
 }

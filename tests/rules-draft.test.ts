@@ -155,7 +155,7 @@ describe('draft rule defaults', () => {
     const current = draft();
     expect(current.format).toBeUndefined();
     addRule(current);
-    expect(current.format).toBe('arbiter-config-v2');
+    expect(current.format).toBe('arbiter-config-v3');
   });
 
   it('keeps ids unique and stable across renames and edits', () => {
@@ -282,12 +282,24 @@ describe('automatic summary and custom names', () => {
     expect(ruleName(one, t)).toBe('命令 RE2：gh pr view');
 
     const many = rule({
+      combine: 'any',
       conditions: [
         { target: 'command', kind: 'regex', pattern: 'gh pr view' },
         { target: 'tool', kind: 'exact', pattern: 'bash' },
       ],
     });
-    expect(ruleSummary(many, t)).toBe('命令 RE2：gh pr view 等 2 个条件');
+    // The connective belongs in the name: two conditions under `any` and two
+    // under `all` are different rules with the same expressions.
+    expect(ruleSummary(many, t)).toBe(
+      '命令 RE2：gh pr view 等 2 个条件（任一满足）',
+    );
+    const conjunctive = rule({
+      combine: 'all',
+      conditions: many.conditions,
+    });
+    expect(ruleSummary(conjunctive, t)).toBe(
+      '命令 RE2：gh pr view 等 2 个条件（全部满足）',
+    );
   });
 
   it('prefixes the scope and marks case-insensitive conditions', () => {

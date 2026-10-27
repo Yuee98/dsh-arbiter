@@ -1914,3 +1914,315 @@ describe('rule validation', () => {
     });
   });
 });
+
+describe('condition combining (combine: all)', () => {
+  test('one node must satisfy every condition on a structural target', () => {
+    // The conjunction is "a git command AND a --force flag", so a compound line
+    // that satisfies each half with a different command is not a match. Reading
+    // the two conditions independently would let coverage mark both nodes
+    // allowed, which is the failure this rule shape exists to avoid.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'git-force',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'glob', pattern: 'git *' }),
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: '.*--force',
+            }),
+          ],
+        }),
+      ],
+      'git status && rm --force',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('no-match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'no-match',
+    });
+  });
+
+  test('a single node satisfying both conditions does match', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'git-force',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'glob', pattern: 'git *' }),
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: '.*--force',
+            }),
+          ],
+        }),
+      ],
+      'git push --force',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'rule',
+      verdict: 'allow',
+      ruleId: 'git-force',
+    });
+    expect(evaluation.rules[0]?.groups).toEqual([
+      {
+        target: 'command',
+        conditionIndices: [0, 1],
+        outcome: 'match',
+        witnessText: 'git push --force',
+      },
+    ]);
+  });
+
+  test('a target with no node is a certain miss only when the structure is complete', () => {
+    const redirectRule = rule({
+      id: 'echo-to-tmp',
+      verdict: 'allow',
+      combine: 'all',
+      conditions: [
+        condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+        condition({
+          target: 'file_redirect',
+          kind: 'glob',
+          pattern: '/tmp/**',
+        }),
+      ],
+    });
+    // No redirect at all, and the parse saw the whole line: the group cannot be
+    // satisfied, so the rule does not match.
+    expect(evaluate([redirectRule], 'echo hi').path).toEqual({
+      kind: 'review-default',
+      reason: 'no-match',
+    });
+    expect(evaluate([redirectRule], 'echo hi > /tmp/a').path).toEqual({
+      kind: 'rule',
+      verdict: 'allow',
+      ruleId: 'echo-to-tmp',
+    });
+  });
+
+  test('unread structure is unknown, never a certain absence', () => {
+    // The redirect may sit in the part the reader never reached. Calling that a
+    // miss would let a higher-priority deny look inapplicable.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-tmp',
+          verdict: 'deny',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'regex', pattern: 'echo .*' }),
+            condition({
+              target: 'file_redirect',
+              kind: 'glob',
+              pattern: '/etc/**',
+            }),
+          ],
+        }),
+        rule({
+          id: 'tool-allow',
+          verdict: 'allow',
+          scope: { tools: ['bash'] },
+        }),
+      ],
+      'echo hi > $TARGET',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('unknown');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'unresolved',
+    });
+  });
+
+  test('a certain miss decides even when a sibling group is unknown', () => {
+    // `cat` is certainly not this call's command while the redirect is unknown;
+    // one false conjunct is enough to make the conjunction false.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'deny-mixed',
+          verdict: 'deny',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'cat' }),
+            condition({
+              target: 'file_redirect',
+              kind: 'glob',
+              pattern: '/etc/**',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > $TARGET',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('no-match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'no-match',
+    });
+  });
+
+  test('cross-statement facts still match, and the explanation says which nodes', () => {
+    // Call-level conjunction does not claim the redirect belongs to that
+    // command. The rule matches, coverage then refuses the call because the
+    // other command is not covered, and the tester can see both witness nodes.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'echo-tmp',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+            condition({
+              target: 'file_redirect',
+              kind: 'exact',
+              pattern: '/tmp/a',
+            }),
+          ],
+        }),
+      ],
+      'echo hi > /etc/a; cat x > /tmp/a',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('match');
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
+  test('a node satisfying only half the conjunction covers nothing', () => {
+    // The rule matches overall because `git push --force` satisfies both
+    // predicates. `git status` satisfies only the first, so it must not be
+    // covered: crediting per-condition matches would authorize the whole line,
+    // which is exactly the difference between witness and plain matches.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'git-force',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'glob', pattern: 'git *' }),
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: '.*--force',
+            }),
+          ],
+        }),
+      ],
+      'git push --force; git status',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('match');
+    expect(evaluation.rules[0]?.conditions[0]?.witnessValues).toEqual([
+      'git push --force',
+    ]);
+    // `git status` matched the condition but not the conjunction.
+    expect(evaluation.rules[0]?.conditions[0]?.matchedValues).toContain(
+      'git status',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
+  test('a tool condition cannot cover a call the conjunction also restricts', () => {
+    // Without the narrowing, `wholeTool` would cover the entire call and the
+    // command half of the conjunction would mean nothing.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'bash-echo',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+            condition({ target: 'command', kind: 'exact', pattern: 'echo hi' }),
+          ],
+        }),
+      ],
+      'echo hi; rm -rf /tmp/victim',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
+  test('a tool condition still covers a call when nothing else restricts it', () => {
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'bash-only',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'tool', kind: 'exact', pattern: 'bash' }),
+          ],
+        }),
+      ],
+      'echo hi; rm -rf /tmp/victim',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'rule',
+      verdict: 'allow',
+      ruleId: 'bash-only',
+    });
+  });
+
+  test('a structural condition and an argument condition must both hold', () => {
+    // This is the capability the connective exists for: the argument condition
+    // narrows the command instead of being an unrelated alternative.
+    const rule = (combine: 'all' | 'any'): CommandRule => ({
+      id: 'push-to-dev',
+      verdict: 'allow',
+      combine,
+      conditions: [
+        condition({ target: 'command', kind: 'exact', pattern: 'git push' }),
+        condition({
+          target: 'argument',
+          path: '$.environment',
+          kind: 'exact',
+          pattern: 'dev',
+        }),
+      ],
+    });
+    const evaluateArguments = (combine: 'all' | 'any', args: unknown) =>
+      evaluateCall({
+        rules: [rule(combine)],
+        tool: 'bash',
+        arguments: args,
+        identity: 'main',
+        workspaceRoot: '/workspace/app',
+        cwd: '/workspace/app',
+        parentAuthorizationPresent: null,
+        historyTruncated: false,
+        overlapsDeniedEffect: false,
+      }).path;
+    expect(
+      evaluateArguments('all', {
+        command: 'git push',
+        environment: 'production',
+      }),
+    ).toEqual({ kind: 'review-default', reason: 'no-match' });
+    expect(
+      evaluateArguments('all', { command: 'git push', environment: 'dev' }),
+    ).toEqual({ kind: 'rule', verdict: 'allow', ruleId: 'push-to-dev' });
+    // The same conditions under `any`: the command alone decides, which is why
+    // the absent connective cannot be read as `all`.
+    expect(
+      evaluateArguments('any', {
+        command: 'git push',
+        environment: 'production',
+      }),
+    ).toEqual({ kind: 'rule', verdict: 'allow', ruleId: 'push-to-dev' });
+  });
+});

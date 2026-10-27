@@ -160,6 +160,34 @@ describe('rule list header and inline editing', () => {
     );
   });
 
+  test('duplicating a two-condition rule keeps its connective', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+      'any',
+    );
+    await user.click(within(row(id)).getByText('更多'));
+    await user.click(within(row(id)).getByRole('button', { name: '复制' }));
+
+    const copyId = rows()[1]?.getAttribute('data-rule-row') ?? '';
+    // A copy is the same rule with a new id: dropping the connective would leave
+    // a multi-condition rule that v3 refuses to save, and show the default here.
+    // The summary names it even before the row is expanded.
+    expect(
+      within(row(copyId)).getByRole('checkbox', { name: /任一满足/ }),
+    ).toBeInTheDocument();
+    await user.click(
+      within(row(copyId)).getByRole('button', { name: /编辑规则/ }),
+    );
+    expect(
+      within(row(copyId)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('any');
+    expect(conditionGroups(copyId)).toHaveLength(2);
+  });
+
   test('a custom name replaces the summary and can be restored', async () => {
     baseHandlers();
     const user = await openRules();
@@ -258,21 +286,31 @@ describe('rule list header and inline editing', () => {
     });
   });
 
-  test('adding and removing an alternative keeps conditions as OR', async () => {
+  test('adding and removing a condition keeps the chosen connective', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
-    await user.click(
-      within(row(id)).getByRole('button', { name: '添加条件（或）' }),
-    );
+    // A new rule starts on "all": adding a condition narrows it.
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(conditionGroups(id)).toHaveLength(2);
-    expect(within(row(id)).getByText('满足以下任一条件')).toBeVisible();
+    expect(within(row(id)).getByText('满足以下全部条件')).toBeVisible();
+    const combine = within(row(id)).getByRole('combobox', {
+      name: '条件组合方式',
+    });
+    expect(combine).toHaveValue('all');
 
+    // Switch to "any", drop back to one condition, then add another: the value
+    // must survive the round trip instead of being reset to the default.
+    await user.selectOptions(combine, 'any');
     const second = conditionGroups(id)[1];
     if (second === undefined)
       throw new Error('the second condition is missing');
     await user.click(within(second).getByRole('button', { name: '删除条件' }));
     expect(conditionGroups(id)).toHaveLength(1);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    expect(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('any');
   });
 
   test('multi-value mode, case-insensitivity and the path reach the save body', async () => {
@@ -308,12 +346,13 @@ describe('rule list header and inline editing', () => {
     });
     expect(saved[0]).toMatchObject({
       config: {
-        format: 'arbiter-config-v2',
+        format: 'arbiter-config-v3',
         rules: [
           {
             id,
             verdict: 'force-review',
             enabled: true,
+            combine: 'all',
             conditions: [
               {
                 target: 'argument',
@@ -793,10 +832,10 @@ describe('locale handling', () => {
     expect(screen.getByRole('combobox', { name: /^Behavior/ })).toHaveValue(
       'force-review',
     );
-    expect(screen.getByText('Matches any of the following')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Add condition (or)' }),
-    ).toBeVisible();
+    // A brand-new rule has one condition, so the connective control is not shown
+    // yet; the heading names what the list is rather than claiming a combination.
+    expect(screen.getByText('Match conditions')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add condition' })).toBeVisible();
     // No raw key, blank label or undefined placeholder anywhere in the editor.
     expect(document.body.textContent).not.toMatch(
       /rules\.[A-Za-z]+|undefined|\[object Object\]/u,
@@ -836,7 +875,7 @@ describe('rule validation feedback', () => {
     // The draft stays editable and explains why it cannot be applied.
     expect(screen.getByText(/没有匹配条件/)).toBeInTheDocument();
     expect(
-      within(row(id)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(id)).getByRole('button', { name: '添加条件' }),
     ).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
@@ -1205,11 +1244,11 @@ describe('rule tester selector location', () => {
     // rule is the one the backend rejects.
     const first = await addRule(user);
     await user.click(
-      within(row(first)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(first)).getByRole('button', { name: '添加条件' }),
     );
     const second = await addRule(user);
     await user.click(
-      within(row(second)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(second)).getByRole('button', { name: '添加条件' }),
     );
     const groups = conditionGroups(second);
     expect(groups).toHaveLength(2);
@@ -1243,5 +1282,216 @@ describe('rule tester selector location', () => {
     expect(
       within(row(first)).queryByRole('textbox', { name: 'JSONPath' }),
     ).toBeNull();
+  });
+});
+
+describe('condition combining', () => {
+  async function twoConditions(): Promise<{
+    readonly user: ReturnType<typeof renderClient>['user'];
+    readonly id: string;
+  }> {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    return { user, id };
+  }
+
+  test('the control appears only once a second condition exists', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    // One condition: both values judge identically, so offering the choice would
+    // ask a question that has no consequence.
+    expect(
+      within(row(id)).queryByRole('combobox', { name: '条件组合方式' }),
+    ).toBeNull();
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    expect(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('all');
+  });
+
+  test('a conjunction over two kinds of structure states its limitation', async () => {
+    const { user, id } = await twoConditions();
+    const [first, second] = conditionGroups(id);
+    if (first === undefined || second === undefined)
+      throw new Error('two conditions were expected');
+    // One command condition and one redirect condition can come from different
+    // statements, so the editor must not let the rule look narrower than it is.
+    await user.selectOptions(
+      within(second).getByRole('combobox', { name: '匹配对象' }),
+      'file_redirect',
+    );
+    expect(within(row(id)).getByText(/可能来自不同的语句/)).toBeVisible();
+
+    // Switching to "any" removes the claim, so the note must go with it.
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+      'any',
+    );
+    expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
+  });
+
+  test('one structural target alone does not raise the limitation note', async () => {
+    const { id } = await twoConditions();
+    // Two command conditions are judged node by node, so there is no statement to
+    // be confused about.
+    expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
+  });
+});
+
+describe('source warnings outlive draft edits', () => {
+  test('an unresolved warning from the loaded file stays visible until it is reloaded', async () => {
+    // A misspelled field in an externally edited v2 file: the document still
+    // loads with the meaning it declares, and the warning is about the file on
+    // disk — not about whatever the draft currently holds.
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json({
+          ...effectiveState(),
+          warnings: [
+            {
+              path: 'rules[0].combinee',
+              message: 'unknown field "combinee"',
+              code: 'rule.unknown-field',
+              params: { field: 'combinee' },
+            },
+          ],
+        }),
+      ),
+    );
+    const view = renderClient(<ArbiterPage />);
+    // The page-level notice and the rule's own hint both report it, so count
+    // rather than search for a single node.
+    const warnings = await screen.findAllByText(/未知字段/);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toHaveTextContent('rules[0].combinee');
+
+    // Editing an unrelated setting must not hide a problem in the file that is
+    // still unchanged on disk.
+    await view.user.click(await screen.findByRole('button', { name: '规则' }));
+    await view.user.click(screen.getByRole('button', { name: '新建规则' }));
+    const stillShown = screen.getAllByText(/未知字段/);
+    expect(stillShown.length).toBeGreaterThan(0);
+    expect(stillShown[0]).toHaveTextContent('rules[0].combinee');
+  });
+});
+
+describe('source findings classification', () => {
+  test('a configuration error from the file is not also reported as a warning', async () => {
+    // The host rejected the file, so the error belongs to the error presentation.
+    // Listing it as a warning too would call an invalid configuration advisory.
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json({
+          ...effectiveState(),
+          loadErrors: [
+            {
+              path: 'rules[0].combine',
+              message: 'a rule with several conditions must state "combine"',
+              code: 'rule.combine-required',
+            },
+          ],
+          warnings: [],
+        }),
+      ),
+    );
+    renderClient(<ArbiterPage />);
+    const error = await screen.findByText(/必须声明条件组合方式/);
+    expect(error).toHaveTextContent('rules[0].combine');
+    // The same text must not appear a second time as an informational notice.
+    expect(screen.queryAllByText(/必须声明条件组合方式/)).toHaveLength(1);
+  });
+});
+
+describe('source warnings after a save', () => {
+  test('a warning the save resolved does not outlive it, even with a pending edit', async () => {
+    // The file changed: the field the warning was about is gone. A draft edit
+    // made while the save's reload is in flight must not preserve that warning,
+    // because it no longer describes anything on disk.
+    const reloadGate = deferred();
+    let stateCalls = 0;
+    server.use(
+      http.get('*/api/arbiter/state', async () => {
+        stateCalls += 1;
+        const loaded = effectiveState();
+        if (stateCalls === 1) {
+          return HttpResponse.json({
+            ...loaded,
+            warnings: [
+              {
+                path: 'rules[0].combinee',
+                message: 'unknown field "combinee"',
+                code: 'rule.unknown-field',
+                params: { field: 'combinee' },
+              },
+            ],
+          });
+        }
+        // The saved document no longer carries the misspelled field.
+        await reloadGate.promise;
+        return HttpResponse.json({
+          ...loaded,
+          fileRevision: 'file-2',
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+          warnings: [],
+        });
+      }),
+    );
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', async () => {
+        stateCalls += 1;
+        const loaded = effectiveState();
+        if (stateCalls === 1) {
+          return HttpResponse.json({
+            ...loaded,
+            warnings: [
+              {
+                path: 'rules[0].combinee',
+                message: 'unknown field "combinee"',
+                code: 'rule.unknown-field',
+                params: { field: 'combinee' },
+              },
+            ],
+          });
+        }
+        await reloadGate.promise;
+        return HttpResponse.json({
+          ...loaded,
+          fileRevision: 'file-2',
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+          warnings: [],
+        });
+      }),
+    );
+    const user = await openRules();
+    expect((await screen.findAllByText(/未知字段/)).length).toBeGreaterThan(0);
+
+    const id = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(stateCalls).toBe(2);
+    });
+    // Edit while the reload is in flight, so the draft is newer than the save.
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'typed during reload',
+    );
+    reloadGate.release();
+
+    await waitFor(() => {
+      expect(screen.getByText('文件修订 file-2')).toBeVisible();
+    });
+    // The warning described the replaced file, so it is gone; the draft survives.
+    expect(screen.queryAllByText(/未知字段/)).toHaveLength(0);
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('typed during reload');
   });
 });

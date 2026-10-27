@@ -5,7 +5,7 @@
   "enabledRule": "Enable rule \"{name}\"",
   "add": "New rule",
   "empty": "No rules yet. Calls that need Arbiter start from review(default).",
-  "syntax": "Exact, RE2 and glob all require the whole value to match; regex no longer needs to start with ^, so write the prefix or containment requirement into the expression itself. You can match commands, redirects, assignments, tool names or tool arguments read via JSONPath; multiple conditions inside one rule are \"or\". Argument matching keeps JSON types, so numbers, booleans and null are not converted to strings.",
+  "syntax": "Exact, RE2 and glob all require the whole value to match; regex no longer needs to start with ^, so write the prefix or containment requirement into the expression itself. You can match commands, redirects, assignments, tool names or tool arguments read via JSONPath. The rule-level \"Condition combining\" setting decides how several conditions work together: with \"all\", conditions on the same kind of structure must be satisfied by one and the same node; with \"any\", one match is enough. Argument matching keeps JSON types, so numbers, booleans and null are not converted to strings.",
   "name": "Display name",
   "restoreName": "Restore the automatic name",
   "id": "Rule ID",
@@ -32,7 +32,7 @@
   "agentsPlaceholder": "main, subagent, preset:<name>; empty means any",
   "conditions": "Match conditions",
   "anyOf": "Matches any of the following",
-  "addCondition": "Add condition (or)",
+  "addCondition": "Add condition",
   "removeCondition": "Remove condition",
   "conditionIndex": "Condition {index}",
   "conditionsEmpty": "No match conditions: you can keep editing, but it cannot be saved and applied.",
@@ -54,7 +54,7 @@
   "hintHint": "Provides review focus only; leaving it empty does not affect forced review.",
   "issues": "Validation problems",
   "summaryScoped": "{scope} · {text}",
-  "summaryMore": "{text} and {count} conditions",
+  "summaryMore": "{text} and {count} conditions ({mode})",
   "summaryCondition": "{target} {kind}: {pattern}",
   "summaryConditionEmpty": "{target} {kind}: not filled in yet",
   "summaryIgnoreCase": "{text} (ignore case)",
@@ -97,5 +97,14 @@
   "matched": "Matched rule",
   "shadowed": "Shadowed / facts",
   "unmatched": "(no match)",
-  "nameTitle": "Leave it empty to use the generated summary; renaming does not change the rule ID, and editing conditions never overwrites a custom name."
+  "nameTitle": "Leave it empty to use the generated summary; renaming does not change the rule ID, and editing conditions never overwrites a custom name.",
+  "combineHeading": "All of the following conditions",
+  "oneConditionHeading": "Match conditions",
+  "combine": "Condition combining",
+  "combineOption": {
+    "all": "All must match",
+    "any": "Any may match"
+  },
+  "combineCrossTarget": "These conditions are checked across the whole call: the matching command and redirect may belong to different statements. The rule does not claim they describe one operation.",
+  "unknownField": "Unknown field: {field}"
 }

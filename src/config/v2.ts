@@ -2,10 +2,13 @@
  * Format `arbiter-config-v2`: scope, OR conditions, RFC 9535 JSONPath selectors
  * and whole-value matching.
  *
- * This is the current model. A document that declares `arbiter-config-v1` is
- * converted by `legacy.ts` only where equivalence is provable; a document that
- * declares no format keeps the legacy prefix semantics and never inherits this
- * behaviour silently.
+ * A document that declares `arbiter-config-v1` is converted by `legacy.ts` only
+ * where equivalence is provable; a document that declares no format keeps the
+ * legacy prefix semantics and never inherits this behaviour silently.
+ *
+ * `combine` belongs to v3. Accepting it here would be the one thing this module
+ * exists to prevent: a reader that ignores the field and evaluates the wider
+ * alternative while the author believes they narrowed the rule.
  */
 
 import type {
@@ -15,6 +18,7 @@ import type {
   ConfigWarning,
 } from '../types.js';
 import { finishDocument, parseConfigSections } from './document.js';
+import { isRecord } from './values.js';
 import { parseRule } from './rules.js';
 
 export function parseConfigV2(raw: Record<string, unknown>): ConfigParseResult {
@@ -32,7 +36,20 @@ export function parseConfigV2(raw: Record<string, unknown>): ConfigParseResult {
   const rules: CommandRule[] = [];
   const sourceIndices: number[] = [];
   rulesRaw.forEach((value, index) => {
-    const rule = parseRule(value, index, errors);
+    if (isRecord(value) && value['combine'] !== undefined) {
+      errors.push({
+        path: `rules[${String(index)}].combine`,
+        message:
+          '"combine" requires format "arbiter-config-v3"; the v2 format has no connective and would ignore it',
+        code: 'rule.format-mismatch',
+        params: { format: 'arbiter-config-v3', field: 'combine' },
+      });
+      return;
+    }
+    const rule = parseRule(value, index, errors, {
+      strict: false,
+      warnings,
+    });
     if (rule === null) return;
     rules.push(rule);
     sourceIndices.push(index);

@@ -8,6 +8,8 @@
  * final permission verdict is kept apart from the execution result.
  */
 
+import type { RuleConjunctionEvidence } from '../types.js';
+
 /**
  * Why part of a detail could not be shown.
  *
@@ -85,6 +87,14 @@ export interface CallDetailStage {
   readonly decisionRules: readonly string[];
   readonly configRevision: string | null;
   readonly configSnapshotId: string | null;
+  /**
+   * The conjunction witness recorded when this stage ruled.
+   *
+   * `null` means the record carries none — an `any` rule, or a record written
+   * before the connective existed. It never means "recompute from the current
+   * rule": a deleted or edited rule must not change what history says happened.
+   */
+  readonly conjunction: RuleConjunctionEvidence | null;
   readonly ts: number | null;
 }
 

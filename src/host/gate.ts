@@ -25,6 +25,7 @@ import type {
   PreToolDecision,
   PriorVerdictItem,
 } from '../types.js';
+import { ruleConjunctionStage } from './gate-conjunction.js';
 import { deny, isAborted, sessionKindOf } from './common.js';
 import type { DecisionHistory } from './history.js';
 import type { PermissionLifecycle } from './permissions.js';
@@ -373,6 +374,7 @@ export class CallGate {
               }
             : {}),
           ...(path.kind === 'review-default' ? { reason: path.reason } : {}),
+          ...ruleConjunctionStage(evaluation, path),
           // The revision that decided this stage, from the same view the
           // evaluation used, so a later switch cannot relabel it.
           configRevision: view.revision,

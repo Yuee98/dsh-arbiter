@@ -20,10 +20,12 @@ import { DEFAULT_CONFIG } from './config/defaults.js';
 import { isRecord } from './config/values.js';
 import { parseConfigV1 } from './config/v1.js';
 import { parseConfigV2 } from './config/v2.js';
+import { parseConfigV3 } from './config/v3.js';
 import {
   CONFIG_FORMAT_FIELD,
   CONFIG_FORMAT_V1,
   CONFIG_FORMAT_V2,
+  CONFIG_FORMAT_V3,
   identifyConfigFormat,
   registerConfigFormat,
 } from './config/format.js';
@@ -42,6 +44,11 @@ registerConfigFormat({
 registerConfigFormat({
   id: CONFIG_FORMAT_V2,
   parse: parseConfigV2,
+});
+
+registerConfigFormat({
+  id: CONFIG_FORMAT_V3,
+  parse: parseConfigV3,
 });
 
 /**

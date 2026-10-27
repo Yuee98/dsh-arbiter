@@ -136,5 +136,8 @@
   "noEvidenceNotNeeded": "这次调用没有发出模型请求，因此没有送审证据。",
   "noAttemptsNotNeeded": "这次调用没有发出模型请求，因此没有模型尝试。",
   "minimalVerdict": "最小裁决记录",
-  "minimalVerdictHint": "审计与裁决历史都没有这条调用；下列内容来自当前会话记录，不包含阶段链与原始材料。"
+  "minimalVerdictHint": "审计与裁决历史都没有这条调用；下列内容来自当前会话记录，不包含阶段链与原始材料。",
+  "conjunction": "合取证据（当时的判定依据）",
+  "conjunctionWitness": "{target}：同时满足的节点 {text}",
+  "conjunctionNoWitness": "这条记录没有留下可显示的合取节点。"
 }

@@ -1,13 +1,9 @@
-import {
-  saveResponse,
-  stateResponse,
-  validationResponse,
-} from './decoders/state.js';
+import { saveResponse, validationResponse } from './decoders/state.js';
 import { PageTabs } from './components/page-tabs.js';
 import type { TabId } from './components/page-tabs.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ApiError, getJson, postJson } from './api.js';
+import { ApiError, postJson } from './api.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
@@ -16,6 +12,8 @@ import { useArbiterTranslation } from './i18n-provider.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
 import type { ConfigIssueView } from './view-issues.js';
+import { reportFindings, useLoadState } from './page-load.js';
+import type { ValidationState } from './page-load.js';
 import type {
   Draft,
   SaveResponse,
@@ -60,10 +58,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   const [busy, setBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
-  const [validation, setValidation] = useState<{
-    readonly errors: readonly ConfigIssueView[];
-    readonly warnings: readonly ConfigIssueView[];
-  }>({ errors: [], warnings: [] });
+  const [validation, setValidation] = useState<ValidationState>({
+    errors: [],
+    warnings: [],
+    sourceWarnings: [],
+  });
   const generation = useRef(0);
   /**
    * Findings belong to the draft revision that produced them.
@@ -79,49 +78,18 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   // The feed keeps the conflict view live; the payload's value only seeds it.
   const coexistence = useCoexistenceFeed(state, onFailure);
 
-  /**
-   * Read the host state.
-   *
-   * When a save initiated the reload, the submitted draft revision travels with
-   * it: the decision to keep or replace the draft is made after `/state`
-   * resolves, immediately before the draft is written, so edits made during
-   * either the save or the reload survive.
-   */
-  const load = useCallback(
-    async (
-      options: { readonly submittedRevision?: number } = {},
-    ): Promise<void> => {
-      const ticket = generation.current + 1;
-      generation.current = ticket;
-      setBusy(true);
-      setError(null);
-      try {
-        const value = await getJson('/state', stateResponse);
-        if (generation.current !== ticket) return;
-        // A reload or a completed save replaces the draft, so any answer for
-        // the previous draft is stale from here on.
-        const edited = validationRevision.current !== options.submittedRevision;
-        validationRevision.current += 1;
-        setState(value);
-        if (options.submittedRevision !== undefined && edited) {
-          // The user edited after submitting the save. The applied
-          // configuration is what was sent; the newer edits stay unsaved.
-          setValidation({ errors: [], warnings: [] });
-          return;
-        }
-        setDraft(cloneDraft(value.config));
-        setDirty(false);
-        setSaveStatus('idle');
-        setAuditNotice(null);
-        setValidation({ errors: value.loadErrors, warnings: value.warnings });
-      } catch (errorValue) {
-        if (generation.current === ticket) setError(errorText(errorValue));
-      } finally {
-        if (generation.current === ticket) setBusy(false);
-      }
-    },
-    [],
-  );
+  const load = useLoadState({
+    generation,
+    validationRevision,
+    setBusy,
+    setError,
+    setState,
+    setDraft,
+    setDirty,
+    setSaveStatus,
+    setAuditNotice,
+    setValidation,
+  });
 
   useEffect(() => {
     load().catch(onFailure);
@@ -129,7 +97,14 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
 
   const onDraft = useCallback((mutator: (draft: Draft) => void): void => {
     validationRevision.current += 1;
-    setValidation({ errors: [], warnings: [] });
+    // Only the draft-validation findings are invalidated by an edit. The loaded
+    // source's own warnings are about the document on disk, which the edit has
+    // not touched — clearing them here would hide an unresolved problem (a
+    // misspelled field in an externally edited file) the moment the user nudges
+    // any unrelated setting. `sourceWarnings` is replaced only by a reload.
+    setValidation((current) =>
+      reportFindings(current.sourceWarnings, { errors: [], warnings: [] }),
+    );
     setDraft((current) => {
       if (current === null) return current;
       const next = cloneDraft(current);
@@ -150,7 +125,12 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       );
       // A draft edit while the request was in flight makes this answer stale.
       if (validationRevision.current !== revision) return;
-      setValidation({ errors: response.errors, warnings: response.warnings });
+      setValidation((current) =>
+        reportFindings(current.sourceWarnings, {
+          errors: response.errors,
+          warnings: response.warnings,
+        }),
+      );
     } catch (errorValue) {
       setError(errorText(errorValue));
     }

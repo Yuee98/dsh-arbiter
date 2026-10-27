@@ -19,6 +19,10 @@ import { Collapsible } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
 import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
+import type {
+  RuleConjunctionEvidence,
+  RuleConjunctionGroup,
+} from '../../types.js';
 import type { CallDetailView } from '../view-types.js';
 
 /** The matched rule, or the review strategy when no rule decided the call. */
@@ -118,10 +122,76 @@ function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
               {stage.reason}
             </div>
           )}
+          {stage.conjunction === null ? null : (
+            <Conjunction evidence={stage.conjunction} />
+          )}
         </li>
       ))}
     </ol>
   );
+}
+
+/**
+ * The conjunction a rule stage actually used.
+ *
+ * Only the groups that matched are listed with their witness node: that pair is
+ * what made the call allowed, and reproducing it from the rule as it stands now
+ * would describe a decision this record did not make.
+ */
+function Conjunction(props: {
+  readonly evidence: RuleConjunctionEvidence;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  // Every matched group is listed, including the ones whose target has no node
+  // text: a value target's matched value is the evidence for that conjunct, and
+  // dropping it would describe a conjunction of command-plus-argument as a
+  // command-only decision.
+  const matched = props.evidence.groups.filter(
+    (group) => group.outcome === 'match',
+  );
+  return (
+    <div
+      style={{ marginTop: 2, fontSize: 11.5 }}
+      data-call-detail-conjunction=""
+    >
+      <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+        {t('callDetail.conjunction')}
+      </div>
+      {matched.length === 0 ? (
+        <div>{t('callDetail.conjunctionNoWitness')}</div>
+      ) : (
+        <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+          {matched.map((group) => (
+            <li
+              key={`${group.target}-${String(group.conditionIndices[0])}`}
+              data-call-detail-conjunction-group={group.target}
+            >
+              {t('callDetail.conjunctionWitness', {
+                // The target is a protocol value, so it stays as written rather
+                // than being translated into a name this build might rename.
+                target: group.target,
+                text: groupText(group),
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What one matched group can show about itself.
+ *
+ * A structural group names the node that satisfied every condition; a value
+ * group has no node, so its own matched values are the evidence. Neither is
+ * invented when the record lacks it.
+ */
+function groupText(group: RuleConjunctionGroup): string {
+  if (group.witnessText !== undefined) return group.witnessText;
+  if (group.witnessValues !== undefined)
+    return group.witnessValues.map((entry) => entry.text).join(', ');
+  return '';
 }
 
 /** The decision rules the policy applied, when the call reached a review. */

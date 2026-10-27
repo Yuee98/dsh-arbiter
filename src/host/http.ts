@@ -1,5 +1,5 @@
 import { parseConfig } from '../config.js';
-import { CONFIG_FORMAT_V2 } from '../config/format.js';
+import { CONFIG_FORMAT_V3 } from '../config/format.js';
 import type { CommandRule, ConfigError } from '../types.js';
 
 export function jsonResponse(value: unknown, status = 200): Response {
@@ -60,7 +60,13 @@ export function asRuleDraft(value: unknown): RuleDraftResult {
       ],
     };
   }
-  const parsed = parseConfig({ format: CONFIG_FORMAT_V2, rules: value });
+  // The tester must validate the draft with the format this build writes, or a
+  // rule carrying `combine` would be rejected as a format mismatch and the
+  // panel would disagree with the gate that actually evaluates it.
+  const parsed = parseConfig({
+    format: CONFIG_FORMAT_V3,
+    rules: value,
+  });
   return {
     rules: parsed.errors.length > 0 ? [] : parsed.config.rules,
     errors: parsed.errors,

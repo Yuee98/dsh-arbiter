@@ -176,6 +176,10 @@ function rememberedChain(
     decisionRules: stage.decisionRules,
     configRevision: stage.configRevision,
     configSnapshotId: null,
+    // The session record keeps result strings and a few named fields, never a
+    // conjunction witness. Reporting `null` keeps the gap visible instead of
+    // borrowing the live rule's shape.
+    conjunction: null,
     ts: stage.ts,
   }));
 }

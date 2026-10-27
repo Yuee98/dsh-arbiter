@@ -37,6 +37,31 @@ export type RuleTarget =
 export type RuleMultiMode = 'any' | 'all';
 
 /**
+ * How a rule combines its own conditions.
+ *
+ * `any` keeps the historical meaning (one certain match decides). `all` requires
+ * every condition to hold, and for the structural targets the *same node* must
+ * satisfy all of them — otherwise a rule could pair a command from one statement
+ * with a redirect from another and authorize both.
+ *
+ * This is a different layer from `RuleMultiMode`: that one combines the values
+ * one condition selected, this one combines conditions.
+ */
+export type RuleCombine = 'all' | 'any';
+
+/** The structural targets whose conditions must be satisfied by one node. */
+export const STRUCTURAL_TARGETS = [
+  'command',
+  'file_redirect',
+  'variable_assignment',
+] as const;
+
+/** Whether a target reads shell structure rather than a single call value. */
+export function isStructuralTarget(target: RuleTarget): boolean {
+  return (STRUCTURAL_TARGETS as readonly RuleTarget[]).includes(target);
+}
+
+/**
  * A pattern keeps the JSON type it was written with.
  *
  * `regex` and `glob` only apply to strings; `exact` compares the actual JSON
@@ -79,7 +104,13 @@ export interface CommandRule {
   readonly comment?: string;
   readonly enabled?: boolean;
   readonly scope?: RuleScope;
-  /** At least one condition; several conditions are alternatives (OR). */
+  /**
+   * How several conditions combine. Required when there is more than one
+   * condition; a single condition keeps it optional because both values mean the
+   * same thing.
+   */
+  readonly combine?: RuleCombine;
+  /** At least one condition; `combine` decides whether they all or any must hold. */
   readonly conditions: readonly RuleCondition[];
   readonly verdict: RuleVerdict;
   readonly hint?: string;
@@ -268,7 +299,23 @@ export interface TraceStage {
    * configuration that was in effect for it, not by whatever runs last.
    */
   readonly configSnapshotId?: string;
+  /**
+   * How a `combine: all` rule's conjunction was satisfied, when one ruled.
+   *
+   * A conjunction's reason is the pair of facts that jointly permitted the call,
+   * so recording only the first matching condition would describe the decision as
+   * something narrower than it was. Absent for `any` rules and for records
+   * written before the connective existed; readers report the gap rather than
+   * reconstruct a witness from the current rule.
+   */
+  readonly conjunction?: RuleConjunctionEvidence;
   readonly at: number;
+}
+
+/** One witness node per conjunction group, as observed when the rule ruled. */
+export interface RuleConjunctionEvidence {
+  readonly combine: RuleCombine;
+  readonly groups: readonly RuleConjunctionGroup[];
 }
 
 export interface DerivedFacts {
@@ -605,6 +652,46 @@ export interface RuleConditionResult {
   readonly values?: readonly unknown[];
   readonly matchedValues?: readonly unknown[];
   readonly matchedValue?: string;
+  /**
+   * For `combine: all`, the nodes that satisfied this condition *and* every
+   * other condition on the same structural target.
+   *
+   * Only this set may contribute coverage. A condition that matched a node no
+   * sibling condition matched covers nothing: otherwise a rule could pair a
+   * command from one statement with a redirect from another and call the pair
+   * allowed. Absent for `any`, where each condition's own matches are the cover.
+   */
+  readonly witnessValues?: readonly string[];
+}
+
+/**
+ * One conjunction group: the conditions of a rule that share a target, and the
+ * nodes that satisfied all of them.
+ *
+ * Kept per target so the tester can say "the redirect condition had no matching
+ * node" instead of collapsing the rule into a single verdict.
+ */
+export interface RuleConjunctionGroup {
+  readonly target: RuleTarget;
+  /** Condition indices evaluated in this group, in rule order. */
+  readonly conditionIndices: readonly number[];
+  readonly outcome: RuleConditionOutcome;
+  /** Node text that satisfied every structural condition in the group. */
+  readonly witnessText?: string;
+  /**
+   * The matched value of each condition in a `tool` or `argument` group.
+   *
+   * Those targets have no node to name, so without this a matched value group
+   * carries nothing historical readers can show — and a conjunction recorded as
+   * "command and argument" would look like a command-only decision.
+   */
+  readonly witnessValues?: readonly RuleConjunctWitness[];
+}
+
+/** One condition's matched text inside a conjunction group. */
+export interface RuleConjunctWitness {
+  readonly conditionIndex: number;
+  readonly text: string;
 }
 
 /** One rule's result, including every condition it evaluated. */
@@ -613,8 +700,11 @@ export interface RuleResult {
   readonly id: string;
   readonly name?: string;
   readonly verdict: RuleVerdict;
+  readonly combine?: RuleCombine;
   readonly outcome: RuleConditionOutcome;
   readonly conditions: readonly RuleConditionResult[];
+  /** Present for `all`: how each target's conjunction resolved. */
+  readonly groups?: readonly RuleConjunctionGroup[];
 }
 
 export interface RuleMatchDetail {

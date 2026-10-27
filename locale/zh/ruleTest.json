@@ -45,7 +45,7 @@
   "reviewPartialAllow": "匹配的 allow 未覆盖整个调用，进入默认审查。",
   "reviewHint": "进入审查只表示路径，不预测模型结果；必须人工审批也不会真的弹出。",
   "effectiveCwd": "本次求值目录：{cwd}",
-  "conditionHead": "条件 {n}（条件之间为“或”）",
+  "conditionHead": "条件 {n}",
   "conditionTarget": "匹配对象：{target}",
   "conditionExpression": "匹配方式：{kind} · {pattern}",
   "conditionPath": "JSONPath：{path}",
@@ -92,5 +92,11 @@
   "invalidRules": "草稿中有规则未通过校验，整份规则无法测试：",
   "locateIssue": "定位到 {path}",
   "issuesOutdated": "草稿已改变，原来的错误位置不再对应同一条条件；请重新运行测试。",
-  "requestFailed": "测试请求失败：{error}"
+  "requestFailed": "测试请求失败：{error}",
+  "conditionWitness": "同时满足的节点：{text}",
+  "conditionGroup": "与同一匹配对象上的其他条件：{outcome}",
+  "combineAll": "本规则要求下列条件全部满足（同一匹配对象上的条件须由同一个节点同时满足）。",
+  "groupMatch": "已同时满足",
+  "groupNoMatch": "无法同时满足",
+  "groupUnknown": "结构未读全，无法判断"
 }

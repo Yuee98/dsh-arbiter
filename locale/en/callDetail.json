@@ -136,5 +136,8 @@
   "noEvidenceNotNeeded": "This call sent no model request, so there is no review evidence.",
   "noAttemptsNotNeeded": "This call sent no model request, so there are no model attempts.",
   "minimalVerdict": "Minimal verdict record",
-  "minimalVerdictHint": "Neither the audit nor the verdict history has this call; the following comes from the current session record and has no decision chain or raw material."
+  "minimalVerdictHint": "Neither the audit nor the verdict history has this call; the following comes from the current session record and has no decision chain or raw material.",
+  "conjunction": "Conjunction evidence (as decided then)",
+  "conjunctionWitness": "{target}: node satisfying all of them — {text}",
+  "conjunctionNoWitness": "This record carries no conjunction node to show."
 }

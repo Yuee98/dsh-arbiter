@@ -3,13 +3,16 @@ import picomatch from 'picomatch';
 import { RE2JS } from 're2js';
 import type {
   CommandRule,
+  RuleCombine,
   RuleCondition,
   RuleConditionOutcome,
   RuleConditionResult,
+  RuleConjunctionGroup,
   RulePattern,
   RuleScope,
   RuleTarget,
 } from '../types.js';
+import { combineAll, combineOf } from './combine.js';
 import { compileSelector, SelectorSyntaxError } from './selector.js';
 import type { ArgSelector } from './selector.js';
 
@@ -157,7 +160,7 @@ function compileRegex(
 }
 
 /** One condition compiled once, ready to test typed values. */
-interface CompiledCondition {
+export interface CompiledCondition {
   readonly condition: RuleCondition;
   readonly matches: (value: unknown) => boolean;
   readonly selector: ArgSelector | null;
@@ -391,15 +394,19 @@ function evaluateStructural(
   return noMatch(index, condition, 'value-mismatch');
 }
 
+/** How one rule's conditions combined, including every evaluated condition. */
 export interface ConditionEvaluation {
   readonly outcome: RuleConditionOutcome;
   readonly conditions: readonly RuleConditionResult[];
+  readonly groups: readonly RuleConjunctionGroup[];
 }
 
 /** One compiled rule, ready for the evaluator and the tester. */
 export interface CompiledRule {
   readonly rule: CommandRule;
   readonly index: number;
+  /** The effective connective, after canonicalizing a document that omitted it. */
+  readonly combine: RuleCombine;
   readonly toolMatcher: ((tool: string) => boolean) | null;
   readonly conditions: readonly CompiledCondition[];
   readonly evaluate: (call: CallSubjects) => ConditionEvaluation;
@@ -507,15 +514,18 @@ export function compileRule(rule: CommandRule, index: number): CompiledRule {
   );
   const toolMatcher = compileToolScope(rule.scope?.tools);
   const agents = rule.scope?.agents;
+  const combine = combineOf(rule);
   const scopedOut = (): ConditionEvaluation => ({
     outcome: 'no-match',
     conditions: conditions.map((compiled, conditionIndex) =>
       noMatch(conditionIndex, compiled.condition, 'scope'),
     ),
+    groups: [],
   });
   return {
     rule,
     index,
+    combine,
     toolMatcher,
     conditions,
     evaluate: (call: CallSubjects): ConditionEvaluation => {
@@ -530,9 +540,10 @@ export function compileRule(rule: CommandRule, index: number): CompiledRule {
           ? evaluateArgument(compiled, conditionIndex, call)
           : evaluateStructural(compiled, conditionIndex, call),
       );
-      // Conditions are alternatives (OR): one certain match decides the rule, an
-      // unknown only survives when nothing matched, and a rule that is entirely
-      // determined not to match stays not-matched.
+      if (combine === 'all') return combineAll(conditions, results, call);
+      // `any` is the historical reading and is unchanged: one certain match
+      // decides the rule, an unknown only survives when nothing matched, and a
+      // rule that is entirely determined not to match stays not-matched.
       const outcome: RuleConditionOutcome = results.some(
         (result) => result.outcome === 'match',
       )
@@ -540,7 +551,7 @@ export function compileRule(rule: CommandRule, index: number): CompiledRule {
         : results.some((result) => result.outcome === 'unknown')
           ? 'unknown'
           : 'no-match';
-      return { outcome, conditions: results };
+      return { outcome, conditions: results, groups: [] };
     },
   };
 }
