@@ -55,7 +55,7 @@ export function formatTime(ts: number): string {
  * A draft without rules keeps whatever the document declared, so an explicit
  * declaration still round-trips unchanged.
  */
-const CANONICAL_FORMAT = 'arbiter-config-v2';
+const CANONICAL_FORMAT = 'arbiter-config-v3';
 
 export function cloneDraft(config: ArbiterConfig): Draft {
   const copy = structuredClone(config);
@@ -64,6 +64,10 @@ export function cloneDraft(config: ArbiterConfig): Draft {
     ...(copy.rules.length === 0 ? {} : { format: CANONICAL_FORMAT }),
     rules: copy.rules.map((rule) => ({
       ...rule,
+      // A rule parsed from a v1/v2 document carries the normalized connective the
+      // host derived, so nothing has to be invented here. Keeping the spread means
+      // a rule without one would still be written without one, and the server
+      // would reject rather than guess.
       conditions: rule.conditions.map((condition) => ({ ...condition })),
       ...(rule.scope === undefined
         ? {}

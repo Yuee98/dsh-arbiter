@@ -42,6 +42,7 @@ import type {
   RuleVerdict,
   SessionKind,
 } from '../types.js';
+import { isStructuralTarget } from '../types.js';
 
 const VERDICT_PRIORITY: Record<RuleVerdict, number> = {
   deny: 0,
@@ -243,9 +244,11 @@ function ruleResults(
       index: rule.index,
       id: rule.rule.id,
       verdict: rule.rule.verdict,
+      combine: rule.combine,
       outcome: evaluation.outcome,
       ...(rule.rule.name === undefined ? {} : { name: rule.rule.name }),
       conditions: evaluation.conditions,
+      ...(evaluation.groups.length === 0 ? {} : { groups: evaluation.groups }),
     });
     if (evaluation.outcome !== 'match') continue;
     const condition = evaluation.conditions.find(
@@ -318,12 +321,23 @@ function allowCoverage(
   // covers the whole call when that alternative is the one that matched;
   // otherwise a matching command alternative would silently extend its coverage
   // to an unrelated tool alternative.
-  const wholeTool = allows.some((result) =>
-    result.conditions.some(
+  //
+  // Under `all` the tool condition covers the whole call only when it is the only
+  // thing the rule narrowed on. Letting it cover a rule that also constrains the
+  // structure would make the structural half decorative: `all(tool=bash,
+  // command="echo hi")` would then allow `echo hi; rm -rf /tmp/victim`, because
+  // the tool match alone covers everything the conjunction was meant to restrict.
+  const wholeTool = allows.some((result) => {
+    const toolMatched = result.conditions.some(
       (condition) =>
         condition.target === 'tool' && condition.outcome === 'match',
-    ),
-  );
+    );
+    if (!toolMatched) return false;
+    if (result.combine !== 'all') return true;
+    return !result.conditions.some((condition) =>
+      isStructuralTarget(condition.target),
+    );
+  });
   // A non-shell call has no AST to cover; its arguments are the entire judged
   // input, so a matching argument condition covers it. The tool category decides
   // this, never an empty subject list: a shell call whose structure could not be
@@ -340,14 +354,19 @@ function allowCoverage(
   // match several distinct subjects (a case-insensitive exact value, or a regex
   // over several commands), and keeping only the first would mark the rest as
   // uncovered.
+  //
+  // The covered text comes from `witnessValues` when a condition carries it: an
+  // `all` condition's own matches are not a cover on their own, because a node
+  // that satisfies only one half of a conjunction was never authorized by it.
   const covers = (subject: Subject): boolean =>
     allows.some((result) =>
-      result.conditions.some(
-        (condition) =>
-          condition.outcome === 'match' &&
-          condition.target === subject.target &&
-          (condition.matchedValues ?? []).includes(subject.text),
-      ),
+      result.conditions.some((condition) => {
+        if (condition.outcome !== 'match') return false;
+        if (condition.target !== subject.target) return false;
+        const covered =
+          condition.witnessValues ?? condition.matchedValues ?? [];
+        return covered.includes(subject.text);
+      }),
     );
   // An argument condition covers no structural node, and a partial parse hides
   // nodes the matcher never saw, so neither can complete a structural cover.

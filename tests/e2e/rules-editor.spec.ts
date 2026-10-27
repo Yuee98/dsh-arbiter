@@ -18,6 +18,7 @@ interface RuleState {
   readonly enabled?: boolean;
   readonly conditions: readonly unknown[];
   readonly scope?: unknown;
+  readonly combine?: string;
 }
 
 interface ArbiterState {
@@ -48,6 +49,7 @@ function readState(value: unknown): ArbiterState {
         throw new TypeError('conditions must be an array');
       const name = entry['name'];
       const enabled = entry['enabled'];
+      const combine = entry['combine'];
       return {
         id: String(entry['id']),
         verdict: String(entry['verdict']),
@@ -55,6 +57,9 @@ function readState(value: unknown): ArbiterState {
         ...('scope' in entry ? { scope: entry['scope'] } : {}),
         ...(typeof name === 'string' ? { name } : {}),
         ...(typeof enabled === 'boolean' ? { enabled } : {}),
+        // The projection kept only the fields the assertions needed; the
+        // connective is now one of them.
+        ...(typeof combine === 'string' ? { combine } : {}),
       };
     }),
   };
@@ -127,9 +132,7 @@ test.describe('rule editing in the real host', () => {
       ).toHaveValue('只读查询');
 
       // A second condition is an alternative (OR), not a nested group.
-      await row
-        .getByRole('button', { name: '添加条件（或）', exact: true })
-        .click();
+      await row.getByRole('button', { name: '添加条件', exact: true }).click();
       await expect(row.getByRole('group', { name: /^条件 \d+$/ })).toHaveCount(
         2,
       );
@@ -179,7 +182,7 @@ test.describe('rule editing in the real host', () => {
 
       const applied = await readArbiter(dsh);
       expect(applied.invalidConfigError).toBeNull();
-      expect(applied.configFormat).toBe('arbiter-config-v2');
+      expect(applied.configFormat).toBe('arbiter-config-v3');
       expect(applied.rules).toHaveLength(1);
       const [saved] = applied.rules;
       expect(saved).toMatchObject({
@@ -187,6 +190,9 @@ test.describe('rule editing in the real host', () => {
         name: '只读查询',
         verdict: 'force-review',
         enabled: true,
+        // The editor now records how the two conditions combine. "全部满足" is
+        // the default for a rule the user builds here.
+        combine: 'all',
         scope: { tools: ['bash', 'deploy'] },
       });
       expect(saved?.conditions).toHaveLength(2);
@@ -240,7 +246,7 @@ test.describe('rule editing in the real host', () => {
     await row.getByRole('button', { name: '删除条件', exact: true }).click();
     await expect(plugin.getByText(/没有匹配条件/)).toBeVisible();
     await expect(
-      row.getByRole('button', { name: '添加条件（或）', exact: true }),
+      row.getByRole('button', { name: '添加条件', exact: true }),
     ).toBeEnabled();
 
     const before = await readArbiter(dsh);

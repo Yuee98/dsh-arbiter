@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { isStructuralTarget } from '../../../types.js';
+
 import type { Translate } from '../../i18n.js';
 import { useArbiterTranslation } from '../../i18n-provider.js';
 import { issueText } from '../../view-issues.js';
-import { Button, TextInput } from '../controls.js';
+import { Button, Select, TextInput } from '../controls.js';
 import {
   addCondition,
   listText,
   listValue,
+  removeCondition,
   ruleFieldLabel,
   withCondition,
 } from './draft.js';
@@ -27,6 +30,30 @@ const headingStyle = {
   fontSize: 12.5,
   fontWeight: 600,
 } as const;
+
+/** A limit stated in place, not an error: it describes what the rule does. */
+const noteStyle = {
+  margin: 0,
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  color: 'var(--dsw-alias-label-tertiary)',
+} as const;
+
+/**
+ * Whether a conjunction spans more than one kind of structural node.
+ *
+ * Only then can the two facts come from different statements. A rule over one
+ * target cannot, and a rule over only tool/argument conditions has no statement
+ * to be confused about.
+ */
+function crossesStructuralTargets(rule: DraftRule): boolean {
+  const targets = new Set(
+    rule.conditions
+      .map((condition) => condition.target)
+      .filter((target) => isStructuralTarget(target)),
+  );
+  return targets.size > 1;
+}
 
 const labelStyle = {
   display: 'flex',
@@ -65,7 +92,40 @@ export function RuleEditor(props: {
       <ScopeFields rule={rule} onChange={onChange} />
 
       <section style={groupStyle} aria-label={t('rules.conditions')}>
-        <h4 style={headingStyle}>{t('rules.anyOf')}</h4>
+        <h4 style={headingStyle}>
+          {rule.conditions.length > 1
+            ? t('rules.combineHeading')
+            : t('rules.oneConditionHeading')}
+        </h4>
+        {rule.conditions.length > 1 ? (
+          // The connective is only meaningful with two conditions, and it is
+          // never rewritten when conditions are added or removed: the value is
+          // kept so a rule set to "any" does not silently narrow to "all".
+          <Select
+            ariaLabel={t('rules.combine')}
+            value={rule.combine ?? 'all'}
+            options={['all', 'any'] as const}
+            labels={{
+              all: t('rules.combineOption.all'),
+              any: t('rules.combineOption.any'),
+            }}
+            onChange={(value) => {
+              onChange((next) => {
+                next.combine = value;
+              });
+            }}
+          />
+        ) : null}
+        {rule.conditions.length > 1 &&
+        (rule.combine ?? 'all') === 'all' &&
+        crossesStructuralTargets(rule) ? (
+          // A call-level conjunction does not claim the two facts belong to the
+          // same statement. Saying so is the difference between a rule the user
+          // understands and one that looks narrower than it is.
+          <p role="note" style={noteStyle}>
+            {t('rules.combineCrossTarget')}
+          </p>
+        ) : null}
         {rule.conditions.length === 0 ? (
           <p
             role="note"
@@ -90,7 +150,7 @@ export function RuleEditor(props: {
             }}
             onRemove={() => {
               onChange((next) => {
-                next.conditions.splice(conditionIndex, 1);
+                removeCondition(next.conditions, conditionIndex);
               });
             }}
           />

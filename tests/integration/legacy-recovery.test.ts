@@ -127,10 +127,10 @@ describe('converted legacy rules survive a round trip', () => {
     const record: unknown = JSON.parse(
       await readFile(join(lastGood, entries[0] ?? ''), 'utf8'),
     );
-    // The copy declares the canonical format for validation while remembering
+    // The copy declares the canonical format this build writes while remembering
     // that the running configuration was implicit.
     expect(record).toMatchObject({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       sourceFormatExplicit: false,
       sourceFormat: null,
     });
@@ -140,7 +140,7 @@ describe('converted legacy rules survive a round trip', () => {
         : undefined;
     const reparsed = parseConfig({
       ...(stored !== null && typeof stored === 'object' ? stored : {}),
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
     });
     expect(reparsed.errors).toEqual([]);
     expect(reparsed.config.rules).toHaveLength(1);

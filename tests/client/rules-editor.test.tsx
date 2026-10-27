@@ -258,21 +258,31 @@ describe('rule list header and inline editing', () => {
     });
   });
 
-  test('adding and removing an alternative keeps conditions as OR', async () => {
+  test('adding and removing a condition keeps the chosen connective', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
-    await user.click(
-      within(row(id)).getByRole('button', { name: '添加条件（或）' }),
-    );
+    // A new rule starts on "all": adding a condition narrows it.
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(conditionGroups(id)).toHaveLength(2);
-    expect(within(row(id)).getByText('满足以下任一条件')).toBeVisible();
+    expect(within(row(id)).getByText('满足以下全部条件')).toBeVisible();
+    const combine = within(row(id)).getByRole('combobox', {
+      name: '条件组合方式',
+    });
+    expect(combine).toHaveValue('all');
 
+    // Switch to "any", drop back to one condition, then add another: the value
+    // must survive the round trip instead of being reset to the default.
+    await user.selectOptions(combine, 'any');
     const second = conditionGroups(id)[1];
     if (second === undefined)
       throw new Error('the second condition is missing');
     await user.click(within(second).getByRole('button', { name: '删除条件' }));
     expect(conditionGroups(id)).toHaveLength(1);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    expect(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('any');
   });
 
   test('multi-value mode, case-insensitivity and the path reach the save body', async () => {
@@ -308,12 +318,13 @@ describe('rule list header and inline editing', () => {
     });
     expect(saved[0]).toMatchObject({
       config: {
-        format: 'arbiter-config-v2',
+        format: 'arbiter-config-v3',
         rules: [
           {
             id,
             verdict: 'force-review',
             enabled: true,
+            combine: 'all',
             conditions: [
               {
                 target: 'argument',
@@ -793,10 +804,10 @@ describe('locale handling', () => {
     expect(screen.getByRole('combobox', { name: /^Behavior/ })).toHaveValue(
       'force-review',
     );
-    expect(screen.getByText('Matches any of the following')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Add condition (or)' }),
-    ).toBeVisible();
+    // A brand-new rule has one condition, so the connective control is not shown
+    // yet; the heading names what the list is rather than claiming a combination.
+    expect(screen.getByText('Match conditions')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add condition' })).toBeVisible();
     // No raw key, blank label or undefined placeholder anywhere in the editor.
     expect(document.body.textContent).not.toMatch(
       /rules\.[A-Za-z]+|undefined|\[object Object\]/u,
@@ -836,7 +847,7 @@ describe('rule validation feedback', () => {
     // The draft stays editable and explains why it cannot be applied.
     expect(screen.getByText(/没有匹配条件/)).toBeInTheDocument();
     expect(
-      within(row(id)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(id)).getByRole('button', { name: '添加条件' }),
     ).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
@@ -1205,11 +1216,11 @@ describe('rule tester selector location', () => {
     // rule is the one the backend rejects.
     const first = await addRule(user);
     await user.click(
-      within(row(first)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(first)).getByRole('button', { name: '添加条件' }),
     );
     const second = await addRule(user);
     await user.click(
-      within(row(second)).getByRole('button', { name: '添加条件（或）' }),
+      within(row(second)).getByRole('button', { name: '添加条件' }),
     );
     const groups = conditionGroups(second);
     expect(groups).toHaveLength(2);
@@ -1243,5 +1254,61 @@ describe('rule tester selector location', () => {
     expect(
       within(row(first)).queryByRole('textbox', { name: 'JSONPath' }),
     ).toBeNull();
+  });
+});
+
+describe('condition combining', () => {
+  async function twoConditions(): Promise<{
+    readonly user: ReturnType<typeof renderClient>['user'];
+    readonly id: string;
+  }> {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    return { user, id };
+  }
+
+  test('the control appears only once a second condition exists', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    // One condition: both values judge identically, so offering the choice would
+    // ask a question that has no consequence.
+    expect(
+      within(row(id)).queryByRole('combobox', { name: '条件组合方式' }),
+    ).toBeNull();
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    expect(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('all');
+  });
+
+  test('a conjunction over two kinds of structure states its limitation', async () => {
+    const { user, id } = await twoConditions();
+    const [first, second] = conditionGroups(id);
+    if (first === undefined || second === undefined)
+      throw new Error('two conditions were expected');
+    // One command condition and one redirect condition can come from different
+    // statements, so the editor must not let the rule look narrower than it is.
+    await user.selectOptions(
+      within(second).getByRole('combobox', { name: '匹配对象' }),
+      'file_redirect',
+    );
+    expect(within(row(id)).getByText(/可能来自不同的语句/)).toBeVisible();
+
+    // Switching to "any" removes the claim, so the note must go with it.
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+      'any',
+    );
+    expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
+  });
+
+  test('one structural target alone does not raise the limitation note', async () => {
+    const { id } = await twoConditions();
+    // Two command conditions are judged node by node, so there is no statement to
+    // be confused about.
+    expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
   });
 });

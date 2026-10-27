@@ -10,6 +10,7 @@
 
 import type {
   RuleConditionResult,
+  RuleConjunctionGroup,
   RuleMatchDetail,
   RuleResult,
   RuleVerdict,
@@ -154,16 +155,35 @@ export interface ConditionView {
   readonly multi: 'any' | 'all' | null;
   readonly values: readonly unknown[];
   readonly matchedValues: readonly unknown[];
+  /**
+   * The node that satisfied this condition *and* its siblings on the same
+   * target, when the rule used `all`.
+   *
+   * Without it a matched condition in a conjunction reads as if it alone decided
+   * the rule, which is the narrower claim the user did not write.
+   */
+  readonly witness: string | null;
+  /** The conjunction group this condition belongs to, when the rule used `all`. */
+  readonly group: RuleConjunctionGroup | null;
 }
 
 export function conditionViews(result: RuleResult): readonly ConditionView[] {
-  return result.conditions.map((condition) => ({
-    index: condition.index,
-    condition,
-    multi: condition.target === 'argument' ? (condition.multi ?? 'any') : null,
-    values: condition.values ?? [],
-    matchedValues: condition.matchedValues ?? [],
-  }));
+  return result.conditions.map((condition) => {
+    const group =
+      result.groups?.find((entry) =>
+        entry.conditionIndices.includes(condition.index),
+      ) ?? null;
+    return {
+      index: condition.index,
+      condition,
+      multi:
+        condition.target === 'argument' ? (condition.multi ?? 'any') : null,
+      values: condition.values ?? [],
+      matchedValues: condition.matchedValues ?? [],
+      witness: condition.witnessValues?.[0] ?? null,
+      group,
+    };
+  });
 }
 
 /**

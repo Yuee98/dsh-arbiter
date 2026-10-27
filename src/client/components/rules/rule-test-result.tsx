@@ -283,12 +283,24 @@ function ConditionList(props: {
   readonly result: RuleResult;
   readonly name: string | null;
 }): ReactNode {
+  const t = useArbiterTranslation();
   const views = conditionViews(props.result);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ fontSize: 12.5, fontWeight: 600 }}>
         {props.name ?? props.result.id}
       </div>
+      {props.result.combine === 'all' ? (
+        // Naming the connective up front stops the per-condition blocks below
+        // from being read as independent alternatives.
+        <div
+          style={muted}
+          data-testid="rule-test-combine"
+          data-arbiter-test-combine="all"
+        >
+          {t('ruleTest.combineAll')}
+        </div>
+      ) : null}
       {views.map((view) => (
         <ConditionBlock
           key={`${props.result.id}-${String(view.index)}`}
@@ -345,6 +357,32 @@ function ConditionBlock(props: { readonly view: ConditionView }): ReactNode {
           pattern: patternText(condition),
         })}
       </span>
+      {view.witness === null ? null : (
+        <span
+          style={mono}
+          data-testid="rule-test-condition-witness"
+          data-arbiter-test-condition-witness={view.witness}
+        >
+          {t('ruleTest.conditionWitness', { text: view.witness })}
+        </span>
+      )}
+      {view.group === null ? null : (
+        <span
+          style={muted}
+          data-testid="rule-test-condition-group"
+          data-arbiter-test-condition-group={view.group.outcome}
+        >
+          {t('ruleTest.conditionGroup', {
+            outcome: t(
+              view.group.outcome === 'match'
+                ? 'ruleTest.groupMatch'
+                : view.group.outcome === 'unknown'
+                  ? 'ruleTest.groupUnknown'
+                  : 'ruleTest.groupNoMatch',
+            ),
+          })}
+        </span>
+      )}
       {condition.target === 'argument' ? (
         <ValueBlock values={view.values} matched={view.matchedValues} />
       ) : null}

@@ -14,7 +14,7 @@ import {
   parseDocument,
   stableHash,
 } from '../config.js';
-import { CONFIG_FORMAT_V2 } from '../config/format.js';
+import { CONFIG_FORMAT_V2, CONFIG_FORMAT_V3 } from '../config/format.js';
 import { isRecord } from '../config/values.js';
 import { loadSessionRecordApi, sessionRecordError } from '../records.js';
 import type { ArbiterConfig } from '../types.js';
@@ -151,14 +151,23 @@ export function lastGoodPath(
  *
  * The effective configuration always holds canonical rules, even when the profile
  * document used the legacy format, so the copy is validated as the canonical
- * format. The wrapper also remembers the declaration the running configuration
- * actually had — absent, `arbiter-config-v1`, or `arbiter-config-v2` — because
- * that declaration is part of the configuration's content identity: dropping it
- * or forcing v2 would change the hash, the reported format and whether the format
- * counts as explicit.
+ * format the running build writes. The wrapper also remembers the declaration the
+ * running configuration actually had — absent, `arbiter-config-v1`,
+ * `arbiter-config-v2`, or `arbiter-config-v3` — because that declaration is part
+ * of the configuration's content identity: dropping it or forcing the current
+ * format would change the hash, the reported format and whether the format counts
+ * as explicit.
  */
 interface LastGoodDocument {
-  readonly format: typeof CONFIG_FORMAT_V2;
+  /**
+   * The format the canonical payload was written as.
+   *
+   * Recovery dispatches on this rather than trying formats in turn: a v3 copy
+   * that fails v3 validation must not be retried as v2, because v2 would accept
+   * the same conditions as the wider alternative reading and recover a rule the
+   * user wrote as a conjunction into one that allows either half.
+   */
+  readonly format: typeof CONFIG_FORMAT_V2 | typeof CONFIG_FORMAT_V3;
   /** `true` when the running configuration declared a format at all. */
   readonly sourceFormatExplicit: boolean;
   readonly sourceFormat: string | null;
@@ -170,10 +179,13 @@ function readLastGood(path: string): ArbiterConfig | null {
     const text = readFileSync(path, 'utf8');
     const stored: unknown = JSON.parse(text);
     if (!isRecord(stored) || !isRecord(stored['config'])) return null;
-    const parsed = parseConfig({
-      ...stored['config'],
-      format: CONFIG_FORMAT_V2,
-    });
+    const declared = stored['format'];
+    // Only the two formats this build has written are readable. An unknown or
+    // missing declaration is not a hint to guess: a payload whose format cannot
+    // be established could mean either connective.
+    if (declared !== CONFIG_FORMAT_V2 && declared !== CONFIG_FORMAT_V3)
+      return null;
+    const parsed = parseConfig({ ...stored['config'], format: declared });
     if (parsed.errors.length > 0) return null;
     const sourceFormat = stored['sourceFormat'];
     const sourceFormatExplicit = stored['sourceFormatExplicit'] === true;
@@ -193,7 +205,7 @@ function writeLastGood(path: string, config: ArbiterConfig): void {
   try {
     mkdirSync(dirname(path), { recursive: true });
     const document: LastGoodDocument = {
-      format: CONFIG_FORMAT_V2,
+      format: CONFIG_FORMAT_V3,
       sourceFormatExplicit: config.format !== undefined,
       sourceFormat: config.format ?? null,
       config,

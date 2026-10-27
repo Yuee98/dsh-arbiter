@@ -3,6 +3,7 @@ import type {
   ArbiterConfig,
   CommandRule,
   ExecutionBoundary,
+  RuleConjunctionEvidence,
   RulePath,
   RuleTestResult,
 } from '../types.js';
@@ -269,6 +270,14 @@ export interface CallDetailStageView {
   readonly decisionRules: readonly string[];
   readonly configRevision: string | null;
   readonly configSnapshotId: string | null;
+  /**
+   * The conjunction witness stored with this stage.
+   *
+   * `null` is a real answer — an `any` rule, or a record from before the
+   * connective existed — so the panel says the evidence is missing instead of
+   * deriving it from the rule as it stands today.
+   */
+  readonly conjunction: RuleConjunctionEvidence | null;
   readonly ts: number | null;
 }
 

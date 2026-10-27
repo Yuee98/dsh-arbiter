@@ -114,6 +114,15 @@ const EXISTING_RULE = {
   verdict: 'allow',
 };
 
+/**
+ * The same rule as the state route reports it.
+ *
+ * A v2 document has no connective, so parsing canonicalizes the single condition
+ * to `all`. The state view therefore carries the field even though the file never
+ * wrote it; asserting the raw input here would hide that normalization.
+ */
+const EXISTING_RULE_VIEW = { ...EXISTING_RULE, combine: 'all' };
+
 async function startHost(): Promise<StartedHost> {
   const home = await mkdtemp(join(tmpdir(), 'arbiter-scope-routes-'));
   cleanup.push(() => rm(home, { recursive: true, force: true }));
@@ -216,7 +225,7 @@ describe('first-release route scope', () => {
     const before = await bodyOf(
       await state.fetch(new Request('http://fixture/api/arbiter/state')),
     );
-    expect(rulesOf(before)).toEqual([EXISTING_RULE]);
+    expect(rulesOf(before)).toEqual([EXISTING_RULE_VIEW]);
 
     // Neither analysis nor acceptance has a handler, and no request reaches it.
     expect(routes.get('/api/arbiter/analyze')).toBeUndefined();
@@ -226,7 +235,7 @@ describe('first-release route scope', () => {
     const after = await bodyOf(
       await state.fetch(new Request('http://fixture/api/arbiter/state')),
     );
-    expect(rulesOf(after)).toEqual([EXISTING_RULE]);
+    expect(rulesOf(after)).toEqual([EXISTING_RULE_VIEW]);
   });
 
   test('keeps rule testing, validation and existing audit rows working', async () => {

@@ -30,8 +30,17 @@ export interface ConfigFormatIdentification {
 
 export const CONFIG_FORMAT_FIELD = 'format';
 
-/** The current rule format: scope, OR conditions and whole-value matching. */
+/** Format v2: scope, OR conditions and whole-value matching. */
 export const CONFIG_FORMAT_V2 = 'arbiter-config-v2';
+
+/**
+ * The current rule format: v2 plus the rule-level `combine` connective.
+ *
+ * It is a separate declaration rather than a v2 field because a v2 document must
+ * keep meaning "or": an older build reading a declared v2 file with `combine`
+ * would ignore the field and evaluate the wider alternative.
+ */
+export const CONFIG_FORMAT_V3 = 'arbiter-config-v3';
 
 /**
  * The legacy format, kept for documents that were written before v2.

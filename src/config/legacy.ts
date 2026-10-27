@@ -184,7 +184,7 @@ function readLegacyMatch(value: unknown): LegacyMatch | null {
 }
 
 /** Keys on a rule, or inside `match`, that only the canonical format defines. */
-const CANONICAL_RULE_KEYS = ['conditions', 'scope'] as const;
+const CANONICAL_RULE_KEYS = ['conditions', 'scope', 'combine'] as const;
 const CANONICAL_MATCH_KEYS = ['path', 'multi', 'caseSensitive'] as const;
 
 /**

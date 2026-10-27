@@ -248,7 +248,7 @@ describe('configuration format identification', () => {
       {
         path: 'format',
         message:
-          'unknown configuration format "arbiter-config-v9"; supported: arbiter-config-v1, arbiter-config-v2',
+          'unknown configuration format "arbiter-config-v9"; supported: arbiter-config-v1, arbiter-config-v2, arbiter-config-v3',
         code: 'config.format-unknown',
       },
     ]);
@@ -258,10 +258,11 @@ describe('configuration format identification', () => {
     expect(malformed.errors.map((error) => error.path)).toEqual(['format']);
   });
 
-  test('both registered formats are advertised and validated', () => {
+  test('every registered format is advertised and validated', () => {
     expect(registeredConfigFormats()).toEqual([
       'arbiter-config-v1',
       'arbiter-config-v2',
+      'arbiter-config-v3',
     ]);
     const v2 = parseConfig({ format: 'arbiter-config-v2', enabled: false });
     expect(v2.errors).toEqual([]);

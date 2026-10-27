@@ -9,6 +9,12 @@
  */
 
 import type { StoredCall } from '../audit.js';
+import type {
+  RuleConditionOutcome,
+  RuleConjunctionEvidence,
+  RuleConjunctionGroup,
+  RuleTarget,
+} from '../types.js';
 import { reviewedRequest } from './call-detail-transport.js';
 import { snapshotBasis } from './call-detail-snapshot.js';
 import { reviewStateOf } from './call-detail-trace.js';
@@ -78,8 +84,79 @@ function stageOf(stage: StoredCall, index: number): CallDetailStage {
     decisionRules: stringsOf(stage, 'decisionRules'),
     configRevision: textOf(stage, 'configRevision'),
     configSnapshotId: textOf(stage, 'configSnapshotId'),
+    conjunction: null,
     ts: numberOf(stage, 'ts'),
   };
+}
+
+/**
+ * The conjunction witness a stored stage carries, or `null`.
+ *
+ * The witness rides in the call's `trace` JSON, which every stored record already
+ * keeps: the stage rows themselves only project the fields history always had.
+ * Reading it back from `trace` keeps old databases readable without a schema
+ * change, and a record written before the connective existed simply has none.
+ */
+function conjunctionOf(stage: StoredCall): RuleConjunctionEvidence | null {
+  const value = stage['conjunction'];
+  if (!isRecordLike(value)) return null;
+  const groups = value['groups'];
+  if (!Array.isArray(groups)) return null;
+  const items: readonly unknown[] = groups;
+  const parsed: RuleConjunctionGroup[] = [];
+  for (const item of items) {
+    if (!isRecordLike(item)) continue;
+    // Only values this build defines are accepted: a stored row is data, so an
+    // unrecognized target or outcome is skipped rather than asserted into the
+    // type it happens to resemble.
+    const target = conjunctionTarget(textOf(item, 'target'));
+    const outcome = conjunctionOutcome(textOf(item, 'outcome'));
+    if (target === null || outcome === null) continue;
+    const indices = item['conditionIndices'];
+    const conditionIndices = Array.isArray(indices)
+      ? (indices as readonly unknown[]).flatMap((entry) =>
+          typeof entry === 'number' ? [entry] : [],
+        )
+      : [];
+    const witness = textOf(item, 'witnessText');
+    parsed.push({
+      target,
+      conditionIndices,
+      outcome,
+      ...(witness === null ? {} : { witnessText: witness }),
+    });
+  }
+  return { combine: 'all', groups: parsed };
+}
+
+/** A stored conjunction target, or `null` when this build does not define it. */
+function conjunctionTarget(value: string | null): RuleTarget | null {
+  switch (value) {
+    case null:
+      return null;
+    case 'command':
+    case 'file_redirect':
+    case 'variable_assignment':
+    case 'tool':
+    case 'argument':
+      return value;
+    default:
+      return null;
+  }
+}
+
+/** A stored condition outcome, or `null` when this build does not define it. */
+function conjunctionOutcome(value: string | null): RuleConditionOutcome | null {
+  switch (value) {
+    case null:
+      return null;
+    case 'match':
+    case 'no-match':
+    case 'unknown':
+      return value;
+    default:
+      return null;
+  }
 }
 
 /** The stored result sequence, which every record carries. */
@@ -127,6 +204,28 @@ function ruleBasis(chain: readonly CallDetailStage[]): {
     rule: { ruleId: stage.ruleId, ruleName: stage.ruleName },
     missing: stage.ruleName === null ? 'rule-name-missing' : null,
   };
+}
+
+/**
+ * Attach the conjunction witness stored in `trace` to the matching stage.
+ *
+ * The witness is not a stage row column: it belongs to the call's JSON trace, so
+ * history kept it from the first version that could produce one. Pairing is by
+ * position, which is how the row was written.
+ */
+function withConjunctions(
+  chain: readonly CallDetailStage[],
+  record: StoredCall,
+): readonly CallDetailStage[] {
+  const trace = record['trace'];
+  if (!Array.isArray(trace)) return chain;
+  const items: readonly unknown[] = trace;
+  return chain.map((stage, index) => {
+    const item = items[index];
+    if (!isRecordLike(item)) return stage;
+    const conjunction = conjunctionOf(item);
+    return conjunction === null ? stage : { ...stage, conjunction };
+  });
 }
 
 /** Whether a human approval ended without granting or denying. */
@@ -284,7 +383,8 @@ function unreadableDetail(record: StoredCall): CallDetail {
 export function auditDetail(record: StoredCall): CallDetail {
   if (record.unreadable) return unreadableDetail(record);
   const stages = recordsOf(record, 'stages');
-  const chain = stages.length === 0 ? null : stages.map(stageOf);
+  const chain =
+    stages.length === 0 ? null : withConjunctions(stages.map(stageOf), record);
   const trace = traceOf(record);
   const snapshotUnreadable = isTrue(record['snapshotUnreadable']);
   const configUnreadable = isTrue(record['configUnreadable']);

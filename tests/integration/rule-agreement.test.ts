@@ -637,3 +637,174 @@ describe('rule tester and real gate agreement', () => {
     expect(state['invalidConfigError']).toBeNull();
   });
 });
+
+/**
+ * The rule-level connective, end to end.
+ *
+ * The evaluator tests prove the predicate; these prove the wiring around it —
+ * the real gate, the tester route and the stored audit row — because the
+ * dangerous outcome is a conjunction being read as the wider alternative on a
+ * path the pure evaluator never sees.
+ */
+describe('combine: all through the real gate and history', () => {
+  const V3 = 'arbiter-config-v3';
+
+  /** The motivating rule: a command restricted by one of its arguments. */
+  const PUSH_TO_DEV = {
+    id: 'push-to-dev',
+    combine: 'all',
+    conditions: [
+      { target: 'command', kind: 'exact', pattern: 'git push' },
+      {
+        target: 'argument',
+        path: '$.environment',
+        kind: 'exact',
+        pattern: 'dev',
+      },
+    ],
+    verdict: 'allow',
+  };
+
+  test('the argument condition narrows the command on both paths', async () => {
+    const harness = await createHarness({
+      format: V3,
+      rules: [PUSH_TO_DEV],
+    });
+    const allowed = await harness.gate(
+      executionOf(
+        'bash',
+        { command: 'git push', environment: 'dev' },
+        harness.session,
+        'combine-dev',
+      ),
+    );
+    expect(gateVerdict(allowed)).toBe('allow');
+
+    // Without the conjunction this is allowed, because the command alone matches.
+    const production = await harness.gate(
+      executionOf(
+        'bash',
+        { command: 'git push', environment: 'production' },
+        harness.session,
+        'combine-prod',
+      ),
+    );
+    expect(gateVerdict(production)).not.toBe('allow');
+
+    const missing = await harness.gate(
+      executionOf(
+        'bash',
+        { command: 'git push' },
+        harness.session,
+        'combine-missing',
+      ),
+    );
+    expect(gateVerdict(missing)).not.toBe('allow');
+
+    const tested = await testShellRoute(harness, 'git push', [PUSH_TO_DEV]);
+    expect(tested['path']).toBe('review(default)');
+  });
+
+  test('a tool condition cannot cover what the conjunction restricts', async () => {
+    const rule = {
+      id: 'bash-echo',
+      combine: 'all',
+      conditions: [
+        { target: 'tool', kind: 'exact', pattern: 'bash' },
+        { target: 'command', kind: 'exact', pattern: 'echo hi' },
+      ],
+      verdict: 'allow',
+    };
+    const harness = await createHarness({ format: V3, rules: [rule] });
+    const decision = await harness.gate(
+      shellExecution(
+        harness.session,
+        'echo hi; rm -rf /tmp/victim',
+        'combine-tool-cover',
+      ),
+    );
+    expect(gateVerdict(decision)).not.toBe('allow');
+  });
+
+  test('the stored call detail carries the conjunction it used', async () => {
+    const rule = {
+      id: 'echo-to-tmp',
+      combine: 'all',
+      conditions: [
+        { target: 'command', kind: 'exact', pattern: 'echo hi' },
+        { target: 'file_redirect', kind: 'glob', pattern: '/tmp/**' },
+      ],
+      verdict: 'allow',
+    };
+    const harness = await createHarness({ format: V3, rules: [rule] });
+    const decision = await harness.gate(
+      shellExecution(harness.session, 'echo hi > /tmp/a', 'combine-witness'),
+    );
+    expect(gateVerdict(decision)).toBe('allow');
+
+    const detail = await callDetailOf(harness, 'combine-witness');
+    const basis: unknown = detail['basis'];
+    if (basis === null || typeof basis !== 'object')
+      throw new TypeError('the detail must carry a basis');
+    const chain: unknown = Reflect.get(basis, 'chain');
+    if (!Array.isArray(chain) || chain.length === 0)
+      throw new TypeError('the basis must carry the stage chain');
+    const stage: unknown = chain[0];
+    if (stage === null || typeof stage !== 'object')
+      throw new TypeError('the stage must be an object');
+    expect(Reflect.get(stage, 'conjunction')).toEqual({
+      combine: 'all',
+      groups: [
+        {
+          target: 'command',
+          conditionIndices: [0],
+          outcome: 'match',
+          witnessText: 'echo hi',
+        },
+        {
+          target: 'file_redirect',
+          conditionIndices: [1],
+          outcome: 'match',
+          witnessText: '/tmp/a',
+        },
+      ],
+    });
+  });
+});
+
+/**
+ * The shared call-detail view, once the stored record can answer it.
+ *
+ * A detail assembled from the in-memory entry has no stage chain; only the
+ * persisted row does. Waiting for the chain is waiting for the record this case
+ * is about, and it is a bounded wait on a real condition rather than a delay.
+ */
+async function callDetailOf(
+  harness: Harness,
+  callId: string,
+): Promise<Record<string, unknown>> {
+  const route = harness.routes.get('/api/arbiter/log');
+  if (route === undefined) throw new Error('log route was not registered');
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const response = await route.fetch(
+      new Request(`http://fixture/api/arbiter/log?callId=${callId}`),
+    );
+    const body: unknown = await response.json();
+    if (body !== null && typeof body === 'object') {
+      const detail: unknown = Reflect.get(body, 'detail');
+      if (detail !== null && typeof detail === 'object') {
+        const basis: unknown = Reflect.get(detail, 'basis');
+        const chain: unknown =
+          basis !== null && typeof basis === 'object'
+            ? Reflect.get(basis, 'chain')
+            : null;
+        if (Array.isArray(chain) && chain.length > 0)
+          return Object.fromEntries(Object.entries(detail));
+      }
+    }
+    if (Date.now() > deadline)
+      throw new Error(`call ${callId} was not written to the audit store`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

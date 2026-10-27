@@ -17,6 +17,7 @@ import type {
   CommandRule,
   ConfigError,
   ConfigWarning,
+  RuleCombine,
   RuleCondition,
   RuleKind,
   RuleMultiMode,
@@ -220,15 +221,82 @@ function parsePattern(
   return value;
 }
 
+/**
+ * Unknown keys a document supplied, reported instead of silently dropped.
+ *
+ * A misspelled `combine` is the dangerous case: the rule keeps its declared
+ * alternative semantics while the author believes they narrowed it. `strict`
+ * turns the finding into an error (v3, a format written by this build) and
+ * leaves it a warning for an older format whose documents were already valid.
+ */
+function reportUnknownKeys(
+  value: Record<string, unknown>,
+  known: readonly string[],
+  path: string,
+  errors: ConfigError[],
+  warnings: ConfigWarning[],
+  strict: boolean,
+  code: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (known.includes(key)) continue;
+    const issue = {
+      path: `${path}.${key}`,
+      message: strict
+        ? `unknown field "${key}"`
+        : `unknown field "${key}"; it is ignored and the rule keeps its declared meaning`,
+      code,
+      params: { field: key },
+    };
+    // A declared v3 document is written by this build, so a stray key means the
+    // author intended something this build does not do. A v2 document that
+    // already loaded stays valid; the finding is reported, not enforced.
+    if (strict) errors.push(issue);
+    else warnings.push(issue);
+  }
+}
+
+const RULE_FIELDS = [
+  'id',
+  'name',
+  'comment',
+  'enabled',
+  'scope',
+  'combine',
+  'conditions',
+  'verdict',
+  'hint',
+] as const;
+
+const CONDITION_FIELDS = [
+  'target',
+  'kind',
+  'pattern',
+  'caseSensitive',
+  'path',
+  'multi',
+] as const;
+
 function parseCondition(
   value: unknown,
   path: string,
   errors: ConfigError[],
+  warnings: ConfigWarning[],
+  strict: boolean,
 ): RuleCondition | null {
   if (!isRecord(value)) {
     errors.push({ path, message: 'must be an object', code: 'type.object' });
     return null;
   }
+  reportUnknownKeys(
+    value,
+    CONDITION_FIELDS,
+    path,
+    errors,
+    warnings,
+    strict,
+    'rule.unknown-field',
+  );
   const target = enumField(
     value['target'],
     RULE_TARGETS,
@@ -284,22 +352,7 @@ function parseCondition(
         });
     }
   } else {
-    // A scope/field that belongs to another target is an error: silently dropping
-    // it would change what the user asked the rule to do.
-    if (pathSupplied)
-      errors.push({
-        path: `${path}.path`,
-        message: 'path is only valid for the argument target',
-        code: 'rule.path-scope',
-        params: { target },
-      });
-    if (multiSupplied)
-      errors.push({
-        path: `${path}.multi`,
-        message: 'multi is only valid for the argument target',
-        code: 'rule.multi-scope',
-        params: { target },
-      });
+    rejectForeignFields(path, target, { pathSupplied, multiSupplied }, errors);
   }
 
   // A missing or invalid pattern already produced an error, and the document is
@@ -318,16 +371,67 @@ function parseCondition(
   };
 }
 
+/**
+ * Reject a field that belongs to another target.
+ *
+ * Silently dropping such a field would change what the user asked the rule to do:
+ * a `path` on a command condition reads as a narrowing the rule never had.
+ */
+function rejectForeignFields(
+  path: string,
+  target: RuleTarget,
+  supplied: { readonly pathSupplied: boolean; readonly multiSupplied: boolean },
+  errors: ConfigError[],
+): void {
+  if (supplied.pathSupplied)
+    errors.push({
+      path: `${path}.path`,
+      message: 'path is only valid for the argument target',
+      code: 'rule.path-scope',
+      params: { target },
+    });
+  if (supplied.multiSupplied)
+    errors.push({
+      path: `${path}.multi`,
+      message: 'multi is only valid for the argument target',
+      code: 'rule.multi-scope',
+      params: { target },
+    });
+}
+
+export interface ParseRuleOptions {
+  /**
+   * Whether the document declared a format this build writes.
+   *
+   * A strict document turns an unknown key and a missing `combine` into errors;
+   * a v1/v2 document was already valid, so those become warnings and its rules
+   * are canonicalized to the alternative semantics it was written with.
+   */
+  readonly strict: boolean;
+  /** Collected alongside errors; warnings never reject a document. */
+  readonly warnings: ConfigWarning[];
+}
+
 export function parseRule(
   value: unknown,
   index: number,
   errors: ConfigError[],
+  options: ParseRuleOptions,
 ): CommandRule | null {
   const path = `rules[${String(index)}]`;
   if (!isRecord(value)) {
     errors.push({ path, message: 'must be an object', code: 'type.object' });
     return null;
   }
+  reportUnknownKeys(
+    value,
+    RULE_FIELDS,
+    path,
+    errors,
+    options.warnings,
+    options.strict,
+    'rule.unknown-field',
+  );
   const id = optionalString(value['id'], `${path}.id`, errors)?.trim() ?? '';
   if (id.length === 0)
     errors.push({
@@ -358,6 +462,8 @@ export function parseRule(
       condition,
       `${path}.conditions[${String(conditionIndex)}]`,
       errors,
+      options.warnings,
+      options.strict,
     );
     if (parsed !== null) conditions.push(parsed);
   });
@@ -371,8 +477,14 @@ export function parseRule(
   const enabled = boolField(value['enabled'], `${path}.enabled`, errors);
   const comment = optionalString(value['comment'], `${path}.comment`, errors);
   const hint = optionalString(value['hint'], `${path}.hint`, errors);
+  const combine = resolveCombine(value['combine'], rawConditions.length, {
+    path: `${path}.combine`,
+    errors,
+    strict: options.strict,
+  });
   return {
     id,
+    combine,
     conditions,
     verdict,
     ...(name === undefined ? {} : { name }),
@@ -381,6 +493,48 @@ export function parseRule(
     ...(enabled === undefined ? {} : { enabled }),
     ...(scope === undefined ? {} : { scope }),
   };
+}
+
+/**
+ * Read the rule-level connective.
+ *
+ * A document written by this build must state it whenever the choice actually
+ * matters, because the two readings differ in the safe direction: `any` is
+ * wider. An older document never stated it and meant `any`, so asking for it
+ * there would reject files that were valid when they were written. A single
+ * condition keeps it optional everywhere — both values judge identically — but a
+ * supplied value is preserved rather than replaced by the default.
+ */
+function resolveCombine(
+  value: unknown,
+  conditionCount: number,
+  context: {
+    readonly path: string;
+    readonly errors: ConfigError[];
+    readonly strict: boolean;
+  },
+): RuleCombine {
+  if (value !== undefined) {
+    if (value === 'all' || value === 'any') return value;
+    context.errors.push({
+      path: context.path,
+      message: 'must be one of all, any',
+      code: 'enum.value',
+      params: { values: 'all, any' },
+    });
+    return conditionCount > 1 ? 'any' : 'all';
+  }
+  if (conditionCount > 1) {
+    if (context.strict)
+      context.errors.push({
+        path: context.path,
+        message:
+          'a rule with several conditions must state "combine": "all" or "any"',
+        code: 'rule.combine-required',
+      });
+    return 'any';
+  }
+  return 'all';
 }
 
 function literalPrefix(pattern: string): string {

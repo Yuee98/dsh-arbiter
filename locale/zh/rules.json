@@ -5,7 +5,7 @@
   "enabledRule": "启用规则「{name}」",
   "add": "新建规则",
   "empty": "还没有规则。需要 Arbiter 处理的调用从 review(default) 起步。",
-  "syntax": "精确匹配、RE2 与 glob 都要求整个值匹配；regex 不再要求以 ^ 开头，需要前缀或包含关系时请直接写进表达式。可以选择命令、重定向、赋值、工具名或以 JSONPath 取出的工具参数；同一规则内多个条件是“或”。参数匹配保留 JSON 类型，数字、布尔与 null 不会被转成字符串。",
+  "syntax": "精确匹配、RE2 与 glob 都要求整个值匹配；regex 不再要求以 ^ 开头，需要前缀或包含关系时请直接写进表达式。可以选择命令、重定向、赋值、工具名或以 JSONPath 取出的工具参数。多条条件由规则级“条件组合方式”决定：全部满足时，同一类结构条件必须由同一个节点同时满足；任一满足时，命中其中一条即算命中。参数匹配保留 JSON 类型，数字、布尔与 null 不会被转成字符串。",
   "name": "显示名称",
   "restoreName": "恢复自动名称",
   "id": "规则 ID",
@@ -32,7 +32,7 @@
   "agentsPlaceholder": "main, subagent, preset:<name>；留空不限",
   "conditions": "匹配条件",
   "anyOf": "满足以下任一条件",
-  "addCondition": "添加条件（或）",
+  "addCondition": "添加条件",
   "removeCondition": "删除条件",
   "conditionIndex": "条件 {index}",
   "conditionsEmpty": "没有匹配条件：可以继续编辑，但不能保存应用。",
@@ -54,7 +54,7 @@
   "hintHint": "只提供审查关注点；留空不影响强制审查。",
   "issues": "校验问题",
   "summaryScoped": "{scope} · {text}",
-  "summaryMore": "{text} 等 {count} 个条件",
+  "summaryMore": "{text} 等 {count} 个条件（{mode}）",
   "summaryCondition": "{target} {kind}：{pattern}",
   "summaryConditionEmpty": "{target} {kind}：尚未填写",
   "summaryIgnoreCase": "{text}（忽略大小写）",
@@ -97,5 +97,14 @@
   "matched": "命中规则",
   "shadowed": "被遮蔽 / 事实",
   "unmatched": "(未命中)",
-  "nameTitle": "留空使用自动摘要；改名不影响规则 ID，改条件也不会覆盖自定义名称。"
+  "nameTitle": "留空使用自动摘要；改名不影响规则 ID，改条件也不会覆盖自定义名称。",
+  "combineHeading": "满足以下全部条件",
+  "oneConditionHeading": "匹配条件",
+  "combine": "条件组合方式",
+  "combineOption": {
+    "all": "全部满足",
+    "any": "任一满足"
+  },
+  "combineCrossTarget": "这些条件在整次调用中分别检查：命中的命令与重定向可能来自不同的语句。规则不保证它们属于同一次操作。",
+  "unknownField": "未知字段：{field}"
 }

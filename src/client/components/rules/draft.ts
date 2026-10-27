@@ -127,6 +127,10 @@ export function nextRuleId(rules: readonly DraftRule[]): string {
 export function createRule(rules: readonly DraftRule[]): DraftRule {
   return {
     id: nextRuleId(rules),
+    // A new rule starts on `all`: adding a condition should narrow what the rule
+    // covers, and the narrower reading is the safe direction when the user only
+    // meant to describe one situation.
+    combine: 'all',
     conditions: [defaultCondition()],
     verdict: 'force-review',
     enabled: true,
@@ -261,6 +265,11 @@ export function ruleSummary(rule: DraftRule, t: Translate): string {
         ? t('rules.summaryMore', {
             text: conditionSummary(first, t),
             count: rule.conditions.length,
+            mode: t(
+              (rule.combine ?? 'all') === 'all'
+                ? 'rules.combineOption.all'
+                : 'rules.combineOption.any',
+            ),
           })
         : conditionSummary(first, t);
   const scope = scopeSummary(rule);
@@ -316,7 +325,7 @@ export function ruleFieldLabel(field: string): string {
 }
 
 /** The canonical declaration a canonical rule needs in its document. */
-export const CANONICAL_FORMAT = 'arbiter-config-v2';
+export const CANONICAL_FORMAT = 'arbiter-config-v3';
 
 /** Append a rule to the draft and declare the format its structure requires. */
 export function addRule(draft: Draft): DraftRule {
@@ -365,4 +374,18 @@ export function addCondition(
   conditions: Draft['rules'][number]['conditions'],
 ): void {
   conditions.push(defaultCondition());
+}
+
+/**
+ * Remove one condition, leaving the rule's connective untouched.
+ *
+ * The control is hidden while only one condition remains, but its value is kept:
+ * removing a condition and adding another must not silently switch a rule the
+ * user set to `any` over to `all`.
+ */
+export function removeCondition(
+  conditions: Draft['rules'][number]['conditions'],
+  index: number,
+): void {
+  conditions.splice(index, 1);
 }

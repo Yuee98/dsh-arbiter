@@ -397,6 +397,9 @@ describe('rule test route with the shared evaluator', () => {
     const rules = [
       {
         id: 'or-rule',
+        // The tester now validates drafts as v3, where a multi-condition rule
+        // must state its connective. `any` is this case's meaning.
+        combine: 'any',
         conditions: [
           { target: 'tool', kind: 'exact', pattern: 'deploy' },
           {

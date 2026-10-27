@@ -19,6 +19,7 @@ import { Collapsible } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
 import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
+import type { RuleConjunctionEvidence } from '../../types.js';
 import type { CallDetailView } from '../view-types.js';
 
 /** The matched rule, or the review strategy when no rule decided the call. */
@@ -118,9 +119,54 @@ function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
               {stage.reason}
             </div>
           )}
+          {stage.conjunction === null ? null : (
+            <Conjunction evidence={stage.conjunction} />
+          )}
         </li>
       ))}
     </ol>
+  );
+}
+
+/**
+ * The conjunction a rule stage actually used.
+ *
+ * Only the groups that matched are listed with their witness node: that pair is
+ * what made the call allowed, and reproducing it from the rule as it stands now
+ * would describe a decision this record did not make.
+ */
+function Conjunction(props: {
+  readonly evidence: RuleConjunctionEvidence;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const matched = props.evidence.groups.filter(
+    (group) => group.outcome === 'match' && group.witnessText !== undefined,
+  );
+  return (
+    <div
+      style={{ marginTop: 2, fontSize: 11.5 }}
+      data-call-detail-conjunction=""
+    >
+      <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+        {t('callDetail.conjunction')}
+      </div>
+      {matched.length === 0 ? (
+        <div>{t('callDetail.conjunctionNoWitness')}</div>
+      ) : (
+        <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+          {matched.map((group) => (
+            <li key={`${group.target}-${String(group.conditionIndices[0])}`}>
+              {t('callDetail.conjunctionWitness', {
+                // The target is a protocol value, so it stays as written rather
+                // than being translated into a name this build might rename.
+                target: group.target,
+                text: group.witnessText ?? '',
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

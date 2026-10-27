@@ -1,11 +1,18 @@
 import type {
   RuleConditionResult,
+  RuleConjunctionGroup,
   RuleMatchDetail,
   RulePath,
   RuleResult,
 } from '../../types.js';
 import type { RuleTestResultView } from '../view-types.js';
-import { ruleKind, ruleMulti, ruleTarget, ruleVerdict } from './config.js';
+import {
+  ruleCombine,
+  ruleKind,
+  ruleMulti,
+  ruleTarget,
+  ruleVerdict,
+} from './config.js';
 import {
   array,
   boolean,
@@ -76,6 +83,27 @@ function conditionResult(value: unknown): RuleConditionResult {
     ...(source['matchedValues'] === undefined
       ? {}
       : { matchedValues: field(source, 'matchedValues', valueList) }),
+    ...(source['witnessValues'] === undefined
+      ? {}
+      : { witnessValues: field(source, 'witnessValues', stringList) }),
+  };
+}
+
+/** Witness texts are node strings, so they survive decoding as text. */
+function stringList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) throw new TypeError('expected an array');
+  const items: readonly unknown[] = value;
+  return items.map((item) => text(item));
+}
+
+function conjunctionGroup(value: unknown): RuleConjunctionGroup {
+  const source = object(value);
+  const witness = field(source, 'witnessText', optional(text));
+  return {
+    target: field(source, 'target', ruleTarget),
+    conditionIndices: field(source, 'conditionIndices', array(number)),
+    outcome: field(source, 'outcome', OUTCOMES),
+    ...(witness === undefined ? {} : { witnessText: witness }),
   };
 }
 
@@ -89,6 +117,12 @@ function ruleResult(value: unknown): RuleResult {
     outcome: field(source, 'outcome', OUTCOMES),
     conditions: field(source, 'conditions', array(conditionResult)),
     ...(name === undefined ? {} : { name }),
+    ...(source['combine'] === undefined
+      ? {}
+      : { combine: field(source, 'combine', ruleCombine) }),
+    ...(source['groups'] === undefined
+      ? {}
+      : { groups: field(source, 'groups', array(conjunctionGroup)) }),
   };
 }
 
