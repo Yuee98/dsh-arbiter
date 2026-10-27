@@ -108,13 +108,12 @@ export function useLoadState(
         setState(value);
         if (options.submittedRevision !== undefined && edited) {
           // The user edited after submitting the save. The applied configuration
-          // is what was sent; the newer edits stay unsaved. The file's own
-          // findings still describe the file, so they are kept.
-          setValidation((current) =>
-            reportFindings(current.sourceWarnings, {
-              errors: [],
-              warnings: [],
-            }),
+          // is what was sent; the newer edits stay unsaved. The file itself did
+          // change, though, so its findings come from this answer rather than
+          // from the previous document — a warning about a field the save
+          // removed must not outlive the save.
+          setValidation(() =>
+            reportFindings(value.warnings, { errors: [], warnings: [] }),
           );
           return;
         }
@@ -123,10 +122,12 @@ export function useLoadState(
         setSaveStatus('idle');
         setAuditNotice(null);
         // A reload is the one event that replaces the file's own findings.
+        // `loadErrors` are configuration errors: they belong to the error
+        // presentation only, never to the non-blocking warning list.
         setValidation(() =>
           reportFindings(value.warnings, {
             errors: value.loadErrors,
-            warnings: value.loadErrors,
+            warnings: [],
           }),
         );
       } catch (errorValue) {

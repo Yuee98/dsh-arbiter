@@ -274,7 +274,11 @@ describe('v3 recovery around the rule connective', () => {
     expect(recovered?.id).toBe('push-to-dev');
   });
 
-  test('a v2 copy written before v3 recovers as the alternative reading', async () => {
+  test('a copy written by the previous release recovers as the alternative reading', async () => {
+    // A v3 build always writes a v3 wrapper, so one produced from a v2 source
+    // document proves nothing about reading an *old* copy. Construct the shape
+    // the previous release actually left on disk: a v2 wrapper holding canonical
+    // rules that carry no connective yet.
     const harness = await createHarness({
       format: 'arbiter-config-v2',
       rules: [
@@ -288,9 +292,40 @@ describe('v3 recovery around the rule connective', () => {
         },
       ],
     });
+    const directory = join(harness.home, 'arbiter', 'last-good');
+    const [entry] = await readdir(directory);
+    if (entry === undefined) throw new Error('no recovery copy was written');
+    await writeFile(
+      join(directory, entry),
+      JSON.stringify({
+        format: 'arbiter-config-v2',
+        sourceFormatExplicit: true,
+        sourceFormat: 'arbiter-config-v2',
+        config: {
+          ...harness.host.runtime.config,
+          format: 'arbiter-config-v2',
+          rules: [
+            {
+              id: 'multi-or',
+              conditions: [
+                { target: 'command', kind: 'exact', pattern: 'a' },
+                { target: 'command', kind: 'exact', pattern: 'b' },
+              ],
+              verdict: 'deny',
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
     const host = await coldStart(harness.home);
     const recovered = host.runtime.config.rules[0];
+    expect(recovered?.id).toBe('multi-or');
     expect(recovered?.combine).toBe('any');
+    expect(recovered?.conditions).toHaveLength(2);
+    // The declaration the copy ran with comes back, not a v3 rewrite of it.
+    expect(host.runtime.config.format).toBe('arbiter-config-v2');
   });
 
   test('a v3 copy whose connective is broken is refused, not read as v2', async () => {

@@ -1378,3 +1378,120 @@ describe('source warnings outlive draft edits', () => {
     expect(stillShown[0]).toHaveTextContent('rules[0].combinee');
   });
 });
+
+describe('source findings classification', () => {
+  test('a configuration error from the file is not also reported as a warning', async () => {
+    // The host rejected the file, so the error belongs to the error presentation.
+    // Listing it as a warning too would call an invalid configuration advisory.
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json({
+          ...effectiveState(),
+          loadErrors: [
+            {
+              path: 'rules[0].combine',
+              message: 'a rule with several conditions must state "combine"',
+              code: 'rule.combine-required',
+            },
+          ],
+          warnings: [],
+        }),
+      ),
+    );
+    renderClient(<ArbiterPage />);
+    const error = await screen.findByText(/必须声明条件组合方式/);
+    expect(error).toHaveTextContent('rules[0].combine');
+    // The same text must not appear a second time as an informational notice.
+    expect(screen.queryAllByText(/必须声明条件组合方式/)).toHaveLength(1);
+  });
+});
+
+describe('source warnings after a save', () => {
+  test('a warning the save resolved does not outlive it, even with a pending edit', async () => {
+    // The file changed: the field the warning was about is gone. A draft edit
+    // made while the save's reload is in flight must not preserve that warning,
+    // because it no longer describes anything on disk.
+    const reloadGate = deferred();
+    let stateCalls = 0;
+    server.use(
+      http.get('*/api/arbiter/state', async () => {
+        stateCalls += 1;
+        const loaded = effectiveState();
+        if (stateCalls === 1) {
+          return HttpResponse.json({
+            ...loaded,
+            warnings: [
+              {
+                path: 'rules[0].combinee',
+                message: 'unknown field "combinee"',
+                code: 'rule.unknown-field',
+                params: { field: 'combinee' },
+              },
+            ],
+          });
+        }
+        // The saved document no longer carries the misspelled field.
+        await reloadGate.promise;
+        return HttpResponse.json({
+          ...loaded,
+          fileRevision: 'file-2',
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+          warnings: [],
+        });
+      }),
+    );
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', async () => {
+        stateCalls += 1;
+        const loaded = effectiveState();
+        if (stateCalls === 1) {
+          return HttpResponse.json({
+            ...loaded,
+            warnings: [
+              {
+                path: 'rules[0].combinee',
+                message: 'unknown field "combinee"',
+                code: 'rule.unknown-field',
+                params: { field: 'combinee' },
+              },
+            ],
+          });
+        }
+        await reloadGate.promise;
+        return HttpResponse.json({
+          ...loaded,
+          fileRevision: 'file-2',
+          effectiveRevision: 'effective-2',
+          configSnapshotId: 'snapshot-2',
+          warnings: [],
+        });
+      }),
+    );
+    const user = await openRules();
+    expect((await screen.findAllByText(/未知字段/)).length).toBeGreaterThan(0);
+
+    const id = await addRule(user);
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(stateCalls).toBe(2);
+    });
+    // Edit while the reload is in flight, so the draft is newer than the save.
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'typed during reload',
+    );
+    reloadGate.release();
+
+    await waitFor(() => {
+      expect(screen.getByText('文件修订 file-2')).toBeVisible();
+    });
+    // The warning described the replaced file, so it is gone; the draft survives.
+    expect(screen.queryAllByText(/未知字段/)).toHaveLength(0);
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('typed during reload');
+  });
+});
