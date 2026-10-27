@@ -13,22 +13,36 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from './ui/cn.js';
 
+export function CollapsibleCard(props: {
+  readonly children: ReactNode;
+  readonly className?: string | undefined;
+}): ReactNode {
+  return (
+    <div
+      className={cn(
+        'arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:bg-layer-2',
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
+
 export function Collapsible(props: {
   readonly summary: string;
   readonly children: ReactNode;
-  readonly level?: 'group' | 'item';
-  readonly grouped?: boolean;
+  readonly level?: 'group' | 'item' | undefined;
+  readonly className?: string | undefined;
 }): ReactNode {
   const [open, setOpen] = useState(false);
-  const isGrouped = props.grouped ?? false;
 
   return (
     <div
       data-collapsible={props.level ?? 'group'}
       className={cn(
-        isGrouped
-          ? 'arb:bg-layer-2'
-          : 'arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:bg-layer-2',
+        'arb:border-b arb:border-border-subtle last:arb:border-b-0',
+        props.className,
       )}
     >
       <button
@@ -37,7 +51,7 @@ export function Collapsible(props: {
         onClick={() => {
           setOpen((current) => !current);
         }}
-        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:bg-layer-2 arb:px-3 arb:py-2.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors hover:arb:bg-layer-3 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
+        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:border-0 arb:bg-transparent arb:px-3.5 arb:py-2.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors arb:hover:bg-layer-3/60 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
       >
         <ChevronRight
           className={cn(

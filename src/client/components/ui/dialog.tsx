@@ -44,7 +44,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           {children}
           {showCloseButton ? (
             <DialogPrimitive.Close
-              className="arb:absolute arb:right-3.5 arb:top-3.5 arb:inline-flex arb:h-6 arb:w-6 arb:cursor-pointer arb:items-center arb:justify-center arb:rounded-sm arb:border-0 arb:bg-transparent arb:p-0 arb:text-secondary arb:transition-colors hover:arb:bg-layer-3/50 hover:arb:text-primary arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent arb:disabled:pointer-events-none"
+              className="arb:absolute arb:right-3.5 arb:top-3.5 arb:inline-flex arb:h-7 arb:w-7 arb:cursor-pointer arb:items-center arb:justify-center arb:rounded-md arb:border-0 arb:bg-transparent arb:p-0 arb:text-secondary arb:transition-colors arb:hover:bg-layer-4 arb:hover:text-primary arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent arb:disabled:pointer-events-none"
               aria-label={closeLabel}
             >
               <X className="arb:h-4 arb:w-4" />

@@ -83,12 +83,12 @@ export function StatusPanel(props: {
             {boundaryHelp(t)[draft.boundary] ?? '—'}
           </span>
         </div>
-        <div className="arb:grid arb:grid-cols-1 arb:gap-4 sm:arb:grid-cols-2 arb:max-w-xl">
+        <div className="arb:grid arb:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] arb:gap-4 arb:max-w-xl">
           <Field
             label={t('status.mainMode')}
             hint={modeHelp(t)[draft.modes.main] ?? '—'}
           >
-            <div className="arb:max-w-xs">
+            <div className="arb:w-full">
               <Select
                 value={draft.modes.main}
                 options={['normal', 'strict', 'progress'] as const}
@@ -109,7 +109,7 @@ export function StatusPanel(props: {
             label={t('status.subagentMode')}
             hint={modeHelp(t)[draft.modes.subagent] ?? '—'}
           >
-            <div className="arb:max-w-xs">
+            <div className="arb:w-full">
               <Select
                 value={draft.modes.subagent}
                 options={['strict', 'progress'] as const}

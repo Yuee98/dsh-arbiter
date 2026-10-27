@@ -16,7 +16,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
-import { Collapsible } from './call-detail-collapsible.js';
+import { Collapsible, CollapsibleCard } from './call-detail-collapsible.js';
 import { JsonBlock } from './controls.js';
 import { formatTime } from '../view-helpers.js';
 import type {
@@ -239,55 +239,57 @@ export function CallDetailRaw({
   const { raw } = detail;
   return (
     <div data-call-detail-raw>
-      <Collapsible summary={t('callDetail.rawTitle')}>
-        <div className="arb:flex arb:flex-col arb:gap-2.5">
-          <MaterialCard
-            label={t('callDetail.rawArguments')}
-            value={raw.arguments}
-            missingText={t('callDetail.rawArgumentsMissing')}
-          />
-          <MaterialCard
-            label={t('callDetail.rawArgumentsSchema')}
-            value={raw.argumentsSchema}
-            missingText={t('callDetail.rawArgumentsSchemaMissing')}
-          />
-          <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-[12.5px]">
-            <div className="arb:text-xs arb:font-medium arb:text-secondary">
-              {t('callDetail.modelAttempts', {
-                count: raw.modelAttempts.length,
-              })}
+      <CollapsibleCard>
+        <Collapsible summary={t('callDetail.rawTitle')}>
+          <div className="arb:flex arb:flex-col arb:gap-2.5">
+            <MaterialCard
+              label={t('callDetail.rawArguments')}
+              value={raw.arguments}
+              missingText={t('callDetail.rawArgumentsMissing')}
+            />
+            <MaterialCard
+              label={t('callDetail.rawArgumentsSchema')}
+              value={raw.argumentsSchema}
+              missingText={t('callDetail.rawArgumentsSchemaMissing')}
+            />
+            <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-[12.5px]">
+              <div className="arb:text-xs arb:font-medium arb:text-secondary">
+                {t('callDetail.modelAttempts', {
+                  count: raw.modelAttempts.length,
+                })}
+              </div>
+              <Attempts detail={detail} />
             </div>
-            <Attempts detail={detail} />
+            <MaterialCard
+              label={t('callDetail.rawSnapshot', {
+                version: raw.snapshotFormatVersion ?? t('callDetail.unknown'),
+              })}
+              value={raw.snapshot}
+              missingText={t('callDetail.rawSnapshotMissing')}
+            />
+            <MaterialCard
+              label={t('callDetail.rawConfig', {
+                version: raw.configFormatVersion ?? t('callDetail.unknown'),
+              })}
+              value={raw.config}
+              missingText={t('callDetail.rawConfigMissing')}
+            />
+            <MaterialCard
+              label={t('callDetail.rawTemplates', {
+                count: raw.templates.length,
+              })}
+              value={raw.templates}
+              missingText={t('callDetail.rawTemplatesMissing')}
+            />
+            <div className="arb:text-xs arb:text-secondary">
+              {t('callDetail.sessionRecordState')}:{' '}
+              <code className="arb:font-mono">
+                {raw.sessionRecordState ?? t('callDetail.unknown')}
+              </code>
+            </div>
           </div>
-          <MaterialCard
-            label={t('callDetail.rawSnapshot', {
-              version: raw.snapshotFormatVersion ?? t('callDetail.unknown'),
-            })}
-            value={raw.snapshot}
-            missingText={t('callDetail.rawSnapshotMissing')}
-          />
-          <MaterialCard
-            label={t('callDetail.rawConfig', {
-              version: raw.configFormatVersion ?? t('callDetail.unknown'),
-            })}
-            value={raw.config}
-            missingText={t('callDetail.rawConfigMissing')}
-          />
-          <MaterialCard
-            label={t('callDetail.rawTemplates', {
-              count: raw.templates.length,
-            })}
-            value={raw.templates}
-            missingText={t('callDetail.rawTemplatesMissing')}
-          />
-          <div className="arb:text-xs arb:text-secondary">
-            {t('callDetail.sessionRecordState')}:{' '}
-            <code className="arb:font-mono">
-              {raw.sessionRecordState ?? t('callDetail.unknown')}
-            </code>
-          </div>
-        </div>
-      </Collapsible>
+        </Collapsible>
+      </CollapsibleCard>
     </div>
   );
 }

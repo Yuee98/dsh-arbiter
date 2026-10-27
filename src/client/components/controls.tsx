@@ -110,7 +110,7 @@ export function NumberInput(props: {
       onBlur={() => {
         setEditingText(null);
       }}
-      className={cn(inputClassName, 'arb:w-48', props.className)}
+      className={cn(inputClassName, props.className)}
     />
   );
 }

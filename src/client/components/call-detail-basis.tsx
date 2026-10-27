@@ -15,7 +15,7 @@
 
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
-import { Collapsible } from './call-detail-collapsible.js';
+import { Collapsible, CollapsibleCard } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
 import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
@@ -223,18 +223,19 @@ function DecisionRules({
   );
 }
 
-/** What the review was given: evidence, materials and their truncation facts. */
-function SubmittedEvidence({
+/** What the review was given and signals derived: evidence, materials and signals. */
+function BasisCollapsibles({
   detail,
 }: {
   readonly detail: CallDetailView;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { evidence, materials, evidenceTruncated } = detail.basis;
-  if (evidence.length === 0 && materials.length === 0) {
-    // The reason for the emptiness differs by what the record proves, so each
-    // state gets its own sentence: a short-circuit never had evidence, a review
-    // that lost its record did, and an old row may not say.
+  const { evidence, materials, evidenceTruncated, signals, effect } =
+    detail.basis;
+  const hasEvidence = evidence.length > 0 || materials.length > 0;
+  const hasSignals = signals !== null || effect !== null;
+
+  if (!hasEvidence && !hasSignals) {
     const text =
       detail.basis.reviewState === 'reviewed'
         ? t('callDetail.evidenceLost')
@@ -247,25 +248,47 @@ function SubmittedEvidence({
       </div>
     );
   }
+
   return (
-    <div className="arb:flex arb:flex-col arb:gap-2">
+    <div className="arb:flex arb:flex-col arb:gap-1.5">
       {evidenceTruncated ? (
         <div className="arb:text-xs">{t('callDetail.evidenceTruncated')}</div>
       ) : null}
-      <div className="arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:divide-y arb:divide-border-subtle">
-        <Collapsible
-          summary={t('callDetail.evidence', { count: evidence.length })}
-          grouped
-        >
-          <JsonBlock value={evidence} />
-        </Collapsible>
-        <Collapsible
-          summary={t('callDetail.materials', { count: materials.length })}
-          grouped
-        >
-          <JsonBlock value={materials} />
-        </Collapsible>
-      </div>
+      <CollapsibleCard>
+        {hasEvidence ? (
+          <>
+            <Collapsible
+              summary={t('callDetail.evidence', { count: evidence.length })}
+            >
+              <JsonBlock value={evidence} />
+            </Collapsible>
+            <Collapsible
+              summary={t('callDetail.materials', { count: materials.length })}
+            >
+              <JsonBlock value={materials} />
+            </Collapsible>
+          </>
+        ) : null}
+        {hasSignals ? (
+          <Collapsible summary={t('callDetail.signals')}>
+            <div className="arb:flex arb:flex-col arb:gap-1.5">
+              {signals === null ? null : (
+                <section aria-label={t('callDetail.signals')}>
+                  <JsonBlock value={signals} />
+                </section>
+              )}
+              {effect === null ? null : (
+                <section aria-label={t('callDetail.effect')}>
+                  <div className="arb:text-[12.5px]">
+                    {t('callDetail.effect')}
+                  </div>
+                  <JsonBlock value={effect} />
+                </section>
+              )}
+            </div>
+          </Collapsible>
+        ) : null}
+      </CollapsibleCard>
     </div>
   );
 }
@@ -313,30 +336,6 @@ function Conflicts({ detail }: { readonly detail: CallDetailView }): ReactNode {
   );
 }
 
-/** The signals the policy read, and the effect it derived from them. */
-function Signals({ detail }: { readonly detail: CallDetailView }): ReactNode {
-  const t = useArbiterTranslation();
-  const { signals, effect } = detail.basis;
-  if (signals === null && effect === null) return null;
-  return (
-    <Collapsible summary={t('callDetail.signals')}>
-      <div className="arb:flex arb:flex-col arb:gap-1.5">
-        {signals === null ? null : (
-          <section aria-label={t('callDetail.signals')}>
-            <JsonBlock value={signals} />
-          </section>
-        )}
-        {effect === null ? null : (
-          <section aria-label={t('callDetail.effect')}>
-            <div className="arb:text-[12.5px]">{t('callDetail.effect')}</div>
-            <JsonBlock value={effect} />
-          </section>
-        )}
-      </div>
-    </Collapsible>
-  );
-}
-
 /** The basis layer of one detail. */
 export function CallDetailBasis({
   detail,
@@ -361,8 +360,7 @@ export function CallDetailBasis({
         <Chain detail={detail} />
       </div>
       <DecisionRules detail={detail} />
-      <SubmittedEvidence detail={detail} />
-      <Signals detail={detail} />
+      <BasisCollapsibles detail={detail} />
     </div>
   );
 }
