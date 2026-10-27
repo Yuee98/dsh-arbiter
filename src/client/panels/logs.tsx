@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CallDetailPanel } from '../components/call-detail-panel.js';
 import { Button, Notice, Section } from '../components/controls.js';
@@ -22,6 +22,7 @@ export function LogsPanel(): ReactNode {
   const t = useArbiterTranslation();
   const pages = useLogPages();
   const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const callDetailOpenerRef = useRef<HTMLElement | null>(null);
 
   const notice = pages.notice;
   return (
@@ -33,26 +34,13 @@ export function LogsPanel(): ReactNode {
           onApply={pages.applyFilters}
           onClear={pages.clearFilters}
         />
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-2">
           <Button onClick={pages.refresh} disabled={pages.busy} tone="primary">
             {pages.busy ? t('logs.loading') : t('logs.refresh')}
           </Button>
           {notice === null ? null : (
             <>
-              <span
-                role="status"
-                style={{
-                  fontSize: 12,
-                  color: 'var(--dsw-alias-label-secondary)',
-                }}
-              >
+              <span role="status" className="arb:text-xs arb:text-secondary">
                 {t('logs.newRecords', { count: notice.count })}
               </span>
               <Button onClick={pages.backToLatest} disabled={pages.busy}>
@@ -67,7 +55,8 @@ export function LogsPanel(): ReactNode {
         <LogTable
           rows={pages.loaded?.rows ?? []}
           emptyText={pages.error === null ? pages.emptyText : ''}
-          onOpen={(callId) => {
+          onOpen={(callId, opener) => {
+            callDetailOpenerRef.current = opener ?? null;
             setOpenCallId(callId);
           }}
         />
@@ -86,6 +75,7 @@ export function LogsPanel(): ReactNode {
       {openCallId === null ? null : (
         <CallDetailPanel
           callId={openCallId}
+          openerRef={callDetailOpenerRef}
           onClose={() => {
             setOpenCallId(null);
           }}

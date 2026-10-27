@@ -574,7 +574,7 @@ export interface RuleListProps {
   readonly warnings?: readonly ConfigIssueView[];
   readonly onSelect: (id: string | null) => void;
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
-  readonly onTest: (id: string) => void;
+  readonly onTest: (id: string, opener?: HTMLElement | null) => void;
 }
 
 /** Why the backend resolved one session the way it did (#4's scope reasons). */

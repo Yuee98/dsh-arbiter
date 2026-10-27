@@ -74,6 +74,7 @@ export function RuleTest(props: {
   readonly focusedRule: DraftRule | null;
   readonly focusRequest: number;
   readonly renderTrigger?: boolean | undefined;
+  readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
   readonly onLocateIssue?: (target: IssueTarget) => void;
   readonly onClearFocus?: () => void;
 }): ReactNode {
@@ -81,20 +82,8 @@ export function RuleTest(props: {
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const locatingRef = useRef(false);
-  const openerRef = useRef<HTMLElement | null>(null);
+  const internalOpenerRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      if (
-        document.activeElement instanceof HTMLElement &&
-        !document.activeElement.closest(
-          '[data-arbiter-surface="rule-test-dialog"]',
-        )
-      ) {
-        openerRef.current = document.activeElement;
-      }
-    }
-  }, [open]);
   const [handled, setHandled] = useState(0);
 
   const [pendingFocus, setPendingFocus] = useState(false);
@@ -122,7 +111,8 @@ export function RuleTest(props: {
       {props.renderTrigger !== false ? (
         <div className="arb:flex arb:gap-2">
           <Button
-            onClick={() => {
+            onClick={(event) => {
+              internalOpenerRef.current = event.currentTarget;
               setOpen(true);
             }}
           >
@@ -147,12 +137,17 @@ export function RuleTest(props: {
               locatingRef.current = false;
               return;
             }
-            if (
-              openerRef.current !== null &&
-              document.contains(openerRef.current)
-            ) {
-              event.preventDefault();
-              openerRef.current.focus();
+            event.preventDefault();
+            const opener =
+              props.openerRef?.current ?? internalOpenerRef.current;
+            if (opener !== null && document.contains(opener)) {
+              opener.focus();
+            } else {
+              const fallback =
+                document.querySelector<HTMLElement>(
+                  '[data-arbiter-surface="rules-panel"] button, [data-arbiter-root] button, button',
+                ) ?? null;
+              fallback?.focus();
             }
           }}
           className="arb:max-h-[90vh] arb:max-w-4xl arb:overflow-y-auto"

@@ -43,13 +43,7 @@ export function LogPager({
   return (
     <nav
       aria-label={t('logs.pager.label')}
-      style={{
-        display: 'flex',
-        gap: 8,
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        fontSize: 12,
-      }}
+      className="arb:flex arb:flex-wrap arb:items-center arb:gap-2 arb:text-xs"
     >
       <Button onClick={onPrevious} disabled={busy || !hasPrevious}>
         {t('logs.pager.previous')}
@@ -57,7 +51,7 @@ export function LogPager({
       <Button onClick={onNext} disabled={busy || !hasNext}>
         {t('logs.pager.next')}
       </Button>
-      <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+      <span className="arb:text-secondary">
         {info.pages === 0
           ? t('logs.pager.empty')
           : t('logs.pager.position', {
@@ -65,12 +59,12 @@ export function LogPager({
               pages: info.pages,
             })}
       </span>
-      <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>
+      <span className="arb:text-tertiary">
         {info.pages === 0
           ? ''
           : t('logs.pager.range', { first: info.first, last: info.last })}
       </span>
-      <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>
+      <span className="arb:text-tertiary">
         {t('logs.total', { count: total })}
       </span>
     </nav>

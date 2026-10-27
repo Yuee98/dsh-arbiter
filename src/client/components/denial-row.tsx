@@ -13,7 +13,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import { useArbiterTranslation } from '../i18n-provider.js';
 import type { ArbiterDenialSource, ArbiterDenialView } from '../view-types.js';
@@ -57,6 +57,7 @@ export function DenialRow(props: {
   const t = useArbiterTranslation();
   const regionId = `${useId()}-detail`;
   const [open, setOpen] = useState(false);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
   const reason = props.denial.reason;
   return (
     <div
@@ -101,6 +102,7 @@ export function DenialRow(props: {
       </div>
       <div>
         <Button
+          ref={openerRef}
           onClick={() => {
             setOpen((current) => !current);
           }}
@@ -112,6 +114,7 @@ export function DenialRow(props: {
         <div id={regionId} className="arb:pt-1">
           <CallDetailPanel
             callId={props.callId}
+            openerRef={openerRef}
             onClose={() => {
               setOpen(false);
             }}

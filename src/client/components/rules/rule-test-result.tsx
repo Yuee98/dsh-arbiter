@@ -17,13 +17,6 @@ import {
 } from './rule-test-model.js';
 import type { ConditionView } from './rule-test-model.js';
 
-const muted = {
-  fontSize: 12,
-  color: 'var(--dsw-alias-label-secondary)',
-} as const;
-
-const mono = { fontFamily: 'var(--dsw-font-mono, monospace)' } as const;
-
 /** A localized verdict label; the protocol value itself stays visible. */
 export function verdictLabel(verdict: RuleVerdict, t: Translate): string {
   switch (verdict) {
@@ -121,51 +114,35 @@ export function RuleTestConclusion(props: {
       data-arbiter-test-conclusion=""
       data-testid="rule-test-conclusion"
       data-arbiter-test-stale={props.stale ? 'true' : 'false'}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: 12,
-      }}
+      className="arb:grid arb:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] arb:gap-3"
     >
       <section
         data-testid="rule-test-rule"
         data-arbiter-test-rule-state={conclusion.state}
-        style={{
-          border: '0.5px solid var(--dsw-alias-border-l2)',
-          borderRadius: 6,
-          padding: 10,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-        }}
+        className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:p-2.5"
       >
-        <h4 style={{ margin: 0, fontSize: 12.5 }}>
+        <h4 className="arb:m-0 arb:text-[12.5px]">
           {t('ruleTest.ruleConclusion')}
         </h4>
         <strong
-          style={{ fontSize: 13 }}
+          className="arb:text-[13px]"
           data-arbiter-test-rule-outcome={conclusion.state}
         >
           {ruleStateText(conclusion.state, t)}
         </strong>
         {props.rule === null ? (
-          <span style={muted}>{t('ruleTest.noRuleHint')}</span>
+          <span className="arb:text-xs arb:text-secondary">
+            {t('ruleTest.noRuleHint')}
+          </span>
         ) : null}
       </section>
       <section
         data-testid="rule-test-path"
         data-arbiter-test-path={props.result.path}
-        style={{
-          border: '0.5px solid var(--dsw-alias-border-l2)',
-          borderRadius: 6,
-          padding: 10,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-        }}
+        className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:p-2.5"
       >
-        <h4 style={{ margin: 0, fontSize: 12.5 }}>{t('ruleTest.finalPath')}</h4>
-        <strong style={{ fontSize: 13 }}>
+        <h4 className="arb:m-0 arb:text-[12.5px]">{t('ruleTest.finalPath')}</h4>
+        <strong className="arb:text-[13px]">
           {path.kind === 'rule'
             ? t('ruleTest.pathVerdict', {
                 verdict: verdictLabel(path.verdict, t),
@@ -173,11 +150,18 @@ export function RuleTestConclusion(props: {
               })
             : t('ruleTest.pathReviewDefault')}
         </strong>
-        <span style={muted}>{pathReasonText(path, coverage, t)}</span>
-        <span style={muted}>{t('ruleTest.reviewHint')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {pathReasonText(path, coverage, t)}
+        </span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.reviewHint')}
+        </span>
         {/* The effective directory is shown, not implied: a relative redirect
             resolves against it, so the conclusion is only reproducible with it. */}
-        <span style={muted} data-testid="rule-test-cwd">
+        <span
+          className="arb:text-xs arb:text-secondary"
+          data-testid="rule-test-cwd"
+        >
           {t('ruleTest.effectiveCwd', { cwd: props.result.cwd })}
         </span>
       </section>
@@ -253,17 +237,10 @@ export function RuleTestDetails(props: {
         null);
   return (
     <details data-arbiter-test-details="">
-      <summary style={{ cursor: 'pointer', fontSize: 12 }}>
+      <summary className="arb:cursor-pointer arb:text-xs">
         {t('ruleTest.details')}
       </summary>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          marginTop: 8,
-        }}
-      >
+      <div className="arb:mt-2 arb:flex arb:flex-col arb:gap-2.5">
         {selected === null ? null : (
           <ConditionList result={selected} name={props.rule?.name ?? null} />
         )}
@@ -286,15 +263,15 @@ function ConditionList(props: {
   const t = useArbiterTranslation();
   const views = conditionViews(props.result);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+    <div className="arb:flex arb:flex-col arb:gap-2">
+      <div className="arb:text-[12.5px] arb:font-semibold">
         {props.name ?? props.result.id}
       </div>
       {props.result.combine === 'all' ? (
         // Naming the connective up front stops the per-condition blocks below
         // from being read as independent alternatives.
         <div
-          style={muted}
+          className="arb:text-xs arb:text-secondary"
           data-testid="rule-test-combine"
           data-arbiter-test-combine="all"
         >
@@ -320,29 +297,21 @@ function ConditionBlock(props: { readonly view: ConditionView }): ReactNode {
       data-testid="rule-test-condition"
       data-arbiter-test-condition={String(view.index)}
       data-arbiter-test-condition-outcome={condition.outcome}
-      style={{
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 6,
-        padding: 8,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        fontSize: 12,
-      }}
+      className="arb:flex arb:flex-col arb:gap-0.5 arb:rounded-md arb:border arb:border-border-default arb:p-2 arb:text-xs"
     >
       <strong>{t('ruleTest.conditionHead', { n: view.index + 1 })}</strong>
-      <span style={muted}>
+      <span className="arb:text-xs arb:text-secondary">
         {t('ruleTest.conditionTarget', {
           target: targetLabel(condition.target, t),
         })}
       </span>
       {condition.path === undefined ? null : (
-        <span style={{ ...mono, fontSize: 11.5 }}>
+        <span className="arb:font-mono arb:text-[11.5px]">
           {t('ruleTest.conditionPath', { path: condition.path })}
         </span>
       )}
       {view.multi === null ? null : (
-        <span style={muted}>
+        <span className="arb:text-xs arb:text-secondary">
           {t('ruleTest.conditionMulti', {
             mode:
               view.multi === 'all'
@@ -351,7 +320,7 @@ function ConditionBlock(props: { readonly view: ConditionView }): ReactNode {
           })}
         </span>
       )}
-      <span style={mono}>
+      <span className="arb:font-mono">
         {t('ruleTest.conditionExpression', {
           kind: condition.kind,
           pattern: patternText(condition),
@@ -359,7 +328,7 @@ function ConditionBlock(props: { readonly view: ConditionView }): ReactNode {
       </span>
       {view.witness === null ? null : (
         <span
-          style={mono}
+          className="arb:font-mono"
           data-testid="rule-test-condition-witness"
           data-arbiter-test-condition-witness={view.witness}
         >
@@ -368,7 +337,7 @@ function ConditionBlock(props: { readonly view: ConditionView }): ReactNode {
       )}
       {view.group === null ? null : (
         <span
-          style={muted}
+          className="arb:text-xs arb:text-secondary"
           data-testid="rule-test-condition-group"
           data-arbiter-test-condition-group={view.group.outcome}
         >
@@ -401,15 +370,20 @@ function ValueBlock(props: {
   const t = useArbiterTranslation();
   return (
     <>
-      <span style={muted}>
+      <span className="arb:text-xs arb:text-secondary">
         {t('ruleTest.values', { count: props.values.length })}
       </span>
       {props.values.length === 0 ? (
-        <span style={muted}>{t('ruleTest.valuesEmpty')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.valuesEmpty')}
+        </span>
       ) : (
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <ul className="arb:m-0 arb:pl-4.5">
           {props.values.map((value, index) => (
-            <li key={`${String(index)}-${valueText(value)}`} style={mono}>
+            <li
+              key={`${String(index)}-${valueText(value)}`}
+              className="arb:font-mono"
+            >
               {valueText(value)}
             </li>
           ))}
@@ -417,12 +391,15 @@ function ValueBlock(props: {
       )}
       {props.matched.length === 0 ? null : (
         <>
-          <span style={muted}>
+          <span className="arb:text-xs arb:text-secondary">
             {t('ruleTest.matchedValues', { count: props.matched.length })}
           </span>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <ul className="arb:m-0 arb:pl-4.5">
             {props.matched.map((value, index) => (
-              <li key={`m-${String(index)}-${valueText(value)}`} style={mono}>
+              <li
+                key={`m-${String(index)}-${valueText(value)}`}
+                className="arb:font-mono"
+              >
                 {valueText(value)}
               </li>
             ))}
@@ -443,22 +420,14 @@ function ShadowList(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div
-      style={{
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 6,
-        padding: 8,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        fontSize: 12,
-      }}
-    >
+    <div className="arb:flex arb:flex-col arb:gap-0.5 arb:rounded-md arb:border arb:border-border-default arb:p-2 arb:text-xs">
       <strong>{t('ruleTest.shadowedTitle')}</strong>
       {props.shadowed.length === 0 ? (
-        <span style={muted}>{t('ruleTest.shadowedNone')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.shadowedNone')}
+        </span>
       ) : (
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <ul className="arb:m-0 arb:pl-4.5">
           {props.shadowed.map((match) => (
             <li key={`${match.id}-${match.verdict}`}>
               {t('ruleTest.shadowedEntry', {
@@ -470,13 +439,15 @@ function ShadowList(props: {
         </ul>
       )}
       <strong>{t('ruleTest.unknownTitle')}</strong>
-      <span style={muted}>
+      <span className="arb:text-xs arb:text-secondary">
         {props.unknown.length === 0
           ? t('ruleTest.unknownNone')
           : props.unknown.join(', ')}
       </span>
       {props.allowMatched ? null : (
-        <span style={muted}>{t('ruleTest.noAllow')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.noAllow')}
+        </span>
       )}
     </div>
   );
@@ -499,32 +470,26 @@ function NormalizationBlock(props: {
   return (
     <div
       data-testid="rule-test-normalization"
-      style={{
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 6,
-        padding: 8,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        fontSize: 12,
-      }}
+      className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:p-2 arb:text-xs"
     >
       <strong>{t('ruleTest.normalizationTitle')}</strong>
       {detail.commands.length === 0 ? (
-        <span style={muted}>{t('ruleTest.normalizationEmpty')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.normalizationEmpty')}
+        </span>
       ) : (
         detail.commands.map((command, index) => (
           <div
             key={`${String(index)}-${command.text}`}
-            style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+            className="arb:flex arb:flex-col arb:gap-0.5"
           >
-            <span style={mono}>
+            <span className="arb:font-mono">
               {t('ruleTest.normalizationCommand', { text: command.text })}
             </span>
             {command.words.map((word, at) => (
               <span
                 key={`${String(at)}-${word.raw}`}
-                style={{ ...muted, ...mono }}
+                className="arb:font-mono arb:text-xs arb:text-secondary"
               >
                 {t('ruleTest.normalizationWord', {
                   raw: word.raw,
@@ -551,24 +516,16 @@ function ParseBlock(props: { readonly result: RuleTestResultView }): ReactNode {
   return (
     <div
       data-arbiter-test-parse={parse.status}
-      style={{
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 6,
-        padding: 8,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        fontSize: 12,
-      }}
+      className="arb:flex arb:flex-col arb:gap-0.5 arb:rounded-md arb:border arb:border-border-default arb:p-2 arb:text-xs"
     >
       <strong>{t('ruleTest.parseTitle')}</strong>
-      <span style={muted}>
+      <span className="arb:text-xs arb:text-secondary">
         {t('ruleTest.parseStatusValue', {
           status: parse.status,
           completeness: parse.completeness,
         })}
       </span>
-      <span style={mono}>
+      <span className="arb:font-mono">
         {t('ruleTest.parseNodes', {
           nodes:
             parse.nodes.length === 0
@@ -576,7 +533,7 @@ function ParseBlock(props: { readonly result: RuleTestResultView }): ReactNode {
               : parse.nodes.join(', '),
         })}
       </span>
-      <span style={mono}>
+      <span className="arb:font-mono">
         {t('ruleTest.parseUnresolved', {
           values:
             parse.unresolved.length === 0
@@ -585,12 +542,12 @@ function ParseBlock(props: { readonly result: RuleTestResultView }): ReactNode {
         })}
       </span>
       {parse.opaque ? (
-        <span style={muted}>{t('ruleTest.parseOpaque')}</span>
+        <span className="arb:text-xs arb:text-secondary">
+          {t('ruleTest.parseOpaque')}
+        </span>
       ) : null}
       {props.result.error === undefined ? null : (
-        <span
-          style={{ ...mono, color: 'var(--dsw-alias-state-error-primary)' }}
-        >
+        <span className="arb:font-mono arb:text-error">
           {t('ruleTest.parseError', { error: props.result.error })}
         </span>
       )}

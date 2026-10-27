@@ -49,9 +49,7 @@ function ConflictRow({
       <strong>{severityText(t, conflict.severity)}</strong>{' '}
       {reasonText(t, conflict)}
       {conflict.entryId === null ? null : (
-        <span
-          style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 }}
-        >
+        <span className="arb:text-[11.5px] arb:text-tertiary">
           {' '}
           {t('coexistence.entry', { entry: conflict.entryId })}
         </span>

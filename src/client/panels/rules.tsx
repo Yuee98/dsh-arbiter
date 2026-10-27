@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Button, Section } from '../components/controls.js';
 import { addRule, nextRuleId } from '../components/rules/draft.js';
@@ -37,6 +37,7 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  const ruleTestOpenerRef = useRef<HTMLElement | null>(null);
   const [locateRequest, setLocateRequest] = useState<LocateRequest>({
     ruleId: null,
     conditionIndex: null,
@@ -79,7 +80,8 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
             {t('rules.add')}
           </Button>
           <Button
-            onClick={() => {
+            onClick={(event) => {
+              ruleTestOpenerRef.current = event.currentTarget;
               setFocusedId(null);
               setFocusRequest((current) => current + 1);
             }}
@@ -97,7 +99,8 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
           pendingExactTypes={pendingExactTypes}
           onSelect={setSelectedId}
           onDraft={onDraft}
-          onTest={(id) => {
+          onTest={(id, opener) => {
+            ruleTestOpenerRef.current = opener ?? null;
             setFocusedId(id);
             setFocusRequest((current) => current + 1);
           }}
@@ -114,6 +117,7 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
         draft={draft}
         focusedRule={focusedRule}
         focusRequest={focusRequest}
+        openerRef={ruleTestOpenerRef}
         renderTrigger={false}
         onClearFocus={() => {
           setFocusedId(null);

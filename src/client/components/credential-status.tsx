@@ -46,7 +46,7 @@ export function CredentialStatus(props: {
   }, [props.reference]);
 
   return (
-    <span style={{ fontSize: 12.5, lineHeight: '30px' }}>
+    <span className="arb:text-[12.5px] arb:leading-[30px] arb:text-secondary">
       {credentialText(probe, t)}
     </span>
   );

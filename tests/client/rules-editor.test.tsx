@@ -1551,4 +1551,67 @@ describe('source warnings after a save', () => {
       within(row(id)).getByRole('textbox', { name: '表达式' }),
     ).toHaveValue('typed during reload');
   });
+
+  test('closing rule tester restores focus to toolbar opener button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const testToolbarBtn = screen.getByRole('button', { name: '展开测试区' });
+    testToolbarBtn.focus();
+    await user.click(testToolbarBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    expect(testToolbarBtn).toHaveFocus();
+  });
+
+  test('closing rule tester restores focus to per-rule test button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const ruleTestBtn = within(row(id)).getByRole('button', {
+      name: /测试规则/,
+    });
+    ruleTestBtn.focus();
+    await user.click(ruleTestBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    expect(ruleTestBtn).toHaveFocus();
+  });
+
+  test('closing rule tester when opener is removed safely falls back to surviving button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const testToolbarBtn = screen.getByRole('button', { name: '展开测试区' });
+    await user.click(testToolbarBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    // Disconnect toolbar button
+    testToolbarBtn.remove();
+
+    const closeBtn = screen.getByRole('button', { name: '收起测试区' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    // Active element safely fell back to surviving button
+    expect(screen.getByRole('button', { name: '校验草稿' })).toHaveFocus();
+  });
 });

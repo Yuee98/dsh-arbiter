@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { forwardRef, useState } from 'react';
 import { cn } from './ui/cn.js';
 
@@ -49,18 +49,6 @@ export function Field(props: {
     </label>
   );
 }
-
-export const inputStyle = {
-  boxSizing: 'border-box' as const,
-  height: 30,
-  border: '0.5px solid var(--dsw-alias-border-l4)',
-  borderRadius: 6,
-  background: 'var(--dsw-alias-bg-layer-3)',
-  color: 'var(--dsw-alias-label-primary)',
-  padding: '0 8px',
-  fontSize: 12.5,
-  width: '100%',
-};
 
 export const inputClassName =
   'arb:h-[30px] arb:w-full arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:px-2 arb:text-xs arb:text-primary arb:focus:border-accent arb:focus:outline-none arb:disabled:cursor-not-allowed arb:disabled:opacity-50';
@@ -156,7 +144,8 @@ export function Select<T extends string>(props: {
 
 export interface ButtonProps {
   readonly children: ReactNode;
-  readonly onClick?: (() => void) | undefined;
+  readonly onClick?:
+    ((event: MouseEvent<HTMLButtonElement>) => void) | undefined;
   readonly disabled?: boolean | undefined;
   readonly tone?: 'primary' | 'danger' | 'plain' | undefined;
   readonly type?: 'button' | 'submit' | undefined;

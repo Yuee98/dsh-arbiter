@@ -8,7 +8,7 @@
  * can render that directly.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
@@ -116,6 +116,7 @@ function AbsentState({
 export function CallDetailPanel(props: {
   readonly callId: string;
   readonly onClose?: () => void;
+  readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
   /**
    * The caller's own recorded facts, shown only when no source holds the call.
    *
@@ -127,17 +128,6 @@ export function CallDetailPanel(props: {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
   const openerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (
-      document.activeElement instanceof HTMLElement &&
-      !document.activeElement.closest(
-        '[data-arbiter-surface="call-detail-dialog"]',
-      )
-    ) {
-      openerRef.current = document.activeElement;
-    }
-  }, []);
 
   return (
     <Dialog
@@ -151,12 +141,16 @@ export function CallDetailPanel(props: {
         data-arbiter-surface="call-detail-dialog"
         showCloseButton={false}
         onCloseAutoFocus={(event) => {
-          if (
-            openerRef.current !== null &&
-            document.contains(openerRef.current)
-          ) {
-            event.preventDefault();
-            openerRef.current.focus();
+          event.preventDefault();
+          const opener = props.openerRef?.current ?? openerRef.current;
+          if (opener !== null && document.contains(opener)) {
+            opener.focus();
+          } else {
+            const fallback =
+              document.querySelector<HTMLElement>(
+                '[data-arbiter-surface="logs-panel"] button, [data-arbiter-surface="denials-panel"] button, [data-arbiter-root] button, button',
+              ) ?? null;
+            fallback?.focus();
           }
         }}
         className="arb:flex arb:max-h-[85vh] arb:max-w-3xl arb:flex-col arb:gap-4 arb:overflow-y-auto"

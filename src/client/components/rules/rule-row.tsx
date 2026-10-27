@@ -127,7 +127,7 @@ export interface RuleRowProps {
   readonly pendingExactTypes?: PendingExactTypeMap | undefined;
   readonly onSelect: (id: string | null) => void;
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
-  readonly onTest: (id: string) => void;
+  readonly onTest: (id: string, opener?: HTMLElement | null) => void;
   readonly onArmDelete: (ruleId: string) => void;
   readonly onDisarmDelete: () => void;
   readonly onDeleteRule: (ruleId: string) => void;
@@ -257,7 +257,7 @@ function RuleRowToolbar(props: {
   readonly listeners: ReturnType<typeof useSortable>['listeners'];
   readonly onSelect: (id: string | null) => void;
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
-  readonly onTest: (id: string) => void;
+  readonly onTest: (id: string, opener?: HTMLElement | null) => void;
   readonly onArmDelete: (ruleId: string) => void;
   readonly onDisarmDelete: () => void;
   readonly onDeleteRule: (ruleId: string) => void;
@@ -361,9 +361,9 @@ function RuleRowToolbar(props: {
       <IconButton
         label={t('rules.testRule', { name })}
         icon={FlaskConical}
-        onClick={() => {
+        onClick={(event) => {
           onDisarmDelete();
-          onTest(rule.id);
+          onTest(rule.id, event.currentTarget);
         }}
       />
 

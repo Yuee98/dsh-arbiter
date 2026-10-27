@@ -7,7 +7,6 @@ import {
   Section,
   Select,
   TextInput,
-  inputStyle,
 } from '../components/controls.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 
@@ -63,7 +62,7 @@ function PolicySettings({
           {t('advanced.progress')}
         </div>
         {thresholdFields.map(([key, label, min, max, step]) => (
-          <div key={key} style={{ display: 'contents' }}>
+          <div key={key} className="arb:contents">
             <div className="arb:text-xs arb:leading-[30px] arb:text-secondary">
               {label}
             </div>
@@ -268,7 +267,7 @@ function ContextSettings({
               next.context.customRules = event.target.value;
             });
           }}
-          style={{ ...inputStyle, height: 'auto', padding: 8 }}
+          className="arb:h-auto arb:w-full arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-xs arb:text-primary arb:focus:border-accent arb:focus:outline-none"
         />
       </Field>
     </Section>

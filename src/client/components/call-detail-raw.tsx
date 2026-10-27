@@ -196,17 +196,22 @@ function Attempts({ detail }: { readonly detail: CallDetailView }): ReactNode {
       className="arb:flex arb:flex-col arb:gap-2.5"
     >
       {modelAttempts.length > 1 ? (
-        <div className="arb:flex arb:flex-wrap arb:gap-1.5" role="tablist">
+        <div
+          role="group"
+          aria-label={t('callDetail.modelAttempts', {
+            count: modelAttempts.length,
+          })}
+          className="arb:flex arb:flex-wrap arb:gap-1.5"
+        >
           {modelAttempts.map((attempt, index) => (
             <button
               key={attempt.requestId}
               type="button"
-              role="tab"
-              aria-selected={index === selectedAttempt}
+              aria-pressed={index === selectedAttempt}
               onClick={() => {
                 setSelectedAttempt(index);
               }}
-              className={`arb:rounded arb:px-2.5 arb:py-1 arb:text-xs ${
+              className={`arb:rounded arb:px-2.5 arb:py-1 arb:text-xs arb:transition-colors ${
                 index === selectedAttempt
                   ? 'arb:bg-layer-4 arb:font-medium arb:text-primary'
                   : 'arb:bg-layer-2 arb:text-secondary hover:arb:text-primary'
@@ -217,7 +222,9 @@ function Attempts({ detail }: { readonly detail: CallDetailView }): ReactNode {
           ))}
         </div>
       ) : null}
-      {activeAttempt !== undefined ? <Attempt attempt={activeAttempt} /> : null}
+      {activeAttempt !== undefined ? (
+        <Attempt key={activeAttempt.requestId} attempt={activeAttempt} />
+      ) : null}
     </div>
   );
 }

@@ -94,15 +94,7 @@ export function ReviewerTestDialog(props: {
   return (
     <div
       role="presentation"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0, 0, 0, 0.45)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
+      className="arb:fixed arb:inset-0 arb:z-50 arb:flex arb:items-center arb:justify-center arb:bg-black/45"
     >
       <div
         role="dialog"
@@ -110,44 +102,20 @@ export function ReviewerTestDialog(props: {
         aria-label={t('reviewer.test.title')}
         data-arbiter-reviewer-test=""
         data-arbiter-surface="reviewer-test-dialog"
-        style={{
-          width: 'min(760px, 92vw)',
-          maxHeight: '82vh',
-          overflow: 'auto',
-          background: 'var(--dsw-alias-bg-layer-3)',
-          color: 'var(--dsw-alias-label-primary)',
-          borderRadius: 10,
-          padding: 18,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
+        className="arb:flex arb:max-h-[82vh] arb:w-[min(760px,92vw)] arb:flex-col arb:gap-3 arb:overflow-auto arb:rounded-lg arb:bg-layer-3 arb:p-4.5 arb:text-primary"
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+        <div className="arb:flex arb:items-center arb:justify-between arb:gap-3">
+          <h3 className="arb:m-0 arb:text-base arb:font-semibold">
             {t('reviewer.test.title')}
           </h3>
           <Button onClick={close}>{t('reviewer.test.close')}</Button>
         </div>
 
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--dsw-alias-label-secondary)',
-            fontSize: 12,
-          }}
-        >
+        <p className="arb:m-0 arb:text-xs arb:text-secondary">
           {t('reviewer.test.costNotice')}
         </p>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="arb:flex arb:items-center arb:gap-2">
           <Button
             tone="primary"
             disabled={run.kind === 'running'}
@@ -213,31 +181,31 @@ function ProbeSummary(props: {
     captured.reviewer.type === 'chat'
       ? `${captured.reviewer.chat.provider} / ${captured.reviewer.chat.model}`
       : `decision / ${captured.reviewer.decision.model}`;
-  const muted = {
-    color: 'var(--dsw-alias-label-secondary)',
-    fontSize: 12,
-  } as const;
 
   if (run.kind === 'idle') {
-    return <p style={{ margin: 0, ...muted }}>{t('reviewer.test.idle')}</p>;
+    return (
+      <p className="arb:m-0 arb:text-xs arb:text-secondary">
+        {t('reviewer.test.idle')}
+      </p>
+    );
   }
   if (run.kind === 'running') {
     return (
-      <p role="status" style={{ margin: 0, ...muted }}>
+      <p role="status" className="arb:m-0 arb:text-xs arb:text-secondary">
         {t('reviewer.test.runningHint', { route })}
       </p>
     );
   }
   if (run.kind === 'cancelled') {
     return (
-      <p role="status" style={{ margin: 0, ...muted }}>
+      <p role="status" className="arb:m-0 arb:text-xs arb:text-secondary">
         {t('reviewer.test.cancelled')}
       </p>
     );
   }
   if (run.kind === 'error') {
     return (
-      <p role="status" style={{ margin: 0, ...muted }}>
+      <p role="status" className="arb:m-0 arb:text-xs arb:text-secondary">
         {t('reviewer.test.requestFailed')}
       </p>
     );
@@ -255,49 +223,34 @@ function ProbeSummary(props: {
         : t('reviewer.test.failed', { reason: failureText(result.failure, t) });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="arb:flex arb:flex-col arb:gap-2">
       <p
         role="status"
         data-arbiter-probe-status={result.status}
         {...(result.status === 'passed'
           ? {}
           : { 'data-arbiter-probe-failure': result.failure })}
-        style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+        className="arb:m-0 arb:text-sm arb:font-semibold"
       >
         {headline}
       </p>
-      <dl
-        style={{
-          margin: 0,
-          display: 'grid',
-          gridTemplateColumns: 'max-content 1fr',
-          gap: '4px 12px',
-          fontSize: 12,
-        }}
-      >
-        <dt style={muted}>{t('reviewer.test.actualModel')}</dt>
-        <dd style={{ margin: 0 }}>{actual}</dd>
-        <dt style={muted}>{t('reviewer.test.backend')}</dt>
-        <dd style={{ margin: 0 }}>{result.backend}</dd>
-        <dt style={muted}>{t('reviewer.test.protocol')}</dt>
-        <dd style={{ margin: 0 }}>{result.protocol}</dd>
-        <dt style={muted}>{t('reviewer.test.duration')}</dt>
-        <dd style={{ margin: 0 }}>
+      <dl className="arb:m-0 arb:grid arb:grid-cols-[max-content_1fr] arb:gap-x-3 arb:gap-y-1 arb:text-xs">
+        <dt className="arb:text-secondary">{t('reviewer.test.actualModel')}</dt>
+        <dd className="arb:m-0">{actual}</dd>
+        <dt className="arb:text-secondary">{t('reviewer.test.backend')}</dt>
+        <dd className="arb:m-0">{result.backend}</dd>
+        <dt className="arb:text-secondary">{t('reviewer.test.protocol')}</dt>
+        <dd className="arb:m-0">{result.protocol}</dd>
+        <dt className="arb:text-secondary">{t('reviewer.test.duration')}</dt>
+        <dd className="arb:m-0">
           {t('reviewer.test.durationValue', { ms: result.durationMs })}
         </dd>
       </dl>
       <details>
-        <summary style={{ cursor: 'pointer', fontSize: 12 }}>
+        <summary className="arb:cursor-pointer arb:text-xs">
           {t('reviewer.test.details')}
         </summary>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            marginTop: 8,
-          }}
-        >
+        <div className="arb:mt-2 arb:flex arb:flex-col arb:gap-2.5">
           {result.attempts.map((attempt) => (
             <ProbeAttemptBlock
               key={attempt.attempt}
@@ -319,11 +272,9 @@ function ProbeAttemptBlock(props: {
   const t = useArbiterTranslation();
   const { attempt } = props;
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ fontSize: 12, fontWeight: 600 }}>{props.label}</div>
-      <div
-        style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)' }}
-      >
+    <section className="arb:flex arb:flex-col arb:gap-1">
+      <div className="arb:text-xs arb:font-semibold">{props.label}</div>
+      <div className="arb:text-[11.5px] arb:text-secondary">
         {t('reviewer.test.attemptMeta', {
           ms: attempt.durationMs,
           protocol: attempt.protocol,
@@ -354,25 +305,11 @@ function RawBlock(props: {
       ? props.value
       : JSON.stringify(props.value, null, 2);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span
-        style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)' }}
-      >
+    <div className="arb:flex arb:flex-col arb:gap-0.5">
+      <span className="arb:text-[11.5px] arb:text-secondary">
         {props.label}
       </span>
-      <pre
-        style={{
-          margin: 0,
-          padding: 8,
-          maxHeight: 220,
-          overflow: 'auto',
-          borderRadius: 6,
-          background: 'var(--dsw-alias-bg-module-platform)',
-          fontSize: 11.5,
-          fontFamily: 'var(--dsw-font-mono, monospace)',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
+      <pre className="arb:m-0 arb:max-h-[220px] arb:overflow-auto arb:rounded-md arb:bg-layer-4 arb:p-2 arb:font-mono arb:text-[11.5px] arb:whitespace-pre-wrap">
         {rendered}
       </pre>
     </div>
