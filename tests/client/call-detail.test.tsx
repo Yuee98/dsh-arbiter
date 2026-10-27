@@ -231,19 +231,18 @@ describe('shared call detail', () => {
       screen.getByRole('button', { name: '原始材料（默认折叠）' }),
     );
 
-    // The attempt is its own disclosure; opening it reveals the material.
-    const attempt = screen.getByRole('button', { name: '第 1 次尝试' });
-    expect(attempt).toHaveAttribute('aria-expanded', 'false');
-    await user.click(attempt);
-    expect(
-      screen.getByRole('button', { name: '提交的请求' }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '模型原文' }));
+    // The attempt is rendered as a flat card section rather than nested disclosures.
+    expect(screen.getByText('第 1 次尝试')).toBeInTheDocument();
+    expect(screen.getByText('提交的请求')).toBeInTheDocument();
+    expect(screen.getByText('模型原文')).toBeInTheDocument();
     // The model's own answer is shown verbatim, as stored.
-    const answer = screen.getByText(/authorized/u);
-    expect(answer.textContent).toContain('risk');
+    const answers = screen.getAllByText(/authorized/u);
+    expect(answers.length).toBeGreaterThanOrEqual(1);
+    expect(answers[0]?.textContent).toContain('risk');
     // The runtime's own reason is a separate layer, not this answer text.
-    expect(answer.textContent).not.toContain('the review rejected this call');
+    expect(answers[0]?.textContent).not.toContain(
+      'the review rejected this call',
+    );
   });
 
   test('shows the policy signals without presenting them as the verdict', async () => {

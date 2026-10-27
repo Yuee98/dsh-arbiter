@@ -2,7 +2,7 @@
 @import 'tailwindcss/utilities.css' prefix(arb);
 @source "../**/*.{ts,tsx}";
 
-@theme {
+@theme inline {
   --color-canvas: var(--arb-bg-canvas);
   --color-layer-1: var(--arb-bg-layer-1);
   --color-layer-2: var(--arb-bg-layer-2);
@@ -37,7 +37,11 @@
   --arb-text-secondary: var(--dsw-alias-label-secondary, #a1a1aa);
   --arb-text-tertiary: var(--dsw-alias-label-tertiary, #71717a);
   --arb-text-on-accent: var(--dsw-alias-label-primary-foreground, #ffffff);
-  --arb-accent: var(--dsw-alias-state-business-primary, #3b82f6);
+  --arb-accent: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-primary, #2563eb) 90%,
+    black
+  );
   --arb-error: var(--dsw-alias-state-error-primary, #ef4444);
   --arb-success: var(--dsw-alias-state-success-primary, #22c55e);
   --arb-warning: var(

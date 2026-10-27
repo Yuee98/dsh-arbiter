@@ -714,6 +714,50 @@ describe('rule list header and inline editing', () => {
     });
   });
 
+  test('switching target away from argument discards pending exact type and allows saving string condition', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.count',
+    );
+
+    // Enter pending number state
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'number',
+    );
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('');
+
+    // Switch target to tool
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'tool',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'bash',
+    );
+
+    // Save succeeds without incomplete exact value error
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [{ id, conditions: [{ target: 'tool', pattern: 'bash' }] }],
+      },
+    });
+  });
+
   test('a deliberate exact empty string is kept as a value', async () => {
     baseHandlers();
     const user = await openRules();

@@ -538,7 +538,7 @@ export function pendingExactIssues(
   const issues: ConfigIssueView[] = [];
   draft.rules.forEach((rule, ruleIndex) => {
     rule.conditions.forEach((condition, conditionIndex) => {
-      if (condition.kind === 'exact') {
+      if (condition.target === 'argument' && condition.kind === 'exact') {
         const key = pendingExactKey(rule.id, conditionIndex);
         const pending = pendingMap[key];
         if (

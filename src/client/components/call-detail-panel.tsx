@@ -8,7 +8,7 @@
  * can render that directly.
  */
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
@@ -126,6 +126,18 @@ export function CallDetailPanel(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (
+      document.activeElement instanceof HTMLElement &&
+      !document.activeElement.closest(
+        '[data-arbiter-surface="call-detail-dialog"]',
+      )
+    ) {
+      openerRef.current = document.activeElement;
+    }
+  }, []);
 
   return (
     <Dialog
@@ -138,7 +150,16 @@ export function CallDetailPanel(props: {
         data-call-detail-panel={props.callId}
         data-arbiter-surface="call-detail-dialog"
         showCloseButton={false}
-        className="arb:max-h-[85vh] arb:max-w-3xl arb:overflow-y-auto arb:flex arb:flex-col arb:gap-4"
+        onCloseAutoFocus={(event) => {
+          if (
+            openerRef.current !== null &&
+            document.contains(openerRef.current)
+          ) {
+            event.preventDefault();
+            openerRef.current.focus();
+          }
+        }}
+        className="arb:flex arb:max-h-[85vh] arb:max-w-3xl arb:flex-col arb:gap-4 arb:overflow-y-auto"
       >
         <DialogHeader className="arb:flex arb:flex-row arb:items-center arb:justify-between arb:border-b arb:border-border-default arb:pb-3">
           <div>

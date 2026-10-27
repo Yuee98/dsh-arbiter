@@ -72,7 +72,9 @@ export function RuleTestImport(props: {
       </PopoverTrigger>
       <PopoverContent
         data-arbiter-test-import=""
-        className="arb:w-80 arb:max-h-80 arb:overflow-y-auto arb:p-3"
+        data-rule-test-import-content=""
+        aria-label={t('ruleTest.importOpen')}
+        className="arb:max-h-80 arb:w-80 arb:overflow-y-auto arb:p-3"
       >
         <div className="arb:flex arb:flex-col arb:gap-2">
           {busy && calls === null ? (
@@ -99,7 +101,6 @@ export function RuleTestImport(props: {
                 key={call.callId}
                 type="button"
                 disabled={busy}
-                aria-label={accessibleTitle}
                 onClick={() => {
                   take(call).catch((failure: unknown) => {
                     setError(
@@ -109,14 +110,14 @@ export function RuleTestImport(props: {
                     );
                   });
                 }}
-                className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-left arb:transition-colors arb:hover:bg-layer-4 arb:disabled:opacity-50"
+                className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-left arb:transition-colors hover:arb:bg-layer-4 disabled:arb:opacity-50"
               >
                 <div className="arb:flex arb:items-center arb:justify-between arb:gap-2">
-                  <span className="arb:text-xs arb:font-medium arb:text-primary arb:truncate">
-                    {call.tool} · {call.callId}
+                  <span className="arb:truncate arb:text-xs arb:font-medium arb:text-primary">
+                    {accessibleTitle}
                   </span>
                   {time ? (
-                    <span className="arb:text-[11px] arb:text-tertiary arb:shrink-0">
+                    <span className="arb:shrink-0 arb:text-xs arb:text-secondary">
                       {time}
                     </span>
                   ) : null}

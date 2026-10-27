@@ -37,6 +37,7 @@ export function RuleConditionEditor(props: {
   const { condition, onChange, onPendingTypeChange } = props;
   const isArgument = condition.target === 'argument';
   const isExact = condition.kind === 'exact';
+  const isTypedExact = isArgument && isExact;
 
   const [localPendingType, setLocalPendingType] =
     useState<PendingExactType | null>(null);
@@ -51,7 +52,7 @@ export function RuleConditionEditor(props: {
 
   const isBlank = isBlankPattern(condition.pattern);
 
-  const currentExactType: ValueType = isExact
+  const currentExactType: ValueType = isTypedExact
     ? (effectivePendingType ?? exactType(condition.pattern))
     : 'string';
 
@@ -78,17 +79,19 @@ export function RuleConditionEditor(props: {
               argument: t('rules.targetOption.argument'),
             }}
             onChange={(value) => {
+              if (value !== 'argument') {
+                setEffectivePendingType(null);
+              }
               onChange((next) => {
                 next.target = value;
                 if (patternText(next.pattern).length === 0) {
                   next.kind = value === 'argument' ? 'exact' : 'regex';
                 }
-                if (value !== 'argument' && typeof next.pattern !== 'string') {
+                if (value !== 'argument') {
                   next.pattern = patternText(next.pattern);
+                  delete next.path;
+                  delete next.multi;
                 }
-                if (value === 'argument') return;
-                delete next.path;
-                delete next.multi;
               });
             }}
           />
@@ -162,7 +165,7 @@ export function RuleConditionEditor(props: {
       </div>
 
       <div className="arb:flex arb:flex-wrap arb:gap-2.5">
-        {isExact ? (
+        {isTypedExact ? (
           <ExactTypeSelector
             currentExactType={currentExactType}
             isBlank={isBlank}
@@ -176,6 +179,7 @@ export function RuleConditionEditor(props: {
             {t('rules.pattern')}
           </span>
           <ExactValue
+            isTypedExact={isTypedExact}
             type={currentExactType}
             pendingType={effectivePendingType}
             condition={condition}
@@ -297,6 +301,7 @@ function ExactTypeSelector(props: {
 }
 
 function ExactValue(props: {
+  readonly isTypedExact: boolean;
   readonly type: ValueType;
   readonly pendingType: PendingExactType | null;
   readonly condition: MutableRuleCondition;
@@ -306,7 +311,21 @@ function ExactValue(props: {
   ) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { condition, onChange, onCommitType } = props;
+  const { isTypedExact, condition, onChange, onCommitType } = props;
+
+  if (!isTypedExact) {
+    return (
+      <TextInput
+        ariaLabel={t('rules.pattern')}
+        value={patternText(condition.pattern)}
+        onChange={(value) => {
+          onChange((next) => {
+            next.pattern = value;
+          });
+        }}
+      />
+    );
+  }
 
   if (props.type === 'null') {
     return (

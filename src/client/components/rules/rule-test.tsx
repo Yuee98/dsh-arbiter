@@ -81,6 +81,20 @@ export function RuleTest(props: {
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const locatingRef = useRef(false);
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      if (
+        document.activeElement instanceof HTMLElement &&
+        !document.activeElement.closest(
+          '[data-arbiter-surface="rule-test-dialog"]',
+        )
+      ) {
+        openerRef.current = document.activeElement;
+      }
+    }
+  }, [open]);
   const [handled, setHandled] = useState(0);
 
   const [pendingFocus, setPendingFocus] = useState(false);
@@ -119,6 +133,7 @@ export function RuleTest(props: {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
+          data-rule-tester-dialog=""
           surface="rule-test-dialog"
           closeLabel={t('ruleTest.close')}
           showCloseButton={false}
@@ -130,6 +145,14 @@ export function RuleTest(props: {
             if (locatingRef.current) {
               event.preventDefault();
               locatingRef.current = false;
+              return;
+            }
+            if (
+              openerRef.current !== null &&
+              document.contains(openerRef.current)
+            ) {
+              event.preventDefault();
+              openerRef.current.focus();
             }
           }}
           className="arb:max-h-[90vh] arb:max-w-4xl arb:overflow-y-auto"

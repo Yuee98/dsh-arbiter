@@ -90,9 +90,17 @@ export function RuleList(props: ExtendedRuleListProps): ReactNode {
     clearArmedDelete();
     const { active, over } = event;
     if (over !== null && active.id !== over.id) {
-      onDraft((d) => {
-        reorderRuleWithinVerdict(d.rules, String(active.id), String(over.id));
-      });
+      const activeRule = draft.rules.find((r) => r.id === String(active.id));
+      const overRule = draft.rules.find((r) => r.id === String(over.id));
+      if (
+        activeRule !== undefined &&
+        overRule !== undefined &&
+        activeRule.verdict === overRule.verdict
+      ) {
+        onDraft((d) => {
+          reorderRuleWithinVerdict(d.rules, String(active.id), String(over.id));
+        });
+      }
     }
   };
 
