@@ -227,7 +227,7 @@ test.describe('rule tester panel', () => {
         .filter({
           has: page.getByRole('checkbox', { name: '启用规则「双条件」' }),
         });
-      await brokenRow.getByRole('button', { name: /^编辑/ }).click();
+      await brokenRow.getByRole('button', { name: /^(展开|编辑)/ }).click();
       const pathFields = brokenRow.getByRole('textbox', { name: 'JSONPath' });
       await expect(pathFields).toHaveCount(2);
       await pathFields.nth(1).fill('$.');

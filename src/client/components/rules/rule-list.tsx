@@ -80,6 +80,7 @@ export function RuleList(props: ExtendedRuleListProps): ReactNode {
 
   const handleDragStart = (): void => {
     clearArmedDelete();
+    onSelect(null);
   };
 
   const handleDragCancel = (): void => {

@@ -83,43 +83,47 @@ export function StatusPanel(props: {
             {boundaryHelp(t)[draft.boundary] ?? '—'}
           </span>
         </div>
-        <div className="arb:grid arb:grid-cols-1 arb:gap-3 sm:arb:grid-cols-2">
+        <div className="arb:grid arb:grid-cols-1 arb:gap-4 sm:arb:grid-cols-2 arb:max-w-xl">
           <Field
             label={t('status.mainMode')}
             hint={modeHelp(t)[draft.modes.main] ?? '—'}
           >
-            <Select
-              value={draft.modes.main}
-              options={['normal', 'strict', 'progress'] as const}
-              labels={{
-                normal: t('status.normal'),
-                strict: t('status.strict'),
-                progress: t('status.progress'),
-              }}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.modes.main = value;
-                });
-              }}
-            />
+            <div className="arb:max-w-xs">
+              <Select
+                value={draft.modes.main}
+                options={['normal', 'strict', 'progress'] as const}
+                labels={{
+                  normal: t('status.normal'),
+                  strict: t('status.strict'),
+                  progress: t('status.progress'),
+                }}
+                onChange={(value) => {
+                  onDraft((next) => {
+                    next.modes.main = value;
+                  });
+                }}
+              />
+            </div>
           </Field>
           <Field
             label={t('status.subagentMode')}
             hint={modeHelp(t)[draft.modes.subagent] ?? '—'}
           >
-            <Select
-              value={draft.modes.subagent}
-              options={['strict', 'progress'] as const}
-              labels={{
-                strict: t('status.strict'),
-                progress: t('status.progress'),
-              }}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.modes.subagent = value;
-                });
-              }}
-            />
+            <div className="arb:max-w-xs">
+              <Select
+                value={draft.modes.subagent}
+                options={['strict', 'progress'] as const}
+                labels={{
+                  strict: t('status.strict'),
+                  progress: t('status.progress'),
+                }}
+                onChange={(value) => {
+                  onDraft((next) => {
+                    next.modes.subagent = value;
+                  });
+                }}
+              />
+            </div>
           </Field>
         </div>
         <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">

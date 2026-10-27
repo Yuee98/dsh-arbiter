@@ -15,6 +15,7 @@
   "test": "测试",
   "edit": "编辑",
   "collapse": "收起",
+  "expandRule": "展开规则「{name}」",
   "editRule": "编辑规则「{name}」",
   "disabled": "（已停用）",
   "hasErrors": "（有校验错误）",

@@ -155,7 +155,7 @@ test.describe('rule editing in the real host', () => {
         row.getByRole('textbox', { name: '表达式', exact: true }),
       ).toHaveCount(0);
       await row
-        .getByRole('button', { name: /^编辑规则/, exact: false })
+        .getByRole('button', { name: /^(展开|编辑)规则/, exact: false })
         .click();
       await expect(
         row.getByRole('textbox', { name: '表达式', exact: true }).first(),
@@ -222,7 +222,7 @@ test.describe('rule editing in the real host', () => {
         reloadedRow.getByRole('combobox', { name: /^行为/ }),
       ).toHaveValue('force-review');
       await reloadedRow
-        .getByRole('button', { name: /^编辑规则/, exact: false })
+        .getByRole('button', { name: /^(展开|编辑)规则/, exact: false })
         .click();
       await expect(
         reloadedRow

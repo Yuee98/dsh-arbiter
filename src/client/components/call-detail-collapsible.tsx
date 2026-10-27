@@ -8,8 +8,10 @@
  * than purely visual.
  */
 
+import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { cn } from './ui/cn.js';
 
 export function Collapsible(props: {
   readonly summary: string;
@@ -18,18 +20,29 @@ export function Collapsible(props: {
 }): ReactNode {
   const [open, setOpen] = useState(false);
   return (
-    <div data-collapsible={props.level ?? 'group'}>
+    <div data-collapsible={props.level ?? 'group'} className="arb:my-1.5">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => {
           setOpen((current) => !current);
         }}
-        className="arb:cursor-pointer arb:border-none arb:bg-transparent arb:p-0 arb:font-inherit arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:hover:underline"
+        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:rounded arb:border arb:border-border-subtle arb:bg-layer-2/80 arb:px-2.5 arb:py-1.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors hover:arb:bg-layer-3 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
       >
-        {props.summary}
+        <ChevronRight
+          className={cn(
+            'arb:h-3.5 arb:w-3.5 arb:shrink-0 arb:text-secondary arb:transition-transform arb:duration-200',
+            open && 'arb:rotate-90',
+          )}
+          aria-hidden="true"
+        />
+        <span>{props.summary}</span>
       </button>
-      {open ? <div className="arb:mt-1.5">{props.children}</div> : null}
+      {open ? (
+        <div className="arb:mt-1.5 arb:rounded-b arb:border-x arb:border-b arb:border-border-subtle arb:bg-layer-1/50 arb:p-2.5">
+          {props.children}
+        </div>
+      ) : null}
     </div>
   );
 }

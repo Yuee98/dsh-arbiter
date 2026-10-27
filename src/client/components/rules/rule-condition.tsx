@@ -193,8 +193,8 @@ export function RuleConditionEditor(props: {
         </div>
       </div>
 
-      <div className="arb:flex arb:items-center arb:gap-3">
-        <label className="arb:flex arb:items-center arb:gap-1.5 arb:text-xs">
+      <div className="arb:flex arb:items-center arb:justify-between arb:pt-1">
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
           <input
             type="checkbox"
             checked={condition.caseSensitive === false}
@@ -268,7 +268,7 @@ function InlineDeleteConditionButton(props: {
           index: props.index + 1,
         })}
         onClick={props.onRemove}
-        className="arb:inline-flex arb:h-[30px] arb:items-center arb:gap-1.5 arb:rounded-md arb:border arb:border-error arb:bg-error/15 arb:px-2.5 arb:text-xs arb:font-medium arb:text-error arb:transition-colors arb:hover:bg-error/25 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-error"
+        className="arb:inline-flex arb:h-7 arb:items-center arb:gap-1.5 arb:rounded arb:border arb:border-error arb:bg-error arb:px-2 arb:text-xs arb:font-medium arb:text-white arb:shadow-xs arb:transition-colors arb:hover:bg-error/90 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-error"
       >
         <Trash2 className="arb:h-3.5 arb:w-3.5" />
         <span>{t('rules.confirmDeleteShort')}</span>
@@ -281,7 +281,7 @@ function InlineDeleteConditionButton(props: {
       ref={buttonRef}
       label={t('rules.removeCondition')}
       icon={Trash2}
-      className="arb:text-error hover:arb:bg-error/10"
+      className="arb:h-7 arb:border arb:border-border-default arb:bg-layer-3 arb:text-error arb:transition-colors hover:arb:border-error/40 hover:arb:bg-error/10"
       onClick={() => {
         setIsArmed(true);
       }}

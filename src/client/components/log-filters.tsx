@@ -1,5 +1,7 @@
+import { RotateCw } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button, Field, Select, TextInput } from './controls.js';
+import { IconButton } from './ui/button.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { RESULT_OPTIONS, verdictLabel } from '../log-list.js';
 import type { LogQuery } from '../log-list.js';
@@ -66,11 +68,15 @@ export function LogFilters({
   onDraft,
   onApply,
   onClear,
+  onRefresh,
+  busy = false,
 }: {
   readonly draft: LogQuery;
   readonly onDraft: (draft: LogQuery) => void;
   readonly onApply: () => void;
   readonly onClear: () => void;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly busy?: boolean | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   const labels: Record<string, string> = { '': t('logs.all') };
@@ -196,15 +202,22 @@ export function LogFilters({
         panel's request generation decides which answer wins, so an overlapping
         read is safe rather than a reason to block the interaction.
       */}
-      <div className="arb:pb-[1px]">
+      <div className="arb:flex arb:items-center arb:gap-1.5 arb:pb-[1px]">
         <Button type="submit" tone="primary">
           {t('logs.filters.apply')}
         </Button>
-      </div>
-      <div className="arb:pb-[1px]">
         <Button type="button" onClick={onClear}>
           {t('logs.filters.clear')}
         </Button>
+        {onRefresh !== undefined ? (
+          <IconButton
+            label={t('logs.refresh')}
+            icon={RotateCw}
+            disabled={busy}
+            onClick={onRefresh}
+            className={busy ? 'arb:animate-spin' : ''}
+          />
+        ) : null}
       </div>
     </form>
   );

@@ -175,7 +175,7 @@ describe('rule list header and inline editing', () => {
       within(row(copyId)).getByRole('checkbox', { name: /任一满足/ }),
     ).toBeInTheDocument();
     await user.click(
-      within(row(copyId)).getByRole('button', { name: /编辑规则/ }),
+      within(row(copyId)).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row(copyId)).getByRole('radio', { name: '任一满足' }),
@@ -514,7 +514,7 @@ describe('rule list header and inline editing', () => {
       within(row(id)).queryByRole('textbox', { name: '表达式' }),
     ).toBeNull();
     await user.click(
-      within(row(id)).getByRole('button', { name: /^编辑规则/ }),
+      within(row(id)).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
@@ -993,7 +993,7 @@ describe('rule validation feedback', () => {
     const user = await openRules();
     // The warning is attached to the allow rule, not to the reviewer rule.
     await user.click(
-      within(row('rule-1')).getByRole('button', { name: /^编辑规则/ }),
+      within(row('rule-1')).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row('rule-1')).getByText(
@@ -1001,7 +1001,7 @@ describe('rule validation feedback', () => {
       ),
     ).toBeInTheDocument();
     await user.click(
-      within(row('rule-2')).getByRole('button', { name: /^编辑规则/ }),
+      within(row('rule-2')).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row('rule-2')).queryByText(/可能被 force-review 规则/),

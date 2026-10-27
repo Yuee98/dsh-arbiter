@@ -15,6 +15,7 @@
   "test": "Test",
   "edit": "Edit",
   "collapse": "Collapse",
+  "expandRule": "Expand rule \"{name}\"",
   "editRule": "Edit rule \"{name}\"",
   "disabled": " (disabled)",
   "hasErrors": " (has validation errors)",

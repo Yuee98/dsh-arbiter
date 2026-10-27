@@ -3,11 +3,11 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   ChevronUp,
   Copy,
   FlaskConical,
   GripVertical,
-  Pencil,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
@@ -284,9 +284,35 @@ function RuleRowToolbar(props: {
     update,
   } = props;
   const labels = verdictLabels(t);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (el === null) return;
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          'button, input, select, textarea, a, [role="button"], [data-no-row-toggle]',
+        ) !== null
+      ) {
+        return;
+      }
+      onDisarmDelete();
+      onSelect(expanded ? null : rule.id);
+    };
+    el.addEventListener('click', handleClick);
+    return () => {
+      el.removeEventListener('click', handleClick);
+    };
+  }, [expanded, onDisarmDelete, onSelect, rule.id]);
 
   return (
-    <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-2 arb:p-2.5">
+    <div
+      ref={toolbarRef}
+      className="arb:flex arb:cursor-pointer arb:flex-wrap arb:items-center arb:gap-2 arb:p-2.5 arb:transition-colors hover:arb:bg-layer-3/40"
+    >
       <IconButton
         label={t('rules.dragRule', { name })}
         icon={GripVertical}
@@ -294,6 +320,9 @@ function RuleRowToolbar(props: {
           !canMoveRule(rules, index, -1) && !canMoveRule(rules, index, 1)
         }
         className="arb:cursor-grab arb:active:cursor-grabbing"
+        onPointerDown={() => {
+          onSelect(null);
+        }}
         {...attributes}
         {...listeners}
       />
@@ -358,21 +387,59 @@ function RuleRowToolbar(props: {
         />
       </div>
 
-      <IconButton
-        label={
-          expanded
-            ? t('rules.collapseRule', { name })
-            : t('rules.editRule', { name })
-        }
-        icon={expanded ? ChevronUp : Pencil}
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-        onClick={() => {
-          onDisarmDelete();
-          onSelect(expanded ? null : rule.id);
-        }}
+      <RuleRowActionButtons
+        rule={rule}
+        index={index}
+        rules={rules}
+        name={name}
+        expanded={expanded}
+        isArmedDelete={isArmedDelete}
+        bodyId={bodyId}
+        onSelect={onSelect}
+        onDraft={onDraft}
+        onTest={onTest}
+        onArmDelete={onArmDelete}
+        onDisarmDelete={onDisarmDelete}
+        onDeleteRule={onDeleteRule}
       />
+    </div>
+  );
+}
 
+function RuleRowActionButtons(props: {
+  readonly rule: DraftRule;
+  readonly index: number;
+  readonly rules: readonly DraftRule[];
+  readonly name: string;
+  readonly expanded: boolean;
+  readonly isArmedDelete: boolean;
+  readonly bodyId: string;
+  readonly onSelect: (id: string | null) => void;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  readonly onTest: (id: string, opener?: HTMLElement | null) => void;
+  readonly onArmDelete: (ruleId: string) => void;
+  readonly onDisarmDelete: () => void;
+  readonly onDeleteRule: (ruleId: string) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const {
+    rule,
+    index,
+    rules,
+    name,
+    expanded,
+    isArmedDelete,
+    bodyId,
+    onSelect,
+    onDraft,
+    onTest,
+    onArmDelete,
+    onDisarmDelete,
+    onDeleteRule,
+  } = props;
+
+  return (
+    <>
       <IconButton
         label={t('rules.testRule', { name })}
         icon={FlaskConical}
@@ -431,7 +498,28 @@ function RuleRowToolbar(props: {
           onDeleteRule(rule.id);
         }}
       />
-    </div>
+
+      <div
+        className="arb:mx-0.5 arb:h-4 arb:w-px arb:bg-border-subtle"
+        aria-hidden="true"
+      />
+
+      <IconButton
+        label={
+          expanded
+            ? t('rules.collapseRule', { name })
+            : t('rules.expandRule', { name })
+        }
+        icon={expanded ? ChevronUp : ChevronDown}
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        className="arb:text-secondary hover:arb:text-primary"
+        onClick={() => {
+          onDisarmDelete();
+          onSelect(expanded ? null : rule.id);
+        }}
+      />
+    </>
   );
 }
 

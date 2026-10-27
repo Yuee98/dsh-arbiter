@@ -14,7 +14,6 @@ import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -139,7 +138,8 @@ export function CallDetailPanel(props: {
       <DialogContent
         data-call-detail-panel={props.callId}
         data-arbiter-surface="call-detail-dialog"
-        showCloseButton={false}
+        showCloseButton={true}
+        closeLabel={t('callDetail.close')}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           const opener = props.openerRef?.current ?? openerRef.current;
@@ -155,20 +155,13 @@ export function CallDetailPanel(props: {
         }}
         className="arb:flex arb:max-h-[85vh] arb:max-w-3xl arb:flex-col arb:gap-4 arb:overflow-y-auto"
       >
-        <DialogHeader className="arb:flex arb:flex-row arb:items-center arb:justify-between arb:border-b arb:border-border-default arb:pb-3">
-          <div>
-            <DialogTitle className="arb:text-base arb:font-semibold arb:text-primary">
-              {t('callDetail.title', { callId: props.callId })}
-            </DialogTitle>
-            <DialogDescription className="arb:sr-only">
-              {t('callDetail.dialogDescription')}
-            </DialogDescription>
-          </div>
-          <DialogClose asChild>
-            <Button type="button" onClick={props.onClose}>
-              {t('callDetail.close')}
-            </Button>
-          </DialogClose>
+        <DialogHeader className="arb:border-b arb:border-border-default arb:pb-3 arb:pr-8">
+          <DialogTitle className="arb:text-base arb:font-semibold arb:text-primary">
+            {t('callDetail.title', { callId: props.callId })}
+          </DialogTitle>
+          <DialogDescription className="arb:sr-only">
+            {t('callDetail.dialogDescription')}
+          </DialogDescription>
         </DialogHeader>
         <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
       </DialogContent>

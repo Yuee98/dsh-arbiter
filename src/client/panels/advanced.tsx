@@ -52,7 +52,7 @@ function PolicySettings({
       title={t('advanced.policyTitle')}
       description={t('advanced.policyDescription')}
     >
-      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5">
+      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5 arb:max-w-xl">
         <div className="arb:text-xs arb:font-semibold arb:text-primary">
           {t('advanced.parameter')}
         </div>
@@ -140,7 +140,7 @@ function ContextSettings({
 
   return (
     <Section title={t('advanced.contextTitle')}>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2 lg:arb:grid-cols-3">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-2 lg:arb:grid-cols-3 arb:max-w-3xl">
         <Field label={t('advanced.maxInput')}>
           <NumberInput
             value={draft.context.maxInputTokens}
@@ -225,24 +225,26 @@ function ContextSettings({
             }}
           />
         </Field>
-        <Field label={t('advanced.projectFiles')}>
-          <TextInput
-            value={filesText ?? draft.context.projectRules.files.join(', ')}
-            onChange={(value) => {
-              setFilesText(value);
-              onDraft((next) => {
-                next.context.projectRules.files = value
-                  .split(',')
-                  .map((item) => item.trim())
-                  .filter((item) => item.length > 0);
-              });
-            }}
-            onBlur={() => {
-              setFilesText(null);
-            }}
-            monospace
-          />
-        </Field>
+        <div className="sm:arb:col-span-2">
+          <Field label={t('advanced.projectFiles')}>
+            <TextInput
+              value={filesText ?? draft.context.projectRules.files.join(', ')}
+              onChange={(value) => {
+                setFilesText(value);
+                onDraft((next) => {
+                  next.context.projectRules.files = value
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter((item) => item.length > 0);
+                });
+              }}
+              onBlur={() => {
+                setFilesText(null);
+              }}
+              monospace
+            />
+          </Field>
+        </div>
         <Field label={t('advanced.projectEnabled')}>
           <label className="arb:flex arb:h-[30px] arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
             <input
@@ -259,18 +261,20 @@ function ContextSettings({
           </label>
         </Field>
       </div>
-      <Field label={t('advanced.customRules')}>
-        <textarea
-          value={draft.context.customRules}
-          rows={5}
-          onChange={(event) => {
-            onDraft((next) => {
-              next.context.customRules = event.target.value;
-            });
-          }}
-          className="arb:h-auto arb:w-full arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-xs arb:text-primary arb:focus:border-accent arb:focus:outline-none"
-        />
-      </Field>
+      <div className="arb:max-w-3xl">
+        <Field label={t('advanced.customRules')}>
+          <textarea
+            value={draft.context.customRules}
+            rows={5}
+            onChange={(event) => {
+              onDraft((next) => {
+                next.context.customRules = event.target.value;
+              });
+            }}
+            className="arb:h-auto arb:w-full arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-xs arb:text-primary arb:focus:border-accent arb:focus:outline-none"
+          />
+        </Field>
+      </div>
     </Section>
   );
 }
@@ -371,7 +375,7 @@ function AuditSettings({
 
   return (
     <Section title={t('advanced.auditTitle')}>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2 lg:arb:grid-cols-3">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-2 lg:arb:grid-cols-3 arb:max-w-3xl">
         <Field label={t('advanced.retentionDays')}>
           <NumberInput
             value={draft.audit.retentionDays}
@@ -442,7 +446,7 @@ function AuditSettings({
         </Field>
       </div>
       {draft.breaker.mode === 'custom' ? (
-        <div className="arb:mt-3 arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-3">
+        <div className="arb:mt-3 arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-3 arb:max-w-3xl">
           <Field label={t('advanced.consecutiveDenials')}>
             <NumberInput
               value={draft.breaker.consecutiveDenials}

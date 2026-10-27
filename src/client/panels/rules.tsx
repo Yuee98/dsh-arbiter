@@ -1,3 +1,4 @@
+import { FlaskConical, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Button, Section } from '../components/controls.js';
@@ -77,7 +78,8 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
               setSelectedId(id);
             }}
           >
-            {t('rules.add')}
+            <Plus className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
+            <span>{t('rules.add')}</span>
           </Button>
           <Button
             onClick={(event) => {
@@ -86,7 +88,8 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
               setFocusRequest((current) => current + 1);
             }}
           >
-            {t('ruleTest.open')}
+            <FlaskConical className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
+            <span>{t('ruleTest.open')}</span>
           </Button>
         </div>
         <RuleList

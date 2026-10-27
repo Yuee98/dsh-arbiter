@@ -6,7 +6,6 @@ import { cn } from './cn.js';
 import { useArbiterPortalContainer } from './portal-context.js';
 
 export const Dialog = DialogPrimitive.Root;
-export const DialogClose = DialogPrimitive.Close;
 
 export interface DialogContentProps extends ComponentPropsWithoutRef<
   typeof DialogPrimitive.Content
@@ -45,7 +44,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           {children}
           {showCloseButton ? (
             <DialogPrimitive.Close
-              className="arb:absolute arb:right-4 arb:top-4 arb:rounded-sm arb:opacity-70 arb:ring-offset-background arb:transition-opacity arb:hover:opacity-100 arb:focus:outline-none arb:focus:ring-2 arb:focus:ring-ring arb:focus:ring-offset-2 arb:disabled:pointer-events-none"
+              className="arb:absolute arb:right-3.5 arb:top-3.5 arb:inline-flex arb:h-7 arb:w-7 arb:items-center arb:justify-center arb:rounded-md arb:text-secondary arb:transition-colors arb:hover:bg-layer-3 arb:hover:text-primary arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent arb:disabled:pointer-events-none"
               aria-label={closeLabel}
             >
               <X className="arb:h-4 arb:w-4" />
