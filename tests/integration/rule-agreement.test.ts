@@ -808,3 +808,77 @@ async function callDetailOf(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+/**
+ * The value-target conjuncts of a conjunction, as history shows them.
+ *
+ * A command-plus-argument rule has no node for the argument half, so recording
+ * only node text would make a joint decision look like a command-only one.
+ */
+describe('conjunction evidence for value targets', () => {
+  test('the stored detail lists the argument conjunct too', async () => {
+    const rule = {
+      id: 'push-to-dev',
+      combine: 'all',
+      conditions: [
+        { target: 'command', kind: 'exact', pattern: 'git push' },
+        {
+          target: 'argument',
+          path: '$.environment',
+          kind: 'exact',
+          pattern: 'dev',
+        },
+      ],
+      verdict: 'allow',
+    };
+    const harness = await createHarness({
+      format: 'arbiter-config-v3',
+      rules: [rule],
+    });
+    const decision = await harness.gate(
+      executionOf(
+        'bash',
+        { command: 'git push', environment: 'dev' },
+        harness.session,
+        'combine-value-witness',
+      ),
+    );
+    expect(gateVerdict(decision)).toBe('allow');
+
+    const detail = await callDetailOf(harness, 'combine-value-witness');
+    const conjunction = ruleConjunctionOf(detail);
+    expect(conjunction['groups']).toEqual([
+      {
+        target: 'command',
+        conditionIndices: [0],
+        outcome: 'match',
+        witnessText: 'git push',
+      },
+      {
+        target: 'argument',
+        conditionIndices: [1],
+        outcome: 'match',
+        witnessValues: [{ conditionIndex: 1, text: 'dev' }],
+      },
+    ]);
+  });
+});
+
+/** The conjunction recorded on the first rule stage of a stored detail. */
+function ruleConjunctionOf(
+  detail: Record<string, unknown>,
+): Record<string, unknown> {
+  const basis: unknown = detail['basis'];
+  if (basis === null || typeof basis !== 'object')
+    throw new TypeError('the detail must carry a basis');
+  const chain: unknown = Reflect.get(basis, 'chain');
+  if (!Array.isArray(chain) || chain.length === 0)
+    throw new TypeError('the basis must carry the stage chain');
+  const stage: unknown = chain[0];
+  if (stage === null || typeof stage !== 'object')
+    throw new TypeError('the stage must be an object');
+  const conjunction: unknown = Reflect.get(stage, 'conjunction');
+  if (conjunction === null || typeof conjunction !== 'object')
+    throw new TypeError('the rule stage must carry the conjunction witness');
+  return Object.fromEntries(Object.entries(conjunction));
+}

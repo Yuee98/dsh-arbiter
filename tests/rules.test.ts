@@ -2097,6 +2097,43 @@ describe('condition combining (combine: all)', () => {
     });
   });
 
+  test('a node satisfying only half the conjunction covers nothing', () => {
+    // The rule matches overall because `git push --force` satisfies both
+    // predicates. `git status` satisfies only the first, so it must not be
+    // covered: crediting per-condition matches would authorize the whole line,
+    // which is exactly the difference between witness and plain matches.
+    const evaluation = evaluate(
+      [
+        rule({
+          id: 'git-force',
+          verdict: 'allow',
+          combine: 'all',
+          conditions: [
+            condition({ target: 'command', kind: 'glob', pattern: 'git *' }),
+            condition({
+              target: 'command',
+              kind: 'regex',
+              pattern: '.*--force',
+            }),
+          ],
+        }),
+      ],
+      'git push --force; git status',
+    );
+    expect(evaluation.rules[0]?.outcome).toBe('match');
+    expect(evaluation.rules[0]?.conditions[0]?.witnessValues).toEqual([
+      'git push --force',
+    ]);
+    // `git status` matched the condition but not the conjunction.
+    expect(evaluation.rules[0]?.conditions[0]?.matchedValues).toContain(
+      'git status',
+    );
+    expect(evaluation.path).toEqual({
+      kind: 'review-default',
+      reason: 'partial-allow',
+    });
+  });
+
   test('a tool condition cannot cover a call the conjunction also restricts', () => {
     // Without the narrowing, `wholeTool` would cover the entire call and the
     // command half of the conjunction would mean nothing.

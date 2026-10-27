@@ -68,7 +68,9 @@
     "ruleNameEmpty": "自定义名称不能为空。",
     "ruleToolsEmpty": "工具范围不能是空列表。",
     "ruleToolEmpty": "工具范围中的名称不能为空。",
-    "ruleFormatMismatch": "该规则使用新结构，需要声明 format: {format}。",
-    "ruleNotConvertible": "旧规则「{id}」无法证明等价，未自动转换：{reason}"
+    "ruleFormatMismatch": "「{field}」需要格式 {format}，当前文档的格式不接受它。",
+    "ruleNotConvertible": "旧规则「{id}」无法证明等价，未自动转换：{reason}",
+    "ruleCombineRequired": "规则有多条条件时必须声明条件组合方式（combine：all 或 any）。",
+    "ruleUnknownField": "未知字段「{field}」：该字段不会生效，规则仍按声明的含义执行。"
   }
 }

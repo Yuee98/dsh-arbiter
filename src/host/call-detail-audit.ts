@@ -11,6 +11,7 @@
 import type { StoredCall } from '../audit.js';
 import type {
   RuleConditionOutcome,
+  RuleConjunctWitness,
   RuleConjunctionEvidence,
   RuleConjunctionGroup,
   RuleTarget,
@@ -119,14 +120,31 @@ function conjunctionOf(stage: StoredCall): RuleConjunctionEvidence | null {
         )
       : [];
     const witness = textOf(item, 'witnessText');
+    const values = conjunctValues(item['witnessValues']);
     parsed.push({
       target,
       conditionIndices,
       outcome,
       ...(witness === null ? {} : { witnessText: witness }),
+      ...(values.length === 0 ? {} : { witnessValues: values }),
     });
   }
   return { combine: 'all', groups: parsed };
+}
+
+/** The stored matched values of a value-target conjunction group. */
+function conjunctValues(value: unknown): readonly RuleConjunctWitness[] {
+  if (!Array.isArray(value)) return [];
+  const items: readonly unknown[] = value;
+  const parsed: RuleConjunctWitness[] = [];
+  for (const item of items) {
+    if (!isRecordLike(item)) continue;
+    const index = numberOf(item, 'conditionIndex');
+    const text = textOf(item, 'text');
+    if (index === null || text === null) continue;
+    parsed.push({ conditionIndex: index, text });
+  }
+  return parsed;
 }
 
 /** A stored conjunction target, or `null` when this build does not define it. */

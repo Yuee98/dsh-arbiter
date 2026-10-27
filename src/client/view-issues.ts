@@ -29,7 +29,12 @@ export function issueText(issue: ConfigIssueView, t: Translate): string {
   // A payload without a stable code keeps its backend message.
   if (issue.code === undefined) return plainIssue(issue);
   const params = issue.params ?? {};
-  const key = `config.issue.${issueKey(issue.code)}`;
+  // A format mismatch names the field and the format it needs, so it reads as
+  // one sentence rather than as a generic "invalid rule".
+  const key =
+    issue.code === 'rule.format-mismatch' && params['format'] !== undefined
+      ? 'config.issue.ruleFormatMismatch'
+      : `config.issue.${issueKey(issue.code)}`;
   const template = t(key, params);
   // An unmapped code renders its backend message rather than a bare key.
   if (template === key || template.length === 0) return plainIssue(issue);

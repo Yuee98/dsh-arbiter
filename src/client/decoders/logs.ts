@@ -1,4 +1,5 @@
 import type {
+  RuleConjunctWitness,
   RuleConjunctionEvidence,
   RuleConjunctionGroup,
 } from '../../types.js';
@@ -167,6 +168,17 @@ function group(value: unknown): RuleConjunctionGroup {
     conditionIndices: field(source, 'conditionIndices', array(number)),
     outcome: field(source, 'outcome', choice('match', 'no-match', 'unknown')),
     ...(witness === undefined ? {} : { witnessText: witness }),
+    ...(source['witnessValues'] === undefined
+      ? {}
+      : { witnessValues: field(source, 'witnessValues', array(conjunct)) }),
+  };
+}
+
+function conjunct(value: unknown): RuleConjunctWitness {
+  const source = object(value);
+  return {
+    conditionIndex: field(source, 'conditionIndex', number),
+    text: field(source, 'text', text),
   };
 }
 

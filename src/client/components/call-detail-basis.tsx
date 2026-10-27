@@ -19,7 +19,10 @@ import { Collapsible } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
 import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
-import type { RuleConjunctionEvidence } from '../../types.js';
+import type {
+  RuleConjunctionEvidence,
+  RuleConjunctionGroup,
+} from '../../types.js';
 import type { CallDetailView } from '../view-types.js';
 
 /** The matched rule, or the review strategy when no rule decided the call. */
@@ -139,8 +142,12 @@ function Conjunction(props: {
   readonly evidence: RuleConjunctionEvidence;
 }): ReactNode {
   const t = useArbiterTranslation();
+  // Every matched group is listed, including the ones whose target has no node
+  // text: a value target's matched value is the evidence for that conjunct, and
+  // dropping it would describe a conjunction of command-plus-argument as a
+  // command-only decision.
   const matched = props.evidence.groups.filter(
-    (group) => group.outcome === 'match' && group.witnessText !== undefined,
+    (group) => group.outcome === 'match',
   );
   return (
     <div
@@ -155,12 +162,15 @@ function Conjunction(props: {
       ) : (
         <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
           {matched.map((group) => (
-            <li key={`${group.target}-${String(group.conditionIndices[0])}`}>
+            <li
+              key={`${group.target}-${String(group.conditionIndices[0])}`}
+              data-call-detail-conjunction-group={group.target}
+            >
               {t('callDetail.conjunctionWitness', {
                 // The target is a protocol value, so it stays as written rather
                 // than being translated into a name this build might rename.
                 target: group.target,
-                text: group.witnessText ?? '',
+                text: groupText(group),
               })}
             </li>
           ))}
@@ -168,6 +178,20 @@ function Conjunction(props: {
       )}
     </div>
   );
+}
+
+/**
+ * What one matched group can show about itself.
+ *
+ * A structural group names the node that satisfied every condition; a value
+ * group has no node, so its own matched values are the evidence. Neither is
+ * invented when the record lacks it.
+ */
+function groupText(group: RuleConjunctionGroup): string {
+  if (group.witnessText !== undefined) return group.witnessText;
+  if (group.witnessValues !== undefined)
+    return group.witnessValues.map((entry) => entry.text).join(', ');
+  return '';
 }
 
 /** The decision rules the policy applied, when the call reached a review. */

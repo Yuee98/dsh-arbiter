@@ -676,8 +676,22 @@ export interface RuleConjunctionGroup {
   /** Condition indices evaluated in this group, in rule order. */
   readonly conditionIndices: readonly number[];
   readonly outcome: RuleConditionOutcome;
-  /** Node text that satisfied every condition in the group, when it matched. */
+  /** Node text that satisfied every structural condition in the group. */
   readonly witnessText?: string;
+  /**
+   * The matched value of each condition in a `tool` or `argument` group.
+   *
+   * Those targets have no node to name, so without this a matched value group
+   * carries nothing historical readers can show — and a conjunction recorded as
+   * "command and argument" would look like a command-only decision.
+   */
+  readonly witnessValues?: readonly RuleConjunctWitness[];
+}
+
+/** One condition's matched text inside a conjunction group. */
+export interface RuleConjunctWitness {
+  readonly conditionIndex: number;
+  readonly text: string;
 }
 
 /** One rule's result, including every condition it evaluated. */

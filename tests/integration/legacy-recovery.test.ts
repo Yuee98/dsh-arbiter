@@ -239,3 +239,120 @@ describe('converted legacy rules survive a round trip', () => {
     ]);
   });
 });
+
+/**
+ * The v3 connective across the recovery boundary.
+ *
+ * Recovery is where a wider reading could come back silently, so the copy's own
+ * declaration decides the parser and a broken v3 copy is refused rather than
+ * reinterpreted.
+ */
+describe('v3 recovery around the rule connective', () => {
+  const V3_RULE = {
+    id: 'push-to-dev',
+    combine: 'all',
+    conditions: [
+      { target: 'command', kind: 'exact', pattern: 'git push' },
+      {
+        target: 'argument',
+        path: '$.environment',
+        kind: 'exact',
+        pattern: 'dev',
+      },
+    ],
+    verdict: 'allow',
+  };
+
+  test('a v3 copy recovers with its connective intact after a cold start', async () => {
+    const harness = await createHarness({
+      format: 'arbiter-config-v3',
+      rules: [V3_RULE],
+    });
+    const host = await coldStart(harness.home);
+    const recovered = host.runtime.config.rules[0];
+    expect(recovered?.combine).toBe('all');
+    expect(recovered?.id).toBe('push-to-dev');
+  });
+
+  test('a v2 copy written before v3 recovers as the alternative reading', async () => {
+    const harness = await createHarness({
+      format: 'arbiter-config-v2',
+      rules: [
+        {
+          id: 'multi-or',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'a' },
+            { target: 'command', kind: 'exact', pattern: 'b' },
+          ],
+          verdict: 'deny',
+        },
+      ],
+    });
+    const host = await coldStart(harness.home);
+    const recovered = host.runtime.config.rules[0];
+    expect(recovered?.combine).toBe('any');
+  });
+
+  test('a v3 copy whose connective is broken is refused, not read as v2', async () => {
+    const harness = await createHarness({
+      format: 'arbiter-config-v3',
+      rules: [V3_RULE],
+    });
+    const directory = join(harness.home, 'arbiter', 'last-good');
+    const entries = await readdir(directory);
+    const [entry] = entries;
+    if (entry === undefined) throw new Error('no recovery copy was written');
+    const path = join(directory, entry);
+    const record: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (record === null || typeof record !== 'object')
+      throw new TypeError('the copy must be an object');
+    const stored: unknown = Reflect.get(record, 'config');
+    if (stored === null || typeof stored !== 'object')
+      throw new TypeError('the copy must carry a config');
+    const rules: unknown = Reflect.get(stored, 'rules');
+    if (!Array.isArray(rules) || rules.length === 0)
+      throw new TypeError('the copy must carry rules');
+    const rule: unknown = rules[0];
+    if (rule === null || typeof rule !== 'object')
+      throw new TypeError('the rule must be an object');
+    // Break the connective the way a corrupted file would: the field is gone
+    // while two conditions remain.
+    Reflect.deleteProperty(rule, 'combine');
+    await writeFile(path, JSON.stringify(record), 'utf8');
+
+    const host = await coldStart(harness.home, { format: 'arbiter-config-v9' });
+    // The copy cannot be trusted, so it is not used. Reading it as v2 would
+    // resurrect the rule as "either condition", the wider direction.
+    expect(host.runtime.config.rules).toEqual([]);
+  });
+});
+
+/**
+ * A host that has never seen this profile, so only the copy on disk can answer.
+ *
+ * Resetting the module registry gives a fresh runtime map while keeping the same
+ * temporary home; without it the in-memory configuration of the previous host
+ * would mask whatever the copy says.
+ */
+async function coldStart(
+  home: string,
+  document: unknown = { format: 'arbiter-config-v9' },
+): Promise<HostEnvironment> {
+  vi.resetModules();
+  const fresh = await import('../../src/host/runtime.js');
+  const parts = createStubContext({
+    profileContext: {
+      home,
+      dir: join(home, 'profiles', 'recovery'),
+      name: 'recovery',
+    },
+    sandboxPolicy: { defaultMode: 'workspace-write' },
+    approval: { request: () => Promise.resolve('unavailable') },
+    permissionPresets: { registerAuto: () => () => undefined },
+    connection: { fetch: { register: () => () => undefined } },
+  });
+  disposers.push(() => {
+    for (const dispose of parts.disposers) dispose();
+  });
+  return fresh.initializeHost(parts.ctx, document);
+}

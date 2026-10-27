@@ -148,6 +148,11 @@ export function duplicateRule(
 ): DraftRule {
   return {
     id: nextRuleId(rules),
+    // The connective is part of what the rule says, so a copy keeps it. Omitting
+    // it would leave a multi-condition copy without one, which v3 rejects at save
+    // time, and the editor would meanwhile show the default instead of the
+    // source's choice.
+    combine: rule.combine ?? (rule.conditions.length > 1 ? 'any' : 'all'),
     conditions: rule.conditions.map((condition) => ({ ...condition })),
     verdict: rule.verdict,
     enabled: false,

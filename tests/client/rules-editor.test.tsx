@@ -160,6 +160,34 @@ describe('rule list header and inline editing', () => {
     );
   });
 
+  test('duplicating a two-condition rule keeps its connective', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
+      'any',
+    );
+    await user.click(within(row(id)).getByText('更多'));
+    await user.click(within(row(id)).getByRole('button', { name: '复制' }));
+
+    const copyId = rows()[1]?.getAttribute('data-rule-row') ?? '';
+    // A copy is the same rule with a new id: dropping the connective would leave
+    // a multi-condition rule that v3 refuses to save, and show the default here.
+    // The summary names it even before the row is expanded.
+    expect(
+      within(row(copyId)).getByRole('checkbox', { name: /任一满足/ }),
+    ).toBeInTheDocument();
+    await user.click(
+      within(row(copyId)).getByRole('button', { name: /编辑规则/ }),
+    );
+    expect(
+      within(row(copyId)).getByRole('combobox', { name: '条件组合方式' }),
+    ).toHaveValue('any');
+    expect(conditionGroups(copyId)).toHaveLength(2);
+  });
+
   test('a custom name replaces the summary and can be restored', async () => {
     baseHandlers();
     const user = await openRules();
@@ -1310,5 +1338,43 @@ describe('condition combining', () => {
     // Two command conditions are judged node by node, so there is no statement to
     // be confused about.
     expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
+  });
+});
+
+describe('source warnings outlive draft edits', () => {
+  test('an unresolved warning from the loaded file stays visible until it is reloaded', async () => {
+    // A misspelled field in an externally edited v2 file: the document still
+    // loads with the meaning it declares, and the warning is about the file on
+    // disk — not about whatever the draft currently holds.
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/state', () =>
+        HttpResponse.json({
+          ...effectiveState(),
+          warnings: [
+            {
+              path: 'rules[0].combinee',
+              message: 'unknown field "combinee"',
+              code: 'rule.unknown-field',
+              params: { field: 'combinee' },
+            },
+          ],
+        }),
+      ),
+    );
+    const view = renderClient(<ArbiterPage />);
+    // The page-level notice and the rule's own hint both report it, so count
+    // rather than search for a single node.
+    const warnings = await screen.findAllByText(/未知字段/);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toHaveTextContent('rules[0].combinee');
+
+    // Editing an unrelated setting must not hide a problem in the file that is
+    // still unchanged on disk.
+    await view.user.click(await screen.findByRole('button', { name: '规则' }));
+    await view.user.click(screen.getByRole('button', { name: '新建规则' }));
+    const stillShown = screen.getAllByText(/未知字段/);
+    expect(stillShown.length).toBeGreaterThan(0);
+    expect(stillShown[0]).toHaveTextContent('rules[0].combinee');
   });
 });
