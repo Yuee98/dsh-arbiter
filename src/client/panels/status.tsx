@@ -34,17 +34,11 @@ export function StatusPanel(props: {
   return (
     <>
       <Section title={t('status.title')} description={t('status.description')}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: 13,
-          }}
-        >
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-2 arb:text-xs arb:text-primary">
           <input
             type="checkbox"
             checked={draft.enabled}
+            className="arb:rounded arb:border-border-default arb:accent-accent"
             onChange={(event) => {
               onDraft((next) => {
                 next.enabled = event.target.checked;
@@ -71,9 +65,7 @@ export function StatusPanel(props: {
             }}
           />
         </Field>
-        <div
-          style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}
-        >
+        <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
           <Field
             label={t('status.mainMode')}
             hint={modeHelp(t)[draft.modes.main] ?? '—'}
@@ -112,22 +104,10 @@ export function StatusPanel(props: {
             />
           </Field>
         </div>
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--dsw-alias-label-tertiary)',
-            fontSize: 11.5,
-          }}
-        >
+        <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
           {t('status.subagentNote')}
         </p>
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--dsw-alias-label-tertiary)',
-            fontSize: 11.5,
-          }}
-        >
+        <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
           {t('status.sessionNote')}
         </p>
         <RuntimeSummary state={state} />
@@ -180,48 +160,35 @@ function ConfigurationHistory({
       description={t('status.historyDescription')}
     >
       {state.configHistory.length === 0 ? (
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--dsw-alias-label-tertiary)',
-            fontSize: 12.5,
-          }}
-        >
+        <p className="arb:m-0 arb:text-xs arb:text-tertiary">
           {t('status.empty')}
         </p>
       ) : (
-        <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
+        <table className="arb:w-full arb:border-collapse arb:text-xs">
           <thead>
-            <tr
-              style={{
-                textAlign: 'left',
-                color: 'var(--dsw-alias-label-secondary)',
-              }}
-            >
-              <th style={{ padding: 4 }}>{t('status.time')}</th>
-              <th style={{ padding: 4 }}>{t('status.revision')}</th>
-              <th style={{ padding: 4 }}>{t('status.entry')}</th>
-              <th style={{ padding: 4 }}>{t('status.snapshot')}</th>
+            <tr className="arb:border-b arb:border-border-default arb:text-left arb:text-secondary">
+              <th className="arb:p-1.5">{t('status.time')}</th>
+              <th className="arb:p-1.5">{t('status.revision')}</th>
+              <th className="arb:p-1.5">{t('status.entry')}</th>
+              <th className="arb:p-1.5">{t('status.snapshot')}</th>
             </tr>
           </thead>
           <tbody>
             {state.configHistory.slice(0, 5).map((activation) => (
               <tr
                 key={activation.id}
-                style={{
-                  borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-                }}
+                className="arb:border-b arb:border-border-subtle arb:text-primary"
               >
-                <td style={{ padding: 4 }}>
+                <td className="arb:p-1.5">
                   {formatTime(activation.activatedAt)}
                 </td>
-                <td style={{ padding: 4 }}>
+                <td className="arb:p-1.5">
                   <code>{activation.revision}</code>
                 </td>
-                <td style={{ padding: 4 }}>
+                <td className="arb:p-1.5">
                   {activation.entry} / {activation.scope}
                 </td>
-                <td style={{ padding: 4 }}>
+                <td className="arb:p-1.5">
                   <code>{activation.snapshotId}</code>
                 </td>
               </tr>
@@ -245,11 +212,11 @@ function CoverageSummary({
       title={t('status.coverageTitle')}
       description={t('status.coverageDescription')}
     >
-      <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+      <div className="arb:text-xs arb:leading-relaxed arb:text-primary">
         <div>
           <strong>{t('status.connected')}</strong>
         </div>
-        <ul style={{ margin: '4px 0 10px', paddingLeft: 20 }}>
+        <ul className="arb:my-1.5 arb:mb-2.5 arb:list-disc arb:pl-5 arb:text-secondary">
           {state.coverage.gated.map((item) => (
             <li key={item}>{item}</li>
           ))}
@@ -257,7 +224,7 @@ function CoverageSummary({
         <div>
           <strong>{t('status.notIndividual')}</strong>
         </div>
-        <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+        <ul className="arb:m-0 arb:list-disc arb:pl-5 arb:text-secondary">
           {state.coverage.notGated.map((item) => (
             <li key={item}>{item}</li>
           ))}
@@ -275,81 +242,51 @@ function RuntimeSummary({
   const t = useArbiterTranslation();
 
   return (
-    <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+    <table className="arb:border-collapse arb:text-xs">
       <tbody>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.execution')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             {state.executionMode === 'trusted'
               ? t('status.trusted')
               : t('status.guarded')}
           </td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.effectiveRevision')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             <code>{state.effectiveRevision}</code>
           </td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.configSnapshot')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             <code>{state.configSnapshotId}</code>
           </td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.policyVersion')}
           </td>
-          <td>{state.policyVersion}</td>
+          <td className="arb:py-1 arb:text-primary">{state.policyVersion}</td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.reviewer')}
           </td>
-          <td>{state.reviewerType}</td>
+          <td className="arb:py-1 arb:text-primary">{state.reviewerType}</td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.audit')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             {state.audit.health.state}
             {state.audit.health.lastError === null
               ? ''
@@ -357,29 +294,19 @@ function RuntimeSummary({
           </td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.counts')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             {state.audit.stats?.calls ?? 0} /{' '}
             {state.audit.stats?.modelCalls ?? 0}
           </td>
         </tr>
         <tr>
-          <td
-            style={{
-              padding: '3px 12px 3px 0',
-              color: 'var(--dsw-alias-label-secondary)',
-            }}
-          >
+          <td className="arb:py-1 arb:pr-3 arb:text-secondary">
             {t('status.database')}
           </td>
-          <td>
+          <td className="arb:py-1 arb:text-primary">
             <code>{state.audit.path ?? t('status.unavailable')}</code>
           </td>
         </tr>

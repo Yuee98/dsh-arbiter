@@ -18,6 +18,7 @@ export interface ImportableCall {
   readonly callId: string;
   readonly ts: number;
   readonly tool: string;
+  readonly command?: string | undefined;
 }
 
 /**
@@ -68,10 +69,15 @@ export async function recentCalls(): Promise<RecentCalls> {
     const callId = row['callId'];
     const tool = row['tool'];
     if (typeof callId !== 'string' || typeof tool !== 'string') continue;
+    const command =
+      typeof row['command'] === 'string' && row['command'].trim().length > 0
+        ? row['command']
+        : undefined;
     calls.push({
       callId,
       ts: typeof row['ts'] === 'number' ? row['ts'] : 0,
       tool,
+      ...(command === undefined ? {} : { command }),
     });
   }
   return { ok: true, calls };

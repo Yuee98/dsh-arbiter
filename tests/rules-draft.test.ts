@@ -6,15 +6,21 @@ import {
   addRule,
   canMoveRule,
   convertExactPattern,
+  clearRulePendingExact,
   defaultCondition,
   duplicateRule,
   exactType,
   moveRule,
   moveTarget,
   nextRuleId,
+  pendingExactIssues,
+  pendingExactKey,
+  rebasePendingExactOnRemoveCondition,
+  reorderRuleWithinVerdict,
   ruleIssues,
   ruleName,
   ruleSummary,
+  setPendingExactType,
 } from '../src/client/components/rules/draft.js';
 import type { Translate } from '../src/client/i18n.js';
 import type { Draft, DraftRule } from '../src/client/view-types.js';
@@ -409,5 +415,86 @@ describe('validation feedback routing', () => {
         (entry) => entry.issue.code,
       ),
     ).toEqual(['rule.shadowed']);
+  });
+
+  describe('reorderRuleWithinVerdict', () => {
+    it('reorders rules within the same verdict while preserving interleaved slots', () => {
+      const r1: DraftRule = { ...rule({ id: 'deny-1' }), verdict: 'deny' };
+      const r2: DraftRule = { ...rule({ id: 'allow-1' }), verdict: 'allow' };
+      const r3: DraftRule = { ...rule({ id: 'deny-2' }), verdict: 'deny' };
+      const r4: DraftRule = {
+        ...rule({ id: 'force-ask-1' }),
+        verdict: 'force-ask',
+      };
+      const r5: DraftRule = { ...rule({ id: 'deny-3' }), verdict: 'deny' };
+
+      const rules = [r1, r2, r3, r4, r5];
+      const result = reorderRuleWithinVerdict(rules, 'deny-3', 'deny-1');
+      expect(result).toBe(true);
+      expect(rules.map((r) => r.id)).toEqual([
+        'deny-3',
+        'allow-1',
+        'deny-1',
+        'force-ask-1',
+        'deny-2',
+      ]);
+    });
+
+    it('returns false and does not mutate rules on cross-verdict drop', () => {
+      const r1: DraftRule = { ...rule({ id: 'deny-1' }), verdict: 'deny' };
+      const r2: DraftRule = { ...rule({ id: 'allow-1' }), verdict: 'allow' };
+      const rules = [r1, r2];
+      const result = reorderRuleWithinVerdict(rules, 'deny-1', 'allow-1');
+      expect(result).toBe(false);
+      expect(rules.map((r) => r.id)).toEqual(['deny-1', 'allow-1']);
+    });
+  });
+
+  describe('pendingExactType lifecycle', () => {
+    it('manages pending type and rebases correctly on condition removal', () => {
+      let map = {};
+      map = setPendingExactType(map, 'rule-1', 0, 'number');
+      map = setPendingExactType(map, 'rule-1', 1, 'boolean');
+      expect(map).toEqual({
+        'rule-1:0': 'number',
+        'rule-1:1': 'boolean',
+      });
+
+      // Remove condition 0: condition 1 should rebase to index 0
+      map = rebasePendingExactOnRemoveCondition(map, 'rule-1', 0);
+      expect(map).toEqual({
+        'rule-1:0': 'boolean',
+      });
+
+      // Clear rule pending
+      map = clearRulePendingExact(map, 'rule-1');
+      expect(map).toEqual({});
+    });
+
+    it('emits canonical issues for incomplete pending exact conditions', () => {
+      const testDraft = draft([
+        {
+          id: 'rule-1',
+          combine: 'all',
+          conditions: [
+            { target: 'argument', kind: 'exact', pattern: '' },
+            { target: 'argument', kind: 'exact', pattern: '' },
+          ],
+          verdict: 'allow',
+          enabled: true,
+          comment: '',
+        },
+      ]);
+      const map = {
+        [pendingExactKey('rule-1', 0)]: 'number' as const,
+      };
+      const issues = pendingExactIssues(testDraft, map, 'incomplete');
+      expect(issues).toEqual([
+        {
+          path: 'rules[0].conditions[0].pattern',
+          message: 'incomplete',
+        },
+      ]);
+    });
   });
 });

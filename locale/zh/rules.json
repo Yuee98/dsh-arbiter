@@ -106,5 +106,17 @@
     "any": "任一满足"
   },
   "combineCrossTarget": "这些条件在整次调用中分别检查：命中的命令与重定向可能来自不同的语句。规则不保证它们属于同一次操作。",
-  "unknownField": "未知字段：{field}"
+  "unknownField": "未知字段：{field}",
+  "confirmDeleteRule": "确认删除规则：{name}",
+  "confirmDeleteShort": "确认删除",
+  "dragRule": "拖拽排序规则：{name}",
+  "duplicateRule": "复制规则：{name}",
+  "moveUpRule": "上移规则：{name}",
+  "moveDownRule": "下移规则：{name}",
+  "deleteRule": "删除规则：{name}",
+  "testRule": "测试规则：{name}",
+  "selectBooleanValue": "选择布尔值...",
+  "booleanTrue": "true",
+  "booleanFalse": "false",
+  "incompleteExactValue": "请先完成精确匹配条件的值输入，或将值类型切换回文本或空值"
 }

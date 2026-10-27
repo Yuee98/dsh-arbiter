@@ -217,6 +217,7 @@ export function CoexistenceAlert({
   return (
     <div
       data-arbiter-coexistence-notice
+      data-arbiter-surface="coexistence-overlay"
       role="status"
       style={{
         position: 'fixed',
@@ -276,6 +277,7 @@ function BlockingAlert({
       role="alertdialog"
       aria-label={t('coexistence.notice.blockingTitle')}
       data-arbiter-coexistence-alert
+      data-arbiter-surface="coexistence-overlay"
       style={{
         position: 'fixed',
         right: 24,

@@ -38,5 +38,10 @@
   "consecutiveDenials": "Consecutive denials",
   "windowDenials": "Denials within a window",
   "windowSize": "Window size",
-  "auditDescription": "An audit write failure does not change the permission outcome. Log cleanup deletes only the SQLite audit, not the DSH session verdict records."
+  "auditDescription": "An audit write failure does not change the permission outcome. Log cleanup deletes only the SQLite audit, not the DSH session verdict records.",
+  "retentionPreset50MB": "50 MB",
+  "retentionPreset100MB": "100 MB",
+  "retentionPreset500MB": "500 MB",
+  "retentionPreset1GB": "1 GB",
+  "retentionFormatted": "Approx. {formatted}"
 }

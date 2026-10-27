@@ -1,20 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-
 import { useArbiterTranslation } from '../../i18n-provider.js';
+import { errorText, formatTime } from '../../view-helpers.js';
 import { Button, Notice } from '../controls.js';
-import { errorText } from '../../view-helpers.js';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover.js';
 import { importedSample, recentCalls } from './rule-test-source.js';
 import type { ImportableCall, ImportedTestSample } from './rule-test-source.js';
 
-/**
- * "从调用记录带入": choose a past call and replay its original tool input.
- *
- * This is a read of the audit log, never a new judgement: the imported sample is
- * only a starting point the operator can edit, and the answer still comes from
- * the current draft. The recorded arguments object is preserved as-is, so the
- * tester evaluates the same tool input the call carried.
- */
 export function RuleTestImport(props: {
   readonly disabled: boolean;
   readonly onImport: (imported: ImportedTestSample) => void;
@@ -48,8 +40,6 @@ export function RuleTestImport(props: {
     }
   }, [t]);
 
-  // Opening the picker is what reads the log; the panel does not query the
-  // audit store on every tab visit.
   useEffect(() => {
     if (!open || calls !== null) return;
     load().catch((failure: unknown) => {
@@ -76,61 +66,69 @@ export function RuleTestImport(props: {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <Button
-        disabled={props.disabled}
-        onClick={() => {
-          setOpen((current) => !current);
-        }}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button disabled={props.disabled}>{t('ruleTest.importOpen')}</Button>
+      </PopoverTrigger>
+      <PopoverContent
+        data-arbiter-test-import=""
+        className="arb:w-80 arb:max-h-80 arb:overflow-y-auto arb:p-3"
       >
-        {t('ruleTest.importOpen')}
-      </Button>
-      {open ? (
-        <div
-          data-arbiter-test-import=""
-          style={{
-            border: '0.5px solid var(--dsw-alias-border-l2)',
-            borderRadius: 6,
-            padding: 8,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
+        <div className="arb:flex arb:flex-col arb:gap-2">
           {busy && calls === null ? (
-            <span style={{ fontSize: 12 }}>{t('ruleTest.running')}</span>
+            <span className="arb:text-xs arb:text-secondary">
+              {t('ruleTest.running')}
+            </span>
           ) : null}
           {error === null ? null : <Notice kind="error" text={error} />}
-          {calls === null || calls.length > 0 ? null : (
-            <span
-              style={{
-                fontSize: 12,
-                color: 'var(--dsw-alias-label-secondary)',
-              }}
-            >
+          {calls !== null && calls.length === 0 && error === null ? (
+            <span className="arb:text-xs arb:text-secondary">
               {t('ruleTest.importEmpty')}
             </span>
-          )}
-          {(calls ?? []).map((call) => (
-            <Button
-              key={call.callId}
-              disabled={busy}
-              onClick={() => {
-                take(call).catch((failure: unknown) => {
-                  setError(
-                    t('ruleTest.importFailed', { error: errorText(failure) }),
-                  );
-                });
-              }}
-            >
-              {t('ruleTest.importCall', {
-                tool: call.tool,
-                call: call.callId,
-              })}
-            </Button>
-          ))}
+          ) : null}
+          {(calls ?? []).map((call) => {
+            const accessibleTitle = t('ruleTest.importCall', {
+              tool: call.tool,
+              call: call.callId,
+            });
+            const summary = call.command ?? t('ruleTest.importCommandEmpty');
+            const time = call.ts > 0 ? formatTime(call.ts) : '';
+
+            return (
+              <button
+                key={call.callId}
+                type="button"
+                disabled={busy}
+                aria-label={accessibleTitle}
+                onClick={() => {
+                  take(call).catch((failure: unknown) => {
+                    setError(
+                      t('ruleTest.importFailed', {
+                        error: errorText(failure),
+                      }),
+                    );
+                  });
+                }}
+                className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2 arb:text-left arb:transition-colors arb:hover:bg-layer-4 arb:disabled:opacity-50"
+              >
+                <div className="arb:flex arb:items-center arb:justify-between arb:gap-2">
+                  <span className="arb:text-xs arb:font-medium arb:text-primary arb:truncate">
+                    {call.tool} · {call.callId}
+                  </span>
+                  {time ? (
+                    <span className="arb:text-[11px] arb:text-tertiary arb:shrink-0">
+                      {time}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="arb:text-xs arb:text-secondary arb:line-clamp-2 arb:break-all">
+                  {summary}
+                </div>
+              </button>
+            );
+          })}
         </div>
-      ) : null}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }

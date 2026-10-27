@@ -265,10 +265,7 @@ export function CallDetail({
       data-call-detail={detail.callId}
       style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
     >
-      <Section
-        title={t('callDetail.title', { callId: detail.callId })}
-        description={t('callDetail.description')}
-      >
+      <Section description={t('callDetail.description')}>
         <SourceNotice detail={detail} />
         {detail.unreadable ? (
           <UnreadableRecord detail={detail} />

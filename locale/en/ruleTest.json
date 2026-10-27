@@ -98,5 +98,8 @@
   "combineAll": "This rule requires every condition below to hold; conditions on the same target must be satisfied by one and the same node.",
   "groupMatch": "all satisfied by one node",
   "groupNoMatch": "cannot all be satisfied",
-  "groupUnknown": "structure not fully read, so undecided"
+  "groupUnknown": "structure not fully read, so undecided",
+  "clearFocusedRule": "Switch to full ruleset test",
+  "dialogDescription": "Simulate and evaluate a tool call against the current unsaved rule draft.",
+  "importCommandEmpty": "(No command summary)"
 }

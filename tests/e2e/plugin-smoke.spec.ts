@@ -101,12 +101,11 @@ test(
     await expect(
       plugin.getByRole('heading', { name: '规则', exact: true }),
     ).toBeVisible();
-    const tester = plugin.getByRole('region', { name: '规则测试' });
-    await expect(tester).toBeVisible();
-    // The test area is collapsed by default; its entry opens it without running.
-    await tester
+    await plugin
       .getByRole('button', { name: '展开测试区', exact: true })
       .click();
+    const tester = page.getByRole('dialog', { name: '规则测试' });
+    await expect(tester).toBeVisible();
     const [ruleTest] = await Promise.all([
       page.waitForResponse(
         (response) => new URL(response.url()).pathname === '/api/arbiter/test',
@@ -116,10 +115,13 @@ test(
     expect(ruleTest.status()).toBe(200);
     // The decoded answer reaches the page: the two conclusions and the editable
     // sample are real client state, not a hardcoded paragraph.
-    await expect(plugin.getByTestId('rule-test-conclusion')).toBeVisible();
+    await expect(tester.getByTestId('rule-test-conclusion')).toBeVisible();
     await expect(tester.getByRole('textbox', { name: '命令' })).toHaveValue(
       'gh pr view 42',
     );
+    await tester
+      .getByRole('button', { name: '收起测试区', exact: true })
+      .click();
     await expect(plugin.getByRole('status')).toHaveCount(0);
 
     await plugin.getByRole('button', { name: 'Reviewer', exact: true }).click();

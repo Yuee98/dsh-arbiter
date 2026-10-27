@@ -25,19 +25,11 @@ export function Collapsible(props: {
         onClick={() => {
           setOpen((current) => !current);
         }}
-        style={{
-          cursor: 'pointer',
-          border: 'none',
-          background: 'none',
-          padding: 0,
-          font: 'inherit',
-          color: 'var(--dsw-alias-label-primary)',
-          textAlign: 'left',
-        }}
+        className="arb:cursor-pointer arb:border-none arb:bg-transparent arb:p-0 arb:font-inherit arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:hover:underline"
       >
         {props.summary}
       </button>
-      {open ? <div style={{ marginTop: 6 }}>{props.children}</div> : null}
+      {open ? <div className="arb:mt-1.5">{props.children}</div> : null}
     </div>
   );
 }

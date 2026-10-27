@@ -2,9 +2,12 @@ import { build } from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildCss } from './build-css.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const outfile = `${root}lib/client.cjs`;
+
+await buildCss({ write: true });
 
 const result = await build({
   entryPoints: [`${root}src/client/index.tsx`],
@@ -13,7 +16,7 @@ const result = await build({
   platform: 'browser',
   target: 'es2022',
   jsx: 'automatic',
-  external: ['react', 'react/jsx-runtime'],
+  external: ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'],
   write: false,
   sourcemap: false,
   minify: false,

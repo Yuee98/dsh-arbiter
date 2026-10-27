@@ -12,6 +12,14 @@ import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog.js';
 import { useCallDetail } from './use-call-detail.js';
 import type { CallDetailState } from '../view-types.js';
 
@@ -45,13 +53,18 @@ function AbsentState({
   switch (state.kind) {
     case 'loading':
       return (
-        <p style={{ margin: 0, fontSize: 12.5 }}>{t('callDetail.loading')}</p>
+        <p className="arb:m-0 arb:text-xs arb:text-secondary">
+          {t('callDetail.loading')}
+        </p>
       );
     case 'ready':
       return <CallDetail detail={state.detail} />;
     case 'record-unavailable':
       return (
-        <div data-call-detail-state="record-unavailable">
+        <div
+          data-call-detail-state="record-unavailable"
+          className="arb:flex arb:flex-col arb:gap-3"
+        >
           <Notice kind="info" text={t('callDetail.recordUnavailable')} />
           {fallback === undefined ? null : (
             <div data-call-detail-fallback={fallback.tool}>
@@ -59,10 +72,12 @@ function AbsentState({
                 title={t('callDetail.minimalVerdict')}
                 description={t('callDetail.minimalVerdictHint')}
               >
-                <p style={{ margin: 0, fontSize: 12.5 }}>
+                <p className="arb:m-0 arb:text-xs arb:font-medium arb:text-primary">
                   {`${fallback.sourceLabel} · ${fallback.tool}`}
                 </p>
-                <p style={{ margin: 0, fontSize: 12.5 }}>{fallback.reason}</p>
+                <p className="arb:m-0 arb:text-xs arb:text-secondary">
+                  {fallback.reason}
+                </p>
               </Section>
             </div>
           )}
@@ -76,12 +91,17 @@ function AbsentState({
       );
     case 'failed':
       return (
-        <div data-call-detail-state="failed">
+        <div
+          data-call-detail-state="failed"
+          className="arb:flex arb:flex-col arb:gap-3"
+        >
           <Notice
             kind="error"
             text={`${t('callDetail.loadFailed')} ${state.message}`}
           />
-          <Button onClick={onRetry}>{t('callDetail.retry')}</Button>
+          <div>
+            <Button onClick={onRetry}>{t('callDetail.retry')}</Button>
+          </div>
         </div>
       );
   }
@@ -106,19 +126,37 @@ export function CallDetailPanel(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
-  // No wrapper heading: the detail renders its own title, so a caller cannot
-  // end up with two different names for the same view.
+
   return (
-    <div
-      data-call-detail-panel={props.callId}
-      style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+    <Dialog
+      open={true}
+      onOpenChange={(open) => {
+        if (!open) props.onClose?.();
+      }}
     >
-      {props.onClose === undefined ? null : (
-        <div>
-          <Button onClick={props.onClose}>{t('callDetail.close')}</Button>
-        </div>
-      )}
-      <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
-    </div>
+      <DialogContent
+        data-call-detail-panel={props.callId}
+        data-arbiter-surface="call-detail-dialog"
+        showCloseButton={false}
+        className="arb:max-h-[85vh] arb:max-w-3xl arb:overflow-y-auto arb:flex arb:flex-col arb:gap-4"
+      >
+        <DialogHeader className="arb:flex arb:flex-row arb:items-center arb:justify-between arb:border-b arb:border-border-default arb:pb-3">
+          <div>
+            <DialogTitle className="arb:text-base arb:font-semibold arb:text-primary">
+              {t('callDetail.title', { callId: props.callId })}
+            </DialogTitle>
+            <DialogDescription className="arb:sr-only">
+              {t('callDetail.dialogDescription')}
+            </DialogDescription>
+          </div>
+          <DialogClose asChild>
+            <Button type="button" onClick={props.onClose}>
+              {t('callDetail.close')}
+            </Button>
+          </DialogClose>
+        </DialogHeader>
+        <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
+      </DialogContent>
+    </Dialog>
   );
 }

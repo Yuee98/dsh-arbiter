@@ -19,6 +19,7 @@ import { useArbiterTranslation } from '../i18n-provider.js';
 import type { ArbiterDenialSource, ArbiterDenialView } from '../view-types.js';
 import { CallDetailPanel } from './call-detail-panel.js';
 import { Button } from './controls.js';
+import { Badge } from './ui/badge.js';
 
 /**
  * The one-line sentence naming which stage refused.
@@ -60,6 +61,7 @@ export function DenialRow(props: {
   return (
     <div
       data-arbiter-row={props.callId}
+      data-arbiter-surface="denial-row"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -106,7 +108,7 @@ export function DenialRow(props: {
           >
             ●
           </span>
-          <strong style={{ fontWeight: 600 }}>{t('denials.badge')}</strong>
+          <Badge tone="warning">{t('denials.badge')}</Badge>
           <span
             data-denial-source={props.denial.source}
             style={{ color: 'var(--dsw-alias-label-secondary)' }}
@@ -150,6 +152,9 @@ export function DenialRow(props: {
         <div id={regionId} style={{ paddingTop: 4 }}>
           <CallDetailPanel
             callId={props.callId}
+            onClose={() => {
+              setOpen(false);
+            }}
             // The row already holds this call's recorded tool and reason. When
             // the audit store and the decision history both lack the call (a
             // boundary refusal or a teardown fallback never writes one), the

@@ -39,18 +39,11 @@ function FilterToggle(props: {
   readonly onChange: (checked: boolean) => void;
 }): ReactNode {
   return (
-    <label
-      style={{
-        display: 'flex',
-        gap: 6,
-        alignItems: 'center',
-        fontSize: 12.5,
-        paddingBottom: 6,
-      }}
-    >
+    <label className="arb:flex arb:items-center arb:gap-1.5 arb:pb-1.5 arb:text-xs arb:text-primary">
       <input
         type="checkbox"
         checked={props.checked}
+        className="arb:rounded arb:border-border-default arb:accent-accent"
         onChange={(event) => {
           props.onChange(event.target.checked);
         }}
@@ -89,15 +82,14 @@ export function LogFilters({
     onDraft({ ...draft, ...patch });
   };
   return (
-    <div
+    <form
       role="group"
       aria-label={t('logs.filters.apply')}
-      style={{
-        display: 'flex',
-        gap: 8,
-        alignItems: 'flex-end',
-        flexWrap: 'wrap',
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply();
       }}
+      className="arb:flex arb:flex-wrap arb:items-end arb:gap-2"
     >
       <FilterField label={t('logs.result')} width={170}>
         <Select
@@ -204,14 +196,16 @@ export function LogFilters({
         panel's request generation decides which answer wins, so an overlapping
         read is safe rather than a reason to block the interaction.
       */}
-      <div style={{ paddingBottom: 1 }}>
-        <Button onClick={onApply} tone="primary">
+      <div className="arb:pb-[1px]">
+        <Button type="submit" tone="primary">
           {t('logs.filters.apply')}
         </Button>
       </div>
-      <div style={{ paddingBottom: 1 }}>
-        <Button onClick={onClear}>{t('logs.filters.clear')}</Button>
+      <div className="arb:pb-[1px]">
+        <Button type="button" onClick={onClear}>
+          {t('logs.filters.clear')}
+        </Button>
       </div>
-    </div>
+    </form>
   );
 }

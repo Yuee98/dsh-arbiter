@@ -389,8 +389,8 @@ describe('the denial row', () => {
     expect(
       await screen.findByRole('region', { name: '最终裁决' }),
     ).toBeInTheDocument();
-    // Re-clicking collapses the same panel again.
-    await user.click(screen.getByRole('button', { name: '收起详情' }));
+    // Closing the dialog collapses the panel again.
+    await user.click(screen.getByRole('button', { name: /^关闭/ }));
     expect(screen.queryByText('调用详情 · call-shared')).toBeNull();
   });
 
@@ -622,6 +622,6 @@ describe('the denial detail fallback', () => {
       await screen.findByRole('region', { name: '最终裁决' }),
     ).toBeInTheDocument();
     // The absent layers are reported, not silently rendered empty.
-    expect(screen.getByText(/审计/)).toBeInTheDocument();
+    expect(screen.getByText(/详细审计记录不可用/)).toBeInTheDocument();
   });
 });

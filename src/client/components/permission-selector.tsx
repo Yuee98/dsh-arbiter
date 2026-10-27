@@ -106,6 +106,8 @@ export function PermissionSelector(props: {
   return (
     <span
       data-arbiter-permission=""
+      data-arbiter-surface="permission-selector"
+      className="arb:relative arb:inline-flex arb:items-center arb:gap-1.5"
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
     >
       <button

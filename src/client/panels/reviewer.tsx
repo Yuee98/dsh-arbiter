@@ -84,19 +84,13 @@ export function ReviewerPanel(props: {
       title={t('reviewer.title')}
       description={t('reviewer.description')}
     >
-      <div style={{ display: 'flex', gap: 16 }}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-          }}
-        >
+      <div className="arb:flex arb:items-center arb:gap-4">
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
           <input
             type="radio"
             name="arbiter-reviewer-type"
             checked={draft.reviewer.type === 'chat'}
+            className="arb:accent-accent"
             onChange={() => {
               onDraft((next) => {
                 next.reviewer.type = 'chat';
@@ -105,18 +99,12 @@ export function ReviewerPanel(props: {
           />
           {t('reviewer.chat')}
         </label>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-          }}
-        >
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
           <input
             type="radio"
             name="arbiter-reviewer-type"
             checked={draft.reviewer.type === 'decision'}
+            className="arb:accent-accent"
             onChange={() => {
               onDraft((next) => {
                 next.reviewer.type = 'decision';
@@ -164,13 +152,7 @@ export function ReviewerPanel(props: {
         />
       ) : null}
 
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--dsw-alias-label-tertiary)',
-          fontSize: 11.5,
-        }}
-      >
+      <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
         {t('reviewer.failureDescription')}
       </p>
     </Section>
@@ -198,14 +180,12 @@ function TestEntry({
     draft.reviewer.type === 'chat' &&
     draft.reviewer.chat.provider === 'session';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div className="arb:flex arb:flex-col arb:gap-1">
+      <div className="arb:flex arb:items-center arb:gap-2.5">
         <Button disabled={followSession || open} onClick={onOpen}>
           {t('reviewer.test.open')}
         </Button>
-        <span
-          style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' }}
-        >
+        <span className="arb:text-[11.5px] arb:text-tertiary">
           {followSession
             ? t('reviewer.test.sessionDisabled')
             : t('reviewer.test.costNotice')}
@@ -243,11 +223,9 @@ function ChatBasics({
     <div
       role="group"
       aria-label={t('reviewer.model.label')}
-      style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+      className="arb:flex arb:flex-col arb:gap-1"
     >
-      <span
-        style={{ color: 'var(--dsw-alias-label-secondary)', fontSize: 12.5 }}
-      >
+      <span className="arb:text-xs arb:text-secondary">
         {t('reviewer.model.label')}
       </span>
       <ModelSelect
@@ -258,9 +236,7 @@ function ChatBasics({
         onQuery={onQuery}
         onChoice={onChoice}
       />
-      <span
-        style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 }}
-      >
+      <span className="arb:text-[11.5px] arb:text-tertiary">
         {t('reviewer.model.hint')}
       </span>
     </div>
@@ -277,7 +253,7 @@ function DecisionBasics({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+    <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
       <Field label={t('reviewer.url')}>
         <TextInput
           value={draft.reviewer.decision.url}
@@ -318,27 +294,20 @@ function DecisionBasics({
   );
 }
 
-/** Advanced parameters stay behind one disclosure so the common path is short. */
+/** Advanced parameters render as a visible 2-column section below basics. */
 function AdvancedGroup(props: {
   readonly title: string;
   readonly children: ReactNode;
 }): ReactNode {
   return (
-    <details>
-      <summary style={{ cursor: 'pointer', fontSize: 12.5 }}>
+    <div className="arb:flex arb:flex-col arb:gap-3 arb:pt-2">
+      <div className="arb:text-xs arb:font-medium arb:text-secondary">
         {props.title}
-      </summary>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 12,
-          marginTop: 10,
-        }}
-      >
+      </div>
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
         {props.children}
       </div>
-    </details>
+    </div>
   );
 }
 

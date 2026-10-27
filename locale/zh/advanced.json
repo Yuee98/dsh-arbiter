@@ -38,5 +38,10 @@
   "consecutiveDenials": "连续拒绝",
   "windowDenials": "窗口内拒绝",
   "windowSize": "窗口大小",
-  "auditDescription": "审计写入失败不改变权限结果。清理日志只删除 SQLite 审计，不删除 DSH 会话裁决记录。"
+  "auditDescription": "审计写入失败不改变权限结果。清理日志只删除 SQLite 审计，不删除 DSH 会话裁决记录。",
+  "retentionPreset50MB": "50 MB",
+  "retentionPreset100MB": "100 MB",
+  "retentionPreset500MB": "500 MB",
+  "retentionPreset1GB": "1 GB",
+  "retentionFormatted": "约 {formatted}"
 }

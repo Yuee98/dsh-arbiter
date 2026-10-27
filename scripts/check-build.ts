@@ -15,6 +15,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
 import * as react from 'react';
+import * as reactDom from 'react-dom';
+import * as reactDomClient from 'react-dom/client';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { publint } from 'publint';
 import { formatMessage } from 'publint/utils';
@@ -155,9 +157,15 @@ try {
   }
   const registered: LoadedClient = holder.value;
   assert.equal(registered.id, 'dsh-arbiter');
+  assert.ok(
+    clientCode.includes('dsh-arbiter-styles'),
+    'client bundle must include dsh-arbiter-styles',
+  );
   const clientExports = registered.factory((specifier: string) => {
     if (specifier === 'react/jsx-runtime') return jsxRuntime;
     if (specifier === 'react') return react;
+    if (specifier === 'react-dom') return reactDom;
+    if (specifier === 'react-dom/client') return reactDomClient;
     throw new Error(`Unexpected client external dependency: ${specifier}`);
   });
   assert.equal(

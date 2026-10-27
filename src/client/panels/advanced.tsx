@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import {
@@ -51,25 +52,21 @@ function PolicySettings({
       title={t('advanced.policyTitle')}
       description={t('advanced.policyDescription')}
     >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 10,
-        }}
-      >
-        <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5">
+        <div className="arb:text-xs arb:font-semibold arb:text-primary">
           {t('advanced.parameter')}
         </div>
-        <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+        <div className="arb:text-xs arb:font-semibold arb:text-primary">
           {t('advanced.normal')}
         </div>
-        <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+        <div className="arb:text-xs arb:font-semibold arb:text-primary">
           {t('advanced.progress')}
         </div>
         {thresholdFields.map(([key, label, min, max, step]) => (
           <div key={key} style={{ display: 'contents' }}>
-            <div style={{ fontSize: 12.5, lineHeight: '30px' }}>{label}</div>
+            <div className="arb:text-xs arb:leading-[30px] arb:text-secondary">
+              {label}
+            </div>
             <NumberInput
               value={draft.policy.normal[key]}
               min={min}
@@ -95,18 +92,12 @@ function PolicySettings({
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 16 }}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12.5,
-          }}
-        >
+      <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-4 arb:pt-2">
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
           <input
             type="checkbox"
             checked={draft.policy.progress.allowBulkEgress}
+            className="arb:rounded arb:border-border-default arb:accent-accent"
             onChange={(event) => {
               onDraft((next) => {
                 next.policy.progress.allowBulkEgress = event.target.checked;
@@ -115,21 +106,23 @@ function PolicySettings({
           />
           {t('advanced.bulkEgress')}
         </label>
-        <Field label={t('advanced.probeMode')}>
-          <Select
-            value={draft.policy.probeMode}
-            options={['assist', 'override'] as const}
-            labels={{
-              assist: t('advanced.assist'),
-              override: t('advanced.override'),
-            }}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.policy.probeMode = value;
-              });
-            }}
-          />
-        </Field>
+        <div className="arb:w-48">
+          <Field label={t('advanced.probeMode')}>
+            <Select
+              value={draft.policy.probeMode}
+              options={['assist', 'override'] as const}
+              labels={{
+                assist: t('advanced.assist'),
+                override: t('advanced.override'),
+              }}
+              onChange={(value) => {
+                onDraft((next) => {
+                  next.policy.probeMode = value;
+                });
+              }}
+            />
+          </Field>
+        </div>
       </div>
     </Section>
   );
@@ -143,16 +136,11 @@ function ContextSettings({
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
+  const [filesText, setFilesText] = useState<string | null>(null);
 
   return (
     <Section title={t('advanced.contextTitle')}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 12,
-        }}
-      >
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2 lg:arb:grid-cols-3">
         <Field label={t('advanced.maxInput')}>
           <NumberInput
             value={draft.context.maxInputTokens}
@@ -239,8 +227,9 @@ function ContextSettings({
         </Field>
         <Field label={t('advanced.projectFiles')}>
           <TextInput
-            value={draft.context.projectRules.files.join(', ')}
+            value={filesText ?? draft.context.projectRules.files.join(', ')}
             onChange={(value) => {
+              setFilesText(value);
               onDraft((next) => {
                 next.context.projectRules.files = value
                   .split(',')
@@ -248,22 +237,18 @@ function ContextSettings({
                   .filter((item) => item.length > 0);
               });
             }}
+            onBlur={() => {
+              setFilesText(null);
+            }}
             monospace
           />
         </Field>
         <Field label={t('advanced.projectEnabled')}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 30,
-              fontSize: 12.5,
-            }}
-          >
+          <label className="arb:flex arb:h-[30px] arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
             <input
               type="checkbox"
               checked={draft.context.projectRules.enabled}
+              className="arb:rounded arb:border-border-default arb:accent-accent"
               onChange={(event) => {
                 onDraft((next) => {
                   next.context.projectRules.enabled = event.target.checked;
@@ -290,6 +275,91 @@ function ContextSettings({
   );
 }
 
+function BudgetInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  readonly value: number | null;
+  readonly placeholder?: string;
+  readonly onChange: (value: number | null) => void;
+}): ReactNode {
+  const [budgetText, setBudgetText] = useState<string | null>(null);
+
+  return (
+    <TextInput
+      value={budgetText ?? (value === null ? '' : String(value))}
+      placeholder={placeholder}
+      onChange={(text) => {
+        setBudgetText(text);
+        if (text.trim().length === 0) {
+          onChange(null);
+          return;
+        }
+        const parsed = Number(text);
+        if (Number.isFinite(parsed)) {
+          onChange(parsed);
+        }
+      }}
+      onBlur={() => {
+        setBudgetText(null);
+      }}
+    />
+  );
+}
+
+function RetentionBytesInput({
+  value,
+  onChange,
+}: {
+  readonly value: number;
+  readonly onChange: (value: number) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const formatBytes = (bytes: number): string => {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    }
+    return `${String(Math.round(bytes / (1024 * 1024)))} MB`;
+  };
+  const presets = [
+    { label: t('advanced.retentionPreset50MB'), bytes: 50 * 1024 * 1024 },
+    { label: t('advanced.retentionPreset100MB'), bytes: 100 * 1024 * 1024 },
+    { label: t('advanced.retentionPreset500MB'), bytes: 500 * 1024 * 1024 },
+    { label: t('advanced.retentionPreset1GB'), bytes: 1024 * 1024 * 1024 },
+  ];
+
+  return (
+    <div className="arb:flex arb:flex-col arb:gap-1.5">
+      <NumberInput
+        value={value}
+        min={1024 * 1024}
+        max={1024 * 1024 * 1024 * 1024}
+        onChange={onChange}
+      />
+      <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-1.5 arb:text-[11.5px] arb:text-secondary">
+        <span>
+          {t('advanced.retentionFormatted', { formatted: formatBytes(value) })}
+        </span>
+        <div className="arb:flex arb:gap-1">
+          {presets.map((p) => (
+            <button
+              key={p.bytes}
+              type="button"
+              onClick={() => {
+                onChange(p.bytes);
+              }}
+              className="arb:rounded arb:border arb:border-border-default arb:bg-layer-3 arb:px-1.5 arb:py-0.5 arb:text-[11px] arb:text-primary arb:hover:bg-layer-4"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuditSettings({
   draft,
   onDraft,
@@ -301,13 +371,7 @@ function AuditSettings({
 
   return (
     <Section title={t('advanced.auditTitle')}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 12,
-        }}
-      >
+      <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2 lg:arb:grid-cols-3">
         <Field label={t('advanced.retentionDays')}>
           <NumberInput
             value={draft.audit.retentionDays}
@@ -321,10 +385,8 @@ function AuditSettings({
           />
         </Field>
         <Field label={t('advanced.retentionBytes')}>
-          <NumberInput
+          <RetentionBytesInput
             value={draft.audit.retentionBytes}
-            min={1024 * 1024}
-            max={1024 * 1024 * 1024 * 1024}
             onChange={(value) => {
               onDraft((next) => {
                 next.audit.retentionBytes = value;
@@ -359,6 +421,7 @@ function AuditSettings({
           <Select
             value={draft.breaker.preset}
             options={['strict', 'balanced', 'lenient'] as const}
+            disabled={draft.breaker.mode !== 'preset'}
             onChange={(value) => {
               onDraft((next) => {
                 next.breaker.preset = value;
@@ -367,28 +430,19 @@ function AuditSettings({
           />
         </Field>
         <Field label={t('advanced.budget')}>
-          <TextInput
-            value={
-              draft.reviewBudget === null ? '' : String(draft.reviewBudget)
-            }
+          <BudgetInput
+            value={draft.reviewBudget}
             placeholder={t('advanced.null')}
             onChange={(value) => {
               onDraft((next) => {
-                next.reviewBudget =
-                  value.trim().length === 0 ? null : Number(value);
+                next.reviewBudget = value;
               });
             }}
           />
         </Field>
       </div>
       {draft.breaker.mode === 'custom' ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: 12,
-          }}
-        >
+        <div className="arb:mt-3 arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-3">
           <Field label={t('advanced.consecutiveDenials')}>
             <NumberInput
               value={draft.breaker.consecutiveDenials}
@@ -427,13 +481,7 @@ function AuditSettings({
           </Field>
         </div>
       ) : null}
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--dsw-alias-label-tertiary)',
-          fontSize: 11.5,
-        }}
-      >
+      <p className="arb:m-0 arb:pt-2 arb:text-[11.5px] arb:text-tertiary">
         {t('advanced.auditDescription')}
       </p>
     </Section>

@@ -15,37 +15,21 @@ export function AboutPanel(props: {
         title={t('about.trialTitle')}
         description={t('about.trialDescription')}
       >
-        <pre
-          style={{
-            margin: 0,
-            padding: 12,
-            borderRadius: 6,
-            background: 'var(--dsw-alias-bg-module-platform)',
-            fontSize: 12,
-            fontFamily: 'var(--dsw-font-mono, monospace)',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
+        <pre className="arb:m-0 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-3 arb:font-mono arb:text-xs arb:whitespace-pre-wrap arb:text-primary">
           {t('about.trialCommands')}
         </pre>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12.5,
-            color: 'var(--dsw-alias-label-secondary)',
-          }}
-        >
+        <p className="arb:m-0 arb:text-xs arb:text-secondary">
           {t('about.executionPrefix')}
           {props.state.executionMode}
           {t('about.executionExplanation')}
         </p>
       </Section>
       <Section title={t('about.boundaries')}>
-        <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+        <div className="arb:text-xs arb:leading-relaxed arb:text-primary">
           <div>
             <strong>{t('about.connected')}</strong>
           </div>
-          <ul style={{ margin: '4px 0 10px', paddingLeft: 20 }}>
+          <ul className="arb:my-1.5 arb:mb-2.5 arb:list-disc arb:pl-5 arb:text-secondary">
             {props.state.coverage.gated.map((item) => (
               <li key={item}>{item}</li>
             ))}
@@ -53,7 +37,7 @@ export function AboutPanel(props: {
           <div>
             <strong>{t('about.notIndividual')}</strong>
           </div>
-          <ul style={{ margin: '4px 0 10px', paddingLeft: 20 }}>
+          <ul className="arb:my-1.5 arb:mb-2.5 arb:list-disc arb:pl-5 arb:text-secondary">
             {props.state.coverage.notGated.map((item) => (
               <li key={item}>{item}</li>
             ))}
@@ -61,18 +45,13 @@ export function AboutPanel(props: {
           <div>
             <strong>{t('about.lifecycle')}</strong>
           </div>
-          <p style={{ margin: '4px 0 0' }}>{t('about.lifecycleDescription')}</p>
+          <p className="arb:mt-1 arb:text-secondary">
+            {t('about.lifecycleDescription')}
+          </p>
         </div>
       </Section>
       <Section title={t('about.limits')}>
-        <ul
-          style={{
-            margin: 0,
-            paddingLeft: 20,
-            fontSize: 12.5,
-            lineHeight: 1.7,
-          }}
-        >
+        <ul className="arb:m-0 arb:list-disc arb:pl-5 arb:text-xs arb:leading-relaxed arb:text-secondary">
           <li>{t('about.calibrationLimit')}</li>
           <li>{t('about.surfaceLimit')}</li>
           <li>{t('about.subagentLimit')}</li>

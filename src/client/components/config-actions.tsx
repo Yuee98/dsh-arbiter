@@ -1,7 +1,8 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { useArbiterTranslation } from '../i18n-provider.js';
 import type { Translate } from '../i18n.js';
+import { Button } from './controls.js';
 
 /** The observable result of the last save attempt in this page session. */
 export type SaveStatus = 'idle' | 'saved' | 'unchanged' | 'failed';
@@ -23,16 +24,6 @@ interface ConfigActionsProps {
   readonly onSave: () => void;
 }
 
-const buttonStyle: CSSProperties = {
-  height: 30,
-  padding: '0 12px',
-  borderRadius: 6,
-  fontSize: 12.5,
-  border: '0.5px solid var(--dsw-alias-border-l4)',
-  background: 'var(--dsw-alias-bg-layer-3)',
-  color: 'var(--dsw-alias-label-primary)',
-};
-
 function statusText(status: SaveStatus, dirty: boolean, t: Translate): string {
   if (status === 'failed') return t('config.status.failed');
   if (dirty) return t('config.status.dirty');
@@ -51,31 +42,19 @@ function statusText(status: SaveStatus, dirty: boolean, t: Translate): string {
  */
 export function ConfigActions(props: ConfigActionsProps): ReactNode {
   const t = useArbiterTranslation();
-  const inactiveStyle: CSSProperties = {
-    cursor: props.busy ? 'default' : 'pointer',
-    opacity: props.busy ? 0.5 : 1,
-  };
   const saveDisabled = props.busy || !props.canSave;
-  const metaStyle: CSSProperties = {
-    fontSize: 12,
-    color: 'var(--dsw-alias-label-tertiary)',
-  };
+
   return (
     <div
       data-arbiter-config-actions=""
-      style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+      className="arb:flex arb:flex-col arb:gap-2"
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 12,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{t('title')}</div>
-          <div style={metaStyle}>
+      <div className="arb:flex arb:items-start arb:justify-between arb:gap-3">
+        <div className="arb:min-w-0 arb:flex-1">
+          <div className="arb:text-base arb:font-semibold arb:text-primary">
+            {t('title')}
+          </div>
+          <div className="arb:text-xs arb:text-tertiary">
             <span data-arbiter-file-revision="">
               {props.fileRevision === null
                 ? t('config.fileRevisionUnavailable')
@@ -94,56 +73,59 @@ export function ConfigActions(props: ConfigActionsProps): ReactNode {
               {t('config.snapshot', { snapshot: props.snapshotId })}
             </span>
           </div>
-          <div style={metaStyle}>
+          <div className="arb:text-xs arb:text-tertiary">
             <span data-arbiter-config-format={props.format}>
               {t('config.format', { format: props.format })}
               {props.formatExplicit ? null : t('config.formatImplicit')}
             </span>
-            {props.documentPath === null ? null : ` · ${props.documentPath}`}
+            {props.documentPath === null ? null : (
+              <span
+                className="arb:block arb:truncate"
+                title={props.documentPath}
+              >
+                {` · ${props.documentPath}`}
+              </span>
+            )}
           </div>
         </div>
+
         <div
           role="group"
           aria-label={t('config.actions.label')}
-          style={{ display: 'flex', gap: 8 }}
+          className="arb:flex arb:shrink-0 arb:flex-wrap arb:items-center arb:gap-2"
         >
-          <button
+          <Button
             type="button"
             onClick={props.onValidate}
             disabled={props.busy}
-            style={{ ...buttonStyle, ...inactiveStyle }}
+            className="arb:shrink-0 arb:whitespace-nowrap"
           >
             {t('config.validate')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={props.onReload}
             disabled={props.busy}
-            style={{ ...buttonStyle, ...inactiveStyle }}
+            className="arb:shrink-0 arb:whitespace-nowrap"
           >
             {t('config.reload')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={props.onSave}
             disabled={saveDisabled}
-            style={{
-              ...buttonStyle,
-              cursor: saveDisabled ? 'default' : 'pointer',
-              opacity: saveDisabled ? 0.5 : 1,
-              border: '0.5px solid var(--dsw-alias-state-business-primary)',
-              background: 'var(--dsw-alias-state-business-primary)',
-              color: 'var(--dsw-alias-label-primary-foreground, white)',
-            }}
+            tone="primary"
+            className="arb:shrink-0 arb:whitespace-nowrap"
           >
             {props.busy ? t('config.busy') : t('config.save')}
-          </button>
+          </Button>
         </div>
       </div>
+
       <div
         data-testid="arbiter-save-status"
         data-arbiter-save-status={props.status}
-        style={{ fontSize: 12.5 }}
+        className="arb:text-xs arb:text-secondary"
       >
         {statusText(props.status, props.dirty, t)}
         {/*

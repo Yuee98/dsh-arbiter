@@ -110,6 +110,7 @@ describe('first-release page scope', () => {
     await user.click(screen.getByRole('button', { name: '展开测试区' }));
     await user.click(screen.getByRole('button', { name: '运行测试' }));
     expect(requested).toContain('/api/arbiter/test');
+    await user.click(screen.getByRole('button', { name: '收起测试区' }));
 
     await user.click(screen.getByRole('button', { name: 'Reviewer' }));
     expect(

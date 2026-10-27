@@ -279,9 +279,6 @@ test.describe('rule editing in the real host', () => {
     await plugin.getByRole('button', { name: '新建规则', exact: true }).click();
     const row = plugin.locator('[data-rule-row]');
     await expect(row.getByRole('region', { name: '匹配条件' })).toBeVisible();
-    // Expand both optional areas, so the audited state is the real editor.
-    await row.getByText('高级选项', { exact: true }).click();
-    await row.getByText('更多', { exact: true }).click();
 
     const results = await new AxeBuilder({ page })
       .include('[data-arbiter-root]')

@@ -109,6 +109,7 @@ export function ReviewerTestDialog(props: {
         aria-modal="true"
         aria-label={t('reviewer.test.title')}
         data-arbiter-reviewer-test=""
+        data-arbiter-surface="reviewer-test-dialog"
         style={{
           width: 'min(760px, 92vw)',
           maxHeight: '82vh',
