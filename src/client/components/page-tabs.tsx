@@ -27,7 +27,7 @@ export function PageTabs({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div className="arb:flex arb:flex-wrap arb:gap-1 arb:border-b arb:border-border-default">
+    <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-1 arb:border-b arb:border-border-default arb:pb-2">
       {TABS.map(([id, label]) => {
         const isActive = tab === id;
         return (
@@ -38,10 +38,10 @@ export function PageTabs({
               onTab(id);
             }}
             className={cn(
-              'arb:cursor-pointer arb:border-b-2 arb:bg-transparent arb:px-3 arb:py-2 arb:text-xs arb:font-medium arb:transition-colors arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent',
+              'arb:cursor-pointer arb:rounded-md arb:border-0 arb:px-3 arb:py-1.5 arb:text-xs arb:font-medium arb:transition-colors arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent',
               isActive
-                ? 'arb:border-accent arb:text-primary'
-                : 'arb:border-transparent arb:text-secondary arb:hover:text-primary',
+                ? 'arb:bg-layer-3 arb:text-primary arb:shadow-xs'
+                : 'arb:bg-transparent arb:text-secondary hover:arb:bg-layer-2/80 hover:arb:text-primary',
             )}
           >
             {t(label)}

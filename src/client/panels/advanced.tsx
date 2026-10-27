@@ -140,7 +140,7 @@ function ContextSettings({
 
   return (
     <Section title={t('advanced.contextTitle')}>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-2 lg:arb:grid-cols-3 arb:max-w-3xl">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-x-6 arb:gap-y-3.5 sm:arb:grid-cols-2 arb:max-w-2xl">
         <Field label={t('advanced.maxInput')}>
           <NumberInput
             value={draft.context.maxInputTokens}
@@ -261,7 +261,7 @@ function ContextSettings({
           </label>
         </Field>
       </div>
-      <div className="arb:max-w-3xl">
+      <div className="arb:max-w-2xl">
         <Field label={t('advanced.customRules')}>
           <textarea
             value={draft.context.customRules}
@@ -294,6 +294,7 @@ function BudgetInput({
     <TextInput
       value={budgetText ?? (value === null ? '' : String(value))}
       placeholder={placeholder}
+      className="arb:w-48"
       onChange={(text) => {
         setBudgetText(text);
         if (text.trim().length === 0) {
@@ -375,7 +376,7 @@ function AuditSettings({
 
   return (
     <Section title={t('advanced.auditTitle')}>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-2 lg:arb:grid-cols-3 arb:max-w-3xl">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-x-6 arb:gap-y-3.5 sm:arb:grid-cols-2 arb:max-w-2xl">
         <Field label={t('advanced.retentionDays')}>
           <NumberInput
             value={draft.audit.retentionDays}
@@ -414,6 +415,7 @@ function AuditSettings({
           <Select
             value={draft.breaker.mode}
             options={['off', 'preset', 'custom'] as const}
+            className="arb:w-48"
             onChange={(value) => {
               onDraft((next) => {
                 next.breaker.mode = value;
@@ -426,6 +428,7 @@ function AuditSettings({
             value={draft.breaker.preset}
             options={['strict', 'balanced', 'lenient'] as const}
             disabled={draft.breaker.mode !== 'preset'}
+            className="arb:w-48"
             onChange={(value) => {
               onDraft((next) => {
                 next.breaker.preset = value;
@@ -446,7 +449,7 @@ function AuditSettings({
         </Field>
       </div>
       {draft.breaker.mode === 'custom' ? (
-        <div className="arb:mt-3 arb:grid arb:grid-cols-1 arb:gap-3.5 sm:arb:grid-cols-3 arb:max-w-3xl">
+        <div className="arb:mt-3 arb:grid arb:grid-cols-1 arb:gap-x-6 arb:gap-y-3.5 sm:arb:grid-cols-3 arb:max-w-2xl">
           <Field label={t('advanced.consecutiveDenials')}>
             <NumberInput
               value={draft.breaker.consecutiveDenials}

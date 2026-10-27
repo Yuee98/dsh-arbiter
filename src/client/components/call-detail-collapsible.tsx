@@ -17,17 +17,27 @@ export function Collapsible(props: {
   readonly summary: string;
   readonly children: ReactNode;
   readonly level?: 'group' | 'item';
+  readonly grouped?: boolean;
 }): ReactNode {
   const [open, setOpen] = useState(false);
+  const isGrouped = props.grouped ?? false;
+
   return (
-    <div data-collapsible={props.level ?? 'group'} className="arb:my-1.5">
+    <div
+      data-collapsible={props.level ?? 'group'}
+      className={cn(
+        isGrouped
+          ? 'arb:bg-layer-2'
+          : 'arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:bg-layer-2',
+      )}
+    >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => {
           setOpen((current) => !current);
         }}
-        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:rounded arb:border arb:border-border-subtle arb:bg-layer-2/80 arb:px-2.5 arb:py-1.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors hover:arb:bg-layer-3 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
+        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:bg-layer-2 arb:px-3 arb:py-2.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors hover:arb:bg-layer-3 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
       >
         <ChevronRight
           className={cn(
@@ -39,7 +49,7 @@ export function Collapsible(props: {
         <span>{props.summary}</span>
       </button>
       {open ? (
-        <div className="arb:mt-1.5 arb:rounded-b arb:border-x arb:border-b arb:border-border-subtle arb:bg-layer-1/50 arb:p-2.5">
+        <div className="arb:border-t arb:border-border-subtle arb:bg-layer-1/50 arb:p-3">
           {props.children}
         </div>
       ) : null}

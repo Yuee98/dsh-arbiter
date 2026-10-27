@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, test } from 'vitest';
 
@@ -555,7 +555,27 @@ describe('rule list header and inline editing', () => {
     const third = await addRule(user);
 
     // All three start on force-review, so the move is allowed.
-    await user.click(within(row(third)).getByRole('button', { name: /^上移/ }));
+    for (const [i, el] of rows().entries()) {
+      el.getBoundingClientRect = () => ({
+        top: i * 100,
+        bottom: (i + 1) * 100,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 100,
+        x: 0,
+        y: i * 100,
+        toJSON: () => {},
+      });
+    }
+    const dragHandle = within(row(third)).getByRole('button', {
+      name: /^拖拽/,
+    });
+    dragHandle.focus();
+    fireEvent.keyDown(dragHandle, { code: 'Space', key: ' ' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fireEvent.keyDown(document, { code: 'ArrowUp', key: 'ArrowUp' });
+    fireEvent.keyDown(document, { code: 'Space', key: ' ' });
     expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
       first,
       third,
@@ -568,10 +588,7 @@ describe('rule list header and inline editing', () => {
       'deny',
     );
     expect(
-      within(row(second)).getByRole('button', { name: /^上移/ }),
-    ).toBeDisabled();
-    expect(
-      within(row(second)).getByRole('button', { name: /^下移/ }),
+      within(row(second)).getByRole('button', { name: /^拖拽/ }),
     ).toBeDisabled();
 
     // Two-step inline delete: first arm, then confirm
@@ -584,6 +601,51 @@ describe('rule list header and inline editing', () => {
     expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
       first,
       second,
+    ]);
+  });
+
+  test('drag and drop reordering moves rule within same verdict and collapses open rule on drag start', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const first = await addRule(user);
+    const second = await addRule(user);
+
+    // Expand the first rule
+    await user.click(within(row(first)).getByRole('button', { name: /^展开/ }));
+    expect(within(row(first)).getByText('匹配条件')).toBeInTheDocument();
+
+    for (const [i, el] of rows().entries()) {
+      el.getBoundingClientRect = () => ({
+        top: i * 100,
+        bottom: (i + 1) * 100,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 100,
+        x: 0,
+        y: i * 100,
+        toJSON: () => {},
+      });
+    }
+
+    const dragHandle = within(row(second)).getByRole('button', {
+      name: /^拖拽/,
+    });
+    dragHandle.focus();
+    fireEvent.keyDown(dragHandle, { code: 'Space', key: ' ' });
+
+    // Drag start must collapse the open rule
+    await waitFor(() => {
+      expect(within(row(first)).queryByText('匹配条件')).toBeNull();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fireEvent.keyDown(document, { code: 'ArrowUp', key: 'ArrowUp' });
+    fireEvent.keyDown(document, { code: 'Space', key: ' ' });
+
+    expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
+      second,
+      first,
     ]);
   });
 

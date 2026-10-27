@@ -252,16 +252,20 @@ function SubmittedEvidence({
       {evidenceTruncated ? (
         <div className="arb:text-xs">{t('callDetail.evidenceTruncated')}</div>
       ) : null}
-      <Collapsible
-        summary={t('callDetail.evidence', { count: evidence.length })}
-      >
-        <JsonBlock value={evidence} />
-      </Collapsible>
-      <Collapsible
-        summary={t('callDetail.materials', { count: materials.length })}
-      >
-        <JsonBlock value={materials} />
-      </Collapsible>
+      <div className="arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:divide-y arb:divide-border-subtle">
+        <Collapsible
+          summary={t('callDetail.evidence', { count: evidence.length })}
+          grouped
+        >
+          <JsonBlock value={evidence} />
+        </Collapsible>
+        <Collapsible
+          summary={t('callDetail.materials', { count: materials.length })}
+          grouped
+        >
+          <JsonBlock value={materials} />
+        </Collapsible>
+      </div>
     </div>
   );
 }

@@ -223,7 +223,7 @@ function ChatBasics({
     <div
       role="group"
       aria-label={t('reviewer.model.label')}
-      className="arb:flex arb:max-w-xl arb:flex-col arb:gap-1"
+      className="arb:flex arb:max-w-md arb:flex-col arb:gap-1"
     >
       <span className="arb:text-xs arb:text-secondary">
         {t('reviewer.model.label')}
@@ -253,7 +253,7 @@ function DecisionBasics({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div className="arb:grid arb:grid-cols-1 arb:gap-3 md:arb:grid-cols-2">
+    <div className="arb:grid arb:grid-cols-1 arb:gap-3 sm:arb:grid-cols-2 arb:max-w-xl">
       <Field label={t('reviewer.url')}>
         <TextInput
           value={draft.reviewer.decision.url}
@@ -304,7 +304,7 @@ function AdvancedGroup(props: {
       <div className="arb:text-xs arb:font-medium arb:text-secondary">
         {props.title}
       </div>
-      <div className="arb:grid arb:grid-cols-1 arb:gap-3 sm:arb:grid-cols-2 arb:max-w-2xl">
+      <div className="arb:grid arb:grid-cols-1 arb:gap-x-6 arb:gap-y-3 sm:arb:grid-cols-2 arb:max-w-xl">
         {props.children}
       </div>
     </div>
@@ -405,6 +405,7 @@ function DecisionAdvanced({
         <Select
           value={draft.reviewer.decision.costTier}
           options={COST_TIERS}
+          className="arb:w-48"
           onChange={(value) => {
             onDraft((next) => {
               next.reviewer.decision.costTier = value;

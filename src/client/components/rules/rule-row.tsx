@@ -1,8 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -24,7 +22,6 @@ import {
   VERDICT_ORDER,
   addDuplicate,
   canMoveRule,
-  moveRule,
   ruleName,
   ruleSummary,
   withRule,
@@ -163,6 +160,7 @@ export function RuleRow(props: RuleRowProps): ReactNode {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -205,6 +203,7 @@ export function RuleRow(props: RuleRowProps): ReactNode {
         bodyId={bodyId}
         attributes={attributes}
         listeners={listeners}
+        setActivatorNodeRef={setActivatorNodeRef}
         onSelect={onSelect}
         onDraft={onDraft}
         onTest={onTest}
@@ -225,7 +224,7 @@ export function RuleRow(props: RuleRowProps): ReactNode {
         </div>
       ) : null}
 
-      {expanded ? (
+      {expanded && !isDragging ? (
         <div
           id={bodyId}
           className="arb:border-t arb:border-border-subtle arb:p-3"
@@ -255,6 +254,7 @@ function RuleRowToolbar(props: {
   readonly bodyId: string;
   readonly attributes: ReturnType<typeof useSortable>['attributes'];
   readonly listeners: ReturnType<typeof useSortable>['listeners'];
+  readonly setActivatorNodeRef: (element: HTMLElement | null) => void;
   readonly onSelect: (id: string | null) => void;
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
   readonly onTest: (id: string, opener?: HTMLElement | null) => void;
@@ -275,6 +275,7 @@ function RuleRowToolbar(props: {
     bodyId,
     attributes,
     listeners,
+    setActivatorNodeRef,
     onSelect,
     onDraft,
     onTest,
@@ -314,15 +315,13 @@ function RuleRowToolbar(props: {
       className="arb:flex arb:cursor-pointer arb:flex-wrap arb:items-center arb:gap-2 arb:p-2.5 arb:transition-colors hover:arb:bg-layer-3/40"
     >
       <IconButton
+        ref={setActivatorNodeRef}
         label={t('rules.dragRule', { name })}
         icon={GripVertical}
         disabled={
           !canMoveRule(rules, index, -1) && !canMoveRule(rules, index, 1)
         }
-        className="arb:cursor-grab arb:active:cursor-grabbing"
-        onPointerDown={() => {
-          onSelect(null);
-        }}
+        className="arb:cursor-grab arb:touch-none arb:active:cursor-grabbing"
         {...attributes}
         {...listeners}
       />
@@ -389,8 +388,6 @@ function RuleRowToolbar(props: {
 
       <RuleRowActionButtons
         rule={rule}
-        index={index}
-        rules={rules}
         name={name}
         expanded={expanded}
         isArmedDelete={isArmedDelete}
@@ -408,8 +405,6 @@ function RuleRowToolbar(props: {
 
 function RuleRowActionButtons(props: {
   readonly rule: DraftRule;
-  readonly index: number;
-  readonly rules: readonly DraftRule[];
   readonly name: string;
   readonly expanded: boolean;
   readonly isArmedDelete: boolean;
@@ -424,8 +419,6 @@ function RuleRowActionButtons(props: {
   const t = useArbiterTranslation();
   const {
     rule,
-    index,
-    rules,
     name,
     expanded,
     isArmedDelete,
@@ -446,30 +439,6 @@ function RuleRowActionButtons(props: {
         onClick={(event) => {
           onDisarmDelete();
           onTest(rule.id, event.currentTarget);
-        }}
-      />
-
-      <IconButton
-        label={t('rules.moveUpRule', { name })}
-        icon={ArrowUp}
-        disabled={!canMoveRule(rules, index, -1)}
-        onClick={() => {
-          onDisarmDelete();
-          onDraft((draft) => {
-            moveRule(draft.rules, index, -1);
-          });
-        }}
-      />
-
-      <IconButton
-        label={t('rules.moveDownRule', { name })}
-        icon={ArrowDown}
-        disabled={!canMoveRule(rules, index, 1)}
-        onClick={() => {
-          onDisarmDelete();
-          onDraft((draft) => {
-            moveRule(draft.rules, index, 1);
-          });
         }}
       />
 

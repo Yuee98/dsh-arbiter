@@ -60,6 +60,7 @@ export function TextInput(props: {
   readonly placeholder?: string | undefined;
   readonly monospace?: boolean | undefined;
   readonly ariaLabel?: string | undefined;
+  readonly className?: string | undefined;
 }): ReactNode {
   return (
     <input
@@ -74,6 +75,7 @@ export function TextInput(props: {
       className={cn(
         inputClassName,
         props.monospace === true && 'arb:font-mono',
+        props.className,
       )}
     />
   );
@@ -86,6 +88,7 @@ export function NumberInput(props: {
   readonly max?: number;
   readonly step?: number;
   readonly ariaLabel?: string;
+  readonly className?: string | undefined;
 }): ReactNode {
   const [editingText, setEditingText] = useState<string | null>(null);
 
@@ -107,7 +110,7 @@ export function NumberInput(props: {
       onBlur={() => {
         setEditingText(null);
       }}
-      className={inputClassName}
+      className={cn(inputClassName, 'arb:w-48', props.className)}
     />
   );
 }
@@ -119,6 +122,7 @@ export function Select<T extends string>(props: {
   readonly ariaLabel?: string;
   readonly disabled?: boolean;
   readonly onChange: (value: T) => void;
+  readonly className?: string | undefined;
 }): ReactNode {
   return (
     <select
@@ -131,7 +135,7 @@ export function Select<T extends string>(props: {
         );
         if (option !== undefined) props.onChange(option);
       }}
-      className={inputClassName}
+      className={cn(inputClassName, props.className)}
     >
       {props.options.map((option) => (
         <option key={option} value={option}>
