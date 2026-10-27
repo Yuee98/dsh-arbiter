@@ -52,7 +52,7 @@ function PolicySettings({
       title={t('advanced.policyTitle')}
       description={t('advanced.policyDescription')}
     >
-      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5 arb:max-w-xl">
+      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5 arb:max-w-2xl">
         <div className="arb:text-xs arb:font-semibold arb:text-primary">
           {t('advanced.parameter')}
         </div>
@@ -364,6 +364,14 @@ function RetentionBytesInput({
   );
 }
 
+const BREAKER_PRESETS = {
+  strict: { consecutive: 2, window: 4, size: 10 },
+  balanced: { consecutive: 3, window: 6, size: 10 },
+  lenient: { consecutive: 5, window: 10, size: 20 },
+} as const;
+
+type BreakerOption = 'off' | 'strict' | 'balanced' | 'lenient' | 'custom';
+
 function AuditSettings({
   draft,
   onDraft,
@@ -372,6 +380,40 @@ function AuditSettings({
   readonly onDraft: (mutator: (draft: Draft) => void) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
+
+  const breakerOptions: readonly BreakerOption[] = [
+    'off',
+    'strict',
+    'balanced',
+    'lenient',
+    'custom',
+  ];
+
+  const breakerLabels: Record<BreakerOption, string> = {
+    off: t('advanced.breakerOff'),
+    strict: t('advanced.breakerStrict'),
+    balanced: t('advanced.breakerBalanced'),
+    lenient: t('advanced.breakerLenient'),
+    custom: t('advanced.breakerCustom'),
+  };
+
+  const selectedBreakerOption: BreakerOption =
+    draft.breaker.mode === 'off'
+      ? 'off'
+      : draft.breaker.mode === 'custom'
+        ? 'custom'
+        : draft.breaker.preset;
+
+  const isCustom = draft.breaker.mode === 'custom';
+  const currentPreset =
+    draft.breaker.mode === 'preset'
+      ? BREAKER_PRESETS[draft.breaker.preset]
+      : null;
+
+  const consecutive =
+    currentPreset?.consecutive ?? draft.breaker.consecutiveDenials;
+  const windowDenials = currentPreset?.window ?? draft.breaker.windowDenials;
+  const windowSize = currentPreset?.size ?? draft.breaker.windowSize;
 
   return (
     <Section title={t('advanced.auditTitle')}>
@@ -410,29 +452,6 @@ function AuditSettings({
             }}
           />
         </Field>
-        <Field label={t('advanced.breakerMode')}>
-          <Select
-            value={draft.breaker.mode}
-            options={['off', 'preset', 'custom'] as const}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.breaker.mode = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.preset')}>
-          <Select
-            value={draft.breaker.preset}
-            options={['strict', 'balanced', 'lenient'] as const}
-            disabled={draft.breaker.mode !== 'preset'}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.breaker.preset = value;
-              });
-            }}
-          />
-        </Field>
         <Field label={t('advanced.budget')}>
           <BudgetInput
             value={draft.reviewBudget}
@@ -445,47 +464,82 @@ function AuditSettings({
           />
         </Field>
       </div>
-      {draft.breaker.mode === 'custom' ? (
-        <div className="arb:mt-3 arb:grid arb:grid-cols-[repeat(auto-fit,minmax(180px,1fr))] arb:gap-x-6 arb:gap-y-3.5 arb:max-w-2xl">
-          <Field label={t('advanced.consecutiveDenials')}>
-            <NumberInput
-              value={draft.breaker.consecutiveDenials}
-              min={0}
-              max={100}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.breaker.consecutiveDenials = value;
-                });
-              }}
-            />
-          </Field>
-          <Field label={t('advanced.windowDenials')}>
-            <NumberInput
-              value={draft.breaker.windowDenials}
-              min={0}
-              max={100}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.breaker.windowDenials = value;
-                });
-              }}
-            />
-          </Field>
-          <Field label={t('advanced.windowSize')}>
-            <NumberInput
-              value={draft.breaker.windowSize}
-              min={1}
-              max={100}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.breaker.windowSize = value;
-                });
-              }}
-            />
-          </Field>
-        </div>
-      ) : null}
-      <p className="arb:m-0 arb:pt-2 arb:text-[11.5px] arb:text-tertiary">
+
+      <div className="arb:mt-3.5 arb:max-w-2xl">
+        <Field label={t('advanced.breakerMode')}>
+          <Select
+            value={selectedBreakerOption}
+            options={breakerOptions}
+            labels={breakerLabels}
+            onChange={(value) => {
+              onDraft((next) => {
+                if (value === 'off') {
+                  next.breaker.mode = 'off';
+                } else if (value === 'custom') {
+                  next.breaker.mode = 'custom';
+                } else {
+                  next.breaker.mode = 'preset';
+                  next.breaker.preset = value;
+                }
+              });
+            }}
+          />
+        </Field>
+      </div>
+
+      <div className="arb:mt-3 arb:grid arb:grid-cols-3 arb:gap-x-4 arb:max-w-2xl">
+        <Field label={t('advanced.consecutiveDenials')}>
+          <NumberInput
+            value={consecutive}
+            min={0}
+            max={100}
+            disabled={!isCustom}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.breaker.consecutiveDenials = value;
+              });
+            }}
+          />
+        </Field>
+        <Field label={t('advanced.windowDenials')}>
+          <NumberInput
+            value={windowDenials}
+            min={0}
+            max={100}
+            disabled={!isCustom}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.breaker.windowDenials = value;
+              });
+            }}
+          />
+        </Field>
+        <Field label={t('advanced.windowSize')}>
+          <NumberInput
+            value={windowSize}
+            min={1}
+            max={100}
+            disabled={!isCustom}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.breaker.windowSize = value;
+              });
+            }}
+          />
+        </Field>
+      </div>
+
+      <p className="arb:m-0 arb:mt-2 arb:max-w-2xl arb:text-[11.5px] arb:text-secondary">
+        {draft.breaker.mode === 'off'
+          ? t('advanced.breakerHelpOff')
+          : t('advanced.breakerHelpTripped', {
+              consecutive,
+              windowDenials,
+              windowSize,
+            })}
+      </p>
+
+      <p className="arb:m-0 arb:pt-2 arb:max-w-2xl arb:text-[11.5px] arb:text-tertiary">
         {t('advanced.auditDescription')}
       </p>
     </Section>

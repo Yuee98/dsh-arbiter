@@ -88,6 +88,7 @@ export function NumberInput(props: {
   readonly max?: number;
   readonly step?: number;
   readonly ariaLabel?: string;
+  readonly disabled?: boolean;
   readonly className?: string | undefined;
 }): ReactNode {
   const [editingText, setEditingText] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export function NumberInput(props: {
     <input
       type="number"
       aria-label={props.ariaLabel}
+      disabled={props.disabled}
       value={editingText ?? String(props.value)}
       min={props.min}
       max={props.max}
@@ -212,7 +214,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={props.disabled}
         aria-label={props['aria-label']}
         className={cn(
-          'arb:inline-flex arb:h-[30px] arb:items-center arb:justify-center arb:rounded-md arb:px-3 arb:text-xs arb:font-medium arb:transition-colors arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent arb:disabled:cursor-default arb:disabled:opacity-50',
+          'arb:inline-flex arb:h-[30px] arb:items-center arb:justify-center arb:gap-1.5 arb:rounded-md arb:px-3 arb:text-xs arb:font-medium arb:transition-colors arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent arb:disabled:cursor-default arb:disabled:opacity-50',
           props.tone === 'primary' &&
             'arb:border arb:border-accent arb:bg-accent arb:text-accent-foreground arb:hover:opacity-90',
           props.tone === 'danger' &&

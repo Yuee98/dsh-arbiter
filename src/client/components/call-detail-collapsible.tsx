@@ -41,7 +41,7 @@ export function Collapsible(props: {
     <div
       data-collapsible={props.level ?? 'group'}
       className={cn(
-        'arb:border-b arb:border-border-subtle last:arb:border-b-0',
+        'arb:border-b arb:border-border-subtle arb:last:border-b-0',
         props.className,
       )}
     >
