@@ -14,20 +14,22 @@ import {
   coverageView,
   finalPath,
   ruleConclusion,
+  verdictLabel,
 } from './rule-test-model.js';
 import type { ConditionView } from './rule-test-model.js';
+import { CoverageBlock, PriorityBlock } from './rule-test-priority.js';
 
-/** A localized verdict label; the protocol value itself stays visible. */
-export function verdictLabel(verdict: RuleVerdict, t: Translate): string {
+/** What one verdict does to the call, as opposed to how severe it sounds. */
+function behaviorText(verdict: RuleVerdict, t: Translate): string {
   switch (verdict) {
     case 'allow':
-      return t('rules.verdictOption.allow');
+      return t('rules.behaviorOption.allow');
     case 'deny':
-      return t('rules.verdictOption.deny');
+      return t('rules.behaviorOption.deny');
     case 'force-ask':
-      return t('rules.verdictOption.forceAsk');
+      return t('rules.behaviorOption.forceAsk');
     case 'force-review':
-      return t('rules.verdictOption.forceReview');
+      return t('rules.behaviorOption.forceReview');
   }
 }
 
@@ -150,6 +152,19 @@ export function RuleTestConclusion(props: {
               })
             : t('ruleTest.pathReviewDefault')}
         </strong>
+        {/* The verdict name is not the behavior: saying what the engine does with
+            it (no model, or always the model) is what makes the path readable. */}
+        <span
+          className="arb:text-xs arb:text-primary"
+          data-testid="rule-test-path-behavior"
+          data-arbiter-test-path-behavior={
+            path.kind === 'rule' ? path.verdict : 'review(default)'
+          }
+        >
+          {path.kind === 'rule'
+            ? behaviorText(path.verdict, t)
+            : t('ruleTest.pathBehaviorReview')}
+        </span>
         <span className="arb:text-xs arb:text-secondary">
           {pathReasonText(path, coverage, t)}
         </span>
@@ -244,6 +259,8 @@ export function RuleTestDetails(props: {
         {selected === null ? null : (
           <ConditionList result={selected} name={props.rule?.name ?? null} />
         )}
+        <PriorityBlock result={props.result} rule={props.rule} />
+        <CoverageBlock result={props.result} />
         <ShadowList
           shadowed={coverage.shadowed}
           unknown={coverage.unknown}

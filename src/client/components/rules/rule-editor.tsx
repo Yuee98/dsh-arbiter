@@ -9,12 +9,16 @@ import { issueText } from '../../view-issues.js';
 import { Button, RadioGroup, TextInput } from '../controls.js';
 import { cn } from '../ui/cn.js';
 import {
+  VERDICT_BEHAVIOR_KEY,
   addCondition,
+  isAdvancedCondition,
   listText,
   listValue,
   pendingExactKey,
   removeCondition,
   ruleFieldLabel,
+  scopeLabel,
+  scopeView,
   withCondition,
 } from './draft.js';
 import type {
@@ -73,6 +77,8 @@ export function RuleEditor(props: {
         {t('rules.idDetail', { id: rule.id })}
       </p>
 
+      <BehaviorNote rule={rule} />
+
       <ScopeFields rule={rule} onChange={onChange} />
 
       <section
@@ -105,11 +111,26 @@ export function RuleEditor(props: {
             {t('rules.oneConditionHeading')}
           </h4>
         )}
+        {rule.conditions.length > 1 ? (
+          // Adding a condition is the moment the reader has to know what the
+          // default does; stating it here costs one line and prevents a rule
+          // that silently means "all" from being read as "any".
+          <p role="note" className="arb:m-0 arb:text-xs arb:text-tertiary">
+            {t('rules.combineDefaultNote')}
+          </p>
+        ) : null}
         {rule.conditions.length > 1 &&
         (rule.combine ?? 'all') === 'all' &&
         crossesStructuralTargets(rule) ? (
           <p role="note" className="arb:m-0 arb:text-xs arb:text-tertiary">
             {t('rules.combineCrossTarget')}
+          </p>
+        ) : null}
+        {rule.conditions.some(isAdvancedCondition) ? (
+          // Naming what is not the plain exact-whole-value form keeps the
+          // ordinary form readable without removing any of the capability.
+          <p role="note" className="arb:m-0 arb:text-xs arb:text-tertiary">
+            {t('rules.advancedConditionNote')}
           </p>
         ) : null}
         {rule.conditions.length === 0 ? (
@@ -183,23 +204,33 @@ export function RuleEditor(props: {
         />
       </label>
 
-      {/* Flatten hint in RuleEditor without details/summary */}
-      <label className="arb:flex arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
-        <span>{t('rules.hint')}</span>
-        <TextInput
-          ariaLabel={t('rules.hint')}
-          value={rule.hint ?? ''}
-          onChange={(value) => {
-            onChange((next) => {
-              if (value.length === 0) delete next.hint;
-              else next.hint = value;
-            });
-          }}
-        />
-        <span className="arb:text-[11.5px] arb:text-tertiary">
-          {t('rules.hintHint')}
-        </span>
-      </label>
+      {/* A hint only steers what the reviewer looks at, so it lives with the
+          other optional settings rather than beside the ordinary match fields.
+          It stays reachable in one click and never blocks forced review. */}
+      <details
+        data-rule-advanced=""
+        className="arb:rounded-md arb:border arb:border-border-subtle arb:p-2.5"
+      >
+        <summary className="arb:cursor-pointer arb:text-xs arb:font-semibold arb:text-primary">
+          {t('rules.advanced')}
+        </summary>
+        <label className="arb:mt-2 arb:flex arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
+          <span>{t('rules.hint')}</span>
+          <TextInput
+            ariaLabel={t('rules.hint')}
+            value={rule.hint ?? ''}
+            onChange={(value) => {
+              onChange((next) => {
+                if (value.length === 0) delete next.hint;
+                else next.hint = value;
+              });
+            }}
+          />
+          <span className="arb:text-[11.5px] arb:text-tertiary">
+            {t('rules.hintHint')}
+          </span>
+        </label>
+      </details>
 
       <RuleIssueList issues={issues} t={t} />
     </div>
@@ -212,6 +243,7 @@ function ScopeFields(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   const { rule, onChange } = props;
+  const scope = scopeView(rule);
 
   function setList(field: 'tools' | 'agents', value: string): void {
     onChange((next) => {
@@ -237,6 +269,19 @@ function ScopeFields(props: {
       <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
         {t('rules.scopeTitle')}
       </h4>
+      {/* The effective scope is stated, not implied by empty inputs: leaving both
+          fields blank means "every tool and every agent", which is the opposite
+          of what an empty-looking form suggests. */}
+      <p
+        role="note"
+        data-rule-scope={scope.kind}
+        className={cn(
+          'arb:m-0 arb:text-xs',
+          scope.kind === 'unscoped' ? 'arb:text-secondary' : 'arb:text-primary',
+        )}
+      >
+        {scopeLabel(scope, t)}
+      </p>
       <div className="arb:flex arb:flex-wrap arb:gap-2.5">
         <label className="arb:flex arb:min-w-[180px] arb:flex-1 arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
           <span>{t('rules.tools')}</span>
@@ -261,6 +306,37 @@ function ScopeFields(props: {
           />
         </label>
       </div>
+    </section>
+  );
+}
+
+/**
+ * What the selected behavior does, and how it relates to the other two layers.
+ *
+ * The four verdicts are not four severities of the same thing. `deny`,
+ * `force-ask` and a covering `allow` are decided without the model at all, while
+ * `force-review` always sends the call to it — a distinction the option labels
+ * alone cannot carry. The division sentence states once that natural-language
+ * policy makes the judgement, a deterministic rule only forces the path, and a
+ * hint only steers attention.
+ */
+function BehaviorNote(props: { readonly rule: DraftRule }): ReactNode {
+  const t = useArbiterTranslation();
+  return (
+    <section
+      className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:border arb:border-border-subtle arb:p-2.5"
+      aria-label={t('rules.behaviorTitle')}
+    >
+      <p
+        role="note"
+        data-rule-behavior={props.rule.verdict}
+        className="arb:m-0 arb:text-xs arb:text-primary"
+      >
+        {t(VERDICT_BEHAVIOR_KEY[props.rule.verdict])}
+      </p>
+      <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
+        {t('rules.verdictDivision')}
+      </p>
     </section>
   );
 }

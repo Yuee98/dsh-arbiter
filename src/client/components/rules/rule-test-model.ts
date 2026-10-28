@@ -16,6 +16,7 @@ import type {
   RuleVerdict,
   SessionKind,
 } from '../../../types.js';
+import type { Translate } from '../../i18n.js';
 import type { DraftRule, RuleTestResultView } from '../../view-types.js';
 
 /** The two input shapes the tester accepts. */
@@ -212,6 +213,203 @@ export function coverageView(result: RuleTestResultView): CoverageView {
       (entry) => entry.verdict === 'allow' && entry.outcome === 'match',
     ),
   };
+}
+
+/** A localized verdict label; the protocol value itself stays visible. */
+export function verdictLabel(verdict: RuleVerdict, t: Translate): string {
+  switch (verdict) {
+    case 'allow':
+      return t('rules.verdictOption.allow');
+    case 'deny':
+      return t('rules.verdictOption.deny');
+    case 'force-ask':
+      return t('rules.verdictOption.forceAsk');
+    case 'force-review':
+      return t('rules.verdictOption.forceReview');
+  }
+}
+
+/**
+ * One level of the fixed whole-config precedence, as this answer used it.
+ *
+ * `decision` says what this level contributed to *this* call: the winning level,
+ * a level whose rule matched but was outranked, or a level that never applied.
+ * It is read from the evaluator's own path and outcomes, so the list explains
+ * priority without recomputing it.
+ */
+export interface PriorityLevel {
+  readonly kind: 'rule' | 'fallback';
+  readonly verdict: RuleVerdict | null;
+  readonly decision: 'effective' | 'matched' | 'blocked' | 'none';
+  /** Ids at this level that matched, in evaluator order. */
+  readonly ruleIds: readonly string[];
+  /** True when the focused rule sits at this level and took part. */
+  readonly focused: boolean;
+}
+
+/** One command text the call offered, and whether an allow condition named it. */
+export interface CoverageNode {
+  readonly text: string;
+  readonly named: boolean;
+}
+
+/**
+ * How the evaluator classified coverage, taken from its own path.
+ *
+ * This is deliberately not re-derived: `matches[].effective` is set before the
+ * final path is chosen, so a matched `allow` can carry `effective: true` while
+ * the call actually went to `review(default)` because it did not cover
+ * everything. Only `pathDetail` says what coverage was credited, so only
+ * `pathDetail` decides which sentence the panel may state.
+ */
+export type CoverageState =
+  'complete' | 'partial' | 'incomplete' | 'not-allow' | 'no-structure';
+
+/**
+ * What the call offered and what the evaluator credited an `allow` with.
+ *
+ * A composite command is the case the contract calls out: allowing `gh pr view`
+ * says nothing about the `rm` after `&&`. The node list is evidence of which
+ * commands an `allow` condition named; it is never used to compute the
+ * classification, which comes from `pathDetail` and `parse.completeness`.
+ *
+ * The texts come from the parse the evaluator used (`normalization.commands`),
+ * never from re-parsing here: a second parser could describe a different command
+ * than the one that decided the answer.
+ */
+export interface CoverageDetail {
+  /** Command texts the parse published, with whether an allow condition named them. */
+  readonly nodes: readonly CoverageNode[];
+  readonly total: number;
+  readonly namedCount: number;
+  /** The classification the evaluator actually produced. */
+  readonly state: CoverageState;
+  /** True when this call has a shell structure at all. */
+  readonly structural: boolean;
+}
+
+/**
+ * The command texts an `allow` condition actually named.
+ *
+ * Read from the rule outcomes rather than from `matches[].effective`: a shadowed
+ * allow names commands it was never allowed to cover, and hiding it would remove
+ * the evidence for why the call was not released.
+ */
+function allowNamedTexts(result: RuleTestResultView): ReadonlySet<string> {
+  const named = new Set<string>();
+  for (const entry of result.rules) {
+    if (entry.verdict !== 'allow' || entry.outcome !== 'match') continue;
+    for (const condition of entry.conditions) {
+      if (condition.outcome !== 'match') continue;
+      // `witnessValues` is authoritative for an `all` conjunction: a condition
+      // that matched a node no sibling matched does not cover it.
+      for (const text of condition.witnessValues ?? []) named.add(text);
+      // An `any` rule covers what each matched condition named. Selected values
+      // keep their JSON types, so only text is comparable to a command.
+      if (condition.witnessValues !== undefined) continue;
+      for (const value of condition.matchedValues ?? [])
+        if (typeof value === 'string') named.add(value);
+      if (condition.matchedValue !== undefined)
+        named.add(condition.matchedValue);
+    }
+  }
+  return named;
+}
+
+export function coverageDetail(result: RuleTestResultView): CoverageDetail {
+  const namedTexts = allowNamedTexts(result);
+  const texts = (result.normalization?.commands ?? []).map(
+    (command) => command.text,
+  );
+  const nodes: CoverageNode[] = [];
+  for (const text of texts) {
+    if (nodes.some((node) => node.text === text)) continue;
+    nodes.push({ text, named: namedTexts.has(text) });
+  }
+  const structural = nodes.length > 0;
+  return {
+    nodes,
+    total: nodes.length,
+    namedCount: nodes.filter((node) => node.named).length,
+    state: coverageState(finalPath(result), structural),
+    structural,
+  };
+}
+
+/**
+ * Which coverage sentence the evaluator's own answer supports.
+ *
+ * `partial-allow` and `incomplete` are distinct on purpose: the first means the
+ * allows that matched did not name every command, the second means the structure
+ * itself was not fully read. Collapsing them would claim a command list for a
+ * parse that never produced one.
+ */
+function coverageState(path: FinalPath, structural: boolean): CoverageState {
+  if (path.kind === 'rule' && path.verdict === 'allow') return 'complete';
+  if (path.kind === 'rule') return 'not-allow';
+  if (path.reason === 'incomplete') return 'incomplete';
+  if (path.reason === 'partial-allow')
+    return structural ? 'partial' : 'no-structure';
+  return 'not-allow';
+}
+
+/**
+ * The fixed precedence, in the order the evaluator applies it.
+ *
+ * `review(default)` is the fallback path, not a verdict a rule can carry, so it
+ * closes the list. Each level reports what it did for this call; nothing here is
+ * derived from a pattern comparison, only from the evaluator's outcomes.
+ */
+export function priorityView(
+  result: RuleTestResultView,
+  focusedRuleId: string | null,
+): readonly PriorityLevel[] {
+  const path = finalPath(result);
+  const order: (RuleVerdict | null)[] = [
+    'deny',
+    'force-ask',
+    'force-review',
+    'allow',
+    null,
+  ];
+  return order.map((verdict) => {
+    if (verdict === null) {
+      const effective = path.kind === 'review';
+      return {
+        kind: 'fallback' as const,
+        verdict: null,
+        decision: effective ? ('effective' as const) : ('none' as const),
+        ruleIds: [],
+        focused: false,
+      };
+    }
+    // A level matched when any rule at it matched, whether or not it decided.
+    const matchedIds = result.rules
+      .filter((entry) => entry.verdict === verdict && entry.outcome === 'match')
+      .map((entry) => entry.id);
+    const effective =
+      path.kind === 'rule' &&
+      path.verdict === verdict &&
+      matchedIds.includes(path.ruleId);
+    return {
+      kind: 'rule' as const,
+      verdict,
+      decision: effective
+        ? ('effective' as const)
+        : matchedIds.length > 0
+          ? ('matched' as const)
+          : ('none' as const),
+      ruleIds: matchedIds,
+      focused:
+        focusedRuleId !== null &&
+        result.rules.some(
+          (entry) =>
+            entry.id === focusedRuleId &&
+            entry.verdict === verdict &&
+            entry.outcome !== 'unknown',
+        ),
+    };
+  });
 }
 
 /**
