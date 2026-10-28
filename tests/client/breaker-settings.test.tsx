@@ -20,7 +20,7 @@ function baseHandlers(): void {
 }
 
 describe('circuit-breaker explanation contract and dynamic settings', () => {
-  test('locale resource strings accurately describe the 30-minute window and recorded denials without claiming windowSize bounds rolling calls', () => {
+  test('locale resource strings accurately describe the 1-hour accumulated blocking events and 30-minute window without claiming consecutive operations or windowSize call window', () => {
     const zh = localeResources.zh.advanced;
     const en = localeResources.en.advanced;
 
@@ -36,16 +36,28 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
     expect(en.breakerHelpTripped).not.toContain('{windowSize}');
     expect(en.breakerHelpTripped).not.toContain('call window');
 
-    // Both locales must accurately reflect the 30-minute timestamp window
+    // Neither locale may claim the first threshold requires consecutive denied operations
+    expect(zh.breakerHelpTripped).not.toContain('连续');
+    expect(en.breakerHelpTripped.replace('{consecutive}', '')).not.toContain(
+      'consecutive',
+    );
+
+    // Both locales must accurately reflect the 1-hour and 30-minute timestamp windows
+    expect(zh.breakerHelpTripped).toContain('1 小时');
     expect(zh.breakerHelpTripped).toContain('30 分钟');
+    expect(en.breakerHelpTripped).toContain('1 hour');
     expect(en.breakerHelpTripped).toContain('30 minutes');
 
-    // Both locales must accurately state recorded denials, not solely model review denials
-    expect(zh.breakerHelpTripped).toContain('操作被拒绝');
-    expect(en.breakerHelpTripped).toContain('operations are denied');
+    // Both locales must state blocking events (including denials and aborted approvals)
+    expect(zh.breakerHelpTripped).toContain('阻断事件');
+    expect(en.breakerHelpTripped).toContain('blocking events');
 
-    expect(zh.breakerHelpOff).not.toContain('审查拒绝');
-    expect(en.breakerHelpOff).not.toContain('review denials');
+    // Both locales must state approval reset
+    expect(zh.breakerHelpTripped).toContain('放行后重置');
+    expect(en.breakerHelpTripped).toContain('reset on approval');
+
+    expect(zh.breakerHelpOff).not.toContain('连续');
+    expect(en.breakerHelpOff).not.toContain('consecutive');
   });
 
   test('UI reflects dynamic thresholds across presets, custom inputs, and disabled mode in Chinese', async () => {
@@ -55,28 +67,28 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
     await user.click(await screen.findByRole('button', { name: '策略与高级' }));
     await screen.findByRole('heading', { name: '审计与熔断' });
 
-    // 1. Default balanced preset: 3 consecutive, 6 in 30 minutes
+    // 1. Default balanced preset: 3 events in 1 hour, 6 in 30 minutes
     expect(
       screen.getByText(
-        '当连续 3 次操作被拒绝，或在 30 分钟内累计被拒绝达 6 次时，将触发熔断保护并暂停自动放行。',
+        '当 1 小时内累计记录 3 次阻断事件（含拒绝与放弃审批），或 30 分钟内累计达 6 次时，将触发熔断保护并暂停自动放行；审查或人工放行后重置。',
       ),
     ).toBeInTheDocument();
 
     const breakerSelect = screen.getByLabelText('熔断模式');
 
-    // 2. Strict preset: 2 consecutive, 4 in 30 minutes
+    // 2. Strict preset: 2 in 1 hour, 4 in 30 minutes
     await user.selectOptions(breakerSelect, 'strict');
     expect(
       screen.getByText(
-        '当连续 2 次操作被拒绝，或在 30 分钟内累计被拒绝达 4 次时，将触发熔断保护并暂停自动放行。',
+        '当 1 小时内累计记录 2 次阻断事件（含拒绝与放弃审批），或 30 分钟内累计达 4 次时，将触发熔断保护并暂停自动放行；审查或人工放行后重置。',
       ),
     ).toBeInTheDocument();
 
-    // 3. Lenient preset: 5 consecutive, 10 in 30 minutes
+    // 3. Lenient preset: 5 in 1 hour, 10 in 30 minutes
     await user.selectOptions(breakerSelect, 'lenient');
     expect(
       screen.getByText(
-        '当连续 5 次操作被拒绝，或在 30 分钟内累计被拒绝达 10 次时，将触发熔断保护并暂停自动放行。',
+        '当 1 小时内累计记录 5 次阻断事件（含拒绝与放弃审批），或 30 分钟内累计达 10 次时，将触发熔断保护并暂停自动放行；审查或人工放行后重置。',
       ),
     ).toBeInTheDocument();
 
@@ -92,14 +104,14 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
 
     expect(
       screen.getByText(
-        '当连续 7 次操作被拒绝，或在 30 分钟内累计被拒绝达 12 次时，将触发熔断保护并暂停自动放行。',
+        '当 1 小时内累计记录 7 次阻断事件（含拒绝与放弃审批），或 30 分钟内累计达 12 次时，将触发熔断保护并暂停自动放行；审查或人工放行后重置。',
       ),
     ).toBeInTheDocument();
 
     // 5. Off mode
     await user.selectOptions(breakerSelect, 'off');
     expect(
-      screen.getByText('熔断保护已关闭，连续拒绝不会自动阻断执行。'),
+      screen.getByText('熔断保护已关闭，阻断事件不会自动暂停自动放行。'),
     ).toBeInTheDocument();
   });
 
@@ -117,7 +129,7 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
     // Default balanced preset
     expect(
       screen.getByText(
-        'Trips circuit breaker protection when 3 consecutive operations are denied, or when denials reach 6 within 30 minutes, pausing auto-approvals.',
+        'Trips circuit breaker protection when 3 blocking events (denials or aborted approvals) accumulate within 1 hour, or 6 within 30 minutes, pausing auto-approvals; reset on approval.',
       ),
     ).toBeInTheDocument();
 
@@ -135,7 +147,7 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
 
     expect(
       screen.getByText(
-        'Trips circuit breaker protection when 9 consecutive operations are denied, or when denials reach 15 within 30 minutes, pausing auto-approvals.',
+        'Trips circuit breaker protection when 9 blocking events (denials or aborted approvals) accumulate within 1 hour, or 15 within 30 minutes, pausing auto-approvals; reset on approval.',
       ),
     ).toBeInTheDocument();
 
@@ -143,7 +155,7 @@ describe('circuit-breaker explanation contract and dynamic settings', () => {
     await user.selectOptions(breakerSelect, 'off');
     expect(
       screen.getByText(
-        'Circuit breaker protection is disabled; repeated denials will not trip automated gating.',
+        'Circuit breaker protection is disabled; recorded blocking events will not trip automated gating.',
       ),
     ).toBeInTheDocument();
   });
