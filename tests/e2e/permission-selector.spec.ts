@@ -220,112 +220,119 @@ async function settledSession(
   return session;
 }
 
-test('the arbiter selector owns the permission seat and drives the real session state', async ({
-  page,
-}, testInfo) => {
-  const steps = new Steps();
-  const caseHost: CaseHost = await createCaseHost(
-    testInfo.outputPath('dsh-selector'),
-  );
-  try {
-    const host = caseHost.current();
-    await openHost(page, host);
-    await sendPrompt(page, 'SEL-WARM RUN echo selector-warmup');
-    const session = await settledSession(host, 'SEL-WARM');
-    const sessionId = session.sessionId;
-    steps.add('session-settled', { sessionId });
-
-    // The seat exists, and the arbiter occupant is the only thing in it.
-    const seat = permissionSeat(page);
-    await expect(seat).toBeVisible();
-    await expect(arbiterControl(page)).toHaveCount(1);
-    await expect(arbiterControl(page)).toBeVisible();
-    expect(await nativeControlPresent(page)).toBe(false);
-    steps.add('seat-occupied', {
-      seats: await seat.count(),
-      arbiter: await arbiterControl(page).count(),
-      nativeControl: false,
-    });
-    // The seat itself is `display: contents`, so its own box has no pixels;
-    // the arbiter occupant is the element that is actually rendered.
-    await testInfo.attach('selector-initial.png', {
-      body: await arbiterControl(page).screenshot(),
-      contentType: 'image/png',
-    });
-
-    // A fresh session is not admitted: the control says so, and the backend
-    // agrees. This is the "installing must not take over" side of the contract.
-    expect(await admissionView(host, sessionId)).toMatchObject({
-      enabled: false,
-      managed: false,
-    });
-    const trigger = arbiterTrigger(page);
-    await expect(trigger).toBeVisible();
-    await expect(trigger).toContainText('工作区内修改');
-
-    // Enable through the control, then read the backend answer back.
-    await openPermissionMenu(page);
-    const menu = permissionMenu(page);
-    await testInfo.attach('selector-menu.png', {
-      body: await page.screenshot({ fullPage: false }),
-      contentType: 'image/png',
-    });
-    await menu.getByRole('menuitem', { name: '自动审查（Arbiter）' }).click();
-    const enabled = await waitForAdmission(
-      host,
-      sessionId,
-      (admission) => admission['enabled'] === true,
+test(
+  'the arbiter selector owns the permission seat and drives the real session state',
+  {
+    // The only CI job that runs on a real host is the `@smoke` subset, and this
+    // case is what proves the host actually publishes the primitives the seat
+    // renders — the packed-consumer stub cannot show that.
+    tag: '@smoke',
+  },
+  async ({ page }, testInfo) => {
+    const steps = new Steps();
+    const caseHost: CaseHost = await createCaseHost(
+      testInfo.outputPath('dsh-selector'),
     );
-    expect(enabled).not.toBeNull();
-    steps.add('enabled', enabled);
-    // The visible label is the native one; the boundary rides the tooltip and
-    // the accessible name, never the single-line label. The trigger settles
-    // only once the confirmed answer arrives, so this waits for it.
-    await expect(arbiterTrigger(page)).toHaveText('自动审查（Arbiter）');
-    await expect(arbiterTrigger(page)).toHaveAttribute(
-      'title',
-      '自动审查（Arbiter） · 工作区写入',
-    );
-    await testInfo.attach('selector-enabled.png', {
-      body: await arbiterControl(page).screenshot(),
-      contentType: 'image/png',
-    });
+    try {
+      const host = caseHost.current();
+      await openHost(page, host);
+      await sendPrompt(page, 'SEL-WARM RUN echo selector-warmup');
+      const session = await settledSession(host, 'SEL-WARM');
+      const sessionId = session.sessionId;
+      steps.add('session-settled', { sessionId });
 
-    // The enable is durable in the session log, not only in the browser.
-    const logged = await waitForSession(
-      host.home,
-      (candidate) =>
-        candidate.sessionId === sessionId &&
-        candidate.events.some(
-          (event) => event.type === 'plugin:arbiter/admission',
-        ),
-    );
-    expect(lastAdmission(logged?.events ?? [])).toMatchObject({
-      enabled: true,
-    });
+      // The seat exists, and the arbiter occupant is the only thing in it.
+      const seat = permissionSeat(page);
+      await expect(seat).toBeVisible();
+      await expect(arbiterControl(page)).toHaveCount(1);
+      await expect(arbiterControl(page)).toBeVisible();
+      expect(await nativeControlPresent(page)).toBe(false);
+      steps.add('seat-occupied', {
+        seats: await seat.count(),
+        arbiter: await arbiterControl(page).count(),
+        nativeControl: false,
+      });
+      // The seat itself is `display: contents`, so its own box has no pixels;
+      // the arbiter occupant is the element that is actually rendered.
+      await testInfo.attach('selector-initial.png', {
+        body: await arbiterControl(page).screenshot(),
+        contentType: 'image/png',
+      });
 
-    // Leave through the same control. The native exit is a host preset, not a
-    // dedicated row: under guarded the host value is already `workspace-write`,
-    // so this same-value selection is exactly the case that must still send the
-    // command instead of taking the native no-op path.
-    await openPermissionMenu(page);
-    await menuItem(page, '工作区内修改').click();
-    const disabled = await waitForAdmission(
-      host,
-      sessionId,
-      (admission) => admission['enabled'] === false,
-    );
-    expect(disabled).not.toBeNull();
-    steps.add('disabled', disabled);
-    await expect(arbiterTrigger(page)).toBeVisible();
-  } finally {
-    await testInfo.attach('selector-steps.json', {
-      body: steps.json(),
-      contentType: 'application/json',
-    });
-    await caseHost.dispose();
-  }
-});
+      // A fresh session is not admitted: the control says so, and the backend
+      // agrees. This is the "installing must not take over" side of the contract.
+      expect(await admissionView(host, sessionId)).toMatchObject({
+        enabled: false,
+        managed: false,
+      });
+      const trigger = arbiterTrigger(page);
+      await expect(trigger).toBeVisible();
+      await expect(trigger).toContainText('工作区内修改');
+
+      // Enable through the control, then read the backend answer back.
+      await openPermissionMenu(page);
+      const menu = permissionMenu(page);
+      await testInfo.attach('selector-menu.png', {
+        body: await page.screenshot({ fullPage: false }),
+        contentType: 'image/png',
+      });
+      await menu.getByRole('menuitem', { name: '自动审查（Arbiter）' }).click();
+      const enabled = await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === true,
+      );
+      expect(enabled).not.toBeNull();
+      steps.add('enabled', enabled);
+      // The visible label is the native one; the boundary rides the tooltip and
+      // the accessible name, never the single-line label. The trigger settles
+      // only once the confirmed answer arrives, so this waits for it.
+      await expect(arbiterTrigger(page)).toHaveText('自动审查（Arbiter）');
+      await expect(arbiterTrigger(page)).toHaveAttribute(
+        'title',
+        '自动审查（Arbiter） · 工作区写入',
+      );
+      await testInfo.attach('selector-enabled.png', {
+        body: await arbiterControl(page).screenshot(),
+        contentType: 'image/png',
+      });
+
+      // The enable is durable in the session log, not only in the browser.
+      const logged = await waitForSession(
+        host.home,
+        (candidate) =>
+          candidate.sessionId === sessionId &&
+          candidate.events.some(
+            (event) => event.type === 'plugin:arbiter/admission',
+          ),
+      );
+      expect(lastAdmission(logged?.events ?? [])).toMatchObject({
+        enabled: true,
+      });
+
+      // Leave through the same control. The native exit is a host preset, not a
+      // dedicated row: under guarded the host value is already `workspace-write`,
+      // so this same-value selection is exactly the case that must still send the
+      // command instead of taking the native no-op path.
+      await openPermissionMenu(page);
+      await menuItem(page, '工作区内修改').click();
+      const disabled = await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === false,
+      );
+      expect(disabled).not.toBeNull();
+      steps.add('disabled', disabled);
+      await expect(arbiterTrigger(page)).toBeVisible();
+    } finally {
+      await testInfo.attach('selector-steps.json', {
+        body: steps.json(),
+        contentType: 'application/json',
+      });
+      await caseHost.dispose();
+    }
+  },
+);
 
 test('a second connection change and a refresh both adopt the backend state', async ({
   page,
