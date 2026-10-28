@@ -91,6 +91,8 @@ export function PermissionSelector(props: {
     t,
   );
 
+  const item = items.find((entry) => entry.id === confirming) ?? null;
+
   useEffect(() => {
     if (!open && confirming === null) return;
     if (interactive) return;
@@ -98,6 +100,16 @@ export function PermissionSelector(props: {
     setConfirming(null);
     setAcknowledged(false);
   }, [confirming, interactive, open]);
+
+  // A confirmation whose target left the catalog is cancelled for real, not
+  // merely hidden: keeping the state would let the dialog reappear with its
+  // acknowledgement still ticked if the host restored the option later. The
+  // native selector resets on the same condition.
+  useEffect(() => {
+    if (confirming === null || item !== null) return;
+    setConfirming(null);
+    setAcknowledged(false);
+  }, [confirming, item]);
 
   /**
    * Apply one selection.
@@ -130,8 +142,6 @@ export function PermissionSelector(props: {
     }
     admission.chooseHostPreset(id).catch(() => undefined);
   };
-
-  const item = items.find((entry) => entry.id === confirming) ?? null;
 
   return (
     <span
@@ -210,7 +220,6 @@ function toHostItem(item: SelectorItem): {
   readonly id: string;
   readonly label: string;
   readonly icon?: ReactNode;
-  readonly danger?: boolean;
   readonly disabled?: boolean;
 } {
   const icon = glyph(item.icon);
@@ -218,22 +227,27 @@ function toHostItem(item: SelectorItem): {
     id: item.id,
     label: item.label,
     ...(icon === null ? {} : { icon }),
-    ...(item.danger ? { danger: true } : {}),
     ...(item.disabled ? { disabled: true } : {}),
   };
 }
 
-/** The host's own glyph for one preset family; `null` means none. */
-function glyph(kind: PresetIconKind | null): ReactNode {
+/**
+ * The host's own glyph for one preset family; `null` means none.
+ *
+ * `size` is only set for the trigger, whose native glyph is 14px; menu rows keep
+ * the component default, as they do in the host's own selector.
+ */
+function glyph(kind: PresetIconKind | null, size?: number): ReactNode {
+  const props = size === undefined ? {} : { size };
   switch (kind) {
     case 'read-only':
-      return <hostPrimitives.PermissionIconReadOnlyRegular />;
+      return <hostPrimitives.PermissionIconReadOnlyRegular {...props} />;
     case 'workspace-write':
-      return <hostPrimitives.PermissionIconWorkspaceWriteRegular />;
+      return <hostPrimitives.PermissionIconWorkspaceWriteRegular {...props} />;
     case 'danger-full-access':
-      return <hostPrimitives.PermissionIconFullAccessRegular />;
+      return <hostPrimitives.PermissionIconFullAccessRegular {...props} />;
     case 'arbiter':
-      return <hostPrimitives.PermissionIconAutoReviewRegular />;
+      return <hostPrimitives.PermissionIconAutoReviewRegular {...props} />;
     case null:
       return null;
   }
@@ -260,6 +274,7 @@ function Trigger(props: {
   readonly boundary: string | null;
   readonly onClick: () => void;
 }): ReactNode {
+  const icon = glyph(presetKindOf(props.preset), 14);
   return (
     <button
       type="button"
@@ -271,12 +286,23 @@ function Trigger(props: {
       title={props.title}
       disabled={props.disabled}
       onClick={props.onClick}
-      className="arb:inline-flex arb:h-7 arb:max-w-[220px] arb:cursor-pointer arb:items-center arb:gap-1 arb:rounded-sm arb:border-0 arb:bg-transparent arb:py-0 arb:pr-1 arb:pl-2 arb:text-[13px] arb:font-medium arb:leading-5 arb:text-secondary arb:hover:bg-[var(--dsw-alias-interactive-bg-hover)] arb:focus-visible:outline-none arb:focus-visible:ring-2 arb:focus-visible:ring-[var(--dsw-focus-ring-color,var(--arb-accent))] arb:disabled:cursor-default arb:disabled:text-[var(--dsw-alias-label-dimmed)]"
+      className="arb:inline-flex arb:h-7 arb:max-w-[220px] arb:cursor-pointer arb:items-center arb:gap-1 arb:rounded-[var(--dsw-radius-sm)] arb:border-0 arb:bg-transparent arb:py-0 arb:pr-1 arb:pl-2 arb:text-[13px] arb:font-medium arb:leading-5 arb:text-secondary arb:hover:bg-[var(--dsw-alias-interactive-bg-hover)] arb:focus-visible:outline-none arb:focus-visible:ring-2 arb:focus-visible:ring-[var(--dsw-focus-ring-color,var(--arb-accent))] arb:disabled:cursor-default arb:disabled:text-[var(--dsw-alias-label-dimmed)]"
     >
-      <span className="arb:inline-flex arb:shrink-0" aria-hidden="true">
-        {glyph(presetKindOf(props.preset))}
+      {icon === null ? null : (
+        <span
+          data-arbiter-trigger-icon=""
+          className="arb:inline-flex arb:shrink-0"
+          aria-hidden="true"
+        >
+          {icon}
+        </span>
+      )}
+      <span
+        data-arbiter-trigger-label=""
+        className="arb:truncate arb:whitespace-nowrap"
+      >
+        {props.label}
       </span>
-      <span className="arb:truncate arb:whitespace-nowrap">{props.label}</span>
       <span
         aria-hidden="true"
         className={`arb:inline-flex arb:shrink-0 arb:text-[var(--dsw-alias-label-caption)] arb:transition-transform ${

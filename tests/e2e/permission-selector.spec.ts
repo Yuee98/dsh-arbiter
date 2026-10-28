@@ -444,6 +444,91 @@ test('a second connection change and a refresh both adopt the backend state', as
   }
 });
 
+test('the seat keeps native keyboard and focus behaviour', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-keyboard'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-KEYS RUN echo keyboard-warmup');
+    const session = await settledSession(host, 'SEL-KEYS');
+    const trigger = arbiterTrigger(page);
+    await expect(trigger).toBeEnabled();
+
+    // Opening with the keyboard alone: the native menu takes focus into its own
+    // list, so the first row is reachable without a pointer.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    const first = menuItem(page, '仅可查看');
+    await expect(first).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(permissionMenu(page)).toHaveCount(0);
+    // Escape returns focus to the trigger it came from, not to the page body.
+    await expect(trigger).toBeFocused();
+    steps.add('keyboard-open-escape', { focused: true });
+
+    // A chosen row also gives focus back, so the composer stays reachable.
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    await menuItem(page, '自动审查（Arbiter）').click();
+    expect(
+      await waitForAdmission(
+        host,
+        session.sessionId,
+        (admission) => admission['enabled'] === true,
+      ),
+    ).not.toBeNull();
+    steps.add('keyboard-select', { sessionId: session.sessionId });
+
+    // The risk gate is modal and cancellable from the keyboard; cancelling must
+    // send nothing and must give focus back to the trigger.
+    await openPermissionMenu(page);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    await menuItem(page, '完全权限').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('checkbox')).not.toBeChecked();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    expect((await admissionView(host, session.sessionId))['enabled']).toBe(
+      true,
+    );
+    steps.add('keyboard-cancel-dialog', { admission: 'unchanged' });
+    await expect(trigger).toBeVisible();
+
+    // Native responsive parity: the host hides a permission trigger's label in
+    // a narrow composer, keeping only the glyph and the chevron. The plugin's
+    // rule must key off the composer's own container, not the button (which is
+    // capped at 220px and would therefore always look narrow).
+    const label = page.locator('[data-arbiter-trigger-label]');
+    await expect(label).toBeVisible();
+    const icon = page.locator('[data-arbiter-trigger-icon] svg');
+    expect((await icon.boundingBox())?.width).toBe(14);
+    for (const width of [560, 480]) {
+      await page.setViewportSize({ width, height: 720 });
+      await expect(label).toBeHidden();
+      // The glyph survives, so the collapsed trigger is still identifiable.
+      await expect(icon).toBeVisible();
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(label).toBeVisible();
+    steps.add('responsive-trigger', { wideLabel: true, narrowLabel: false });
+  } finally {
+    await testInfo.attach('keyboard-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
 test('removing the client overlay drops the confirmed state and leaves the backend record alone', async ({
   page,
 }, testInfo) => {

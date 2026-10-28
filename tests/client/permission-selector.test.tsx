@@ -1449,6 +1449,98 @@ describe('arbiter permission selector', () => {
     expect(within(menu).queryByRole('menuitem', { name: 'Custom' })).toBeNull();
   });
 
+  test('cancels a pending confirmation whose target left the catalog', async () => {
+    let catalogState: 'full' | 'withdrawn' = 'full';
+    let notify: (() => void) | null = null;
+    const commands: string[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          catalog: () =>
+            Promise.resolve(
+              catalogState === 'full'
+                ? [...HOST_CATALOG]
+                : [{ value: 'read-only', name: 'read-only' }],
+            ),
+          observe: (_id, _listener, onCatalogChanged) => {
+            notify = onCatalogChanged;
+            return () => undefined;
+          },
+          selectPreset: (_sessionId, preset) => {
+            commands.push(preset);
+            return Promise.resolve(true);
+          },
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '完全权限' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('checkbox', { name: /我已了解风险/u }),
+    );
+    expect(within(dialog).getByRole('checkbox')).toBeChecked();
+
+    // The host withdraws the preset while the confirmation is open.
+    catalogState = 'withdrawn';
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    // Restoring the option must not resurrect the old acknowledgement: the
+    // native selector cancels the confirmation rather than hiding it.
+    catalogState = 'full';
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    // The menu closed when the confirmation was opened; re-open it to see the
+    // restored option.
+    const restored = await openMenu(user);
+    expect(
+      within(restored).getByRole('menuitem', { name: '完全权限' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands).toEqual([]);
+
+    // A fresh selection starts from an unchecked acknowledgement again.
+    await user.click(
+      within(restored).getByRole('menuitem', { name: '完全权限' }),
+    );
+    const fresh = await screen.findByRole('dialog');
+    expect(within(fresh).getByRole('checkbox')).not.toBeChecked();
+  });
+
+  test('renders full access as an ordinary row, not a destructive action', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    const menu = await openMenu(user);
+    // The native menu has no destructive row: its warning is the confirmation
+    // dialog. Styling Full access as danger would change a native option.
+    expect(
+      within(menu).getByRole('menuitem', { name: '完全权限' }),
+    ).not.toHaveAttribute('data-danger');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .filter((item) => item.hasAttribute('data-danger')),
+    ).toHaveLength(0);
+  });
+
   test('asks for confirmation before applying full access, and cancel sends nothing', async () => {
     const commands: string[] = [];
     server.use(

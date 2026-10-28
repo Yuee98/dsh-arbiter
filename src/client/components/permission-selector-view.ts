@@ -217,7 +217,6 @@ export interface SelectorItem {
   readonly icon: PresetIconKind | null;
   /** The row the host menu draws as selected. */
   readonly current: boolean;
-  readonly danger: boolean;
   /** A host preset is disabled when the command surface cannot apply it. */
   readonly disabled: boolean;
 }
@@ -248,6 +247,12 @@ export function selectedItemId(options: {
  * host menu has no room for one, and a user who enabled the plugin knows what
  * it does.
  *
+ * No row is flagged destructive either. The native selector renders Full access
+ * as an ordinary preset and reserves its warning for the confirmation dialog,
+ * and reproducing a red row here would change a native option the contract says
+ * must stay as it is. The risk gate stays where it is: in `choose()` and the
+ * host confirmation component.
+ *
  * The degraded exit is not a normal option: it appears only when Arbiter is
  * confirmed enabled and the host cannot switch presets at all (no readable
  * catalog, or a bound session with no callable command), which is the one state
@@ -271,7 +276,6 @@ export function selectorItems(options: {
       label: presetLabel(option, t),
       icon: iconOf(option.value),
       current: selectedId === option.value,
-      danger: option.value === 'danger-full-access',
       disabled: !commandCapable,
     }));
   const arbiter: SelectorItem = {
@@ -279,7 +283,6 @@ export function selectorItems(options: {
     label: t('permission.option.arbiter'),
     icon: 'arbiter',
     current: selectedId === ARBITER_ITEM,
-    danger: false,
     disabled: false,
   };
   const degraded = enabled && (catalog === null || !commandCapable);
@@ -288,7 +291,6 @@ export function selectorItems(options: {
     label: t('permission.option.disable'),
     icon: 'arbiter',
     current: false,
-    danger: false,
     disabled: false,
   };
   return [...host, arbiter, ...(degraded ? [disable] : [])];

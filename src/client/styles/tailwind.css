@@ -58,3 +58,22 @@
     monospace
   );
 }
+
+/*
+ * The native permission trigger collapses to its glyph in a narrow composer.
+ *
+ * The host hides its label under a 460px inline-size container query; the
+ * container is the composer's control row (`container-type: inline-size` on the
+ * host's own row element), not this button — naming the button as the container
+ * would apply the rule at every width, since the trigger is capped at 220px.
+ *
+ * This is the one place the plugin cannot express itself as an `arb:` utility,
+ * so it is a scoped rule: it only matches the permission trigger, and only when
+ * some ancestor actually establishes an inline-size container.
+ */
+@container (width <= 460px) {
+  [data-arbiter-trigger]:has([data-arbiter-trigger-icon])
+    [data-arbiter-trigger-label] {
+    display: none;
+  }
+}
