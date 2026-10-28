@@ -3,16 +3,19 @@ import { describe, expect, test } from 'vitest';
 import {
   buildSample,
   conditionViews,
+  coverageDetail,
   coverageView,
   defaultTool,
   finalPath,
   issueTarget,
+  priorityView,
   ruleConclusion,
   testSignature,
 } from '../../src/client/components/rules/rule-test-model.js';
 import type { RuleTestResultView } from '../../src/client/view-types.js';
 import type {
   RuleConditionResult,
+  RuleMatchDetail,
   RuleResult,
   RuleVerdict,
 } from '../../src/types.js';
@@ -389,5 +392,319 @@ describe('rule test staleness', () => {
     expect(defaultTool({ id: 'x', conditions: [], verdict: 'allow' })).toBe(
       'bash',
     );
+  });
+});
+
+describe('whole-config precedence', () => {
+  function matchOf(overrides: Partial<RuleMatchDetail> = {}): RuleMatchDetail {
+    return {
+      index: 0,
+      id: 'allow-a',
+      verdict: 'allow',
+      effective: false,
+      target: 'command',
+      conditionIndex: 0,
+      nodeIndex: 0,
+      matchedText: 'gh pr view 42',
+      ...overrides,
+    };
+  }
+
+  test('marks the deciding level, the outranked level and the untouched ones', () => {
+    const levels = priorityView(
+      result({
+        path: 'force-ask',
+        pathDetail: {
+          kind: 'rule',
+          verdict: 'force-ask',
+          ruleId: 'ask-deploy',
+        },
+        matches: [
+          matchOf({
+            id: 'ask-deploy',
+            verdict: 'force-ask',
+            effective: true,
+            matchedText: 'deploy',
+          }),
+          matchOf({ id: 'allow-a' }),
+        ],
+        rules: [
+          rule({ index: 0, id: 'allow-a', verdict: 'allow' }),
+          rule({ index: 1, id: 'ask-deploy', verdict: 'force-ask' }),
+        ],
+      }),
+      'allow-a',
+    );
+    expect(levels.map((level) => level.verdict)).toEqual([
+      'deny',
+      'force-ask',
+      'force-review',
+      'allow',
+      null,
+    ]);
+    expect(levels[1]).toMatchObject({
+      decision: 'effective',
+      ruleIds: ['ask-deploy'],
+    });
+    // The allow matched but did not decide; the list says which rule it was.
+    expect(levels[3]).toMatchObject({
+      decision: 'matched',
+      ruleIds: ['allow-a'],
+      focused: true,
+    });
+    expect(levels[0]).toMatchObject({ decision: 'none', focused: false });
+    // The fallback never applied here, so it is listed without a claim.
+    expect(levels[4]).toEqual({
+      kind: 'fallback',
+      verdict: null,
+      decision: 'none',
+      ruleIds: [],
+      focused: false,
+    });
+  });
+
+  test('a review(default) path credits only the fallback level', () => {
+    const levels = priorityView(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'no-match' },
+        rules: [rule({ outcome: 'no-match' })],
+      }),
+      'deny-production',
+    );
+    expect(
+      levels.filter((level) => level.decision === 'effective'),
+    ).toHaveLength(1);
+    expect(levels[4]?.decision).toBe('effective');
+    // The focused rule was evaluated and did not match: it still owns a level,
+    // so the reader can see where their rule sits in the order.
+    expect(levels[0]).toMatchObject({ decision: 'none', focused: true });
+    expect(levels[1]?.focused).toBe(false);
+  });
+});
+
+describe('composite-command coverage', () => {
+  const compound = result({
+    path: 'review(default)',
+    pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+    normalization: {
+      raw: 'gh pr view 42 && rm -rf /tmp/x',
+      completeness: 'complete',
+      issues: [],
+      commands: [
+        { text: 'gh pr view 42', raw: 'gh pr view 42', words: [] },
+        { text: 'rm -rf /tmp/x', raw: 'rm -rf /tmp/x', words: [] },
+      ],
+    },
+    matches: [
+      {
+        index: 0,
+        id: 'allow-gh',
+        verdict: 'allow',
+        effective: true,
+        target: 'command',
+        conditionIndex: 0,
+        nodeIndex: 0,
+        matchedText: 'gh pr view 42',
+      },
+    ],
+    rules: [
+      rule({
+        id: 'allow-gh',
+        verdict: 'allow',
+        conditions: [
+          condition({
+            target: 'command',
+            kind: 'exact',
+            pattern: 'gh pr view 42',
+            matchedValue: 'gh pr view 42',
+          }),
+        ],
+      }),
+    ],
+  });
+
+  test('lists every command and marks only the one an allow named', () => {
+    const detail = coverageDetail(compound);
+    expect(detail.structural).toBe(true);
+    expect(detail.total).toBe(2);
+    expect(detail.namedCount).toBe(1);
+    // The classification is the evaluator's: `partial-allow` says an allow
+    // matched without covering everything, which is not something the node list
+    // could establish on its own.
+    expect(detail.state).toBe('partial');
+    expect(detail.nodes).toEqual([
+      { text: 'gh pr view 42', named: true },
+      { text: 'rm -rf /tmp/x', named: false },
+    ]);
+  });
+
+  test('claims whole-call coverage only when every command is named', () => {
+    const fullyAllowed = result({
+      path: 'allow',
+      pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-gh' },
+      normalization: {
+        raw: 'gh pr view 42',
+        completeness: 'complete',
+        issues: [],
+        commands: [{ text: 'gh pr view 42', raw: 'gh pr view 42', words: [] }],
+      },
+      matches: [
+        {
+          index: 0,
+          id: 'allow-gh',
+          verdict: 'allow',
+          effective: true,
+          target: 'command',
+          conditionIndex: 0,
+          nodeIndex: 0,
+          matchedText: 'gh pr view 42',
+        },
+      ],
+      rules: [
+        rule({
+          id: 'allow-gh',
+          verdict: 'allow',
+          conditions: [
+            condition({
+              target: 'command',
+              kind: 'exact',
+              pattern: 'gh pr view 42',
+              matchedValue: 'gh pr view 42',
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(coverageDetail(fullyAllowed)).toMatchObject({
+      state: 'complete',
+      total: 1,
+      namedCount: 1,
+    });
+  });
+
+  test('a call without shell structure reports that instead of a fake total', () => {
+    const detail = coverageDetail(
+      result({
+        path: 'allow',
+        pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-deploy' },
+        normalization: null,
+        matches: [],
+      }),
+    );
+    expect(detail).toMatchObject({ structural: false, total: 0 });
+    // No structure means nothing was named *nor* left open; the caller must not
+    // read "0 of 0" as a complete partition of a command list.
+    expect(detail.nodes).toEqual([]);
+  });
+
+  test('does not claim coverage for an allow that only ever matched a subset', () => {
+    // The exact case the contract names: one allow rule names `echo hi`, and the
+    // call is `echo hi; rm -rf /tmp/example`. Both answers mark the allow match
+    // as effective, so only the path may decide what the panel says.
+    const single = coverageDetail(
+      result({
+        path: 'allow',
+        pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-echo' },
+        normalization: {
+          raw: 'echo hi',
+          completeness: 'complete',
+          issues: [],
+          commands: [{ text: 'echo hi', raw: 'echo hi', words: [] }],
+        },
+        rules: [
+          rule({
+            id: 'allow-echo',
+            verdict: 'allow',
+            conditions: [
+              condition({
+                target: 'command',
+                kind: 'exact',
+                pattern: 'echo hi',
+                matchedValue: 'echo hi',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    const compoundCall = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        normalization: {
+          raw: 'echo hi; rm -rf /tmp/example',
+          completeness: 'complete',
+          issues: [],
+          commands: [
+            { text: 'echo hi', raw: 'echo hi', words: [] },
+            {
+              text: 'rm -rf /tmp/example',
+              raw: 'rm -rf /tmp/example',
+              words: [],
+            },
+          ],
+        },
+        rules: [
+          rule({
+            id: 'allow-echo',
+            verdict: 'allow',
+            conditions: [
+              condition({
+                target: 'command',
+                kind: 'exact',
+                pattern: 'echo hi',
+                matchedValue: 'echo hi',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(single.state).toBe('complete');
+    expect(compoundCall.state).toBe('partial');
+    // The node list is evidence in both cases; it never sets the classification.
+    expect(compoundCall.nodes).toEqual([
+      { text: 'echo hi', named: true },
+      { text: 'rm -rf /tmp/example', named: false },
+    ]);
+  });
+
+  test('an incomplete parse is reported as such, not as an uncovered command', () => {
+    const detail = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'incomplete' },
+        parse: {
+          status: 'error',
+          statements: 1,
+          nodes: ['command'],
+          completeness: 'partial',
+          opaque: false,
+          unresolved: [],
+        },
+        normalization: {
+          raw: 'echo hi && ',
+          completeness: 'partial',
+          issues: [],
+          commands: [{ text: 'echo hi', raw: 'echo hi', words: [] }],
+        },
+      }),
+    );
+    expect(detail.state).toBe('incomplete');
+    expect(detail.structural).toBe(true);
+  });
+
+  test('a decided non-allow path makes no coverage claim at all', () => {
+    for (const verdict of ['deny', 'force-ask', 'force-review'] as const) {
+      expect(
+        coverageDetail(
+          result({
+            path: verdict,
+            pathDetail: { kind: 'rule', verdict, ruleId: 'r' },
+          }),
+        ).state,
+      ).toBe('not-allow');
+    }
   });
 });

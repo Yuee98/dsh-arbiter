@@ -13,6 +13,8 @@ import {
   moveRule,
   moveTarget,
   nextRuleId,
+  PRIORITY_ENTRIES,
+  isAdvancedCondition,
   pendingExactIssues,
   pendingExactKey,
   rebasePendingExactOnRemoveCondition,
@@ -20,6 +22,8 @@ import {
   ruleIssues,
   ruleName,
   ruleSummary,
+  scopeLabel,
+  scopeView,
   setPendingExactType,
 } from '../src/client/components/rules/draft.js';
 import type { Translate } from '../src/client/i18n.js';
@@ -139,22 +143,51 @@ function rule(overrides: Partial<DraftRule> = {}): DraftRule {
 }
 
 describe('draft rule defaults', () => {
-  it('starts new rules enabled with force-review and the safe match mode', () => {
+  it('starts new rules enabled with force-review and exact matching', () => {
     const created = addRule(draft());
     expect(created).toMatchObject({
       id: 'rule-1',
       verdict: 'force-review',
       enabled: true,
-      conditions: [{ target: 'command', kind: 'regex', pattern: '' }],
+      conditions: [{ target: 'command', kind: 'exact', pattern: '' }],
+      // Adding a condition should narrow a rule, so a new rule combines with
+      // "all" even before a second condition exists.
+      combine: 'all',
     });
   });
 
-  it('uses exact matching for a tool-argument default condition', () => {
-    expect(defaultCondition('argument')).toEqual({
-      target: 'argument',
-      kind: 'exact',
-      pattern: '',
-    });
+  it('uses exact matching for every default condition target', () => {
+    // Exact is the only kind whose meaning needs no knowledge of a matching
+    // dialect, so it is the ordinary entry point for every target.
+    for (const target of [
+      'command',
+      'file_redirect',
+      'variable_assignment',
+      'tool',
+      'argument',
+    ] as const) {
+      expect(defaultCondition(target)).toEqual({
+        target,
+        kind: 'exact',
+        pattern: '',
+      });
+    }
+  });
+
+  it('keeps the fixed precedence in evaluator order', () => {
+    // The order is a product contract: deny > force-ask > force-review > allow,
+    // with review(default) as the fallback rather than a configurable verdict.
+    expect(
+      PRIORITY_ENTRIES.map((entry) =>
+        entry.kind === 'fallback' ? 'review(default)' : entry.verdict,
+      ),
+    ).toEqual([
+      'deny',
+      'force-ask',
+      'force-review',
+      'allow',
+      'review(default)',
+    ]);
   });
 
   it('declares the canonical format once a rule enters the draft', () => {
@@ -496,5 +529,75 @@ describe('validation feedback routing', () => {
         },
       ]);
     });
+  });
+});
+
+describe('scope and condition reach', () => {
+  it('states an unlimited scope instead of implying nothing applies', () => {
+    const view = scopeView(rule());
+    expect(view).toEqual({ kind: 'unscoped', tools: [], agents: [] });
+    expect(scopeLabel(view, t)).toMatch(/^未限定范围/);
+  });
+
+  it('names the entries that do limit the scope, tools before agents', () => {
+    const view = scopeView(
+      rule({ scope: { tools: ['bash', 'deploy'], agents: ['main'] } }),
+    );
+    expect(view.kind).toBe('scoped');
+    expect(scopeLabel(view, t)).toBe(
+      '限定范围：工具 bash, deploy · agent main',
+    );
+
+    // One dimension alone is enough to limit the rule.
+    const toolsOnly = scopeView(rule({ scope: { tools: ['bash'] } }));
+    expect(scopeLabel(toolsOnly, t)).toBe('限定范围：工具 bash');
+    const agentsOnly = scopeView(rule({ scope: { agents: ['subagent'] } }));
+    expect(scopeLabel(agentsOnly, t)).toBe('限定范围：agent subagent');
+  });
+
+  it('treats an empty scope object as unlimited', () => {
+    // The schema rejects an empty list, but a draft read from an older editor
+    // could carry one; the label must not claim a limit that does not exist.
+    expect(scopeView(rule({ scope: { tools: [], agents: [] } })).kind).toBe(
+      'unscoped',
+    );
+  });
+
+  it('marks a condition as advanced only when it leaves the exact whole-value form', () => {
+    expect(
+      isAdvancedCondition({ target: 'command', kind: 'exact', pattern: 'x' }),
+    ).toBe(false);
+    expect(
+      isAdvancedCondition({ target: 'command', kind: 'regex', pattern: 'x' }),
+    ).toBe(true);
+    expect(
+      isAdvancedCondition({ target: 'command', kind: 'glob', pattern: 'x' }),
+    ).toBe(true);
+    expect(
+      isAdvancedCondition({
+        target: 'command',
+        kind: 'exact',
+        pattern: 'x',
+        caseSensitive: false,
+      }),
+    ).toBe(true);
+    // A selector and a multi-value mode both make the condition read a field.
+    expect(
+      isAdvancedCondition({
+        target: 'argument',
+        path: '$.a',
+        kind: 'exact',
+        pattern: 'x',
+      }),
+    ).toBe(true);
+    expect(
+      isAdvancedCondition({
+        target: 'argument',
+        path: '$.a',
+        kind: 'exact',
+        pattern: 'x',
+        multi: 'all',
+      }),
+    ).toBe(true);
   });
 });

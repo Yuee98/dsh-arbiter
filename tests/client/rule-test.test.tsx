@@ -791,3 +791,165 @@ describe('rule test panel', () => {
     });
   });
 });
+
+describe('final path, precedence and composite coverage', () => {
+  /** A composed command: the allow names the first command only. */
+  function composedAnswer() {
+    return {
+      ok: true,
+      results: [
+        {
+          input: 'gh pr view 42 && rm -rf /tmp/x',
+          tool: 'bash',
+          cwd: '/workspace',
+          path: 'review(default)',
+          pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+          rule: null,
+          matches: [
+            {
+              index: 0,
+              id: 'allow-gh',
+              verdict: 'allow',
+              effective: true,
+              target: 'command',
+              conditionIndex: 0,
+              nodeIndex: 0,
+              matchedText: 'gh pr view 42',
+            },
+          ],
+          rules: [
+            {
+              index: 0,
+              id: 'allow-gh',
+              verdict: 'allow',
+              outcome: 'match',
+              conditions: [
+                {
+                  index: 0,
+                  target: 'command',
+                  kind: 'exact',
+                  pattern: 'gh pr view 42',
+                  outcome: 'match',
+                  reason: 'resolved',
+                  matchedValues: ['gh pr view 42'],
+                  matchedValue: 'gh pr view 42',
+                },
+              ],
+            },
+          ],
+          parse: {
+            status: 'ok',
+            statements: 1,
+            nodes: ['command'],
+            completeness: 'complete',
+            opaque: false,
+            unresolved: [],
+          },
+          argv: ['gh', 'pr', 'view', '42', '&&', 'rm', '-rf', '/tmp/x'],
+          normalization: {
+            raw: 'gh pr view 42 && rm -rf /tmp/x',
+            completeness: 'complete',
+            issues: [],
+            commands: [
+              { text: 'gh pr view 42', raw: 'gh pr view 42', words: [] },
+              { text: 'rm -rf /tmp/x', raw: 'rm -rf /tmp/x', words: [] },
+            ],
+          },
+          shadowed: [],
+        },
+      ],
+    };
+  }
+
+  test('the final path says what happens to the call, not only which rule won', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(overriddenAnswer()),
+      ),
+    );
+    const { user } = openTester();
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+
+    const behavior = screen.getByTestId('rule-test-path-behavior');
+    expect(behavior).toHaveAttribute(
+      'data-arbiter-test-path-behavior',
+      'force-ask',
+    );
+    // force-ask is a human decision, not a review: the sentence must say so.
+    expect(behavior).toHaveTextContent(/每次人工/);
+    // The effective rule id stays visible as data next to the localized label.
+    expect(screen.getByTestId('rule-test-path')).toHaveTextContent(
+      '必须人工审批（生效规则 ask-deploy）',
+    );
+  });
+
+  test('the precedence list marks the deciding level and the outranked one', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(overriddenAnswer()),
+      ),
+    );
+    const { user } = openTester();
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const priority = screen.getByTestId('rule-test-priority');
+    expect(priority).toHaveTextContent('整份配置的优先级');
+    // The list is the fixed order, so a wide force-review really does outrank a
+    // narrow allow; each level reports what it did for this call.
+    const levels = within(priority).getAllByRole('listitem');
+    expect(
+      levels.map((level) => level.getAttribute('data-arbiter-test-priority')),
+    ).toEqual(['deny', 'force-ask', 'force-review', 'allow', 'fallback']);
+    expect(levels[1]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'effective',
+    );
+    expect(levels[3]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'matched',
+    );
+    // Levels that never applied say so rather than being omitted.
+    expect(levels[0]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'none',
+    );
+    expect(priority).toHaveTextContent('ask-deploy');
+    expect(priority).toHaveTextContent('allow-test-env');
+    // The focused rule owns the allow level, which is where it actually sits.
+    expect(priority).toHaveTextContent('（当前规则）');
+  });
+
+  test('a composite command shows which commands the allow did not cover', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(composedAnswer()),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    expect(coverage).toHaveAttribute('data-arbiter-test-coverage', 'partial');
+    // Every command the evaluator saw is listed, with the ones the allow named.
+    const nodes = within(coverage).getAllByRole('listitem');
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]).toHaveAttribute(
+      'data-arbiter-test-coverage-node',
+      'named',
+    );
+    expect(nodes[0]).toHaveTextContent('已命名：gh pr view 42');
+    expect(nodes[1]).toHaveAttribute(
+      'data-arbiter-test-coverage-node',
+      'unnamed',
+    );
+    expect(nodes[1]).toHaveTextContent('未命名：rm -rf /tmp/x');
+    expect(coverage).toHaveTextContent('其中 1 条被 allow 条件命名');
+    // The consequence is stated: the rest is not authorized as a side effect.
+    expect(coverage).toHaveTextContent(/进入默认审查/);
+  });
+});
