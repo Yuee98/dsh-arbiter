@@ -109,6 +109,7 @@ function PolicySettings({
         <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-xs">
           <span className="arb:text-secondary">{t('advanced.probeMode')}</span>
           <RadioGroup
+            ariaLabel={t('advanced.probeMode')}
             name="advanced-probe-mode"
             value={draft.policy.probeMode}
             options={['assist', 'override'] as const}
@@ -535,7 +536,6 @@ function AuditSettings({
           : t('advanced.breakerHelpTripped', {
               consecutive,
               windowDenials,
-              windowSize,
             })}
       </p>
 

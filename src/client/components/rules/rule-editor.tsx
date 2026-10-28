@@ -58,6 +58,15 @@ export function RuleEditor(props: {
     onRemoveCondition,
   } = props;
 
+  const [armedConditionIndex, setArmedConditionIndex] = useState<number | null>(
+    null,
+  );
+  const [lastRuleId, setLastRuleId] = useState(rule.id);
+  if (rule.id !== lastRuleId) {
+    setLastRuleId(rule.id);
+    setArmedConditionIndex(null);
+  }
+
   return (
     <div className="arb:flex arb:flex-col arb:gap-3">
       <p className="arb:m-0 arb:text-xs arb:text-tertiary">
@@ -76,6 +85,7 @@ export function RuleEditor(props: {
               {t('rules.combine')}
             </span>
             <RadioGroup
+              ariaLabel={t('rules.combine')}
               name={`combine-${rule.id}`}
               value={rule.combine ?? 'all'}
               options={['all', 'any'] as const}
@@ -124,7 +134,17 @@ export function RuleEditor(props: {
                 withCondition(next.conditions, conditionIndex, mutator);
               });
             }}
+            isArmed={armedConditionIndex === conditionIndex}
+            onArm={() => {
+              setArmedConditionIndex(conditionIndex);
+            }}
+            onDisarm={() => {
+              setArmedConditionIndex((current) =>
+                current === conditionIndex ? null : current,
+              );
+            }}
             onRemove={() => {
+              setArmedConditionIndex(null);
               onRemoveCondition?.(rule.id, conditionIndex);
               onChange((next) => {
                 removeCondition(next.conditions, conditionIndex);
@@ -136,6 +156,7 @@ export function RuleEditor(props: {
           <Button
             className="arb:inline-flex arb:items-center arb:gap-1.5"
             onClick={() => {
+              setArmedConditionIndex(null);
               onChange((next) => {
                 addCondition(next.conditions);
               });

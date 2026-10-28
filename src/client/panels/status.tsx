@@ -66,6 +66,7 @@ export function StatusPanel(props: {
             {t('status.boundaryLabel')}
           </span>
           <RadioGroup
+            ariaLabel={t('status.boundaryLabel')}
             name="status-boundary"
             value={draft.boundary}
             options={['guarded', 'trusted'] as const}

@@ -33,6 +33,9 @@ export function RuleConditionEditor(props: {
   readonly onChange: (
     mutator: (condition: MutableRuleCondition) => void,
   ) => void;
+  readonly isArmed?: boolean | undefined;
+  readonly onArm?: (() => void) | undefined;
+  readonly onDisarm?: (() => void) | undefined;
   readonly onRemove: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
@@ -210,6 +213,9 @@ export function RuleConditionEditor(props: {
         </label>
         <InlineDeleteConditionButton
           index={props.index}
+          isArmed={props.isArmed}
+          onArm={props.onArm}
+          onDisarm={props.onDisarm}
           onRemove={props.onRemove}
         />
       </div>
@@ -219,18 +225,35 @@ export function RuleConditionEditor(props: {
 
 function InlineDeleteConditionButton(props: {
   readonly index: number;
+  readonly isArmed?: boolean | undefined;
+  readonly onArm?: (() => void) | undefined;
+  readonly onDisarm?: (() => void) | undefined;
   readonly onRemove: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const [isArmed, setIsArmed] = useState(false);
+  const [localArmed, setLocalArmed] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const isControlled = props.isArmed !== undefined;
+  const isArmed = isControlled ? props.isArmed : localArmed;
+
+  const onDisarmRef = useRef(props.onDisarm);
+  onDisarmRef.current = props.onDisarm;
+
+  const handleArm = () => {
+    if (props.onArm) props.onArm();
+    else setLocalArmed(true);
+  };
 
   useEffect(() => {
     if (!isArmed) return;
 
-    const timer = window.setTimeout(() => {
-      setIsArmed(false);
-    }, 3000);
+    const disarm = () => {
+      if (onDisarmRef.current) onDisarmRef.current();
+      else setLocalArmed(false);
+    };
+
+    const timer = window.setTimeout(disarm, 3000);
 
     const handlePointerDown = (event: PointerEvent) => {
       if (
@@ -238,13 +261,13 @@ function InlineDeleteConditionButton(props: {
         event.target instanceof Node &&
         !buttonRef.current.contains(event.target)
       ) {
-        setIsArmed(false);
+        disarm();
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsArmed(false);
+        disarm();
       }
     };
 
@@ -282,9 +305,7 @@ function InlineDeleteConditionButton(props: {
       label={t('rules.removeCondition')}
       icon={Trash2}
       className="arb:h-7 arb:border arb:border-border-default arb:bg-layer-3 arb:text-error arb:transition-colors hover:arb:border-error/40 hover:arb:bg-error/10"
-      onClick={() => {
-        setIsArmed(true);
-      }}
+      onClick={handleArm}
     />
   );
 }

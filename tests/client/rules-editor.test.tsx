@@ -312,6 +312,128 @@ describe('rule list header and inline editing', () => {
     ).toBeChecked();
   });
 
+  test('keyboard condition deletion confirmation cannot transfer to another condition after index shift', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+
+    // Initial rule has 1 condition (A). Add condition B and condition C.
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+
+    let groups = conditionGroups(id);
+    expect(groups).toHaveLength(3);
+    const [firstA, firstB, firstC] = groups;
+    if (firstA === undefined || firstB === undefined || firstC === undefined) {
+      throw new Error('missing condition groups');
+    }
+
+    // Differentiate each condition pattern: A -> 'echo A', B -> 'echo B', C -> 'echo C'
+    const patternA = within(firstA).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternA);
+    await user.type(patternA, 'echo A');
+
+    const patternB = within(firstB).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternB);
+    await user.type(patternB, 'echo B');
+
+    const patternC = within(firstC).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternC);
+    await user.type(patternC, 'echo C');
+
+    // Step 1: Using keyboard activation, arm Delete on condition B (index 1).
+    const delBtnB = within(firstB).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnB.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition B must now display the confirm button.
+    const confirmBtnB = within(firstB).getByRole('button', {
+      name: /确认删除/,
+    });
+    expect(confirmBtnB).toBeInTheDocument();
+
+    // Step 2: Using keyboard activation, arm Delete on condition A (index 0).
+    const delBtnA = within(firstA).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnA.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition A is armed; Condition B must be disarmed (no confirm button).
+    const confirmBtnA = within(firstA).getByRole('button', {
+      name: /确认删除/,
+    });
+    expect(confirmBtnA).toBeInTheDocument();
+    expect(
+      within(firstB).queryByRole('button', { name: /确认删除/ }),
+    ).toBeNull();
+
+    // Step 3: Confirm deletion of condition A via keyboard.
+    confirmBtnA.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition A is deleted. There are now 2 conditions: B (now index 0) and C (now index 1).
+    groups = conditionGroups(id);
+    expect(groups).toHaveLength(2);
+    const [survivingB, survivingC] = groups;
+    if (survivingB === undefined || survivingC === undefined) {
+      throw new Error('missing surviving condition groups');
+    }
+
+    expect(
+      within(survivingB).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('echo B');
+    expect(
+      within(survivingC).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('echo C');
+
+    // Step 4: Verify Condition C (now index 1) is NOT armed!
+    expect(
+      within(survivingC).queryByRole('button', { name: /确认删除/ }),
+    ).toBeNull();
+
+    // Step 5: Verify one activation of C's Delete cannot remove C (it only arms it).
+    const delBtnC = within(survivingC).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnC.focus();
+    await user.keyboard('{Enter}');
+
+    // C is now armed, but NOT deleted (length remains 2).
+    groups = conditionGroups(id);
+    expect(groups).toHaveLength(2);
+    const updatedC = groups[1];
+    if (updatedC === undefined) throw new Error('missing condition C');
+    expect(
+      within(updatedC).getByRole('button', { name: /确认删除/ }),
+    ).toBeInTheDocument();
+
+    // Step 6: Save and verify saved conditions contain exactly B and C.
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [{ pattern: 'echo B' }, { pattern: 'echo C' }],
+          },
+        ],
+      },
+    });
+  });
+
   test('multi-value mode, case-insensitivity and the path reach the save body', async () => {
     baseHandlers();
     const user = await openRules();
