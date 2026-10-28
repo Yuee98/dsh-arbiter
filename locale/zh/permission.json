@@ -4,6 +4,7 @@
   "busy": "正在应用…",
   "trigger": {
     "enabled": "自动审查（Arbiter）",
+    "hostUnknown": "权限未知",
     "open": "打开权限菜单，当前：{current}",
     "unavailable": "当前会话不可用"
   },

@@ -4,6 +4,7 @@
   "busy": "Applying…",
   "trigger": {
     "enabled": "Auto review (Arbiter)",
+    "hostUnknown": "Permission unknown",
     "open": "Open the permission menu, currently: {current}",
     "unavailable": "The current session is unavailable"
   },
