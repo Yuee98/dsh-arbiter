@@ -22,6 +22,7 @@ import { createCaseHost, type CaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
 import { resolveDshCommand } from './dsh/profile.js';
 import { waitForSession, type LoggedSession } from './dsh/session-log.js';
+import { startNewSession } from './dsh/ui.js';
 import {
   PARENT_GUIDANCE,
   guidanceRegistration,
@@ -249,14 +250,6 @@ async function openHost(page: Page, host: DshHost): Promise<void> {
       .getByRole('button', { name: /^(关闭|Close)$/ })
       .click();
   }
-}
-
-async function newSession(page: Page): Promise<void> {
-  await page
-    .getByRole('button', { name: '新建会话', exact: true })
-    .first()
-    .click();
-  await expect(page.locator('[contenteditable="true"]').first()).toBeVisible();
 }
 
 async function sendPrompt(page: Page, text: string): Promise<void> {
@@ -634,9 +627,12 @@ test.describe('standing agent guidance', () => {
         // A second session in the same host is still unmanaged: guidance is
         // per admission, not per installation.
         await openHost(page, host);
-        await newSession(page);
+        const otherSessionId = await startNewSession(page);
         await sendPrompt(page, 'GUIDE-OTHER RUN echo guide-other');
         const other = await sessionWithMarker(host, 'GUIDE-OTHER');
+        // The prompt must land in the session the host just created, not in the
+        // one the page was showing before the click.
+        expect(other.sessionId).toBe(otherSessionId);
         expect(other.sessionId).not.toBe(plainSession.sessionId);
         const otherRequest = await requestFor(requestDir, 'GUIDE-OTHER');
         expect(requestText(otherRequest)).not.toContain(COMMON_MARKER);

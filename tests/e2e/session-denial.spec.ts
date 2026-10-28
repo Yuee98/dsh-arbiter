@@ -27,6 +27,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { createCaseHost, type CaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
 import { waitForSession, type LoggedSession } from './dsh/session-log.js';
+import { startNewSession } from './dsh/ui.js';
 
 const FORMAT = 'arbiter-config-v2';
 
@@ -87,17 +88,24 @@ async function openHost(page: Page, host: DshHost): Promise<void> {
   }
 }
 
-/** Send one user turn through the host's own composer. */
-async function sendPrompt(page: Page, text: string): Promise<void> {
-  await page
-    .getByRole('button', { name: '新建会话', exact: true })
-    .first()
-    .click();
+/**
+ * Start a new session and send one user turn through the host's own composer.
+ *
+ * The composer is already present on the previous session, so the send must
+ * wait for `startNewSession` to prove the host actually switched — otherwise
+ * the turn can land in the session the page was showing before the click.
+ */
+async function sendPromptInNewSession(
+  page: Page,
+  text: string,
+): Promise<string> {
+  const sessionId = await startNewSession(page);
   const composer = page.locator('[contenteditable="true"]').first();
   await expect(composer).toBeVisible();
   await composer.click();
   await page.keyboard.insertText(text);
   await page.keyboard.press('Enter');
+  return sessionId;
 }
 
 /**
@@ -310,8 +318,13 @@ test.describe('session denial feedback', () => {
     try {
       const host = caseHost.current();
       await openHost(page, host);
-      await sendPrompt(page, 'DENY-MARKER RUN echo arbiter-denied-one');
+      const createdId = await sendPromptInNewSession(
+        page,
+        'DENY-MARKER RUN echo arbiter-denied-one',
+      );
       const first = await settledSession(host, 'DENY-MARKER');
+      // The turn belongs to the session the click created.
+      expect(first.sessionId).toBe(createdId);
       await enableSession(host, first.sessionId);
 
       // The refused call must be issued by a session Arbiter already manages;
@@ -417,8 +430,12 @@ test.describe('session denial feedback', () => {
     try {
       const host = caseHost.current();
       await openHost(page, host);
-      await sendPrompt(page, 'PAR-WARM RUN echo arbiter-parallel-warm');
+      const warmCreatedId = await sendPromptInNewSession(
+        page,
+        'PAR-WARM RUN echo arbiter-parallel-warm',
+      );
       const warm = await settledSession(host, 'PAR-WARM');
+      expect(warm.sessionId).toBe(warmCreatedId);
       await enableSession(host, warm.sessionId);
 
       // Two independent calls in one assistant step: the fixture issues one
@@ -555,8 +572,12 @@ test.describe('session denial feedback', () => {
     try {
       const host = caseHost.current();
       await openHost(page, host);
-      await sendPrompt(page, 'SBX-WARM RUN echo arbiter-sandbox-warm');
+      const sandboxCreatedId = await sendPromptInNewSession(
+        page,
+        'SBX-WARM RUN echo arbiter-sandbox-warm',
+      );
       const warm = await settledSession(host, 'SBX-WARM');
+      expect(warm.sessionId).toBe(sandboxCreatedId);
       await enableSession(host, warm.sessionId);
 
       const outside = join(testInfo.outputPath('dsh-sandbox'), 'outside.txt');
