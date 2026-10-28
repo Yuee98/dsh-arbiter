@@ -83,21 +83,25 @@ function decisionResponseResult(
   // the one value known to be sensitive is removed here.
   const responseText = redact(text, secrets);
   if (!response.ok) {
-    // A refusal can still carry a JSON explanation; read it before giving up so
-    // the operator sees why rather than only the status.
-    let explanation: string | null = null;
+    // A refusal can still carry both a JSON explanation and the bill for the
+    // attempt; read the body once and take whichever of the two it supplied.
+    let refusal: unknown;
     try {
-      explanation = providerExplanation(JSON.parse(text));
+      refusal = JSON.parse(text);
     } catch {
       // Not JSON: the status is all this refusal said.
     }
-    const error = failureText(response.status, explanation, secrets);
+    const error = failureText(
+      response.status,
+      providerExplanation(refusal),
+      secrets,
+    );
     attempts.push({
       ...recordBase,
       responseText,
       parsed: null,
       error,
-      usage: null,
+      usage: reportedUsage(refusal, secrets),
     });
     return { ok: false, kind: 'review-failure', error, attempts };
   }

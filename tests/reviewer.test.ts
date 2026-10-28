@@ -636,6 +636,28 @@ describe('decision failure reporting', () => {
     expect(result.ok).toBe(true);
   });
 
+  test('a non-2xx response keeps the usage it reported', async () => {
+    // The earlier failure path returned before reading the body, so a billed
+    // refused request lost its token counts. The explanation and the usage come
+    // from the same parse, and neither depends on a verdict being accepted.
+    const result = await run(() =>
+      Promise.resolve(
+        refusal(422, {
+          result: { usage: { input_tokens: 100, output_tokens: 0 } },
+          success: false,
+          errors: [{ message: 'Request validation failed' }],
+        }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('Request validation failed');
+    expect(result.attempts[0]?.usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 0,
+    });
+  });
+
   test('an explanation that crosses the length bound cannot leak a prefix', async () => {
     // Masking must precede bounding. The padding places the credential so the
     // cut lands inside it; asserting the whole value would pass even then,
