@@ -21,8 +21,13 @@
   ],
   // This executable is installed through mise.toml, not npm.
   "ignoreBinaries": ["actionlint", "zizmor"],
-  // The session package ships with DSH and is resolved from the running
-  // installation at runtime; it is intentionally not a declared dependency.
-  "ignoreDependencies": ["@deepseek-ai/dsh-session", "@tailwindcss/cli"],
+  // These packages ship with DSH and are resolved from the running installation
+  // at runtime (the session package from the host root, the browser primitives
+  // from the web shell's module table); neither is a declared dependency.
+  "ignoreDependencies": [
+    "@deepseek-ai/dsh-session",
+    "@deepseek-ai/dsh-client-ui-primitives",
+    "@tailwindcss/cli",
+  ],
   "treatConfigHintsAsErrors": true,
 }

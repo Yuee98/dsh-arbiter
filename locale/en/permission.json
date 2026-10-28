@@ -3,19 +3,13 @@
   "loading": "Reading session permission…",
   "busy": "Applying…",
   "trigger": {
-    "enabled": "Auto review (Arbiter · {boundary})",
-    "hostOnly": "Auto review not enabled ({preset})",
-    "hostUnknown": "Auto review not enabled",
+    "enabled": "Auto review (Arbiter)",
     "open": "Open the permission menu, currently: {current}",
     "unavailable": "The current session is unavailable"
   },
   "option": {
     "arbiter": "Auto review (Arbiter)",
-    "arbiterHint": "Arbiter takes over new calls in this session: rules and review approve or deny automatically, and the approval mode decides whether a human is needed.",
-    "hostHint": "Defer to host permission: {preset}",
-    "current": "Current",
-    "disable": "Turn off auto review",
-    "disableHint": "Stops taking over new calls in this session; if the execution boundary was widened, the host permission first narrows back to workspace write before it is handed back."
+    "disable": "Turn off auto review"
   },
   "boundary": {
     "guarded": "Workspace write",
@@ -26,9 +20,9 @@
     "description": "Full access reduces host confirmation steps, so the agent can directly perform more operations, including sensitive files, commands and network requests. Use it only when you trust the current task.",
     "acknowledge": "I understand the risk and want to continue",
     "cancel": "Cancel",
+    "close": "Close",
     "enable": "Switch permission"
   },
-  "hostUnavailable": "The host permission menu is unavailable; this control can still enable or disable auto review.",
   "error": {
     "sessionRequired": "No session is available, so the permission cannot be changed.",
     "sessionUnknown": "The host does not recognise the current session; the permission was not changed.",
@@ -45,11 +39,8 @@
     "commandNotApplied": "The host command did not actually take effect; the last confirmed state is still shown."
   },
   "preset": {
-    "readOnly": "Read only",
-    "workspaceWrite": "Workspace write",
-    "fullAccess": "Full access",
-    "readOnlyHint": "Read-only access: no file modifications and no operations that need write access.",
-    "workspaceWriteHint": "Workspace write: file writes are limited to the current workspace, and other operations are confirmed by the host.",
-    "fullAccessHint": "Full access: fewer host confirmation steps, so the agent can directly perform more operations."
+    "readOnly": "Read Only",
+    "workspaceWrite": "Workspace Write",
+    "fullAccess": "Full access"
   }
 }

@@ -208,6 +208,11 @@ function arbiterControl(page: Page) {
   return permissionSeat(page).locator('[data-arbiter-permission]');
 }
 
+/** The selector's trigger; its label is the host preset name or Arbiter. */
+function arbiterTrigger(page: Page) {
+  return arbiterControl(page).locator('[data-arbiter-trigger]');
+}
+
 /** Wait for the session carrying `marker` whose turn has settled. */
 async function settledSession(
   host: DshHost,
@@ -387,12 +392,12 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
     const seat = permissionSeat(page);
     await expect(seat).toBeVisible();
     await expect(arbiterControl(page)).toHaveCount(1);
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
+    await arbiterTrigger(page).click();
+    // The host menu portals to `document.body` and publishes no accessible
+    // name, so it is located at page level rather than inside the seat.
+    await page
+      .getByRole('menu')
+      .getByRole('menuitem', { name: '自动审查（Arbiter）' })
       .click();
     const admission = await waitForAdmission(
       host,

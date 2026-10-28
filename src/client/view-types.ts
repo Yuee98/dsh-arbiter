@@ -655,6 +655,16 @@ export interface HostPresetSelection {
 export interface HostBridge {
   /** Whether native switching is possible in this composition at all. */
   available(): boolean;
+  /**
+   * Whether this *session* can actually run a `/permission` command.
+   *
+   * `available()` only proves the `sessions` service exists. Applying a preset
+   * additionally needs a materialized binding whose `command` is callable, and
+   * those can differ: a readable catalog plus an unusable command surface is a
+   * real state, and the selector must offer its degraded exit there rather than
+   * leave the user with presets that cannot be applied.
+   */
+  canCommand(sessionId: string): boolean;
   /** The host's current preset for this session, or `null` when absent. */
   hostPreset(sessionId: string): HostPresetSelection | null;
   /**

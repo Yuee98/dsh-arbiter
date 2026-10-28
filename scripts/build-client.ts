@@ -7,6 +7,24 @@ import { buildCss } from './build-css.ts';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const outfile = `${root}lib/client.cjs`;
 
+/**
+ * Host modules the web shell publishes to every plugin bundle.
+ *
+ * `react`, `react-dom` and their runtime entries come from the platform seed;
+ * so does `@deepseek-ai/dsh-client-ui-primitives`, which the host's own
+ * permission selector requires through the same module table. Keeping it
+ * external is what lets this plugin render the host's real `Menu` and
+ * `RiskConfirmation` instead of a copy, and it avoids shipping a second copy of
+ * the host's component library.
+ */
+const HOST_EXTERNALS = [
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/dsh-client-ui-primitives',
+] as const;
+
 await buildCss({ write: true });
 
 const result = await build({
@@ -16,7 +34,7 @@ const result = await build({
   platform: 'browser',
   target: 'es2022',
   jsx: 'automatic',
-  external: ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'],
+  external: [...HOST_EXTERNALS],
   write: false,
   sourcemap: false,
   minify: false,

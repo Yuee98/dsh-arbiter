@@ -154,6 +154,13 @@ export function createHostBridge(get: (name: string) => unknown): HostBridge {
       const service = sessions();
       return service !== null && typeof service['binding'] === 'function';
     },
+    canCommand(sessionId) {
+      const service = sessions();
+      if (service === null) return false;
+      const session = sessionOf(service, sessionId);
+      if (session === null) return false;
+      return typeof session['command'] === 'function';
+    },
     hostPreset(sessionId) {
       const service = sessions();
       if (service === null) return null;
