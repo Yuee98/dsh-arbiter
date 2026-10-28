@@ -429,7 +429,17 @@ subagent 的简短说明草案：
 
 **运行验证（2026-10-21）**：上述四条前端生命周期均已在真实 Web 客户端上确认——刷新保持后端状态；断连期间由第二连接改变状态后重连采用新值；迟到响应未复活旧值；移除客户端覆盖后原生控件回归且后端 `enabled`／`revision` 不变。冷恢复、新会话不误启用、审计库缺失下的恢复也均已确认；启用状态保存在会话日志的可忽略插件记录中，不依赖审计 SQLite。
 
-**正式客户端实现（#5，2026-10-26）**：`src/client/components/permission-selector.tsx` 以 `PERMISSION_SLOT_PRIORITY = -1` 注册在 `conversation.input.permission`，触发按钮只显示后端确认值（启用时带 guarded／trusted），未启用时显示宿主自己的**当前**预设（读 `permissions` projection，不从沙箱值推断）。菜单固定含“自动审查（Arbiter）”与“关闭自动审查”，宿主预设随后；`auto`／`custom` 不作为选项。宿主预设名就是原始 key 时按插件 locale 显示中文，宿主改名则保留其原名。切出 Arbiter **只发宿主 `/permission <preset>` 命令**，不先写停用记录：成功的命令由 #4 观察并退出，失败的命令不改变准入。前端因此只有两处权威：准入 API（唯一启用状态）与宿主自己的命令／目录。
+**正式客户端实现（#5，2026-10-26）**：`src/client/components/permission-selector.tsx` 以 `PERMISSION_SLOT_PRIORITY = -1` 注册在 `conversation.input.permission`。切出 Arbiter **只发宿主 `/permission <preset>` 命令**，不先写停用记录：成功的命令由 #4 观察并退出，失败的命令不改变准入。前端因此只有两处权威：准入 API（唯一启用状态）与宿主自己的命令／目录。
+
+**原生表现（#62，2026-10-28）**：控件改为渲染宿主自己的浏览器原语——`@deepseek-ai/dsh-client-ui-primitives` 的 `Menu` 与 `RiskConfirmation`——而不是自绘菜单。该包是 Web 前端的平台 seed 模块，插件 bundle 通过模块表 `require` 解析，因此它被声明为 esbuild external 而非 npm 依赖；静态 external 会提升为 factory 顶层调用，解析失败发生在模块求值阶段，所以**不提供缺失降级 UI**，primitives 是锁定宿主版本（E2E 锁定 0.2.1-rc.3）的运行前提。菜单项为宿主目录顺序的三个预设加**最后一项**「自动审查（Arbiter）」，每项只有单行名称；`auto`／`custom` 仍不作为选项。触发按钮的原生外观由插件按宿主结构与 `--dsw-*` 令牌复现（`Menu` 的 anchor 本由调用者提供），启用时可见文案固定为「自动审查（Arbiter）」，guarded／trusted 只出现在 `title` 与可访问名称中。宿主预设标签复刻宿主显示规则：`name` 仍是预设键或英文默认名时用内置中文标签（`read-only` 为「仅可查看」），其余按 kebab-case 转 Title Case，非 kebab 名称原样保留。「关闭自动审查」不再是常驻项，只在**准入已启用且宿主无法切换**（目录不可读，或当前会话的 `command` 不可调用）时作为降级退出项出现。
+
+**与原生刻意不同的一处**：宿主 `PermissionSelect.choose()` 在所选预设等于宿主派生当前值时直接返回。Arbiter + guarded 下宿主值本就是 `workspace-write`，照搬会让「点工作区内修改退出 Arbiter」静默无操作。因此**准入已启用**时的同值选择仍发 `/permission <preset>`（同值命令不写权限事件，但 `command/run` 在 handler 前 commit，后端据此判定退出）；**准入未启用**时保留原生早退，不发命令、不写记录。该早期返回判断在危险预设确认**之前**，所以重复选择已生效的「完全权限」不会弹风险确认。
+
+**已接受的取舍**：宿主 `Menu` 的项渲染为 `role="menuitem"`，不带 `aria-checked` 或 `aria-current`，选中态只有视觉高亮；这取代了原先自绘菜单的 `menuitemradio` + `aria-checked`。宿主 `Menu` 根节点也没有可访问名称，且浮层通过 portal 挂到 `document.body`，所以 E2E 须在页面级定位菜单，不能假定它是席位后代。
+
+**与原生一致的其他细节**：菜单项一律不标记 `danger` —— 原生把「完全权限」渲染成普通预设，警示只出现在确认弹窗里，给该行加深红样式会改变用户要求保持原状的选项。触发按钮按原生在窄 composer 收起标签（保留图标与 chevron）：容器是 composer 控件行的 `container-type: inline-size`，**不是**按钮本身——按钮宽度上限 220px，把它当作容器会让规则在所有宽度命中。该规则写在 `tailwind.css` 的 `@container (width <= 460px)` 段里，只匹配 `[data-arbiter-trigger]`。确认中若目标预设从目录中消失，插件按原生同样**取消**确认并清除勾选，而不是仅仅隐藏弹窗；目录恢复后不会带着旧勾选复现。
+
+**焦点归还**：宿主确认弹窗只把焦点还给打开它时的 `activeElement`，而这里那是已被移除的菜单项，于是宿主只能退回弹窗自身，焦点最终落在 `body`。契约要求回到触发按钮，因此插件在取消／确认后显式 `focus()` 触发按钮。宿主菜单的键盘模型（`ArrowDown` 逐项、`End` 到末项、`Enter` 激活、`Escape` 关闭并归还 anchor）由宿主组件提供，插件只负责不破坏它；这些行为在真实宿主 E2E 中逐项断言。
 
 前端时序（`src/client/permission-selector-state.ts`、`permission-selector-model.ts`）：展示值永远是最后一次服务端确认；写操作是**屏障**——写期间的读取合并为写结束后的一次读取，因为“更晚发出”的读取仍可能答出更旧的服务器状态；每个请求带序号与会话身份，被取代或属于其他会话的答案一律丢弃。失效来源为：会话事件里按 `commandId` 配对的 `/permission` 命令对（覆盖同值切出）、`permissions` projection、连接 generation、`permission-presets/catalog-changed`，以及浏览器 `focus`／`online`／`visibilitychange`——共同覆盖同标签页原生切出与静默重连。所有来源只触发对权威 API 的读取，不建立第二份状态、不轮询。
 

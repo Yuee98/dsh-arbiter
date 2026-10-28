@@ -11,6 +11,21 @@ const server = setupApiMock();
 
 const SESSION = 'session-1';
 
+/**
+ * A host catalog as the pinned host really answers it.
+ *
+ * `optionOf` reports a preset's machine value as its `name` unless the
+ * deployment renamed it, so the raw keys below are the realistic shape; the
+ * selector is what localizes the three built-ins.
+ */
+const HOST_CATALOG = [
+  { value: 'read-only', name: 'read-only' },
+  { value: 'workspace-write', name: 'workspace-write' },
+  { value: 'danger-full-access', name: 'danger-full-access' },
+  { value: 'auto', name: 'auto' },
+  { value: 'custom', name: 'custom' },
+] as const;
+
 interface AdmissionBody {
   readonly ok: boolean;
   readonly revision: string;
@@ -40,16 +55,10 @@ function admission(overrides: Record<string, unknown> = {}): AdmissionBody {
 function bridge(overrides: Partial<HostBridge> = {}): HostBridge {
   return {
     available: () => true,
+    canCommand: () => true,
     hostPreset: () => ({ currentValue: 'workspace-write' }),
     observe: () => () => undefined,
-    catalog: () =>
-      Promise.resolve([
-        { value: 'read-only', name: '只读' },
-        { value: 'workspace-write', name: '工作区内修改' },
-        { value: 'danger-full-access', name: '完全权限' },
-        { value: 'auto', name: '自动审查' },
-        { value: 'custom', name: '自定义' },
-      ]),
+    catalog: () => Promise.resolve([...HOST_CATALOG]),
     selectPreset: () => Promise.resolve(true),
     ...overrides,
   };
@@ -66,13 +75,44 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
+/**
+ * Open the selector and return its menu.
+ *
+ * The trigger's accessible name is the host's own phrasing, so these helpers
+ * stay independent of the visible label — that label is the host preset name or
+ * `自动审查（Arbiter）`, and each case asserts it separately.
+ */
+async function openMenu(
+  user: ReturnType<typeof renderClient>['user'],
+): Promise<HTMLElement> {
+  await user.click(
+    await screen.findByRole('button', {
+      name: /打开权限菜单|Open the permission menu/u,
+    }),
+  );
+  return screen.getByRole('menu');
+}
+
+/** The rows the user sees, in order. */
+function itemLabels(menu: HTMLElement): readonly (string | null)[] {
+  return within(menu)
+    .getAllByRole('menuitem')
+    .map((item) => item.textContent);
+}
+
+/** The row the host menu draws as selected, or `null` when none is. */
+function selectedLabel(menu: HTMLElement): string | null {
+  const selected = within(menu)
+    .getAllByRole('menuitem')
+    .filter((item) => item.getAttribute('data-selected') === 'true');
+  return selected.length === 0 ? null : (selected[0]?.textContent ?? null);
+}
+
 describe('arbiter permission selector', () => {
   test('shows the state the server confirmed, not the one it was asked for', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () =>
-        HttpResponse.json(
-          admission({ enabled: true, reason: 'session-enabled' }),
-        ),
+        HttpResponse.json(admission({ enabled: false })),
       ),
       http.post('*/api/arbiter/sessions', () =>
         // The backend answers with a *different* state than the request asked
@@ -85,25 +125,26 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
-    const trigger = await screen.findByRole('button', {
-      name: /自动审查（Arbiter · 工作区写入）/u,
-    });
-    expect(trigger).toBeEnabled();
+    const menu = await openMenu(user);
+    expect(selectedLabel(menu)).toBe('工作区内修改');
 
-    await user.click(trigger);
     await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '自动审查（Arbiter）',
-      }),
+      within(menu).getByRole('menuitem', { name: '自动审查（Arbiter）' }),
     );
 
     // The requested "enable" is not what the server confirmed.
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /未启用自动审查/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：工作区内修改/u,
+        }),
       ).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /Arbiter ·/u })).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+      }),
+    ).toBeNull();
   });
 
   test('posts only the session and the action, never a boundary', async () => {
@@ -120,13 +161,9 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
+    const menu = await openMenu(user);
     await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '自动审查（Arbiter）',
-      }),
+      within(menu).getByRole('menuitem', { name: '自动审查（Arbiter）' }),
     );
     await waitFor(() => {
       expect(bodies).toEqual([{ sessionId: SESSION, action: 'enable' }]);
@@ -151,13 +188,9 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
+    const menu = await openMenu(user);
     await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '自动审查（Arbiter）',
-      }),
+      within(menu).getByRole('menuitem', { name: '自动审查（Arbiter）' }),
     );
 
     await waitFor(() => {
@@ -167,9 +200,10 @@ describe('arbiter permission selector', () => {
     });
     // The old value is still the displayed one: a failed enable does not stick.
     expect(
-      screen.getByRole('button', { name: /未启用自动审查/u }),
+      screen.getByRole('button', {
+        name: /打开权限菜单，当前：工作区内修改/u,
+      }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Arbiter ·/u })).toBeNull();
   });
 
   test('drops a superseded answer so a late response cannot revive an old value', async () => {
@@ -197,7 +231,9 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：自动审查（Arbiter） · 工作区写入/u,
+        }),
       ).toBeInTheDocument();
     });
 
@@ -207,11 +243,10 @@ describe('arbiter permission selector', () => {
       await Promise.resolve();
     });
     expect(
-      screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+      screen.getByRole('button', {
+        name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+      }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /未启用自动审查/u }),
-    ).toBeNull();
   });
 
   test('adopts a second connection change on focus without writing', async () => {
@@ -235,7 +270,9 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
-    await screen.findByRole('button', { name: /未启用自动审查/u });
+    await screen.findByRole('button', {
+      name: /打开权限菜单，当前：工作区内修改/u,
+    });
 
     // Another connection enables the session while this page is idle.
     enabled = true;
@@ -246,7 +283,9 @@ describe('arbiter permission selector', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：自动审查（Arbiter） · 工作区写入/u,
+        }),
       ).toBeInTheDocument();
     });
     expect(writes).toEqual([]);
@@ -264,16 +303,17 @@ describe('arbiter permission selector', () => {
       { locale: 'zh' },
     );
     const trigger = await screen.findByRole('button', {
-      name: /未启用自动审查/u,
+      name: /打开权限菜单，当前：工作区内修改/u,
     });
     await act(async () => {
       locale.setLocale('en');
       await Promise.resolve();
     });
-    // Since #23 the `permission` module is translated: the same mounted control
-    // keeps its identity and now reads in English.
+    // The same mounted control keeps its identity and now reads in English.
     expect(
-      screen.getByRole('button', { name: /Auto review not enabled/u }),
+      screen.getByRole('button', {
+        name: /Open the permission menu, currently: Workspace Write/u,
+      }),
     ).toBe(trigger);
     const text = document.body.textContent;
     expect(text).not.toMatch(/permission\./u);
@@ -297,19 +337,39 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    const menu = screen.getByRole('menu');
-    expect(
-      within(menu)
-        .getAllByRole('menuitemradio')
-        .map((item) => item.getAttribute('aria-label')),
-    ).toEqual([
-      '自动审查（Arbiter）',
-      '关闭自动审查',
-      '只读',
+    const menu = await openMenu(user);
+    expect(itemLabels(menu)).toEqual([
+      '仅可查看',
       '工作区内修改（自定义）',
+      '自动审查（Arbiter）',
+    ]);
+  });
+
+  test('title-cases a conventional name even for a shipped preset', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          catalog: () =>
+            Promise.resolve([
+              // The host's presentation rule title-cases conventional
+              // kebab-case names; it does not pass them through verbatim.
+              { value: 'read-only', name: 'my-policy' },
+              { value: 'workspace-write', name: '仅供审阅' },
+              { value: 'custom-preset', name: 'custom-preset' },
+            ]),
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    expect(itemLabels(menu)).toEqual([
+      'My Policy',
+      '仅供审阅',
+      'Custom Preset',
+      '自动审查（Arbiter）',
     ]);
   });
 
@@ -342,13 +402,11 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
+    const menu = await openMenu(user);
+    // The host's current preset *is* workspace-write under guarded, so this is
+    // the same-value selection that must still send the command.
     await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '工作区内修改',
-      }),
+      within(menu).getByRole('menuitem', { name: '工作区内修改' }),
     );
     // #4 already disables on a successful host command and ignores a failed
     // one, so the client sends no disable of its own: that would exit
@@ -358,7 +416,64 @@ describe('arbiter permission selector', () => {
     });
   });
 
-  test('keeps the disable action working when the host bridge is unusable', async () => {
+  test('keeps the native no-op for a same-value selection while arbiter is off', async () => {
+    const commands: string[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          selectPreset: (_sessionId, preset) => {
+            commands.push(preset);
+            return Promise.resolve(true);
+          },
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    await user.click(
+      within(menu).getByRole('menuitem', { name: '工作区内修改' }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+    // Nothing to leave, so inventing a command would emit a permission event
+    // pair the native control never produces.
+    expect(commands).toEqual([]);
+  });
+
+  test('asks for no risk confirmation when the same danger preset is already applied', async () => {
+    const commands: string[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          hostPreset: () => ({ currentValue: 'danger-full-access' }),
+          selectPreset: (_sessionId, preset) => {
+            commands.push(preset);
+            return Promise.resolve(true);
+          },
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '完全权限' }));
+    // The native check runs before the danger gate: re-picking the applied
+    // preset must not raise a risk dialog.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands).toEqual([]);
+  });
+
+  test('keeps the degraded exit working when the host cannot switch presets', async () => {
     const bodies: unknown[] = [];
     server.use(
       http.get('*/api/arbiter/sessions', () =>
@@ -376,30 +491,76 @@ describe('arbiter permission selector', () => {
         sessionId={SESSION}
         bridge={bridge({
           available: () => false,
+          canCommand: () => false,
           catalog: () => Promise.resolve(null),
           selectPreset: () => Promise.resolve(false),
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
+    const menu = await openMenu(user);
     // No host preset is offered, but leaving Arbiter still is.
-    const menu = screen.getByRole('menu');
-    expect(
-      within(menu)
-        .getAllByRole('menuitemradio')
-        .map((item) => item.getAttribute('aria-label')),
-    ).toEqual(['自动审查（Arbiter）', '关闭自动审查']);
+    expect(itemLabels(menu)).toEqual(['自动审查（Arbiter）', '关闭自动审查']);
     await user.click(
-      within(menu).getByRole('menuitemradio', { name: '关闭自动审查' }),
+      within(menu).getByRole('menuitem', { name: '关闭自动审查' }),
     );
     await waitFor(() => {
       expect(bodies).toEqual([{ sessionId: SESSION, action: 'disable' }]);
     });
     expect(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
+      await screen.findByRole('button', {
+        name: /打开权限菜单，当前：工作区内修改/u,
+      }),
     ).toBeInTheDocument();
+  });
+
+  test('offers the degraded exit when the catalog reads but commands cannot run', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission({ enabled: true, reason: 'session-enabled' }),
+        ),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        // A readable catalog plus an unusable command surface is a real state:
+        // the presets render, and every one of them would fail to apply.
+        bridge={bridge({ canCommand: () => false })}
+      />,
+    );
+    const menu = await openMenu(user);
+    expect(itemLabels(menu)).toEqual([
+      '仅可查看',
+      '工作区内修改',
+      '完全权限',
+      '自动审查（Arbiter）',
+      '关闭自动审查',
+    ]);
+    // The presets stay visible but say they cannot be applied.
+    expect(
+      within(menu).getByRole('menuitem', { name: '仅可查看' }),
+    ).toBeDisabled();
+  });
+
+  test('offers no degraded exit while arbiter is already off', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          canCommand: () => false,
+          catalog: () => Promise.resolve(null),
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    // Nothing to leave, so there is no exit to offer.
+    expect(itemLabels(menu)).toEqual(['自动审查（Arbiter）']);
   });
 
   test('a failed disable keeps the enabled state and reports the refusal', async () => {
@@ -422,15 +583,14 @@ describe('arbiter permission selector', () => {
       ),
     );
     const { user } = renderClient(
-      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({ canCommand: () => false })}
+      />,
     );
+    const menu = await openMenu(user);
     await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '关闭自动审查',
-      }),
+      within(menu).getByRole('menuitem', { name: '关闭自动审查' }),
     );
     await waitFor(() => {
       expect(
@@ -439,7 +599,9 @@ describe('arbiter permission selector', () => {
     });
     // Still enabled: a refused disable does not look like a successful one.
     expect(
-      screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+      screen.getByRole('button', {
+        name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+      }),
     ).toBeInTheDocument();
   });
 
@@ -466,13 +628,9 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
+    const menu = await openMenu(user);
     await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '自动审查（Arbiter）',
-      }),
+      within(menu).getByRole('menuitem', { name: '自动审查（Arbiter）' }),
     );
     await waitFor(() => {
       expect(writeCount).toBe(1);
@@ -485,7 +643,9 @@ describe('arbiter permission selector', () => {
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /正在应用/u })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /打开权限菜单/u }),
+      ).toBeDisabled();
     });
 
     // The write commits; its answer is the newest server state.
@@ -496,7 +656,9 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：自动审查（Arbiter） · 工作区写入/u,
+        }),
       ).toBeEnabled();
     });
     // Only the one write ran; the coalesced reread read the committed state.
@@ -528,7 +690,9 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
+    await screen.findByRole('button', {
+      name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+    });
 
     // The session exited through a same-value native command: no knob and no
     // projection changed, only the command pair settled.
@@ -539,7 +703,9 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /未启用自动审查/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：工作区内修改/u,
+        }),
       ).toBeInTheDocument();
     });
   });
@@ -561,7 +727,7 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await screen.findByRole('button', { name: /未启用自动审查/u });
+    await screen.findByRole('button', { name: /打开权限菜单/u });
     view.unmount();
     expect(stops).toBe(1);
   });
@@ -573,15 +739,13 @@ describe('arbiter permission selector', () => {
     const view = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
-    await screen.findByRole('button', { name: /未启用自动审查/u });
+    await screen.findByRole('button', { name: /打开权限菜单/u });
     view.unmount();
     // The overlay is the component's own subtree: removing the registration
     // must not leave a trigger, menu, live region or wrapper for the host's
     // own control to sit behind.
     expect(view.container).toBeEmptyDOMElement();
-    expect(
-      screen.queryByRole('button', { name: /未启用自动审查/u }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: /打开权限菜单/u })).toBeNull();
   });
 
   test('refuses a second selection while a native command is in flight', async () => {
@@ -601,36 +765,39 @@ describe('arbiter permission selector', () => {
         return HttpResponse.json(admission({ enabled: true }));
       }),
     );
+    let applied = false;
     const { user } = renderClient(
       <PermissionSelector
         sessionId={SESSION}
         bridge={bridge({
           selectPreset: () => command.promise.then(() => true),
+          // The host's own projection is the independent evidence of the switch.
+          hostPreset: () => ({
+            currentValue: applied ? 'read-only' : 'workspace-write',
+          }),
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
+    const menu = await openMenu(user);
     // A host preset goes through the native command, which this case holds open.
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
     // The mutation is exclusive: the trigger reports busy and refuses input, so
     // an older command cannot land after a newer one.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /打开权限菜单/u }),
+      ).toBeDisabled();
     });
-    expect(screen.getByRole('button', { name: '正在应用…' })).toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
+    // The name keeps its last confirmed identity; the wait is announced through
+    // `aria-busy` rather than by renaming the control mid-write.
+    expect(
+      screen.getByRole('button', { name: /打开权限菜单/u }),
+    ).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByRole('menu')).toBeNull();
     expect(writes).toEqual([]);
 
     exited = true;
+    applied = true;
     await act(async () => {
       command.resolve({ ok: true, value: { matched: true } });
       await Promise.resolve();
@@ -640,12 +807,14 @@ describe('arbiter permission selector', () => {
     await waitFor(
       () => {
         expect(
-          screen.getByRole('button', { name: /未启用自动审查/u }),
+          screen.getByRole('button', {
+            name: /打开权限菜单，当前：仅可查看/u,
+          }),
         ).toBeEnabled();
       },
       { timeout: 8000 },
     );
-  });
+  }, 15_000);
 
   test('reports a recognized command that did not change the admission', async () => {
     // The confirmation loop is bounded but timer-based; this case waits it out.
@@ -664,14 +833,8 @@ describe('arbiter permission selector', () => {
         bridge={bridge({ selectPreset: () => Promise.resolve(true) })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
     await waitFor(
       () => {
         expect(
@@ -682,9 +845,37 @@ describe('arbiter permission selector', () => {
     );
     // The confirmed state is still shown because the backend still says so.
     expect(
-      screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+      screen.getByRole('button', {
+        name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+      }),
     ).toBeInTheDocument();
   }, 20_000);
+
+  test('names the unknown-preset state instead of leaking a locale key', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    // Admission is confirmed off, but there is no bridge to say which host
+    // preset is current. The label must describe that state: the host locale
+    // renders an unknown key as the key itself.
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={undefined} />,
+    );
+    const trigger = await screen.findByRole('button', {
+      name: /打开权限菜单，当前：权限未知/u,
+    });
+    expect(trigger).toHaveTextContent(/^权限未知$/u);
+    expect(document.body.textContent).not.toMatch(/permission\./u);
+    // The menu still opens, so a confirmed "off" session can be enabled.
+    await user.click(trigger);
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitem', {
+        name: '自动审查（Arbiter）',
+      }),
+    ).toBeInTheDocument();
+  });
 
   test('keeps an unlisted current host preset in the trigger without inventing an option', async () => {
     server.use(
@@ -696,21 +887,126 @@ describe('arbiter permission selector', () => {
         bridge={bridge({
           hostPreset: () => ({ currentValue: 'custom' }),
           catalog: () =>
-            Promise.resolve([{ value: 'read-only', name: '只读' }]),
+            Promise.resolve([{ value: 'read-only', name: 'read-only' }]),
         })}
       />,
     );
     // The host legitimately reports `custom` when no configured preset matches;
-    // that identity is the truth about the session and must not be dropped.
-    const trigger = await screen.findByRole('button', {
-      name: /未启用自动审查（custom）/u,
+    // that identity is the truth about the session and must not be dropped. The
+    // host's own presentation title-cases a conventional kebab name.
+    await screen.findByRole('button', {
+      name: /打开权限菜单，当前：Custom/u,
     });
-    await user.click(trigger);
-    expect(
-      within(screen.getByRole('menu'))
-        .getAllByRole('menuitemradio')
-        .map((item) => item.getAttribute('aria-label')),
-    ).toEqual(['自动审查（Arbiter）', '关闭自动审查', '只读']);
+    // The raw identity is shown; no fabricated `custom` row is offered.
+    const menu = await openMenu(user);
+    expect(itemLabels(menu)).toEqual(['仅可查看', '自动审查（Arbiter）']);
+  });
+
+  test('renders no row as selected while admission is unknown', async () => {
+    const pending = deferred<AdmissionBody>();
+    server.use(
+      http.get('*/api/arbiter/sessions', async () =>
+        HttpResponse.json(await pending.promise),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    // The host projection is already known, but admission is not. The control
+    // stays inert — it cannot offer a menu whose selection it cannot vouch for.
+    const busy = await screen.findByRole('button', {
+      name: /打开权限菜单，当前：正在读取会话权限…/u,
+    });
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy).toBeDisabled();
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    await act(async () => {
+      pending.resolve(admission({ enabled: false }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：工作区内修改/u,
+        }),
+      ).toBeEnabled();
+    });
+    // Only now is a row allowed to claim the selection.
+    expect(selectedLabel(await openMenu(user))).toBe('工作区内修改');
+  });
+
+  test('states the execution boundary in metadata but never in the visible label', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission({
+            enabled: true,
+            boundary: 'guarded',
+            reason: 'session-enabled',
+          }),
+        ),
+      ),
+    );
+    const view = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    const trigger = await screen.findByRole('button', {
+      name: /打开权限菜单，当前：自动审查（Arbiter） · 工作区写入/u,
+    });
+    // One single-line label in both boundaries; the boundary rides the tooltip
+    // and the accessible name so the control keeps the host's geometry.
+    expect(trigger).toHaveTextContent(/^自动审查（Arbiter）$/u);
+    expect(trigger).toHaveAttribute(
+      'title',
+      '自动审查（Arbiter） · 工作区写入',
+    );
+    view.unmount();
+
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission({
+            enabled: true,
+            boundary: 'trusted',
+            reason: 'session-enabled',
+          }),
+        ),
+      ),
+    );
+    renderClient(<PermissionSelector sessionId={SESSION} bridge={bridge()} />);
+    const trusted = await screen.findByRole('button', {
+      name: /打开权限菜单，当前：自动审查（Arbiter） · 完全权限/u,
+    });
+    expect(trusted).toHaveTextContent(/^自动审查（Arbiter）$/u);
+    expect(trusted).toHaveAttribute('title', '自动审查（Arbiter） · 完全权限');
+  });
+
+  test('enabling an already enabled arbiter writes nothing', async () => {
+    const writes: unknown[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(
+          admission({ enabled: true, reason: 'session-enabled' }),
+        ),
+      ),
+      http.post('*/api/arbiter/sessions', async ({ request }) => {
+        writes.push(await request.json());
+        return HttpResponse.json(admission({ enabled: true }));
+      }),
+    );
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    const menu = await openMenu(user);
+    await user.click(
+      within(menu).getByRole('menuitem', { name: '自动审查（Arbiter）' }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+    // A duplicate admission record would change nothing and add audit noise.
+    expect(writes).toEqual([]);
   });
 
   test('shows an unmaterialized session as unavailable and inert', async () => {
@@ -735,7 +1031,9 @@ describe('arbiter permission selector', () => {
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
-    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
+    await screen.findByRole('button', {
+      name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+    });
 
     // The host restarted and has not materialized this session yet.
     unmaterialized = true;
@@ -748,7 +1046,9 @@ describe('arbiter permission selector', () => {
     });
     expect(unavailable).toBeDisabled();
     // The old enabled label is not presented as current.
-    expect(screen.queryByRole('button', { name: /Arbiter ·/u })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /自动审查（Arbiter） · /u }),
+    ).toBeNull();
 
     // Once the session materializes, the fresh confirmed answer is shown.
     unmaterialized = false;
@@ -758,7 +1058,9 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /Arbiter · 工作区写入/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+        }),
       ).toBeEnabled();
     });
     expect(user).toBeDefined();
@@ -781,11 +1083,13 @@ describe('arbiter permission selector', () => {
             // must both reach the menu.
             if (catalogReads === 1) return Promise.resolve(null);
             if (catalogReads === 2) {
-              return Promise.resolve([{ value: 'read-only', name: '只读' }]);
+              return Promise.resolve([
+                { value: 'read-only', name: 'read-only' },
+              ]);
             }
             return Promise.resolve([
-              { value: 'read-only', name: '只读' },
-              { value: 'workspace-write', name: '工作区内修改' },
+              { value: 'read-only', name: 'read-only' },
+              { value: 'workspace-write', name: 'workspace-write' },
             ]);
           },
           observe: (_id, _listener, onCatalogChanged) => {
@@ -795,15 +1099,11 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
+    const first = await openMenu(user);
     expect(
-      within(screen.getByRole('menu')).queryByRole('menuitemradio', {
-        name: '只读',
-      }),
+      within(first).queryByRole('menuitem', { name: '仅可查看' }),
     ).toBeNull();
-    await user.click(screen.getByRole('button', { name: /取消/u }));
+    await user.click(screen.getByRole('button', { name: /打开权限菜单/u }));
 
     // The host reports the catalog is available now.
     await act(async () => {
@@ -813,11 +1113,9 @@ describe('arbiter permission selector', () => {
     await waitFor(() => {
       expect(catalogReads).toBe(2);
     });
-    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
+    const second = await openMenu(user);
     expect(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
+      within(second).getByRole('menuitem', { name: '仅可查看' }),
     ).toBeInTheDocument();
 
     // And a changed catalog replaces the options rather than appending.
@@ -830,7 +1128,7 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        within(screen.getByRole('menu')).getByRole('menuitemradio', {
+        within(screen.getByRole('menu')).getByRole('menuitem', {
           name: '工作区内修改',
         }),
       ).toBeInTheDocument();
@@ -851,7 +1149,7 @@ describe('arbiter permission selector', () => {
           catalog: () => {
             reads += 1;
             if (reads === 1) return first.promise;
-            return Promise.resolve([{ value: 'read-only', name: '只读' }]);
+            return Promise.resolve([{ value: 'read-only', name: 'read-only' }]);
           },
           observe: (_id, _listener, onCatalogChanged) => {
             notify = onCatalogChanged;
@@ -860,7 +1158,7 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await screen.findByRole('button', { name: /未启用自动审查/u });
+    await screen.findByRole('button', { name: /打开权限菜单/u });
     await act(async () => {
       notify?.();
       await Promise.resolve();
@@ -874,13 +1172,12 @@ describe('arbiter permission selector', () => {
       first.resolve([{ value: 'stale', name: '过期选项' }]);
       await Promise.resolve();
     });
-    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
-    const menu = screen.getByRole('menu');
+    const menu = await openMenu(user);
     expect(
-      within(menu).getByRole('menuitemradio', { name: '只读' }),
+      within(menu).getByRole('menuitem', { name: '仅可查看' }),
     ).toBeInTheDocument();
     expect(
-      within(menu).queryByRole('menuitemradio', { name: '过期选项' }),
+      within(menu).queryByRole('menuitem', { name: '过期选项' }),
     ).toBeNull();
   });
 
@@ -909,7 +1206,9 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await screen.findByRole('button', { name: /Arbiter · 工作区写入/u });
+    await screen.findByRole('button', {
+      name: /打开权限菜单，当前：自动审查（Arbiter）/u,
+    });
 
     enabled = false;
     await act(async () => {
@@ -918,7 +1217,9 @@ describe('arbiter permission selector', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /未启用自动审查/u }),
+        screen.getByRole('button', {
+          name: /打开权限菜单，当前：工作区内修改/u,
+        }),
       ).toBeInTheDocument();
     });
   });
@@ -936,14 +1237,8 @@ describe('arbiter permission selector', () => {
         bridge={bridge({ selectPreset: () => Promise.resolve(false) })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
     await waitFor(() => {
       expect(
         screen.getByText(/宿主权限命令未生效，仍显示上次确认的状态/u),
@@ -951,7 +1246,9 @@ describe('arbiter permission selector', () => {
     });
     // The previously confirmed value is still what is displayed.
     expect(
-      screen.getByRole('button', { name: /未启用自动审查/u }),
+      screen.getByRole('button', {
+        name: /打开权限菜单，当前：工作区内修改/u,
+      }),
     ).toBeInTheDocument();
   });
 
@@ -985,14 +1282,8 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
 
     // The command settles, but the first authoritative answer still says
     // "admitted" and the host selection has not moved yet. The control must
@@ -1004,7 +1295,9 @@ describe('arbiter permission selector', () => {
     await waitFor(() => {
       expect(reads.length).toBeGreaterThan(1);
     });
-    expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /打开权限菜单/u }),
+    ).toBeDisabled();
     expect(reads).not.toContain('write');
 
     // Once the switch really applied, the control settles to the confirmed
@@ -1014,7 +1307,9 @@ describe('arbiter permission selector', () => {
     await waitFor(
       () => {
         expect(
-          screen.getByRole('button', { name: /未启用自动审查（只读）/u }),
+          screen.getByRole('button', {
+            name: /打开权限菜单，当前：仅可查看/u,
+          }),
         ).toBeEnabled();
       },
       { timeout: 10_000 },
@@ -1037,14 +1332,8 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
     // Arbiter was already disabled, so an admission read proves nothing about
     // the switch; the host selection is the independent evidence.
     await waitFor(
@@ -1073,8 +1362,8 @@ describe('arbiter permission selector', () => {
             catalogReads += 1;
             return Promise.resolve(
               catalogReads === 1
-                ? [{ value: 'read-only', name: '只读' }]
-                : [{ value: 'workspace-write', name: '工作区内修改' }],
+                ? [{ value: 'read-only', name: 'read-only' }]
+                : [{ value: 'workspace-write', name: 'workspace-write' }],
             );
           },
           observe: (_id, _listener, onCatalogChanged) => {
@@ -1084,15 +1373,11 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
+    const first = await openMenu(user);
     expect(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
+      within(first).getByRole('menuitem', { name: '仅可查看' }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /取消/u }));
+    await user.click(screen.getByRole('button', { name: /打开权限菜单/u }));
 
     // A recovered generation invalidates the options as well as the admission.
     await act(async () => {
@@ -1102,11 +1387,9 @@ describe('arbiter permission selector', () => {
     await waitFor(() => {
       expect(catalogReads).toBe(2);
     });
-    await user.click(screen.getByRole('button', { name: /未启用自动审查/u }));
+    const second = await openMenu(user);
     expect(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '工作区内修改',
-      }),
+      within(second).getByRole('menuitem', { name: '工作区内修改' }),
     ).toBeInTheDocument();
   });
 
@@ -1143,20 +1426,16 @@ describe('arbiter permission selector', () => {
         })}
       />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /Arbiter · 工作区写入/u }),
-    );
-    await user.click(
-      within(screen.getByRole('menu')).getByRole('menuitemradio', {
-        name: '只读',
-      }),
-    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '仅可查看' }));
 
     // During the failed read the control is still the mutation's: busy.
     await waitFor(() => {
       expect(reads).toBeGreaterThanOrEqual(2);
     });
-    expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /打开权限菜单/u }),
+    ).toBeDisabled();
 
     // The next read confirms the switch; the control becomes interactive once.
     admitted = false;
@@ -1164,33 +1443,173 @@ describe('arbiter permission selector', () => {
     await waitFor(
       () => {
         expect(
-          screen.getByRole('button', { name: /未启用自动审查（只读）/u }),
+          screen.getByRole('button', {
+            name: /打开权限菜单，当前：仅可查看/u,
+          }),
         ).toBeEnabled();
       },
       { timeout: 10_000 },
     );
-    expect(screen.queryByRole('button', { name: '正在应用…' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /打开权限菜单/u }),
+    ).not.toHaveAttribute('aria-busy', 'true');
   }, 20_000);
 
-  test('offers the host presets but never the auto or derived entries', async () => {
+  test('offers the host presets in host order but never auto or derived entries', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
     );
     const { user } = renderClient(
       <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
     );
-    await user.click(
-      await screen.findByRole('button', { name: /未启用自动审查/u }),
-    );
-    const items = within(screen.getByRole('menu')).getAllByRole(
-      'menuitemradio',
-    );
-    expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
-      '自动审查（Arbiter）',
-      '关闭自动审查',
-      '只读',
+    const menu = await openMenu(user);
+    expect(itemLabels(menu)).toEqual([
+      '仅可查看',
       '工作区内修改',
       '完全权限',
+      '自动审查（Arbiter）',
     ]);
+    // `auto` stays out because the host half rejects that entry before any
+    // permission write; `custom` is a derived state, never a switch target.
+    expect(within(menu).queryByRole('menuitem', { name: 'Auto' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Custom' })).toBeNull();
+  });
+
+  test('cancels a pending confirmation whose target left the catalog', async () => {
+    let catalogState: 'full' | 'withdrawn' = 'full';
+    let notify: (() => void) | null = null;
+    const commands: string[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          catalog: () =>
+            Promise.resolve(
+              catalogState === 'full'
+                ? [...HOST_CATALOG]
+                : [{ value: 'read-only', name: 'read-only' }],
+            ),
+          observe: (_id, _listener, onCatalogChanged) => {
+            notify = onCatalogChanged;
+            return () => undefined;
+          },
+          selectPreset: (_sessionId, preset) => {
+            commands.push(preset);
+            return Promise.resolve(true);
+          },
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '完全权限' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('checkbox', { name: /我已了解风险/u }),
+    );
+    expect(within(dialog).getByRole('checkbox')).toBeChecked();
+
+    // The host withdraws the preset while the confirmation is open.
+    catalogState = 'withdrawn';
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    // Restoring the option must not resurrect the old acknowledgement: the
+    // native selector cancels the confirmation rather than hiding it.
+    catalogState = 'full';
+    await act(async () => {
+      notify?.();
+      await Promise.resolve();
+    });
+    // The menu closed when the confirmation was opened; re-open it to see the
+    // restored option.
+    const restored = await openMenu(user);
+    expect(
+      within(restored).getByRole('menuitem', { name: '完全权限' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands).toEqual([]);
+
+    // A fresh selection starts from an unchecked acknowledgement again.
+    await user.click(
+      within(restored).getByRole('menuitem', { name: '完全权限' }),
+    );
+    const fresh = await screen.findByRole('dialog');
+    expect(within(fresh).getByRole('checkbox')).not.toBeChecked();
+  });
+
+  test('renders full access as an ordinary row, not a destructive action', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
+    );
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={bridge()} />,
+    );
+    const menu = await openMenu(user);
+    // The native menu has no destructive row: its warning is the confirmation
+    // dialog. Styling Full access as danger would change a native option.
+    expect(
+      within(menu).getByRole('menuitem', { name: '完全权限' }),
+    ).not.toHaveAttribute('data-danger');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .filter((item) => item.hasAttribute('data-danger')),
+    ).toHaveLength(0);
+  });
+
+  test('asks for confirmation before applying full access, and cancel sends nothing', async () => {
+    const commands: string[] = [];
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    const { user } = renderClient(
+      <PermissionSelector
+        sessionId={SESSION}
+        bridge={bridge({
+          selectPreset: (_sessionId, preset) => {
+            commands.push(preset);
+            return Promise.resolve(true);
+          },
+        })}
+      />,
+    );
+    const menu = await openMenu(user);
+    await user.click(within(menu).getByRole('menuitem', { name: '完全权限' }));
+
+    const dialog = await screen.findByRole('dialog');
+    // Nothing is applied before the acknowledgement: the host's own risk gate.
+    expect(screen.queryByRole('menuitem')).toBeNull();
+    expect(commands).toEqual([]);
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(commands).toEqual([]);
+
+    // Acknowledging and confirming issues the ordinary host command.
+    await user.click(screen.getByRole('button', { name: /打开权限菜单/u }));
+    await user.click(
+      within(screen.getByRole('menu')).getByRole('menuitem', {
+        name: '完全权限',
+      }),
+    );
+    const again = await screen.findByRole('dialog');
+    await user.click(
+      within(again).getByRole('checkbox', { name: /我已了解风险/u }),
+    );
+    await user.click(within(again).getByRole('button', { name: '切换权限' }));
+    await waitFor(() => {
+      expect(commands).toEqual(['danger-full-access']);
+    });
   });
 });

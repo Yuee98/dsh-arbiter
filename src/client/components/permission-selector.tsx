@@ -1,15 +1,21 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { useArbiterTranslation } from '../i18n-provider.js';
+import { hostPrimitives } from '../host-primitives.js';
 import { useAdmission } from '../permission-selector-model.js';
 import { isInteractive } from '../permission-selector-state.js';
 import {
   ARBITER_ITEM,
   DISABLE_ITEM,
   failureMessage,
+  selectedItemId,
   selectorItems,
-  triggerText,
+  triggerTexts,
+} from './permission-selector-view.js';
+import type {
+  PresetIconKind,
+  SelectorItem,
 } from './permission-selector-view.js';
 import type { HostBridge } from '../view-types.js';
 
@@ -19,13 +25,23 @@ export const PERMISSION_SLOT_PRIORITY = -1;
 /**
  * The Arbiter session permission selector.
  *
- * It occupies the host's own composer permission seat and shows the
- * backend-confirmed admission of the current session. The menu keeps the
- * host's permission presets: choosing one leaves Arbiter through the host's
- * `/permission <preset>` command, which is the only way the native control
- * would do it either. Nothing here infers "admitted" from a preset value, and
- * no state is optimistically advanced: the displayed value is always the last
- * answer the backend confirmed.
+ * It occupies the host's own composer permission seat and renders the host's
+ * real `Menu` and `RiskConfirmation`, so the control looks and behaves like the
+ * native one. The menu is the host catalog in the host's order plus a single
+ * appended `自动审查（Arbiter）` entry; nothing carries a subtitle.
+ *
+ * Two authorities stay separate: admission ("is Arbiter enabled") is the last
+ * answer this plugin's own route confirmed, and the host preset is read from the
+ * session's `permissions` projection. Nothing infers one from the other.
+ *
+ * One behaviour deliberately differs from the native control. Its `choose()`
+ * returns early when the clicked preset equals the host's derived current value;
+ * under Arbiter + guarded that value already *is* `workspace-write`, so the same
+ * early return would turn "pick 工作区内修改 to leave Arbiter" into a silent no-op.
+ * A same-value selection therefore still sends `/permission <preset>` — but only
+ * while Arbiter is confirmed enabled. When it is not, the native no-op is
+ * preserved: there is nothing to leave, and inventing a command would add a
+ * permission event pair the native control never emits.
  */
 export function PermissionSelector(props: {
   readonly sessionId?: string | undefined;
@@ -42,33 +58,53 @@ export function PermissionSelector(props: {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const menuId = useId();
 
+  /**
+   * Give focus back to the trigger after the risk gate closes.
+   *
+   * The host dialog restores focus to whatever was focused when it opened, but
+   * here that is the menu row it opened from — and the row is already gone, so
+   * the host falls back to the dialog and focus ends up on the body. The
+   * accepted contract requires the trigger, so it is restored explicitly.
+   */
+  const restoreTriggerFocus = (): void => {
+    trigger.current?.focus();
+  };
+
+  const commandCapable =
+    props.sessionId === undefined
+      ? false
+      : (props.bridge?.canCommand(props.sessionId) ?? false);
+  const selectedId = selectedItemId({
+    state: admission.state,
+    hostPreset: admission.hostPreset,
+  });
   const items = selectorItems({
     state: admission.state,
     catalog: admission.catalog,
-    hostPreset:
-      admission.catalog?.find(
-        (option) => option.value === admission.hostPreset?.currentValue,
-      ) ?? null,
+    commandCapable,
+    selectedId,
     t,
   });
   const interactive = isInteractive(admission.state, {
     locked: props.locked === true,
     sessionId: props.sessionId ?? null,
   });
-  const label = triggerText(
-    {
-      state: admission.state,
-      hostPreset: admission.hostPreset,
-      catalog: admission.catalog,
-    },
-    t,
-  );
   const failure =
     admission.state.failure === null
       ? null
       : failureMessage(admission.state.failure, t);
+  const texts = triggerTexts(
+    {
+      state: admission.state,
+      hostPreset: admission.hostPreset,
+      catalog: admission.catalog,
+      failure,
+    },
+    t,
+  );
+
+  const item = items.find((entry) => entry.id === confirming) ?? null;
 
   useEffect(() => {
     if (!open && confirming === null) return;
@@ -78,29 +114,46 @@ export function PermissionSelector(props: {
     setAcknowledged(false);
   }, [confirming, interactive, open]);
 
-  const close = (): void => {
-    setOpen(false);
+  // A confirmation whose target left the catalog is cancelled for real, not
+  // merely hidden: keeping the state would let the dialog reappear with its
+  // acknowledgement still ticked if the host restored the option later. The
+  // native selector resets on the same condition.
+  useEffect(() => {
+    if (confirming === null || item !== null) return;
     setConfirming(null);
     setAcknowledged(false);
-    trigger.current?.focus();
-  };
+  }, [confirming, item]);
 
-  const choose = async (id: string, danger: boolean): Promise<void> => {
+  /**
+   * Apply one selection.
+   *
+   * Order matters: the native no-op is decided *before* the danger
+   * confirmation, because re-picking the preset the host already applies must
+   * not pop a risk dialog. The Arbiter and degraded-disable entries are handled
+   * first, so their ids never reach the host command.
+   */
+  const choose = (id: string): void => {
     setOpen(false);
     if (id === ARBITER_ITEM) {
-      await admission.setEnabled(true);
+      // Already enabled: a second enable would only write a duplicate
+      // admission record and change nothing.
+      if (admission.state.confirmed?.enabled === true) return;
+      admission.setEnabled(true).catch(() => undefined);
       return;
     }
     if (id === DISABLE_ITEM) {
-      await admission.setEnabled(false);
+      admission.setEnabled(false).catch(() => undefined);
       return;
     }
+    const sameAsNative = id === admission.hostPreset?.currentValue;
+    if (admission.state.confirmed?.enabled === false && sameAsNative) return;
+    const danger = id === 'danger-full-access';
     if (danger) {
       setAcknowledged(false);
       setConfirming(id);
       return;
     }
-    await admission.chooseHostPreset(id);
+    admission.chooseHostPreset(id).catch(() => undefined);
   };
 
   return (
@@ -109,52 +162,58 @@ export function PermissionSelector(props: {
       data-arbiter-surface="permission-selector"
       className="arb:relative arb:inline-flex arb:items-center arb:gap-1.5"
     >
-      <button
-        ref={trigger}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        aria-busy={admission.state.pending}
-        aria-label={
-          admission.state.pending
-            ? t('permission.busy')
-            : t('permission.trigger.open', { current: label })
-        }
-        title={failure ?? label}
-        disabled={!interactive && !open}
-        onClick={() => {
-          setOpen(!open);
+      <hostPrimitives.Menu
+        open={open}
+        side="top"
+        portal
+        selectedId={selectedId}
+        items={items.map(toHostItem)}
+        onSelect={choose}
+        onClose={() => {
+          setOpen(false);
         }}
-        className={`arb:h-7 arb:max-w-[220px] arb:truncate arb:rounded-md arb:border-0 arb:bg-transparent arb:px-2 arb:text-[13px] arb:text-secondary ${
-          interactive ? 'arb:cursor-pointer' : 'arb:cursor-default'
-        }`}
-      >
-        {admission.state.pending ? t('permission.busy') : label}
-      </button>
-      {open ? (
-        <Menu
-          id={menuId}
-          items={items}
-          onChoose={(id, danger) => {
-            choose(id, danger).catch(() => undefined);
-          }}
-          onClose={close}
-        />
-      ) : null}
-      {confirming === null ? null : (
-        <Confirmation
+        anchor={
+          <Trigger
+            triggerRef={trigger}
+            label={texts.label}
+            title={texts.title}
+            // The accessible name never takes over the pending state: the
+            // control keeps its last confirmed identity while a write runs and
+            // reports the wait through `aria-busy` alone.
+            ariaLabel={texts.ariaLabel}
+            busy={admission.state.pending}
+            disabled={!interactive && !open}
+            open={open}
+            preset={selectedId ?? null}
+            boundary={texts.boundary}
+            onClick={() => {
+              setOpen(!open);
+            }}
+          />
+        }
+      />
+      {item === null ? null : (
+        <hostPrimitives.RiskConfirmation
+          open
+          title={t('permission.confirm.title')}
+          description={t('permission.confirm.description')}
+          acknowledgeLabel={t('permission.confirm.acknowledge')}
+          cancelLabel={t('permission.confirm.cancel')}
+          closeLabel={t('permission.confirm.close')}
+          confirmLabel={t('permission.confirm.enable')}
           acknowledged={acknowledged}
-          onAcknowledged={setAcknowledged}
+          disabled={!interactive}
+          onAcknowledgedChange={setAcknowledged}
           onCancel={() => {
             setConfirming(null);
             setAcknowledged(false);
-            trigger.current?.focus();
+            restoreTriggerFocus();
           }}
           onConfirm={() => {
-            const preset = confirming;
+            const preset = item.id;
             setConfirming(null);
             setAcknowledged(false);
+            restoreTriggerFocus();
             admission.chooseHostPreset(preset).catch(() => undefined);
           }}
         />
@@ -172,103 +231,120 @@ export function PermissionSelector(props: {
   );
 }
 
-function Menu(props: {
+/** One selector row in the host menu's currency. */
+function toHostItem(item: SelectorItem): {
   readonly id: string;
-  readonly items: ReturnType<typeof selectorItems>;
-  readonly onChoose: (id: string, danger: boolean) => void;
-  readonly onClose: () => void;
+  readonly label: string;
+  readonly icon?: ReactNode;
+  readonly disabled?: boolean;
+} {
+  const icon = glyph(item.icon);
+  return {
+    id: item.id,
+    label: item.label,
+    ...(icon === null ? {} : { icon }),
+    ...(item.disabled ? { disabled: true } : {}),
+  };
+}
+
+/**
+ * The host's own glyph for one preset family; `null` means none.
+ *
+ * `size` is only set for the trigger, whose native glyph is 14px; menu rows keep
+ * the component default, as they do in the host's own selector.
+ */
+function glyph(kind: PresetIconKind | null, size?: number): ReactNode {
+  const props = size === undefined ? {} : { size };
+  switch (kind) {
+    case 'read-only':
+      return <hostPrimitives.PermissionIconReadOnlyRegular {...props} />;
+    case 'workspace-write':
+      return <hostPrimitives.PermissionIconWorkspaceWriteRegular {...props} />;
+    case 'danger-full-access':
+      return <hostPrimitives.PermissionIconFullAccessRegular {...props} />;
+    case 'arbiter':
+      return <hostPrimitives.PermissionIconAutoReviewRegular {...props} />;
+    case null:
+      return null;
+  }
+}
+
+/**
+ * The trigger.
+ *
+ * `Menu` renders its caller's `anchor` verbatim and does not style it, so the
+ * native trigger geometry is reproduced here from the pinned host's structure
+ * and design tokens: a 28px row with the preset glyph, a single truncating
+ * label and a chevron that turns while the menu is open. The class names are
+ * the plugin's own `arb:` utilities; the values (height, radius, hover and focus
+ * colours) come from the host's public `--dsw-*` variables.
+ */
+function Trigger(props: {
+  readonly triggerRef: { current: HTMLButtonElement | null };
+  readonly label: string;
+  readonly title: string;
+  readonly ariaLabel: string;
+  readonly busy: boolean;
+  readonly disabled: boolean;
+  readonly open: boolean;
+  readonly preset: string | null;
+  readonly boundary: string | null;
+  readonly onClick: () => void;
 }): ReactNode {
-  const t = useArbiterTranslation();
+  const icon = glyph(presetKindOf(props.preset), 14);
   return (
-    <span
-      id={props.id}
-      role="menu"
-      aria-label={t('permission.label')}
-      className="arb:absolute arb:bottom-[34px] arb:z-20 arb:flex arb:min-w-[240px] arb:flex-col arb:rounded-lg arb:border arb:border-border-default arb:bg-layer-3 arb:p-1 arb:shadow-lg"
+    <button
+      ref={props.triggerRef}
+      type="button"
+      data-arbiter-trigger=""
+      aria-haspopup="menu"
+      aria-expanded={props.open}
+      aria-busy={props.busy}
+      aria-label={props.ariaLabel}
+      title={props.title}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className="arb:inline-flex arb:h-7 arb:max-w-[220px] arb:cursor-pointer arb:items-center arb:gap-1 arb:rounded-[var(--dsw-radius-sm)] arb:border-0 arb:bg-transparent arb:py-0 arb:pr-1 arb:pl-2 arb:text-[13px] arb:font-medium arb:leading-5 arb:text-secondary arb:hover:bg-[var(--dsw-alias-interactive-bg-hover)] arb:focus-visible:outline-none arb:focus-visible:ring-2 arb:focus-visible:ring-[var(--dsw-focus-ring-color,var(--arb-accent))] arb:disabled:cursor-default arb:disabled:text-[var(--dsw-alias-label-dimmed)]"
     >
-      {props.items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          role="menuitemradio"
-          aria-checked={item.current}
-          aria-label={item.label}
-          title={item.hint}
-          onClick={() => {
-            props.onChoose(item.id, item.danger);
-          }}
-          className={`arb:flex arb:cursor-pointer arb:flex-col arb:items-start arb:gap-0.5 arb:rounded-md arb:border-0 arb:bg-transparent arb:px-2 arb:py-1.5 arb:text-left arb:text-[12.5px] hover:arb:bg-layer-4 ${
-            item.danger ? 'arb:text-error' : 'arb:text-primary'
-          }`}
+      {icon === null ? null : (
+        <span
+          data-arbiter-trigger-icon=""
+          className="arb:inline-flex arb:shrink-0"
+          aria-hidden="true"
         >
-          <span className="arb:font-medium">{item.label}</span>
-          <span className="arb:text-[11.5px] arb:text-tertiary">
-            {item.hint}
-          </span>
-        </button>
-      ))}
-      <button
-        type="button"
-        onClick={props.onClose}
-        className="arb:mt-0.5 arb:cursor-pointer arb:border-0 arb:bg-transparent arb:px-2 arb:py-1 arb:text-left arb:text-[11.5px] arb:text-tertiary hover:arb:text-primary"
+          {icon}
+        </span>
+      )}
+      <span
+        data-arbiter-trigger-label=""
+        className="arb:truncate arb:whitespace-nowrap"
       >
-        {t('permission.confirm.cancel')}
-      </button>
-    </span>
+        {props.label}
+      </span>
+      <span
+        aria-hidden="true"
+        className={`arb:inline-flex arb:shrink-0 arb:text-[var(--dsw-alias-label-caption)] arb:transition-transform ${
+          props.open ? 'arb:rotate-180' : ''
+        }`}
+      >
+        <hostPrimitives.IconChevronDownOutlineRegular />
+      </span>
+    </button>
   );
 }
 
-function Confirmation(props: {
-  readonly acknowledged: boolean;
-  readonly onAcknowledged: (value: boolean) => void;
-  readonly onCancel: () => void;
-  readonly onConfirm: () => void;
-}): ReactNode {
-  const t = useArbiterTranslation();
-  const acknowledgeId = useId();
-  return (
-    <span
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby={`${acknowledgeId}-title`}
-      className="arb:absolute arb:bottom-[34px] arb:z-30 arb:flex arb:w-[300px] arb:flex-col arb:gap-2 arb:rounded-lg arb:border arb:border-border-default arb:bg-layer-3 arb:p-3 arb:text-primary arb:shadow-lg"
-    >
-      <strong
-        id={`${acknowledgeId}-title`}
-        className="arb:text-[13px] arb:font-semibold"
-      >
-        {t('permission.confirm.title')}
-      </strong>
-      <span className="arb:text-xs arb:text-secondary">
-        {t('permission.confirm.description')}
-      </span>
-      <label className="arb:flex arb:items-start arb:gap-1.5 arb:text-xs">
-        <input
-          type="checkbox"
-          checked={props.acknowledged}
-          onChange={(event) => {
-            props.onAcknowledged(event.target.checked);
-          }}
-        />
-        <span>{t('permission.confirm.acknowledge')}</span>
-      </label>
-      <span className="arb:flex arb:justify-end arb:gap-2">
-        <button
-          type="button"
-          onClick={props.onCancel}
-          className="arb:cursor-pointer arb:rounded arb:border arb:border-border-subtle arb:bg-layer-2 arb:px-2 arb:py-1 arb:text-xs arb:text-secondary hover:arb:text-primary"
-        >
-          {t('permission.confirm.cancel')}
-        </button>
-        <button
-          type="button"
-          disabled={!props.acknowledged}
-          onClick={props.onConfirm}
-          className="arb:cursor-pointer arb:rounded arb:border-0 arb:bg-accent arb:px-2 arb:py-1 arb:text-xs arb:text-accent-foreground disabled:arb:cursor-not-allowed disabled:arb:opacity-50"
-        >
-          {t('permission.confirm.enable')}
-        </button>
-      </span>
-    </span>
-  );
+/** Which glyph the trigger shows: Arbiter's own, else the selected preset's. */
+function presetKindOf(preset: string | null): PresetIconKind | null {
+  switch (preset) {
+    case null:
+      return null;
+    case 'read-only':
+    case 'workspace-write':
+    case 'danger-full-access':
+      return preset;
+    case ARBITER_ITEM:
+      return 'arbiter';
+    default:
+      return null;
+  }
 }

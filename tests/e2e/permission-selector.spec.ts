@@ -156,6 +156,38 @@ function arbiterControl(page: Page) {
 }
 
 /**
+ * The selector's trigger.
+ *
+ * Its accessible name is the host's own phrasing plus the current value, so it
+ * is matched by prefix rather than by an exact label: the visible text is the
+ * host preset name or `自动审查（Arbiter）`, and both change with the state.
+ */
+function arbiterTrigger(page: Page) {
+  return arbiterControl(page).locator('[data-arbiter-trigger]');
+}
+
+/**
+ * An open permission menu.
+ *
+ * The host `Menu` portals its popup to `document.body` and publishes no
+ * accessible name, so it must be located at page level: it is never a
+ * descendant of the seat.
+ */
+function permissionMenu(page: Page) {
+  return page.getByRole('menu');
+}
+
+/** One selectable row; the host menu renders `menuitem`, not `menuitemradio`. */
+function menuItem(page: Page, name: string | RegExp) {
+  return permissionMenu(page).getByRole('menuitem', { name });
+}
+
+async function openPermissionMenu(page: Page): Promise<void> {
+  await arbiterTrigger(page).click();
+  await expect(permissionMenu(page)).toBeVisible();
+}
+
+/**
  * Report whether the seat renders a native permission control instead of the
  * arbiter occupant, using the host's own accessible names.
  */
@@ -188,119 +220,119 @@ async function settledSession(
   return session;
 }
 
-test('the arbiter selector owns the permission seat and drives the real session state', async ({
-  page,
-}, testInfo) => {
-  const steps = new Steps();
-  const caseHost: CaseHost = await createCaseHost(
-    testInfo.outputPath('dsh-selector'),
-  );
-  try {
-    const host = caseHost.current();
-    await openHost(page, host);
-    await sendPrompt(page, 'SEL-WARM RUN echo selector-warmup');
-    const session = await settledSession(host, 'SEL-WARM');
-    const sessionId = session.sessionId;
-    steps.add('session-settled', { sessionId });
-
-    // The seat exists, and the arbiter occupant is the only thing in it.
-    const seat = permissionSeat(page);
-    await expect(seat).toBeVisible();
-    await expect(arbiterControl(page)).toHaveCount(1);
-    await expect(arbiterControl(page)).toBeVisible();
-    expect(await nativeControlPresent(page)).toBe(false);
-    steps.add('seat-occupied', {
-      seats: await seat.count(),
-      arbiter: await arbiterControl(page).count(),
-      nativeControl: false,
-    });
-    // The seat itself is `display: contents`, so its own box has no pixels;
-    // the arbiter occupant is the element that is actually rendered.
-    await testInfo.attach('selector-initial.png', {
-      body: await arbiterControl(page).screenshot(),
-      contentType: 'image/png',
-    });
-
-    // A fresh session is not admitted: the control says so, and the backend
-    // agrees. This is the "installing must not take over" side of the contract.
-    expect(await admissionView(host, sessionId)).toMatchObject({
-      enabled: false,
-      managed: false,
-    });
-    const trigger = arbiterControl(page).getByRole('button', {
-      name: /未启用自动审查/u,
-    });
-    await expect(trigger).toBeVisible();
-
-    // Enable through the control, then read the backend answer back.
-    await trigger.click();
-    const menu = arbiterControl(page).getByRole('menu', {
-      name: '会话权限',
-    });
-    await expect(menu).toBeVisible();
-    await testInfo.attach('selector-menu.png', {
-      body: await page.screenshot({ fullPage: false }),
-      contentType: 'image/png',
-    });
-    await menu
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
-    const enabled = await waitForAdmission(
-      host,
-      sessionId,
-      (admission) => admission['enabled'] === true,
+test(
+  'the arbiter selector owns the permission seat and drives the real session state',
+  {
+    // The only CI job that runs on a real host is the `@smoke` subset, and this
+    // case is what proves the host actually publishes the primitives the seat
+    // renders — the packed-consumer stub cannot show that.
+    tag: '@smoke',
+  },
+  async ({ page }, testInfo) => {
+    const steps = new Steps();
+    const caseHost: CaseHost = await createCaseHost(
+      testInfo.outputPath('dsh-selector'),
     );
-    expect(enabled).not.toBeNull();
-    steps.add('enabled', enabled);
-    await expect(
-      arbiterControl(page).getByRole('button', {
-        name: /自动审查（Arbiter · 工作区写入）/u,
-      }),
-    ).toBeVisible();
-    await testInfo.attach('selector-enabled.png', {
-      body: await arbiterControl(page).screenshot(),
-      contentType: 'image/png',
-    });
+    try {
+      const host = caseHost.current();
+      await openHost(page, host);
+      await sendPrompt(page, 'SEL-WARM RUN echo selector-warmup');
+      const session = await settledSession(host, 'SEL-WARM');
+      const sessionId = session.sessionId;
+      steps.add('session-settled', { sessionId });
 
-    // The enable is durable in the session log, not only in the browser.
-    const logged = await waitForSession(
-      host.home,
-      (candidate) =>
-        candidate.sessionId === sessionId &&
-        candidate.events.some(
-          (event) => event.type === 'plugin:arbiter/admission',
-        ),
-    );
-    expect(lastAdmission(logged?.events ?? [])).toMatchObject({
-      enabled: true,
-    });
+      // The seat exists, and the arbiter occupant is the only thing in it.
+      const seat = permissionSeat(page);
+      await expect(seat).toBeVisible();
+      await expect(arbiterControl(page)).toHaveCount(1);
+      await expect(arbiterControl(page)).toBeVisible();
+      expect(await nativeControlPresent(page)).toBe(false);
+      steps.add('seat-occupied', {
+        seats: await seat.count(),
+        arbiter: await arbiterControl(page).count(),
+        nativeControl: false,
+      });
+      // The seat itself is `display: contents`, so its own box has no pixels;
+      // the arbiter occupant is the element that is actually rendered.
+      await testInfo.attach('selector-initial.png', {
+        body: await arbiterControl(page).screenshot(),
+        contentType: 'image/png',
+      });
 
-    // Disable through the same control.
-    await arbiterControl(page)
-      .getByRole('button', { name: /自动审查（Arbiter · 工作区写入）/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '关闭自动审查' })
-      .click();
-    const disabled = await waitForAdmission(
-      host,
-      sessionId,
-      (admission) => admission['enabled'] === false,
-    );
-    expect(disabled).not.toBeNull();
-    steps.add('disabled', disabled);
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
-  } finally {
-    await testInfo.attach('selector-steps.json', {
-      body: steps.json(),
-      contentType: 'application/json',
-    });
-    await caseHost.dispose();
-  }
-});
+      // A fresh session is not admitted: the control says so, and the backend
+      // agrees. This is the "installing must not take over" side of the contract.
+      expect(await admissionView(host, sessionId)).toMatchObject({
+        enabled: false,
+        managed: false,
+      });
+      const trigger = arbiterTrigger(page);
+      await expect(trigger).toBeVisible();
+      await expect(trigger).toContainText('工作区内修改');
+
+      // Enable through the control, then read the backend answer back.
+      await openPermissionMenu(page);
+      const menu = permissionMenu(page);
+      await testInfo.attach('selector-menu.png', {
+        body: await page.screenshot({ fullPage: false }),
+        contentType: 'image/png',
+      });
+      await menu.getByRole('menuitem', { name: '自动审查（Arbiter）' }).click();
+      const enabled = await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === true,
+      );
+      expect(enabled).not.toBeNull();
+      steps.add('enabled', enabled);
+      // The visible label is the native one; the boundary rides the tooltip and
+      // the accessible name, never the single-line label. The trigger settles
+      // only once the confirmed answer arrives, so this waits for it.
+      await expect(arbiterTrigger(page)).toHaveText('自动审查（Arbiter）');
+      await expect(arbiterTrigger(page)).toHaveAttribute(
+        'title',
+        '自动审查（Arbiter） · 工作区写入',
+      );
+      await testInfo.attach('selector-enabled.png', {
+        body: await arbiterControl(page).screenshot(),
+        contentType: 'image/png',
+      });
+
+      // The enable is durable in the session log, not only in the browser.
+      const logged = await waitForSession(
+        host.home,
+        (candidate) =>
+          candidate.sessionId === sessionId &&
+          candidate.events.some(
+            (event) => event.type === 'plugin:arbiter/admission',
+          ),
+      );
+      expect(lastAdmission(logged?.events ?? [])).toMatchObject({
+        enabled: true,
+      });
+
+      // Leave through the same control. The native exit is a host preset, not a
+      // dedicated row: under guarded the host value is already `workspace-write`,
+      // so this same-value selection is exactly the case that must still send the
+      // command instead of taking the native no-op path.
+      await openPermissionMenu(page);
+      await menuItem(page, '工作区内修改').click();
+      const disabled = await waitForAdmission(
+        host,
+        sessionId,
+        (admission) => admission['enabled'] === false,
+      );
+      expect(disabled).not.toBeNull();
+      steps.add('disabled', disabled);
+      await expect(arbiterTrigger(page)).toBeVisible();
+    } finally {
+      await testInfo.attach('selector-steps.json', {
+        body: steps.json(),
+        contentType: 'application/json',
+      });
+      await caseHost.dispose();
+    }
+  },
+);
 
 test('a second connection change and a refresh both adopt the backend state', async ({
   page,
@@ -317,13 +349,8 @@ test('a second connection change and a refresh both adopt the backend state', as
     const sessionId = session.sessionId;
 
     // Enable from this page so both pages start from a confirmed "enabled".
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -331,9 +358,7 @@ test('a second connection change and a refresh both adopt the backend state', as
         (admission) => admission['enabled'] === true,
       ),
     ).not.toBeNull();
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     steps.add('first-page-enabled', { sessionId });
 
     // A second connection (its own browser context) disables the session.
@@ -343,13 +368,10 @@ test('a second connection change and a refresh both adopt the backend state', as
     try {
       await openHost(secondPage, host);
       await openExistingSession(secondPage, 'SEL-RECONNECT');
-      await arbiterControl(secondPage)
-        .getByRole('button', { name: /Arbiter ·/u })
-        .click();
-      await arbiterControl(secondPage)
-        .getByRole('menu', { name: '会话权限' })
-        .getByRole('menuitemradio', { name: '关闭自动审查' })
-        .click();
+      await arbiterTrigger(secondPage).click();
+      // Another connection leaves through a host preset, which stops the
+      // admission; the row no longer exists in the healthy state.
+      await menuItem(secondPage, '仅可查看').click();
       expect(
         await waitForAdmission(
           host,
@@ -367,9 +389,7 @@ test('a second connection change and a refresh both adopt the backend state', as
     await page.evaluate(() => {
       window.dispatchEvent(new Event('focus'));
     });
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     steps.add('first-page-adopted', {
       backend: await admissionView(host, sessionId),
     });
@@ -380,13 +400,8 @@ test('a second connection change and a refresh both adopt the backend state', as
 
     // Re-enable, then refresh: the browser must reload the confirmed state
     // rather than replay the pre-refresh label.
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -405,9 +420,7 @@ test('a second connection change and a refresh both adopt the backend state', as
       status: disabledState.status,
       body: await recordBody(disabledState),
     });
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     const after = await admissionView(host, sessionId);
     expect(after['enabled']).toBe(before['enabled']);
     expect(after['admissionRevision']).toBe(before['admissionRevision']);
@@ -431,6 +444,104 @@ test('a second connection change and a refresh both adopt the backend state', as
   }
 });
 
+test('the seat keeps native keyboard and focus behaviour', async ({
+  page,
+}, testInfo) => {
+  const steps = new Steps();
+  const caseHost: CaseHost = await createCaseHost(
+    testInfo.outputPath('dsh-keyboard'),
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    await sendPrompt(page, 'SEL-KEYS RUN echo keyboard-warmup');
+    const session = await settledSession(host, 'SEL-KEYS');
+    const trigger = arbiterTrigger(page);
+    await expect(trigger).toBeEnabled();
+
+    // Opening with the keyboard alone: the native menu takes focus into its own
+    // list, so the first row is reachable without a pointer.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    const first = menuItem(page, '仅可查看');
+    await expect(first).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(permissionMenu(page)).toHaveCount(0);
+    // Escape returns focus to the trigger it came from, not to the page body.
+    await expect(trigger).toBeFocused();
+    steps.add('keyboard-open-escape', { focused: true });
+
+    // Arrow keys move focus through the host's own menu; the contract is that
+    // the plugin's anchor and state plumbing do not break that model.
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await expect(menuItem(page, '仅可查看')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(menuItem(page, '工作区内修改')).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(menuItem(page, '自动审查（Arbiter）')).toBeFocused();
+
+    // Activating the focused row from the keyboard enables the session, so the
+    // whole enable path is reachable without a pointer.
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toHaveCount(0);
+    expect(
+      await waitForAdmission(
+        host,
+        session.sessionId,
+        (admission) => admission['enabled'] === true,
+      ),
+    ).not.toBeNull();
+    steps.add('keyboard-select', { sessionId: session.sessionId });
+
+    // The risk gate is modal and cancellable from the keyboard; cancelling must
+    // send nothing and must give focus back to the trigger.
+    await openPermissionMenu(page);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toBeVisible();
+    await menuItem(page, '完全权限').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('checkbox')).not.toBeChecked();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    expect((await admissionView(host, session.sessionId))['enabled']).toBe(
+      true,
+    );
+    steps.add('keyboard-cancel-dialog', { admission: 'unchanged' });
+    // Dismissing the gate gives focus back to the trigger it was opened from;
+    // visibility alone would not prove that.
+    await expect(trigger).toBeFocused();
+
+    // Native responsive parity: the host hides a permission trigger's label in
+    // a narrow composer, keeping only the glyph and the chevron. The plugin's
+    // rule must key off the composer's own container, not the button (which is
+    // capped at 220px and would therefore always look narrow).
+    const label = page.locator('[data-arbiter-trigger-label]');
+    await expect(label).toBeVisible();
+    const icon = page.locator('[data-arbiter-trigger-icon] svg');
+    expect((await icon.boundingBox())?.width).toBe(14);
+    for (const width of [560, 480]) {
+      await page.setViewportSize({ width, height: 720 });
+      await expect(label).toBeHidden();
+      // The glyph survives, so the collapsed trigger is still identifiable.
+      await expect(icon).toBeVisible();
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(label).toBeVisible();
+    steps.add('responsive-trigger', { wideLabel: true, narrowLabel: false });
+  } finally {
+    await testInfo.attach('keyboard-steps.json', {
+      body: steps.json(),
+      contentType: 'application/json',
+    });
+    await caseHost.dispose();
+  }
+});
+
 test('removing the client overlay drops the confirmed state and leaves the backend record alone', async ({
   page,
 }, testInfo) => {
@@ -445,13 +556,8 @@ test('removing the client overlay drops the confirmed state and leaves the backe
     const session = await settledSession(host, 'SEL-UNMOUNT');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     const enabled = await waitForAdmission(
       host,
       sessionId,
@@ -558,13 +664,8 @@ test('choosing a host preset leaves arbiter through the host command and reads t
     const session = await settledSession(host, 'SEL-NATIVE');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -577,13 +678,8 @@ test('choosing a host preset leaves arbiter through the host command and reads t
     // Same-value exit: guarded already runs workspace-write, so the host writes
     // no permission event at all. Only the command pair proves the exit, and
     // the control must adopt the backend answer without any focus event.
-    await arbiterControl(page)
-      .getByRole('button', { name: /Arbiter · 工作区写入/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '工作区内修改' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '工作区内修改').click();
     const exited = await waitForAdmission(
       host,
       sessionId,
@@ -591,9 +687,7 @@ test('choosing a host preset leaves arbiter through the host command and reads t
     );
     expect(exited).not.toBeNull();
     steps.add('same-value-exit', exited);
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     // No focus/online/visibility event was dispatched by this case.
     await testInfo.attach('same-value-exit.png', {
       body: await arbiterControl(page).screenshot(),
@@ -616,13 +710,8 @@ test('choosing a host preset leaves arbiter through the host command and reads t
 
     // A real permission change: re-enable, then leave to read-only. Both the
     // backend admission and the host's own effective permission move.
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -630,13 +719,8 @@ test('choosing a host preset leaves arbiter through the host command and reads t
         (admission) => admission['enabled'] === true,
       ),
     ).not.toBeNull();
-    await arbiterControl(page)
-      .getByRole('button', { name: /Arbiter ·/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '只读' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '仅可查看').click();
     const readOnly = await waitForAdmission(
       host,
       sessionId,
@@ -685,13 +769,8 @@ test('a failed native command keeps admission and a full-access cancel writes no
     const session = await settledSession(host, 'SEL-FAIL');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -731,19 +810,14 @@ test('a failed native command keeps admission and a full-access cancel writes no
     expect(afterRejection['at']).toBe(before['at']);
     steps.add('auto-rejected', { before, afterRejection });
     // The control still shows the confirmed enabled state.
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
 
     // The full-access confirmation writes nothing when cancelled.
-    await arbiterControl(page)
-      .getByRole('button', { name: /Arbiter ·/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '完全权限' })
-      .click();
-    const dialog = arbiterControl(page).getByRole('dialog');
+    await openPermissionMenu(page);
+    await menuItem(page, '完全权限').click();
+    // `RiskConfirmation` portals to `document.body`, so it is never inside the
+    // seat: it must be located at page level.
+    const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(
       dialog.getByRole('button', { name: '切换权限' }),
@@ -790,13 +864,8 @@ test('a host preset the backend refuses leaves admission and shows a failure', a
     const session = await settledSession(host, 'SEL-REFUSED');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     const enabled = await waitForAdmission(
       host,
       sessionId,
@@ -826,31 +895,21 @@ test('a host preset the backend refuses leaves admission and shows a failure', a
     steps.add('refused-preset', { before, after });
 
     // The control still renders the confirmed state, not the refused intent.
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /Arbiter ·/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
 
     // A rejected selection through Arbiter's own menu: `auto` is not an option,
     // so the failure is produced by a preset the host no longer accepts. The
     // selector must report it instead of claiming success, and the confirmed
     // admission must not move.
     const beforeMenu = await admissionView(host, sessionId);
-    const menuLabels = await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .count();
-    expect(menuLabels).toBe(0);
-    await arbiterControl(page)
-      .getByRole('button', { name: /Arbiter ·/u })
-      .click();
-    const items = arbiterControl(page).getByRole('menu', { name: '会话权限' });
-    await expect(items).toBeVisible();
-    await expect(
-      items.getByRole('menuitemradio', { name: 'auto' }),
-    ).toHaveCount(0);
-    await arbiterControl(page)
-      .getByRole('menuitemradio', { name: '完全权限' })
-      .click();
-    const confirmDialog = arbiterControl(page).getByRole('dialog');
+    expect(await permissionMenu(page).count()).toBe(0);
+    await openPermissionMenu(page);
+    // `auto` stays out: the plugin's host half rejects that entry before any
+    // permission write, so offering it would be a row that always fails.
+    await expect(menuItem(page, 'auto')).toHaveCount(0);
+    await menuItem(page, '完全权限').click();
+    // The host risk gate portals to `document.body`.
+    const confirmDialog = page.getByRole('dialog');
     await expect(confirmDialog).toBeVisible();
     await confirmDialog
       .getByRole('checkbox', { name: '我已了解风险，愿意继续' })
@@ -864,9 +923,7 @@ test('a host preset the backend refuses leaves admission and shows a failure', a
     );
     expect(afterMenu).not.toBeNull();
     expect(afterMenu?.['at']).not.toBe(beforeMenu['at']);
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     await testInfo.attach('refused-preset.png', {
       body: await arbiterControl(page).screenshot(),
       contentType: 'image/png',
@@ -894,13 +951,8 @@ test('an external same-value slash exit updates the selector without focus', asy
     const session = await settledSession(host, 'SEL-EXTERNAL');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -935,9 +987,7 @@ test('an external same-value slash exit updates the selector without focus', asy
 
     // The mounted selector adopted the exit from the session's own event
     // stream; nothing in this case dispatched focus, online or visibility.
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     steps.add('external-exit-adopted', {
       commands: permissionCommands(settled?.events ?? []),
     });
@@ -975,9 +1025,7 @@ test('the real slot follows the released Chinese and English catalogs', async ({
     ).not.toBeNull();
 
     // Chinese host language: the control's own copy is Arbiter's source text.
-    await expect(
-      arbiterControl(page).getByRole('button', { name: /未启用自动审查/u }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toBeVisible();
     const chinese = await arbiterControl(page).innerText();
     steps.add('chinese', { copy: chinese });
 
@@ -997,8 +1045,10 @@ test('the real slot follows the released Chinese and English catalogs', async ({
     await page.getByRole('button', { name: /^(Close|关闭)$/u }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', /^en/);
 
+    // The trigger shows the host's own preset label, not plugin copy: with the
+    // default guarded composition the session is on workspace write.
+    await expect(arbiterTrigger(page)).toHaveText('Workspace Write');
     const copy = await arbiterControl(page).innerText();
-    expect(copy).toContain('Auto review not enabled');
     expect(copy).not.toMatch(/permission\./u);
     expect(copy).not.toMatch(/\{\w+\}/u);
     expect(copy).not.toMatch(/undefined/u);
@@ -1010,16 +1060,12 @@ test('the real slot follows the released Chinese and English catalogs', async ({
 
     // The open menu is translated too, and it still drives the same action:
     // enabling through the English menu reaches the backend unchanged.
-    await arbiterControl(page)
-      .getByRole('button', { name: /Auto review not enabled/u })
-      .click();
-    const menu = arbiterControl(page).getByRole('menu', {
-      name: 'Session permission',
-    });
+    await arbiterTrigger(page).click();
+    const menu = permissionMenu(page);
     await expect(menu).toBeVisible();
     // A long English item must stay inside the menu instead of overflowing it.
     const menuBox = await menu.boundingBox();
-    for (const item of await menu.getByRole('menuitemradio').all()) {
+    for (const item of await menu.getByRole('menuitem').all()) {
       const box = await item.boundingBox();
       if (box === null || menuBox === null) continue;
       expect(box.x).toBeGreaterThanOrEqual(menuBox.x - 1);
@@ -1027,9 +1073,7 @@ test('the real slot follows the released Chinese and English catalogs', async ({
         menuBox.x + menuBox.width + 1,
       );
     }
-    await menu
-      .getByRole('menuitemradio', { name: 'Auto review (Arbiter)' })
-      .click();
+    await menu.getByRole('menuitem', { name: 'Auto review (Arbiter)' }).click();
     expect(
       await waitForAdmission(
         host,
@@ -1037,11 +1081,11 @@ test('the real slot follows the released Chinese and English catalogs', async ({
         (admission) => admission['enabled'] === true,
       ),
     ).not.toBeNull();
-    await expect(
-      arbiterControl(page).getByRole('button', {
-        name: /Auto review \(Arbiter · Workspace write\)/u,
-      }),
-    ).toBeVisible();
+    await expect(arbiterTrigger(page)).toHaveText('Auto review (Arbiter)');
+    await expect(arbiterTrigger(page)).toHaveAttribute(
+      'title',
+      'Auto review (Arbiter) · Workspace write',
+    );
     steps.add('enabled-in-english', {
       copy: await arbiterControl(page).innerText(),
     });
@@ -1072,13 +1116,8 @@ test('the full-access confirmation applies after acknowledging, and a withdrawn 
     const session = await settledSession(host, 'SEL-FULL');
     const sessionId = session.sessionId;
 
-    await arbiterControl(page)
-      .getByRole('button', { name: /未启用自动审查/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '自动审查（Arbiter）' })
-      .click();
+    await openPermissionMenu(page);
+    await menuItem(page, '自动审查（Arbiter）').click();
     expect(
       await waitForAdmission(
         host,
@@ -1089,14 +1128,11 @@ test('the full-access confirmation applies after acknowledging, and a withdrawn 
 
     // Acknowledged full-access: the host applies the preset, and Arbiter leaves
     // because a successful native command is the exit #4 observes.
-    await arbiterControl(page)
-      .getByRole('button', { name: /Arbiter ·/u })
-      .click();
-    await arbiterControl(page)
-      .getByRole('menu', { name: '会话权限' })
-      .getByRole('menuitemradio', { name: '完全权限' })
-      .click();
-    const dialog = arbiterControl(page).getByRole('dialog');
+    await openPermissionMenu(page);
+    await menuItem(page, '完全权限').click();
+    // `RiskConfirmation` portals to `document.body`, so it is never inside the
+    // seat: it must be located at page level.
+    const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await dialog
       .getByRole('checkbox', { name: '我已了解风险，愿意继续' })

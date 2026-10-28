@@ -161,11 +161,40 @@ try {
     clientCode.includes('dsh-arbiter-styles'),
     'client bundle must include dsh-arbiter-styles',
   );
+  // The host publishes its browser primitives through the web shell's module
+  // table. This stub only proves the packaged factory can *load* with that
+  // external declared; it is not evidence that the pinned host provides the real
+  // components. Only the real-host E2E run can show that.
+  const primitivesStub = {
+    Menu: function MenuStub() {
+      return null;
+    },
+    RiskConfirmation: function RiskConfirmationStub() {
+      return null;
+    },
+    IconChevronDownOutlineRegular: function ChevronStub() {
+      return null;
+    },
+    PermissionIconReadOnlyRegular: function ReadOnlyStub() {
+      return null;
+    },
+    PermissionIconWorkspaceWriteRegular: function WorkspaceWriteStub() {
+      return null;
+    },
+    PermissionIconFullAccessRegular: function FullAccessStub() {
+      return null;
+    },
+    PermissionIconAutoReviewRegular: function AutoReviewStub() {
+      return null;
+    },
+  };
   const clientExports = registered.factory((specifier: string) => {
     if (specifier === 'react/jsx-runtime') return jsxRuntime;
     if (specifier === 'react') return react;
     if (specifier === 'react-dom') return reactDom;
     if (specifier === 'react-dom/client') return reactDomClient;
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives')
+      return primitivesStub;
     throw new Error(`Unexpected client external dependency: ${specifier}`);
   });
   assert.equal(

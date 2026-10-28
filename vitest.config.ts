@@ -1,4 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+/**
+ * The host publishes its browser primitives through the web shell's module
+ * table, not as an installed package, so Vite cannot resolve the specifier the
+ * permission selector imports. The `ui` project therefore aliases it to a local
+ * fixture; node projects never load client code and keep the real resolution.
+ */
+const primitivesFixture = fileURLToPath(
+  new URL('./tests/helpers/primitives-fixture.tsx', import.meta.url),
+);
 
 export default defineConfig({
   test: {
@@ -47,6 +58,14 @@ export default defineConfig({
       },
       {
         extends: true,
+        resolve: {
+          alias: [
+            {
+              find: /^@deepseek-ai\/dsh-client-ui-primitives$/u,
+              replacement: primitivesFixture,
+            },
+          ],
+        },
         test: {
           name: 'ui',
           environment: 'jsdom',
