@@ -472,10 +472,21 @@ test('the seat keeps native keyboard and focus behaviour', async ({
     await expect(trigger).toBeFocused();
     steps.add('keyboard-open-escape', { focused: true });
 
-    // A chosen row also gives focus back, so the composer stays reachable.
+    // Arrow keys move focus through the host's own menu; the contract is that
+    // the plugin's anchor and state plumbing do not break that model.
     await page.keyboard.press('Enter');
     await expect(permissionMenu(page)).toBeVisible();
-    await menuItem(page, '自动审查（Arbiter）').click();
+    await page.keyboard.press('ArrowDown');
+    await expect(menuItem(page, '仅可查看')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(menuItem(page, '工作区内修改')).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(menuItem(page, '自动审查（Arbiter）')).toBeFocused();
+
+    // Activating the focused row from the keyboard enables the session, so the
+    // whole enable path is reachable without a pointer.
+    await page.keyboard.press('Enter');
+    await expect(permissionMenu(page)).toHaveCount(0);
     expect(
       await waitForAdmission(
         host,
