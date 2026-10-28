@@ -51,6 +51,8 @@
     "reviewerUrlRequired": "decision 后端必须填写 URL。",
     "reviewerUrlScheme": "必须是 http(s) URL。",
     "reviewerCredentialRequired": "decision 后端必须填写凭据引用。",
+    "reviewerModelRequired": "decision 后端必须填写模型。",
+    "reviewerModelMismatch": "该端点提供的模型与填写的 model 不一致。",
     "configUnknown": "配置无效。",
     "ruleShadowed": "规则「{allow}」可能被 force-review 规则「{review}」遮蔽。",
     "ruleAgentsEmpty": "agent 范围不能是空列表。",

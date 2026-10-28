@@ -555,11 +555,11 @@ describe('decision failure reporting', () => {
     });
   }
 
-  async function run(fetch: typeof globalThis.fetch) {
+  async function run(fetch: typeof globalThis.fetch, credential = 'test-key') {
     return runDecisionReviewer(
       {
         fetch,
-        credentials: { resolve: () => Promise.resolve({ value: 'test-key' }) },
+        credentials: { resolve: () => Promise.resolve({ value: credential }) },
         decision: {
           url: 'https://example.test/ai/run',
           model: 'clef',
@@ -616,6 +616,12 @@ describe('decision failure reporting', () => {
     if (result.ok) return;
     expect(result.error).toContain('quota exhausted');
     expect(result.attempts[0]?.parsed).toBeNull();
+    // A failed request was still billed, so its usage is recorded rather than
+    // dropped along with the verdict.
+    expect(result.attempts[0]?.usage).toEqual({
+      input_tokens: 1000,
+      output_tokens: 0,
+    });
   });
 
   test('a native response without a success field is still accepted', async () => {
@@ -628,6 +634,30 @@ describe('decision failure reporting', () => {
       ),
     );
     expect(result.ok).toBe(true);
+  });
+
+  test('an explanation that crosses the length bound cannot leak a prefix', async () => {
+    // Masking must precede bounding. The padding places the credential so the
+    // cut lands inside it; asserting the whole value would pass even then,
+    // because a cut leaves only a prefix — the assertion therefore targets the
+    // exact fragment that survives truncation-before-masking.
+    // The sentinel must be the credential this call actually sent: masking is
+    // exact-value, so a different string would test nothing.
+    const sentinel = 'sk-truncation-sentinel';
+    const leaked = sentinel.slice(0, 6);
+    const result = await run(
+      () =>
+        Promise.resolve(
+          refusal(422, {
+            errors: [{ message: `${'x'.repeat(280)}${sentinel}` }],
+          }),
+        ),
+      sentinel,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).not.toContain(leaked);
+    expect(result.attempts[0]?.error).not.toContain(leaked);
   });
 
   test('a non-JSON refusal does not quote the body in its error', async () => {
@@ -757,6 +787,17 @@ describe('reviewer transport credential boundary', () => {
           JSON.stringify({
             ...CAPTURED_TYPESAFE,
             usage: { input_tokens: 10, note: secret },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'a usage key',
+      (secret: string) =>
+        new Response(
+          JSON.stringify({
+            ...CAPTURED_TYPESAFE,
+            usage: { [secret]: 10, input_tokens: 10 },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),

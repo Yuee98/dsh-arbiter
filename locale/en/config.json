@@ -51,6 +51,8 @@
     "reviewerUrlRequired": "A decision backend requires a URL.",
     "reviewerUrlScheme": "Must be an http(s) URL.",
     "reviewerCredentialRequired": "A decision backend requires a credential reference.",
+    "reviewerModelRequired": "A decision backend requires a model.",
+    "reviewerModelMismatch": "The endpoint serves a different model than the configured one.",
     "configUnknown": "Invalid configuration.",
     "ruleShadowed": "Rule \"{allow}\" may be shadowed by the force-review rule \"{review}\".",
     "ruleAgentsEmpty": "The agent scope must not be an empty list.",

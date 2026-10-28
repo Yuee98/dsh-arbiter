@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -7,6 +9,9 @@ import {
   registerConfigFormat,
   registeredConfigFormats,
 } from '../src/config.js';
+import type { LocaleTree } from '../src/client/i18n/catalog.js';
+import { flattenCatalog } from '../src/client/i18n/catalog.js';
+import { issueKey } from '../src/client/view-issues.js';
 import { evaluateCall } from '../src/rules/match.js';
 
 describe('configuration', () => {
@@ -86,6 +91,37 @@ describe('configuration', () => {
         'reviewer.decision.apiKeyRef',
       ]),
     );
+  });
+
+  test.each([
+    ['reviewer.model-required', ''],
+    ['reviewer.model-mismatch', 'clef-flash'],
+  ])('%s has a localized message in both catalogs', async (code, model) => {
+    // The key comes from the same function the UI uses, and the catalog is
+    // flattened the same way the loader flattens it, so this asserts what the
+    // renderer would actually find rather than a second invented mapping.
+    const key = `config.issue.${issueKey(code)}`;
+    for (const locale of ['zh', 'en'] as const) {
+      // The file is the shipped catalog; reading it as text keeps the test
+      // independent of the resource module's literal import type.
+      const tree = await readLocaleTree(locale);
+      const catalog = flattenCatalog({ config: tree });
+      const template = catalog[key];
+      expect(template, `${locale} ${key}`).toBeDefined();
+      expect(template?.length ?? 0).toBeGreaterThan(0);
+    }
+    // The code the test names must be the one the parser actually emits.
+    const parsed = parseConfig({
+      reviewer: {
+        type: 'decision',
+        decision: {
+          url: 'https://api.cloudflare.com/client/v4/accounts/a/ai/run/@cf/cloudflare/clef',
+          apiKeyRef: 'K',
+          model,
+        },
+      },
+    });
+    expect(parsed.errors.map((error) => error.code)).toContain(code);
   });
 
   test('rejects a URL that cannot be parsed, not just one without a scheme', () => {
@@ -964,3 +1000,38 @@ describe('rule compiler issues carry localized parameters', () => {
     });
   });
 });
+
+/**
+ * Read one shipped locale file as a nested tree.
+ *
+ * The shipped catalogs are plain JSON objects whose leaves are strings; the
+ * value is walked rather than asserted so a malformed file fails here instead
+ * of producing a misleading "missing key" further down.
+ */
+async function readLocaleTree(locale: string): Promise<LocaleTree> {
+  const text = await readFile(
+    new URL(`../locale/${locale}/config.json`, import.meta.url),
+    'utf8',
+  );
+  const parsed: unknown = JSON.parse(text);
+  const tree = nestedTree(parsed);
+  if (tree === null) {
+    throw new Error(`locale/${locale}/config.json must be a nested object`);
+  }
+  return tree;
+}
+
+function nestedTree(value: unknown): LocaleTree | null {
+  if (value === null || typeof value !== 'object') return null;
+  const out: Record<string, string | LocaleTree> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === 'string') {
+      out[key] = item;
+      continue;
+    }
+    const nested = nestedTree(item);
+    if (nested === null) return null;
+    out[key] = nested;
+  }
+  return out;
+}

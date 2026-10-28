@@ -52,7 +52,16 @@ export function redactAuthHeaders(text: string): string {
   );
 }
 
-/** Mask known secrets and recognisable auth headers in an arbitrary value. */
+/**
+ * Mask known secrets and recognisable auth headers in an arbitrary value.
+ *
+ * Keys are masked as well as values. A provider-supplied object is arbitrary
+ * text on both sides of the colon: a `usage` payload keyed by the credential
+ * would carry it into the audit row even after every value had been cleaned.
+ * Two keys that mask to the same text collapse into one, which is acceptable
+ * because the sensitive content is gone and the remaining number is still
+ * readable — losing a redacted duplicate is cheaper than keeping a secret.
+ */
 export function redactValue(
   value: unknown,
   secrets: readonly string[],
@@ -69,7 +78,7 @@ export function redactValue(
     seen.add(value);
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
-        key,
+        redact(redactAuthHeaders(key), secrets),
         redactValue(item, secrets, seen),
       ]),
     );

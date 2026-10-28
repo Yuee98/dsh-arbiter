@@ -132,15 +132,11 @@ function decisionResponseResult(
       responseText,
       parsed: null,
       error,
-      usage: reportedUsage(parsedBody, undefined, secrets),
+      usage: reportedUsage(parsedBody, secrets),
     });
     return { ok: false, kind: 'review-failure', error, attempts };
   }
-  const usage = reportedUsage(
-    parsedBody,
-    record(parsedBody) ? parsedBody : undefined,
-    secrets,
-  );
+  const usage = reportedUsage(parsedBody, secrets);
   const parsed = parseDecisionResponse(parsedBody, thresholds);
   attempts.push({
     ...recordBase,
@@ -240,26 +236,30 @@ function failureText(
 ): string {
   const base = `HTTP ${String(status)}`;
   if (explanation === null) return base;
-  const trimmed =
-    explanation.length > MAX_EXPLANATION
-      ? `${explanation.slice(0, MAX_EXPLANATION)}…`
-      : explanation;
-  return `${base}: ${redact(trimmed, secrets)}`;
+  // Mask before bounding: truncating first can cut a credential in half, and a
+  // half is no longer an exact-value match, so the visible prefix would survive
+  // the mask that was supposed to remove it.
+  const masked = redact(explanation, secrets);
+  const bounded =
+    masked.length > MAX_EXPLANATION
+      ? `${masked.slice(0, MAX_EXPLANATION)}…`
+      : masked;
+  return `${base}: ${bounded}`;
 }
 
-/** The `usage` a provider reported, masked before it can be stored. */
-function reportedUsage(
-  parsed: unknown,
-  answersAt: Record<string, unknown> | undefined,
-  secrets: readonly string[],
-): unknown {
+/**
+ * The `usage` a provider reported, masked before it can be stored.
+ *
+ * Usage is read whether or not the response produced a verdict: a provider that
+ * reports a failure was still billed for the request, and that is exactly when
+ * the caller most wants the count. Cloudflare nests the payload under `result`,
+ * a native endpoint answers at the root, and both put `usage` beside `answers`.
+ */
+function reportedUsage(parsed: unknown, secrets: readonly string[]): unknown {
   if (!record(parsed)) return null;
-  // Cloudflare nests the payload under `result`; a native endpoint answers at
-  // the root. Both put `usage` beside `answers`, so the object that carried the
-  // answers is the one to read.
   const payload = record(parsed['result']) ? parsed['result'] : parsed;
   const usage = payload['usage'];
-  if (usage === undefined || answersAt === undefined) return null;
+  if (usage === undefined) return null;
   return redactValue(usage, secrets);
 }
 
