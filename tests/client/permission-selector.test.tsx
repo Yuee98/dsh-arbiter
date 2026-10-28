@@ -851,6 +851,32 @@ describe('arbiter permission selector', () => {
     ).toBeInTheDocument();
   }, 20_000);
 
+  test('names the unknown-preset state instead of leaking a locale key', async () => {
+    server.use(
+      http.get('*/api/arbiter/sessions', () =>
+        HttpResponse.json(admission({ enabled: false })),
+      ),
+    );
+    // Admission is confirmed off, but there is no bridge to say which host
+    // preset is current. The label must describe that state: the host locale
+    // renders an unknown key as the key itself.
+    const { user } = renderClient(
+      <PermissionSelector sessionId={SESSION} bridge={undefined} />,
+    );
+    const trigger = await screen.findByRole('button', {
+      name: /打开权限菜单，当前：权限未知/u,
+    });
+    expect(trigger).toHaveTextContent(/^权限未知$/u);
+    expect(document.body.textContent).not.toMatch(/permission\./u);
+    // The menu still opens, so a confirmed "off" session can be enabled.
+    await user.click(trigger);
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitem', {
+        name: '自动审查（Arbiter）',
+      }),
+    ).toBeInTheDocument();
+  });
+
   test('keeps an unlisted current host preset in the trigger without inventing an option', async () => {
     server.use(
       http.get('*/api/arbiter/sessions', () => HttpResponse.json(admission())),
