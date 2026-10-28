@@ -24,6 +24,7 @@ import {
   waitForSession,
   type LoggedSession,
 } from './dsh/session-log.js';
+import { startNewSession } from './dsh/ui.js';
 
 interface ArbiterStateBody {
   readonly config?: { readonly boundary?: string };
@@ -210,15 +211,6 @@ async function openHost(page: Page, host: DshHost): Promise<void> {
       .getByRole('button', { name: /^(关闭|Close)$/ })
       .click();
   }
-}
-
-/** Start a new session through the host's own sidebar control. */
-async function newSession(page: Page): Promise<void> {
-  await page
-    .getByRole('button', { name: '新建会话', exact: true })
-    .first()
-    .click();
-  await expect(page.locator('[contenteditable="true"]').first()).toBeVisible();
 }
 
 /** Open one existing session from the sidebar by its own title. */
@@ -728,10 +720,13 @@ test.describe('session admission', () => {
       // A second, unmanaged session in the same profile: it stays ungated even
       // though another session in the same host is enabled.
       await openHost(page, host);
-      await newSession(page);
+      const plainSessionId = await startNewSession(page);
       await sendPrompt(page, 'ADM-PLAIN RUN echo arbiter-deny-plain');
       const plainSession = await sessionWithText(host, 'ADM-PLAIN');
       const plain = await settledTurn(host, plainSession.sessionId);
+      // The turn landed in the session the host created for this click, which
+      // is a different one from the enabled session above.
+      expect(plain.sessionId).toBe(plainSessionId);
       expect(plain.sessionId).not.toBe(parent.sessionId);
       expect(decisionRecords(plain)).toHaveLength(0);
 
@@ -887,10 +882,13 @@ test.describe('plugin-manager disable with a call in flight', () => {
       // window, the other sends the call that arrives inside it.
       const held = await runOneCall(page, host, 'DRAIN-HELD-WARM', 'echo held');
       await openHost(page, host);
-      await newSession(page);
+      const lateCreatedId = await startNewSession(page);
       await sendPrompt(page, 'DRAIN-LATE-WARM RUN echo late');
       const lateSession = await sessionWithText(host, 'DRAIN-LATE-WARM');
       const lateSessionId = lateSession.sessionId;
+      // The late call must belong to the freshly created session, not to the
+      // one that was already on screen before the click.
+      expect(lateSessionId).toBe(lateCreatedId);
       for (const sessionId of [held.sessionId, lateSessionId]) {
         const enabled = await admissionRequest(host, {
           sessionId,
