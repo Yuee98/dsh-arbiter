@@ -42,14 +42,12 @@
   "priorityFallback": "review(default) · 未命中兜底",
   "priorityFallbackEffective": "本次生效：这是兜底路径",
   "priorityEffective": "本次生效（{ids}）",
-  "priorityMatched": "命中但被更高优先级覆盖（{ids}）",
   "priorityNone": "本次未命中",
   "priorityCurrent": "（当前规则）",
   "coverageTitle": "复合命令与覆盖范围",
   "coverageNodes": "本次调用共 {total} 条命令，其中 {named} 条被 allow 条件命名。",
   "coverageNodeNamed": "已命名：{text}",
   "coverageNodeUnnamed": "未命名：{text}",
-  "coverageNoStructure": "这条调用没有可拆分的 shell 结构，参数本身就是全部输入。",
   "coverageComplete": "生效的 allow 覆盖了整次调用，因此不请求 reviewer。",
   "coverageIncomplete": "结构没有完整读取，无法确认整次调用已被覆盖，因此进入默认审查。",
   "coveragePartial": "还有 {unnamed} 条命令没有被 allow 命名，因此进入默认审查；放宽 allow 不会顺带授权这些命令。",
@@ -119,5 +117,12 @@
   "groupUnknown": "结构未读全，无法判断",
   "clearFocusedRule": "切换为整套规则测试",
   "dialogDescription": "针对当前未保存的规则草稿模拟评估单次工具调用。",
-  "importCommandEmpty": "（无命令摘要）"
+  "importCommandEmpty": "（无命令摘要）",
+  "priorityTierMatch": "同一优先级的其他命中（{ids}）；同层按配置顺序取第一条生效。",
+  "priorityShadowed": "命中但被更高优先级覆盖（{ids}）",
+  "priorityInsufficientCoverage": "命中，但覆盖不足，因此本次进入默认审查（不是被更高优先级规则覆盖）。",
+  "priorityUnknown": "无法判断（{ids}）：既不是命中也不是未命中。",
+  "coverageUnresolved": "有更高优先级的规则无法判断，因此进入默认审查；这与未命中不同。",
+  "coverageNoEvidence": "没有逐条命令的结构证据（例如该工具不是受支持的 shell 方言）；结论以本次最终路径为准。",
+  "coveragePartialOther": "匹配的 allow 只命名了部分命令，另有 {targets} 需要单独覆盖，因此本次进入默认审查。"
 }

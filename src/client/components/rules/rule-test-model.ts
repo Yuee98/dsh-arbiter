@@ -8,6 +8,7 @@
  * lets Node tests cover the explanation contract.
  */
 
+import { VERDICT_ORDER } from './draft.js';
 import type {
   RuleConditionResult,
   RuleConjunctionGroup,
@@ -230,26 +231,49 @@ export function verdictLabel(verdict: RuleVerdict, t: Translate): string {
 }
 
 /**
- * One level of the fixed whole-config precedence, as this answer used it.
+ * What one precedence level contributed to this call.
  *
- * `decision` says what this level contributed to *this* call: the winning level,
- * a level whose rule matched but was outranked, or a level that never applied.
- * It is read from the evaluator's own path and outcomes, so the list explains
- * priority without recomputing it.
+ * These are deliberately distinct. Only one of them means "a higher-priority
+ * rule beat this one": an `allow` that matched but was not credited with the
+ * whole call was not outranked by anything, and a rule that could not be
+ * determined was never proven to be a non-match. Collapsing them into one label
+ * would contradict the evaluator's own answer.
  */
+export type PriorityDecision =
+  /** The rule the evaluator's final path names. */
+  | 'effective'
+  /** Another rule at the winning tier also matched; configuration order picked the winner. */
+  | 'tier-match'
+  /** Matched and was beaten by a decisive higher-priority rule. */
+  | 'shadowed'
+  /** Matched, but the call still went to review because its coverage was insufficient. */
+  | 'insufficient-coverage'
+  /** Could not be determined, so it never became a match or a non-match. */
+  | 'unknown'
+  /** Took no part in this answer. */
+  | 'none';
+
+/** One level of the fixed whole-config precedence, as this answer used it. */
 export interface PriorityLevel {
   readonly kind: 'rule' | 'fallback';
   readonly verdict: RuleVerdict | null;
-  readonly decision: 'effective' | 'matched' | 'blocked' | 'none';
-  /** Ids at this level that matched, in evaluator order. */
-  readonly ruleIds: readonly string[];
+  readonly decision: PriorityDecision;
+  /** The single rule the final path credits, when this level produced it. */
+  readonly winnerId: string | null;
+  /** Other rules at this level that matched without being the credited one. */
+  readonly otherIds: readonly string[];
+  /** Rules at this level whose outcome could not be determined. */
+  readonly unknownIds: readonly string[];
   /** True when the focused rule sits at this level and took part. */
   readonly focused: boolean;
 }
 
-/** One command text the call offered, and whether an allow condition named it. */
+/** One command occurrence the parse published, in parse order. */
 export interface CoverageNode {
+  /** Position in the parse, so two identical commands stay distinct. */
+  readonly index: number;
   readonly text: string;
+  /** True when an `allow` *command* condition named this occurrence's text. */
   readonly named: boolean;
 }
 
@@ -259,37 +283,51 @@ export interface CoverageNode {
  * This is deliberately not re-derived: `matches[].effective` is set before the
  * final path is chosen, so a matched `allow` can carry `effective: true` while
  * the call actually went to `review(default)` because it did not cover
- * everything. Only `pathDetail` says what coverage was credited, so only
- * `pathDetail` decides which sentence the panel may state.
+ * everything. Only `pathDetail` says what coverage was credited.
  */
 export type CoverageState =
-  'complete' | 'partial' | 'incomplete' | 'not-allow' | 'no-structure';
+  | 'complete'
+  | 'partial'
+  | 'incomplete'
+  | 'not-allow'
+  | 'unresolved'
+  | 'unknown-structure';
 
 /**
- * What the call offered and what the evaluator credited an `allow` with.
+ * What the call offered, and what the evaluator credited an `allow` with.
  *
  * A composite command is the case the contract calls out: allowing `gh pr view`
- * says nothing about the `rm` after `&&`. The node list is evidence of which
- * commands an `allow` condition named; it is never used to compute the
- * classification, which comes from `pathDetail` and `parse.completeness`.
+ * says nothing about the `rm` after `&&`. Command occurrences are evidence of
+ * what an `allow` *command* condition named; they never compute the
+ * classification, which comes from `pathDetail`.
  *
- * The texts come from the parse the evaluator used (`normalization.commands`),
- * never from re-parsing here: a second parser could describe a different command
- * than the one that decided the answer.
+ * An uncovered structural effect need not be a command: a redirect or an
+ * assignment is a separate target that a command match cannot authorize. The
+ * panel therefore reports `otherTargets` alongside the command list instead of
+ * blaming the fallback on unnamed commands.
  */
 export interface CoverageDetail {
-  /** Command texts the parse published, with whether an allow condition named them. */
   readonly nodes: readonly CoverageNode[];
   readonly total: number;
   readonly namedCount: number;
-  /** The classification the evaluator actually produced. */
   readonly state: CoverageState;
-  /** True when this call has a shell structure at all. */
+  /** True when the parse published at least one command occurrence. */
   readonly structural: boolean;
+  /**
+   * Structural node kinds the parse published beyond plain commands, such as a
+   * redirect or an assignment. Coverage of these is not visible from commands.
+   */
+  readonly otherTargets: readonly ('file_redirect' | 'variable_assignment')[];
+  /** False when the tester has no per-command evidence at all. */
+  readonly hasEvidence: boolean;
 }
 
 /**
- * The command texts an `allow` condition actually named.
+ * The command texts an `allow` condition named.
+ *
+ * Only `command`-target conditions count. A matching `argument` condition names
+ * a selected value, and on a shell call that value covers no structural node, so
+ * attributing it to a command would report coverage the evaluator did not grant.
  *
  * Read from the rule outcomes rather than from `matches[].effective`: a shadowed
  * allow names commands it was never allowed to cover, and hiding it would remove
@@ -301,14 +339,11 @@ function allowNamedTexts(result: RuleTestResultView): ReadonlySet<string> {
     if (entry.verdict !== 'allow' || entry.outcome !== 'match') continue;
     for (const condition of entry.conditions) {
       if (condition.outcome !== 'match') continue;
+      if (condition.target !== 'command') continue;
       // `witnessValues` is authoritative for an `all` conjunction: a condition
       // that matched a node no sibling matched does not cover it.
       for (const text of condition.witnessValues ?? []) named.add(text);
-      // An `any` rule covers what each matched condition named. Selected values
-      // keep their JSON types, so only text is comparable to a command.
       if (condition.witnessValues !== undefined) continue;
-      for (const value of condition.matchedValues ?? [])
-        if (typeof value === 'string') named.add(value);
       if (condition.matchedValue !== undefined)
         named.add(condition.matchedValue);
     }
@@ -316,41 +351,62 @@ function allowNamedTexts(result: RuleTestResultView): ReadonlySet<string> {
   return named;
 }
 
+/** Structural kinds that a command match alone cannot authorize. */
+function otherStructuralTargets(
+  result: RuleTestResultView,
+): readonly ('file_redirect' | 'variable_assignment')[] {
+  const kinds: ('file_redirect' | 'variable_assignment')[] = [];
+  if (result.parse.nodes.includes('file_redirect')) kinds.push('file_redirect');
+  if (result.parse.nodes.includes('variable_assignment'))
+    kinds.push('variable_assignment');
+  return kinds;
+}
+
 export function coverageDetail(result: RuleTestResultView): CoverageDetail {
   const namedTexts = allowNamedTexts(result);
-  const texts = (result.normalization?.commands ?? []).map(
-    (command) => command.text,
-  );
-  const nodes: CoverageNode[] = [];
-  for (const text of texts) {
-    if (nodes.some((node) => node.text === text)) continue;
-    nodes.push({ text, named: namedTexts.has(text) });
-  }
-  const structural = nodes.length > 0;
+  // Every occurrence is kept: `echo hi; echo hi` ran twice, and collapsing the
+  // two into one entry would hide an operation the parser observed.
+  const commands = result.normalization?.commands ?? [];
+  const nodes: CoverageNode[] = commands.map((command, index) => ({
+    index,
+    text: command.text,
+    named: namedTexts.has(command.text),
+  }));
+  const hasEvidence =
+    result.normalization !== null && result.normalization !== undefined;
   return {
     nodes,
     total: nodes.length,
     namedCount: nodes.filter((node) => node.named).length,
-    state: coverageState(finalPath(result), structural),
-    structural,
+    state: coverageState(finalPath(result), hasEvidence),
+    structural: nodes.length > 0,
+    otherTargets: otherStructuralTargets(result),
+    hasEvidence,
   };
 }
 
 /**
  * Which coverage sentence the evaluator's own answer supports.
  *
- * `partial-allow` and `incomplete` are distinct on purpose: the first means the
- * allows that matched did not name every command, the second means the structure
- * itself was not fully read. Collapsing them would claim a command list for a
- * parse that never produced one.
+ * `partial`, `incomplete` and `unresolved` are distinct causes and stay distinct:
+ * insufficient coverage, a structure that was never fully read, and an
+ * undetermined higher-priority rule. Reporting any of them as the others would
+ * state a reason the evaluator did not give.
  */
-function coverageState(path: FinalPath, structural: boolean): CoverageState {
-  if (path.kind === 'rule' && path.verdict === 'allow') return 'complete';
-  if (path.kind === 'rule') return 'not-allow';
-  if (path.reason === 'incomplete') return 'incomplete';
-  if (path.reason === 'partial-allow')
-    return structural ? 'partial' : 'no-structure';
-  return 'not-allow';
+function coverageState(path: FinalPath, hasEvidence: boolean): CoverageState {
+  if (path.kind === 'rule') {
+    return path.verdict === 'allow' ? 'complete' : 'not-allow';
+  }
+  switch (path.reason) {
+    case 'partial-allow':
+      return hasEvidence ? 'partial' : 'unknown-structure';
+    case 'incomplete':
+      return 'incomplete';
+    case 'unresolved':
+      return 'unresolved';
+    case 'no-match':
+      return 'not-allow';
+  }
 }
 
 /**
@@ -358,58 +414,120 @@ function coverageState(path: FinalPath, structural: boolean): CoverageState {
  *
  * `review(default)` is the fallback path, not a verdict a rule can carry, so it
  * closes the list. Each level reports what it did for this call; nothing here is
- * derived from a pattern comparison, only from the evaluator's outcomes.
+ * derived from a pattern comparison, only from the evaluator's outcomes and its
+ * final path.
  */
 export function priorityView(
   result: RuleTestResultView,
   focusedRuleId: string | null,
 ): readonly PriorityLevel[] {
   const path = finalPath(result);
-  const order: (RuleVerdict | null)[] = [
-    'deny',
-    'force-ask',
-    'force-review',
-    'allow',
-    null,
-  ];
-  return order.map((verdict) => {
-    if (verdict === null) {
-      const effective = path.kind === 'review';
-      return {
-        kind: 'fallback' as const,
-        verdict: null,
-        decision: effective ? ('effective' as const) : ('none' as const),
-        ruleIds: [],
-        focused: false,
-      };
-    }
-    // A level matched when any rule at it matched, whether or not it decided.
-    const matchedIds = result.rules
-      .filter((entry) => entry.verdict === verdict && entry.outcome === 'match')
-      .map((entry) => entry.id);
-    const effective =
-      path.kind === 'rule' &&
-      path.verdict === verdict &&
-      matchedIds.includes(path.ruleId);
-    return {
-      kind: 'rule' as const,
-      verdict,
-      decision: effective
-        ? ('effective' as const)
-        : matchedIds.length > 0
-          ? ('matched' as const)
-          : ('none' as const),
-      ruleIds: matchedIds,
-      focused:
-        focusedRuleId !== null &&
-        result.rules.some(
-          (entry) =>
-            entry.id === focusedRuleId &&
-            entry.verdict === verdict &&
-            entry.outcome !== 'unknown',
-        ),
-    };
-  });
+  return PRIORITY_VERDICTS.map((verdict) =>
+    verdict === null
+      ? fallbackLevel(path)
+      : ruleLevel(result, verdict, path, focusedRuleId),
+  );
+}
+
+/** The precedence order, reusing the constant the editor already declares. */
+const PRIORITY_VERDICTS: readonly (RuleVerdict | null)[] = [
+  ...VERDICT_ORDER,
+  null,
+];
+
+function fallbackLevel(path: FinalPath): PriorityLevel {
+  const effective = path.kind === 'review';
+  return {
+    kind: 'fallback',
+    verdict: null,
+    decision: effective ? 'effective' : 'none',
+    winnerId: null,
+    otherIds: [],
+    unknownIds: [],
+    focused: false,
+  };
+}
+
+/** Why a matched `allow` still sent the call to review. */
+function allowNotApplied(
+  path: FinalPath,
+): 'insufficient-coverage' | 'unknown' | 'shadowed' | 'none' {
+  if (path.kind === 'rule') return 'shadowed';
+  switch (path.reason) {
+    case 'partial-allow':
+    case 'incomplete':
+      return 'insufficient-coverage';
+    case 'unresolved':
+      return 'unknown';
+    case 'no-match':
+      return 'none';
+  }
+}
+
+function ruleLevel(
+  result: RuleTestResultView,
+  verdict: RuleVerdict,
+  path: FinalPath,
+  focusedRuleId: string | null,
+): PriorityLevel {
+  const matchedIds = result.rules
+    .filter((entry) => entry.verdict === verdict && entry.outcome === 'match')
+    .map((entry) => entry.id);
+  const unknownIds = result.rules
+    .filter((entry) => entry.verdict === verdict && entry.outcome === 'unknown')
+    .map((entry) => entry.id);
+  const winnerId =
+    path.kind === 'rule' &&
+    path.verdict === verdict &&
+    matchedIds.includes(path.ruleId)
+      ? path.ruleId
+      : null;
+  return {
+    kind: 'rule',
+    verdict,
+    decision: ruleDecision(verdict, matchedIds, unknownIds, winnerId, path),
+    winnerId,
+    otherIds: matchedIds.filter((id) => id !== winnerId),
+    unknownIds,
+    focused:
+      focusedRuleId !== null &&
+      result.rules.some(
+        (entry) =>
+          entry.id === focusedRuleId &&
+          entry.verdict === verdict &&
+          entry.outcome !== 'no-match',
+      ),
+  };
+}
+
+/**
+ * One level's contribution.
+ *
+ * A winner is the only `effective`. Another match at the winning tier is
+ * `tier-match`, because configuration order picked one of them. A match anywhere
+ * else was either outranked by a decisive rule or left the call in review, and
+ * those two are not the same finding.
+ */
+function ruleDecision(
+  verdict: RuleVerdict,
+  matchedIds: readonly string[],
+  unknownIds: readonly string[],
+  winnerId: string | null,
+  path: FinalPath,
+): PriorityDecision {
+  // The credited rule is the only `effective`; its tier siblings are not.
+  if (winnerId !== null)
+    return matchedIds.length > 1 ? 'tier-match' : 'effective';
+  if (path.kind === 'rule') {
+    // A decisive verdict exists, so any other match lost on priority.
+    return matchedIds.length > 0 ? 'shadowed' : 'none';
+  }
+  if (matchedIds.length > 0) {
+    return verdict === 'allow' ? allowNotApplied(path) : 'none';
+  }
+  // An undetermined rule is neither a match nor a non-match.
+  if (unknownIds.length > 0) return 'unknown';
+  return 'none';
 }
 
 /**

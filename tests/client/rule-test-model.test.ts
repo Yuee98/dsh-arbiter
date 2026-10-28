@@ -444,12 +444,14 @@ describe('whole-config precedence', () => {
     ]);
     expect(levels[1]).toMatchObject({
       decision: 'effective',
-      ruleIds: ['ask-deploy'],
+      winnerId: 'ask-deploy',
     });
-    // The allow matched but did not decide; the list says which rule it was.
+    // A decisive higher-priority rule did beat this allow, so `shadowed` is the
+    // truthful label here.
     expect(levels[3]).toMatchObject({
-      decision: 'matched',
-      ruleIds: ['allow-a'],
+      decision: 'shadowed',
+      winnerId: null,
+      otherIds: ['allow-a'],
       focused: true,
     });
     expect(levels[0]).toMatchObject({ decision: 'none', focused: false });
@@ -458,7 +460,9 @@ describe('whole-config precedence', () => {
       kind: 'fallback',
       verdict: null,
       decision: 'none',
-      ruleIds: [],
+      winnerId: null,
+      otherIds: [],
+      unknownIds: [],
       focused: false,
     });
   });
@@ -476,10 +480,9 @@ describe('whole-config precedence', () => {
       levels.filter((level) => level.decision === 'effective'),
     ).toHaveLength(1);
     expect(levels[4]?.decision).toBe('effective');
-    // The focused rule was evaluated and did not match: it still owns a level,
-    // so the reader can see where their rule sits in the order.
-    expect(levels[0]).toMatchObject({ decision: 'none', focused: true });
-    expect(levels[1]?.focused).toBe(false);
+    // The focused rule was evaluated and did not match; a level that did not
+    // take part is not marked as the current rule's.
+    expect(levels[0]).toMatchObject({ decision: 'none', focused: false });
   });
 });
 
@@ -534,8 +537,8 @@ describe('composite-command coverage', () => {
     // could establish on its own.
     expect(detail.state).toBe('partial');
     expect(detail.nodes).toEqual([
-      { text: 'gh pr view 42', named: true },
-      { text: 'rm -rf /tmp/x', named: false },
+      { index: 0, text: 'gh pr view 42', named: true },
+      { index: 1, text: 'rm -rf /tmp/x', named: false },
     ]);
   });
 
@@ -583,19 +586,121 @@ describe('composite-command coverage', () => {
     });
   });
 
-  test('a call without shell structure reports that instead of a fake total', () => {
+  test('absent command evidence is reported as absent, not as a non-shell call', () => {
+    // `pwsh` is a shell tool the reader does not parse, so normalization is null.
+    // That is not the same as a non-shell tool whose arguments are the whole
+    // input, and the panel must not claim the latter.
     const detail = coverageDetail(
       result({
-        path: 'allow',
-        pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-deploy' },
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
         normalization: null,
         matches: [],
       }),
     );
-    expect(detail).toMatchObject({ structural: false, total: 0 });
-    // No structure means nothing was named *nor* left open; the caller must not
-    // read "0 of 0" as a complete partition of a command list.
+    expect(detail).toMatchObject({
+      hasEvidence: false,
+      structural: false,
+      total: 0,
+      state: 'unknown-structure',
+    });
     expect(detail.nodes).toEqual([]);
+  });
+
+  test('an argument condition never counts as naming a shell command', () => {
+    // An argument condition matches a selected value; on a shell call that value
+    // covers no structural node, so the evaluator still reports partial-allow.
+    const detail = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        normalization: {
+          raw: 'echo hi',
+          completeness: 'complete',
+          issues: [],
+          commands: [{ text: 'echo hi', raw: 'echo hi', words: [] }],
+        },
+        rules: [
+          rule({
+            id: 'allow-argument',
+            verdict: 'allow',
+            conditions: [
+              condition({
+                target: 'argument',
+                path: '$.command',
+                kind: 'exact',
+                pattern: 'echo hi',
+                matchedValues: ['echo hi'],
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(detail.namedCount).toBe(0);
+    expect(detail.nodes).toEqual([{ index: 0, text: 'echo hi', named: false }]);
+  });
+
+  test('a redirect is reported as the uncovered target, not a missing command', () => {
+    const detail = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        parse: {
+          status: 'ok',
+          statements: 1,
+          nodes: ['command', 'file_redirect'],
+          completeness: 'complete',
+          opaque: false,
+          unresolved: [],
+        },
+        normalization: {
+          raw: 'echo hi > /tmp/out',
+          completeness: 'complete',
+          issues: [],
+          commands: [{ text: 'echo hi', raw: 'echo hi', words: [] }],
+        },
+        rules: [
+          rule({
+            id: 'allow-echo',
+            verdict: 'allow',
+            conditions: [
+              condition({
+                target: 'command',
+                kind: 'exact',
+                pattern: 'echo hi',
+                matchedValue: 'echo hi',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    // The one command is named, so the cause is the redirect, not a command.
+    expect(detail.namedCount).toBe(1);
+    expect(detail.otherTargets).toEqual(['file_redirect']);
+    expect(detail.state).toBe('partial');
+  });
+
+  test('repeated command occurrences are kept, not collapsed by their text', () => {
+    const detail = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        normalization: {
+          raw: 'echo hi; echo hi',
+          completeness: 'complete',
+          issues: [],
+          commands: [
+            { text: 'echo hi', raw: 'echo hi', words: [] },
+            { text: 'echo hi', raw: 'echo hi', words: [] },
+          ],
+        },
+      }),
+    );
+    // Two occurrences ran, so the explanation reports two.
+    expect(detail.total).toBe(2);
+    expect(detail.nodes.map((node) => node.index)).toEqual([0, 1]);
   });
 
   test('does not claim coverage for an allow that only ever matched a subset', () => {
@@ -665,8 +770,8 @@ describe('composite-command coverage', () => {
     expect(compoundCall.state).toBe('partial');
     // The node list is evidence in both cases; it never sets the classification.
     expect(compoundCall.nodes).toEqual([
-      { text: 'echo hi', named: true },
-      { text: 'rm -rf /tmp/example', named: false },
+      { index: 0, text: 'echo hi', named: true },
+      { index: 1, text: 'rm -rf /tmp/example', named: false },
     ]);
   });
 
@@ -706,5 +811,110 @@ describe('composite-command coverage', () => {
         ).state,
       ).toBe('not-allow');
     }
+  });
+});
+
+describe('three-state precedence', () => {
+  test('an undetermined higher-priority rule is not reported as a non-match', () => {
+    // The integration fixture `echo a > $TARGET`: the deny redirect condition
+    // cannot be resolved, the allow matches, and the path is review(unresolved).
+    const levels = priorityView(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'unresolved' },
+        parse: {
+          status: 'ok',
+          statements: 1,
+          nodes: ['command', 'file_redirect'],
+          completeness: 'partial',
+          opaque: false,
+          unresolved: ['$TARGET'],
+        },
+        rules: [
+          rule({
+            index: 0,
+            id: 'deny-redirect',
+            verdict: 'deny',
+            outcome: 'unknown',
+            conditions: [
+              condition({
+                target: 'file_redirect',
+                kind: 'glob',
+                pattern: '/srv/**',
+                outcome: 'unknown',
+                reason: 'unresolved-structure',
+              }),
+            ],
+          }),
+          rule({
+            index: 1,
+            id: 'allow-echo',
+            verdict: 'allow',
+            outcome: 'match',
+          }),
+        ],
+      }),
+      null,
+    );
+    const deny = levels[0];
+    // Unknown is its own state: neither a match nor a non-match.
+    expect(deny).toMatchObject({
+      decision: 'unknown',
+      unknownIds: ['deny-redirect'],
+    });
+    const allow = levels[3];
+    // The allow was not beaten by a matching higher-priority rule; it was held
+    // back by an undetermined one.
+    expect(allow).toMatchObject({
+      decision: 'unknown',
+      otherIds: ['allow-echo'],
+    });
+    expect(levels[4]?.decision).toBe('effective');
+  });
+
+  test('a partial-allow fallback is not described as priority shadowing', () => {
+    const levels = priorityView(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        rules: [rule({ id: 'allow-gh', verdict: 'allow', outcome: 'match' })],
+      }),
+      null,
+    );
+    // No higher-priority rule matched, so calling this "outranked" would state
+    // a cause the evaluator never gave.
+    expect(levels[3]).toMatchObject({
+      decision: 'insufficient-coverage',
+      otherIds: ['allow-gh'],
+    });
+  });
+
+  test('only the credited rule is effective when a tier has several matches', () => {
+    const levels = priorityView(
+      result({
+        path: 'deny',
+        pathDetail: { kind: 'rule', verdict: 'deny', ruleId: 'deny-first' },
+        rules: [
+          rule({
+            index: 0,
+            id: 'deny-first',
+            verdict: 'deny',
+            outcome: 'match',
+          }),
+          rule({
+            index: 1,
+            id: 'deny-second',
+            verdict: 'deny',
+            outcome: 'match',
+          }),
+        ],
+      }),
+      null,
+    );
+    expect(levels[0]).toMatchObject({
+      decision: 'tier-match',
+      winnerId: 'deny-first',
+      otherIds: ['deny-second'],
+    });
   });
 });

@@ -42,14 +42,12 @@
   "priorityFallback": "review(default) · fallback",
   "priorityFallbackEffective": "effective this time: the fallback path",
   "priorityEffective": "effective this time ({ids})",
-  "priorityMatched": "matched but outranked ({ids})",
   "priorityNone": "no match this time",
   "priorityCurrent": "(current rule)",
   "coverageTitle": "Composite commands and coverage",
   "coverageNodes": "This call has {total} command(s); an allow condition named {named} of them.",
   "coverageNodeNamed": "Named: {text}",
   "coverageNodeUnnamed": "Not named: {text}",
-  "coverageNoStructure": "This call has no splittable shell structure, so its arguments are the whole input.",
   "coverageComplete": "The effective allow covers the whole call, so the reviewer is not asked.",
   "coverageIncomplete": "The structure was not fully read, so whole-call coverage cannot be confirmed and the call goes to the default review.",
   "coveragePartial": "{unnamed} command(s) were not named by an allow, so the call goes to the default review; widening the allow does not authorize them as a side effect.",
@@ -119,5 +117,12 @@
   "groupUnknown": "structure not fully read, so undecided",
   "clearFocusedRule": "Switch to full ruleset test",
   "dialogDescription": "Simulate and evaluate a tool call against the current unsaved rule draft.",
-  "importCommandEmpty": "(No command summary)"
+  "importCommandEmpty": "(No command summary)",
+  "priorityTierMatch": "Other matches at the same priority ({ids}); within one priority the first in configuration order takes effect.",
+  "priorityShadowed": "Matched but overridden by a higher priority ({ids})",
+  "priorityInsufficientCoverage": "Matched, but its coverage was insufficient, so the call went to the default review (it was not overridden by a higher-priority rule).",
+  "priorityUnknown": "Could not be determined ({ids}): neither a match nor a non-match.",
+  "coverageUnresolved": "A higher-priority rule could not be determined, so the call went to the default review; that is not the same as no match.",
+  "coverageNoEvidence": "There is no per-command structural evidence (for example this tool is not a supported shell dialect); the final evaluation path is authoritative.",
+  "coveragePartialOther": "The matching allow named only some commands, and {targets} need separate coverage, so the call went to the default review."
 }

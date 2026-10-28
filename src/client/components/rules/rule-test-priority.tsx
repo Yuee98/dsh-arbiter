@@ -8,7 +8,7 @@ import {
   priorityView,
   verdictLabel,
 } from './rule-test-model.js';
-import type { CoverageDetail } from './rule-test-model.js';
+import type { CoverageDetail, PriorityLevel } from './rule-test-model.js';
 
 /**
  * The whole-config precedence beside this answer.
@@ -46,17 +46,7 @@ export function PriorityBlock(props: {
                 : verdictLabel(level.verdict, t)}
             </span>
             <span className="arb:text-secondary">
-              {level.decision === 'effective'
-                ? level.ruleIds.length === 0
-                  ? t('ruleTest.priorityFallbackEffective')
-                  : t('ruleTest.priorityEffective', {
-                      ids: level.ruleIds.join(', '),
-                    })
-                : level.decision === 'matched'
-                  ? t('ruleTest.priorityMatched', {
-                      ids: level.ruleIds.join(', '),
-                    })
-                  : t('ruleTest.priorityNone')}
+              {priorityDecisionText(level, t)}
             </span>
             {level.focused ? (
               <span className="arb:text-tertiary">
@@ -78,6 +68,42 @@ export function PriorityBlock(props: {
  * block therefore lists every command the parse published, marks the ones the
  * allow named, and states which conclusion follows.
  */
+/**
+ * What this level did, stated separately for each finding.
+ *
+ * The distinct cases are the point: a rule that could not be determined is not a
+ * non-match, another match at the winning tier was not outranked, and an `allow`
+ * that left the call in review lost on coverage rather than on priority.
+ */
+function priorityDecisionText(level: PriorityLevel, t: Translate): string {
+  switch (level.decision) {
+    case 'effective':
+      return level.winnerId === null
+        ? t('ruleTest.priorityFallbackEffective')
+        : t('ruleTest.priorityEffective', { ids: level.winnerId });
+    case 'tier-match':
+      return t('ruleTest.priorityTierMatch', {
+        ids: [level.winnerId ?? '', ...level.otherIds]
+          .filter((id) => id.length > 0)
+          .join(', '),
+      });
+    case 'shadowed':
+      return t('ruleTest.priorityShadowed', {
+        ids: [level.winnerId ?? '', ...level.otherIds]
+          .filter((id) => id.length > 0)
+          .join(', '),
+      });
+    case 'insufficient-coverage':
+      return t('ruleTest.priorityInsufficientCoverage');
+    case 'unknown':
+      return t('ruleTest.priorityUnknown', {
+        ids: level.unknownIds.join(', '),
+      });
+    case 'none':
+      return t('ruleTest.priorityNone');
+  }
+}
+
 export function CoverageBlock(props: {
   readonly result: RuleTestResultView;
 }): ReactNode {
@@ -101,7 +127,7 @@ export function CoverageBlock(props: {
           <ul className="arb:m-0 arb:list-none arb:p-0">
             {detail.nodes.map((node) => (
               <li
-                key={node.text}
+                key={node.index}
                 className="arb:font-mono"
                 data-arbiter-test-coverage-node={
                   node.named ? 'named' : 'unnamed'
@@ -142,13 +168,37 @@ function coverageConclusion(detail: CoverageDetail, t: Translate): string {
       return t('ruleTest.coverageComplete');
     case 'incomplete':
       return t('ruleTest.coverageIncomplete');
+    case 'unresolved':
+      return t('ruleTest.coverageUnresolved');
     case 'partial':
-      return t('ruleTest.coveragePartial', {
-        unnamed: detail.total - detail.namedCount,
-      });
-    case 'no-structure':
-      return t('ruleTest.coverageNoStructure');
+      return coveragePartialText(detail, t);
+    case 'unknown-structure':
+      return t('ruleTest.coverageNoEvidence');
     case 'not-allow':
       return t('ruleTest.coverageNotAllow');
   }
+}
+
+/**
+ * Why an `allow` that matched did not cover the call.
+ *
+ * Unnamed commands are only one possible cause. A redirect or an assignment is a
+ * separate structural target that a command match never authorizes, so the
+ * sentence names that instead of implying a missing command.
+ */
+function coveragePartialText(detail: CoverageDetail, t: Translate): string {
+  const unnamed = detail.total - detail.namedCount;
+  if (detail.otherTargets.length > 0)
+    return t('ruleTest.coveragePartialOther', {
+      targets: detail.otherTargets
+        .map((target) =>
+          t(
+            target === 'file_redirect'
+              ? 'rules.targetOption.fileRedirect'
+              : 'rules.targetOption.variableAssignment',
+          ),
+        )
+        .join(', '),
+    });
+  return t('ruleTest.coveragePartial', { unnamed });
 }

@@ -825,13 +825,14 @@ describe('final path, precedence and composite coverage', () => {
               outcome: 'match',
               conditions: [
                 {
+                  // A command condition: its matched text is a command the
+                  // allow named, which is what the coverage list may show.
                   index: 0,
                   target: 'command',
                   kind: 'exact',
                   pattern: 'gh pr view 42',
                   outcome: 'match',
                   reason: 'resolved',
-                  matchedValues: ['gh pr view 42'],
                   matchedValue: 'gh pr view 42',
                 },
               ],
@@ -907,15 +908,19 @@ describe('final path, precedence and composite coverage', () => {
       'data-arbiter-test-priority-decision',
       'effective',
     );
+    // A decisive higher-priority rule beat this allow, so it was shadowed.
     expect(levels[3]).toHaveAttribute(
       'data-arbiter-test-priority-decision',
-      'matched',
+      'shadowed',
     );
     // Levels that never applied say so rather than being omitted.
     expect(levels[0]).toHaveAttribute(
       'data-arbiter-test-priority-decision',
       'none',
     );
+    // The effective level names exactly one rule, not its whole tier.
+    expect(levels[1]).toHaveTextContent('本次生效（ask-deploy）');
+    expect(levels[1]).not.toHaveTextContent('allow-test-env');
     expect(priority).toHaveTextContent('ask-deploy');
     expect(priority).toHaveTextContent('allow-test-env');
     // The focused rule owns the allow level, which is where it actually sits.
@@ -948,6 +953,8 @@ describe('final path, precedence and composite coverage', () => {
       'unnamed',
     );
     expect(nodes[1]).toHaveTextContent('未命名：rm -rf /tmp/x');
+    // The documented cause here is an unnamed command, so the sentence says so.
+    expect(coverage).toHaveTextContent(/还有 1 条命令没有被 allow 命名/);
     expect(coverage).toHaveTextContent('其中 1 条被 allow 条件命名');
     // The consequence is stated: the rest is not authorized as a side effect.
     expect(coverage).toHaveTextContent(/进入默认审查/);
