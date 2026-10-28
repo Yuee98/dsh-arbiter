@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { useArbiterTranslation } from '../i18n-provider.js';
@@ -57,6 +57,19 @@ export function PermissionSelector(props: {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+
+  /**
+   * Give focus back to the trigger after the risk gate closes.
+   *
+   * The host dialog restores focus to whatever was focused when it opened, but
+   * here that is the menu row it opened from — and the row is already gone, so
+   * the host falls back to the dialog and focus ends up on the body. The
+   * accepted contract requires the trigger, so it is restored explicitly.
+   */
+  const restoreTriggerFocus = (): void => {
+    trigger.current?.focus();
+  };
 
   const commandCapable =
     props.sessionId === undefined
@@ -161,6 +174,7 @@ export function PermissionSelector(props: {
         }}
         anchor={
           <Trigger
+            triggerRef={trigger}
             label={texts.label}
             title={texts.title}
             // The accessible name never takes over the pending state: the
@@ -193,11 +207,13 @@ export function PermissionSelector(props: {
           onCancel={() => {
             setConfirming(null);
             setAcknowledged(false);
+            restoreTriggerFocus();
           }}
           onConfirm={() => {
             const preset = item.id;
             setConfirming(null);
             setAcknowledged(false);
+            restoreTriggerFocus();
             admission.chooseHostPreset(preset).catch(() => undefined);
           }}
         />
@@ -264,6 +280,7 @@ function glyph(kind: PresetIconKind | null, size?: number): ReactNode {
  * colours) come from the host's public `--dsw-*` variables.
  */
 function Trigger(props: {
+  readonly triggerRef: { current: HTMLButtonElement | null };
   readonly label: string;
   readonly title: string;
   readonly ariaLabel: string;
@@ -277,6 +294,7 @@ function Trigger(props: {
   const icon = glyph(presetKindOf(props.preset), 14);
   return (
     <button
+      ref={props.triggerRef}
       type="button"
       data-arbiter-trigger=""
       aria-haspopup="menu"

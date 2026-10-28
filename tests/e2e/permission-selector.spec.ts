@@ -501,7 +501,9 @@ test('the seat keeps native keyboard and focus behaviour', async ({
       true,
     );
     steps.add('keyboard-cancel-dialog', { admission: 'unchanged' });
-    await expect(trigger).toBeVisible();
+    // Dismissing the gate gives focus back to the trigger it was opened from;
+    // visibility alone would not prove that.
+    await expect(trigger).toBeFocused();
 
     // Native responsive parity: the host hides a permission trigger's label in
     // a narrow composer, keeping only the glyph and the chevron. The plugin's
