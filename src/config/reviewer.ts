@@ -94,6 +94,46 @@ function parseDecision(
   return decision;
 }
 
+/** Whether the string parses as an absolute URL at all. */
+function parseableUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The model name a Cloudflare model-specific endpoint serves, when the path has
+ * that shape.
+ *
+ * Only `…/ai/run/@cf/cloudflare/{model}` is recognised. A looser
+ * `…/ai/run/<vendor>/<model>` rule would be wrong twice over: it misses the real
+ * path, whose vendor part is a scoped name containing its own slash, and it
+ * would impose an equality requirement on a custom endpoint that happens to
+ * share the prefix — endpoints this plugin has never seen keep working with
+ * whatever model their operator configured.
+ */
+function pathModel(url: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return null;
+  }
+  const match = /\/ai\/run\/@cf\/cloudflare\/([A-Za-z0-9._-]+)$/u.exec(
+    pathname,
+  );
+  return match?.[1] ?? null;
+}
+
+/** Whether a recognisable path names a different model than the configured one. */
+function modelMismatch(url: string, model: string): boolean {
+  const served = pathModel(url);
+  return served !== null && served !== model;
+}
+
 export function parseReviewer(
   raw: Record<string, unknown>,
   errors: ConfigError[],
@@ -121,11 +161,33 @@ export function parseReviewer(
         message: 'a decision backend requires a URL',
         code: 'reviewer.url-required',
       });
-    } else if (!/^https?:\/\//u.test(decision.url)) {
+    } else if (
+      !/^https?:\/\//u.test(decision.url) ||
+      !parseableUrl(decision.url)
+    ) {
+      // A scheme prefix alone is not a URL: `https://` passes the pattern above
+      // and then throws when the adapter needs its pathname, which would surface
+      // as a runtime fault rather than a configuration error.
       errors.push({
         path: 'reviewer.decision.url',
         message: 'must be an http(s) URL',
         code: 'reviewer.url-scheme',
+      });
+    }
+    if (decision.model.length === 0) {
+      // `asString` accepts an explicit empty string, so the model's presence is
+      // this check's job. An empty model reaches the provider as a request for
+      // nothing and comes back as an opaque refusal.
+      errors.push({
+        path: 'reviewer.decision.model',
+        message: 'a decision backend requires a model',
+        code: 'reviewer.model-required',
+      });
+    } else if (modelMismatch(decision.url, decision.model)) {
+      errors.push({
+        path: 'reviewer.decision.model',
+        message: `the endpoint serves "${pathModel(decision.url) ?? ''}", not "${decision.model}"`,
+        code: 'reviewer.model-mismatch',
       });
     }
     if (decision.apiKeyRef.length === 0) {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { CAPTURED_CLOUDFLARE } from './helpers/decision-captures.js';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
@@ -85,25 +86,13 @@ function answer(text: string): AsyncIterable<Record<string, unknown>> {
  * `noul` probability per boolean probe, as the production parser expects.
  */
 function decisionAnswer(): Response {
-  const probabilities = Object.fromEntries(
-    Array.from({ length: 11 }, (_, index) => [
-      String(index),
-      index === 6 ? 1 : 0,
-    ]),
-  );
-  return new Response(
-    JSON.stringify({
-      response: {
-        risk: { type: 'score', probabilities, score: 6 },
-        authorized: { type: 'score', probabilities, score: 6 },
-        secrets: { noul: 0 },
-        destructive: { noul: 0 },
-        egress: { noul: 1 },
-        bulk: { noul: 0 },
-      },
-    }),
-    { status: 200, headers: { 'content-type': 'application/json' } },
-  );
+  // A real Cloudflare envelope: the fixture lives in the transport test file and
+  // is reused here so both callers verify the same shapes rather than two
+  // hand-written variants of the protocol.
+  return new Response(JSON.stringify(CAPTURED_CLOUDFLARE), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 function credentials(value: string | undefined) {
@@ -741,26 +730,45 @@ describe('decision probe', () => {
   });
 
   test.each([
-    [401, 'unauthorized'],
-    [403, 'unauthorized'],
-    [429, 'rate-limited'],
-    [503, 'unavailable'],
-    [400, 'unavailable'],
-  ])('HTTP %i fails as %s while keeping the raw body', async (status, kind) => {
-    const result = await runReviewerProbe({
-      config: decisionConfig(),
-      llm: undefined,
-      credentials: credentials('probe-secret-value'),
-      fetch: () =>
-        Promise.resolve(new Response('upstream refused', { status })),
-      signal: new AbortController().signal,
-    });
-    expect(result.status).toBe('failed');
-    if (result.status !== 'failed') throw new Error('expected a failure');
-    expect(result.failure).toBe(kind);
-    expect(result.attempts[0]?.error).toBe(`HTTP ${String(status)}`);
-    expect(result.attempts[0]?.responseText).toBe('upstream refused');
-  });
+    [401, 'unauthorized', undefined],
+    [403, 'unauthorized', undefined],
+    [429, 'rate-limited', undefined],
+    [503, 'unavailable', undefined],
+    [400, 'unavailable', undefined],
+    // With an explanation, the adapter appends it after the status. The
+    // classification must survive that, or an authentication failure would be
+    // reported as an output-contract failure.
+    [401, 'unauthorized', { errors: [{ message: 'invalid token' }] }],
+    [429, 'rate-limited', { errors: [{ message: 'slow down' }] }],
+    [422, 'unavailable', { errors: [{ message: 'bad body' }] }],
+    [500, 'unavailable', { detail: { message: 'upstream exploded' } }],
+  ])(
+    'HTTP %i fails as %s while keeping the raw body',
+    async (status, kind, payload) => {
+      const body = payload === undefined ? 'upstream refused' : payload;
+      const result = await runReviewerProbe({
+        config: decisionConfig(),
+        llm: undefined,
+        credentials: credentials('probe-secret-value'),
+        fetch: () =>
+          Promise.resolve(
+            typeof body === 'string'
+              ? new Response(body, { status })
+              : new Response(JSON.stringify(body), { status }),
+          ),
+        signal: new AbortController().signal,
+      });
+      expect(result.status).toBe('failed');
+      if (result.status !== 'failed') throw new Error('expected a failure');
+      expect(result.failure).toBe(kind);
+      // The status prefix is what classification reads; an explanation follows
+      // it rather than replacing it.
+      expect(result.attempts[0]?.error).toContain(`HTTP ${String(status)}`);
+      expect(result.attempts[0]?.responseText).toBe(
+        typeof body === 'string' ? body : JSON.stringify(body),
+      );
+    },
+  );
 
   test('a malformed decision body fails the output contract', async () => {
     const result = await runReviewerProbe({

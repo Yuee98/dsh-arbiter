@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'vitest';
+import {
+  CAPTURED_CLOUDFLARE,
+  CAPTURED_TYPESAFE,
+} from './helpers/decision-captures.js';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
@@ -74,40 +78,69 @@ describe('chat reviewer output', () => {
 });
 
 describe('decision reviewer output', () => {
-  test('maps score distributions and noul answers', () => {
-    const body = {
-      result: {
-        response: {
-          risk: {
-            type: 'score',
-            score: 2.1,
-            probabilities: { '1': 0.2, '5': 0.7, '9': 0.1 },
-          },
-          authorized: {
-            type: 'score',
-            score: 8.4,
-            probabilities: { '8': 0.8, '9': 0.2 },
-          },
-          secrets: { type: 'noul', noul: 0.1 },
-          destructive: { type: 'noul', noul: 0.1 },
-          egress: { type: 'noul', noul: 0.2 },
-          bulk: { type: 'noul', noul: 0.1 },
-        },
-      },
-    };
-    const parsed = parseDecisionResponse(body, thresholds);
+  test('reads answers from the Cloudflare envelope', () => {
+    const parsed = parseDecisionResponse(CAPTURED_CLOUDFLARE, thresholds);
     expect(parsed.ok).toBe(true);
-    const signals = parsed.ok ? parsed.signals : null;
-    expect(signals?.source).toBe('decision');
-    expect(signals?.riskClass).toBe('medium');
-    expect(signals?.authClass).toBe('explicit');
-    expect(signals?.secrets).toBe(false);
+    if (!parsed.ok) return;
+    const signals = parsed.signals;
+    expect(signals.source).toBe('decision');
+    // Normalization is the parser's job, not the vendor's: the distribution is
+    // renormalized to sum to one even though the provider already reports that.
+    const total = Object.values(signals.riskDist ?? {}).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    expect(total).toBeCloseTo(1, 10);
+    expect(signals.riskScore).toBeCloseTo(3.8154, 4);
+    // The probes are the captured probabilities thresholded at one half. The
+    // expected booleans are written out because the capture is a literal: the
+    // comparison would be constant-folded, and a fold cannot drift when the
+    // fixture changes but a literal that disagrees with it can.
+    const answers = CAPTURED_CLOUDFLARE.result.answers;
+    expect([answers.secrets.noul, answers.destructive.noul]).toEqual([
+      0.0099, 0.512,
+    ]);
+    expect([answers.egress.noul, answers.bulk.noul]).toEqual([0.0084, 0.6548]);
+    expect([signals.secrets, signals.destructive]).toEqual([false, true]);
+    expect([signals.egress, signals.bulk]).toEqual([false, true]);
+  });
+
+  test('reads answers from a native response that has no envelope', () => {
+    const parsed = parseDecisionResponse(CAPTURED_TYPESAFE, thresholds);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const signals = parsed.signals;
+    const answers = CAPTURED_TYPESAFE.answers;
+    expect(signals.riskScore).toBeCloseTo(answers.risk.score, 4);
+    expect(
+      [answers.secrets.noul, answers.destructive.noul].map(
+        (value) => value >= 0.5,
+      ),
+    ).toEqual([signals.secrets, signals.destructive]);
+    expect(
+      [answers.egress.noul, answers.bulk.noul].map((value) => value >= 0.5),
+    ).toEqual([signals.egress, signals.bulk]);
   });
 
   test('rejects missing answers and invalid probabilities', () => {
     expect(parseDecisionResponse({}, thresholds).ok).toBe(false);
+    // The `result.response` shape this file used to assert never existed at any
+    // endpoint; it is gone rather than preserved as a tolerated variant.
+    expect(
+      parseDecisionResponse(
+        { result: { response: { risk: { type: 'score' } } } },
+        thresholds,
+      ).ok,
+    ).toBe(false);
     const parsed = parseDecisionResponse(
-      { response: { risk: { type: 'score' }, authorized: { type: 'score' } } },
+      {
+        result: {
+          answers: {
+            risk: { type: 'score' },
+            authorized: { type: 'score' },
+          },
+        },
+      },
       thresholds,
     );
     expect(parsed.ok).toBe(false);
@@ -346,27 +379,10 @@ describe('chat reviewer run', () => {
 
 describe('decision reviewer run', () => {
   test('posts state and questions and maps a distribution response', async () => {
-    const response = new Response(
-      JSON.stringify({
-        response: {
-          risk: {
-            type: 'score',
-            score: 2,
-            probabilities: { '1': 0.2, '5': 0.7, '9': 0.1 },
-          },
-          authorized: {
-            type: 'score',
-            score: 8,
-            probabilities: { '8': 0.8, '9': 0.2 },
-          },
-          secrets: { type: 'noul', noul: 0.1 },
-          destructive: { type: 'noul', noul: 0.1 },
-          egress: { type: 'noul', noul: 0.2 },
-          bulk: { type: 'noul', noul: 0.1 },
-        },
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+    const response = new Response(JSON.stringify(CAPTURED_CLOUDFLARE), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
     let received: unknown = null;
     const result = await runDecisionReviewer(
       {
@@ -453,6 +469,282 @@ describe('decision reviewer run', () => {
   });
 });
 
+/** A minimal request body builder so each shape test reads as one assertion. */
+async function postedBody(url: string): Promise<Record<string, unknown>> {
+  let received: unknown = null;
+  const response = new Response(JSON.stringify(CAPTURED_CLOUDFLARE), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  await runDecisionReviewer(
+    {
+      fetch: (_input, init) => {
+        received = init?.body;
+        return Promise.resolve(response);
+      },
+      credentials: { resolve: () => Promise.resolve({ value: 'test-key' }) },
+      decision: {
+        url,
+        model: 'clef',
+        apiKeyRef: 'TEST_KEY',
+        timeoutMs: 1000,
+        costTier: 'free',
+      },
+      thresholds,
+      signal: new AbortController().signal,
+    },
+    snapshot,
+    { user: 'STATE', estimatedInputTokens: 10 },
+    'call-1',
+  );
+  const parsed: unknown = JSON.parse(String(received));
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('the request body must be a JSON object');
+  }
+  return { ...parsed };
+}
+
+describe('decision request shape', () => {
+  // The envelope is a property of the entry point. These cases pin the two
+  // shapes against the three verified entries plus the custom-endpoint fallback,
+  // asserting the parsed body rather than a substring of it.
+  test('a Cloudflare model-specific path sends a flat body', async () => {
+    const body = await postedBody(
+      'https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/cloudflare/clef',
+    );
+    expect(Object.keys(body)).toEqual(['model', 'state', 'questions']);
+  });
+
+  test('the generic Cloudflare entry wraps the request in input', async () => {
+    const body = await postedBody(
+      'https://api.cloudflare.com/client/v4/accounts/acct/ai/run',
+    );
+    // `input` carries the same material the flat body puts at the root, so the
+    // wrapper is checked by what it holds rather than by its key alone.
+    const input: unknown = body['input'];
+    expect(input).toBeDefined();
+    expect(Object.keys(body)).toEqual(['model', 'input']);
+    expect(JSON.stringify(input)).toContain('STATE');
+  });
+
+  test('the native TypeSafe entry sends a flat body', async () => {
+    const body = await postedBody('https://api.typesafe.ai/v1/systemone');
+    expect(Object.keys(body)).toEqual(['model', 'state', 'questions']);
+  });
+
+  test('an unrecognized path keeps the flat body it had before', async () => {
+    // A custom compatible service was addressable before this change; wrapping
+    // or rejecting it would break a working configuration.
+    const body = await postedBody('https://example.test/decision');
+    expect(Object.keys(body)).toEqual(['model', 'state', 'questions']);
+  });
+
+  test('routing reads the pathname, not the raw URL', async () => {
+    const body = await postedBody(
+      'https://api.cloudflare.com/client/v4/accounts/acct/ai/run?trace=1',
+    );
+    expect(Object.keys(body)).toEqual(['model', 'input']);
+  });
+});
+
+describe('decision failure reporting', () => {
+  function refusal(status: number, payload: unknown) {
+    return new Response(JSON.stringify(payload), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  async function run(fetch: typeof globalThis.fetch, credential = 'test-key') {
+    return runDecisionReviewer(
+      {
+        fetch,
+        credentials: { resolve: () => Promise.resolve({ value: credential }) },
+        decision: {
+          url: 'https://example.test/ai/run',
+          model: 'clef',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-1',
+    );
+  }
+
+  test('a refusal reports the provider explanation in the attempt and the result', async () => {
+    const result = await run(() =>
+      Promise.resolve(
+        refusal(422, {
+          errors: [
+            { code: 3030, message: 'List should have at most 10 items' },
+          ],
+          success: false,
+        }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Both consumers matter: the attempt feeds the audit record, the result
+    // feeds the error-escalate trace and the human handoff text.
+    expect(result.error).toContain('HTTP 422');
+    expect(result.error).toContain('at most 10 items');
+    expect(result.attempts[0]?.error).toContain('HTTP 422');
+    expect(result.attempts[0]?.error).toContain('at most 10 items');
+    // The status prefix stays exact so the connection test can still classify it.
+    expect(result.attempts[0]?.error).toMatch(/^HTTP 422\b/u);
+  });
+
+  test('success:false wins over a structurally valid answer', async () => {
+    // A provider that reports failure has not answered, even when it filled the
+    // answer fields; trusting the payload would turn a provider fault into a
+    // permission verdict.
+    const result = await run(() =>
+      Promise.resolve(
+        refusal(200, {
+          ...CAPTURED_CLOUDFLARE,
+          success: false,
+          errors: [{ message: 'quota exhausted' }],
+        }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('quota exhausted');
+    expect(result.attempts[0]?.parsed).toBeNull();
+    // A failed request was still billed, so its usage is recorded rather than
+    // dropped along with the verdict.
+    expect(result.attempts[0]?.usage).toEqual({
+      input_tokens: 1000,
+      output_tokens: 0,
+    });
+  });
+
+  test('a native response without a success field is still accepted', async () => {
+    const result = await run(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CAPTURED_TYPESAFE), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test('a non-2xx response keeps the usage it reported', async () => {
+    // The earlier failure path returned before reading the body, so a billed
+    // refused request lost its token counts. The explanation and the usage come
+    // from the same parse, and neither depends on a verdict being accepted.
+    const result = await run(() =>
+      Promise.resolve(
+        refusal(422, {
+          result: { usage: { input_tokens: 100, output_tokens: 0 } },
+          success: false,
+          errors: [{ message: 'Request validation failed' }],
+        }),
+      ),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('Request validation failed');
+    expect(result.attempts[0]?.usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 0,
+    });
+  });
+
+  test('an explanation that crosses the length bound cannot leak a prefix', async () => {
+    // Masking must precede bounding. The padding places the credential so the
+    // cut lands inside it; asserting the whole value would pass even then,
+    // because a cut leaves only a prefix — the assertion therefore targets the
+    // exact fragment that survives truncation-before-masking.
+    // The sentinel must be the credential this call actually sent: masking is
+    // exact-value, so a different string would test nothing.
+    const sentinel = 'sk-truncation-sentinel';
+    const leaked = sentinel.slice(0, 6);
+    const result = await run(
+      () =>
+        Promise.resolve(
+          refusal(422, {
+            errors: [{ message: `${'x'.repeat(280)}${sentinel}` }],
+          }),
+        ),
+      sentinel,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).not.toContain(leaked);
+    expect(result.attempts[0]?.error).not.toContain(leaked);
+  });
+
+  test('a non-JSON refusal does not quote the body in its error', async () => {
+    const result = await run(() =>
+      Promise.resolve(new Response('SECRET_SENTINEL', { status: 200 })),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.attempts[0]?.error).not.toContain('SECRET_SENTINEL');
+  });
+});
+
+describe('decision usage recording', () => {
+  async function usageOf(payload: unknown): Promise<unknown> {
+    const result = await runDecisionReviewer(
+      {
+        fetch: () =>
+          Promise.resolve(
+            new Response(JSON.stringify(payload), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          ),
+        credentials: { resolve: () => Promise.resolve({ value: 'test-key' }) },
+        decision: {
+          url: 'https://example.test/ai/run',
+          model: 'clef',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-1',
+    );
+    return result.attempts[0]?.usage;
+  }
+
+  test('reads usage from the Cloudflare envelope', async () => {
+    expect(await usageOf(CAPTURED_CLOUDFLARE)).toEqual({
+      input_tokens: 1000,
+      output_tokens: 0,
+    });
+  });
+
+  test('reads usage from a native response', async () => {
+    expect(await usageOf(CAPTURED_TYPESAFE)).toEqual({
+      input_tokens: 847,
+      output_tokens: 98,
+    });
+  });
+
+  test('reports null when the provider omits usage', async () => {
+    const withoutUsage = {
+      ...CAPTURED_TYPESAFE,
+      usage: undefined,
+    } as Record<string, unknown>;
+    delete withoutUsage['usage'];
+    expect(await usageOf(withoutUsage)).toBeNull();
+  });
+});
+
 describe('reviewer transport credential boundary', () => {
   // The agreed local-retention contract keeps the original review material but
   // never the transport credential or an auth header. These assertions pin the
@@ -492,6 +784,79 @@ describe('reviewer transport credential boundary', () => {
     expect(stored).not.toMatch(/authorization\s*[:=]\s*\S/iu);
     expect(stored).not.toMatch(/bearer\s+\S/iu);
   });
+
+  test.each([
+    [
+      'the response body',
+      (secret: string) =>
+        new Response(JSON.stringify({ echo: secret }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ],
+    [
+      'a structured error message',
+      (secret: string) =>
+        new Response(
+          JSON.stringify({ errors: [{ message: `invalid token: ${secret}` }] }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'the usage object',
+      (secret: string) =>
+        new Response(
+          JSON.stringify({
+            ...CAPTURED_TYPESAFE,
+            usage: { input_tokens: 10, note: secret },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'a usage key',
+      (secret: string) =>
+        new Response(
+          JSON.stringify({
+            ...CAPTURED_TYPESAFE,
+            usage: { [secret]: 10, input_tokens: 10 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'a non-JSON body',
+      (secret: string) => new Response(secret, { status: 200 }),
+    ],
+  ])(
+    'a credential echoed through %s never reaches the attempt record',
+    async (_where, respond) => {
+      const sentinel = 'sk-decision-echo-sentinel';
+      const result = await runDecisionReviewer(
+        {
+          fetch: () => Promise.resolve(respond(sentinel)),
+          credentials: { resolve: () => Promise.resolve({ value: sentinel }) },
+          decision: {
+            url: 'https://example.test/ai/run',
+            model: 'clef',
+            apiKeyRef: 'TEST_KEY',
+            timeoutMs: 1000,
+            costTier: 'free',
+          },
+          thresholds,
+          signal: new AbortController().signal,
+        },
+        snapshot,
+        { user: 'STATE', estimatedInputTokens: 10 },
+        'call-echo',
+      );
+      // The writer stores each attempt field independently, so one masked field
+      // proves nothing about the others; the whole serialized record must be
+      // clean whatever route the echo took.
+      expect(JSON.stringify(result.attempts)).not.toContain(sentinel);
+      expect(result.ok ? '' : result.error).not.toContain(sentinel);
+    },
+  );
 
   test('a decision transport error does not echo the credential it sent', async () => {
     const sentinel = 'sk-decision-error-sentinel';
@@ -630,7 +995,7 @@ describe('calibrated cross-protocol parity', () => {
       );
       const parsed = parseDecisionResponse(
         {
-          response: {
+          answers: {
             risk: {
               type: 'score',
               probabilities: pair.decision.risk.probabilities,

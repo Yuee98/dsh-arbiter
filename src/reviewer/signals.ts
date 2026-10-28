@@ -224,20 +224,30 @@ function noul(
   return raw >= 0.5;
 }
 
-function decisionAnswers(
+/**
+ * Where a decision response keeps its answers.
+ *
+ * Two placements exist among the supported endpoints, and they are not
+ * alternatives for the same vendor — they belong to different envelopes:
+ *
+ *   Cloudflare edge   { result: { model, answers, usage }, success, errors, messages }
+ *   native endpoints  { model, answers, usage }
+ *
+ * The object is taken whole rather than unpacked here so the caller can also
+ * read the sibling `usage` from the same payload. An earlier version looked for
+ * `result.response`, a key no documented endpoint produces; it existed only in
+ * this file's test fixture, which is how the mismatch stayed invisible.
+ */
+export function decisionAnswers(
   body: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const candidates = [
-    isRecord(body['result']) && isRecord(body['result']['response'])
-      ? body['result']['response']
+    isRecord(body['result']) && isRecord(body['result']['answers'])
+      ? body['result']['answers']
       : undefined,
-    isRecord(body['response']) ? body['response'] : undefined,
-    isRecord(body['result']) ? body['result'] : undefined,
-    body,
+    isRecord(body['answers']) ? body['answers'] : undefined,
   ];
-  return candidates.find(
-    (candidate) => candidate !== undefined && isRecord(candidate['risk']),
-  );
+  return candidates.find((candidate) => candidate !== undefined);
 }
 
 export function parseDecisionResponse(

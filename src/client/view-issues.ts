@@ -9,7 +9,7 @@ export interface ConfigIssueView {
 }
 
 /** Locale keys must start with a lowercase letter and use no separators. */
-function issueKey(code: string): string {
+export function issueKey(code: string): string {
   const parts = code.split(/[^A-Za-z0-9]+/u);
   const [first = '', ...rest] = parts;
   return [

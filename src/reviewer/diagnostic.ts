@@ -8,6 +8,7 @@ import type { LlmLike } from './chat.js';
 import { runChatReviewer } from './chat.js';
 import { runDecisionReviewer } from './decision.js';
 import { renderRequest, renderUser } from './prompt.js';
+import { redact, redactAuthHeaders, redactValue } from './redact.js';
 
 /**
  * The fixed synthetic probe input.
@@ -203,72 +204,6 @@ function protocolOf(backend: 'chat' | 'decision'): string {
   return backend === 'chat' ? 'arbiter-chat-json-v1' : 'arbiter-decision-v1';
 }
 
-/** Replace every occurrence of a known secret, so no echo can carry it out. */
-function redact(text: string, secrets: readonly string[]): string {
-  return secrets.reduce(
-    (current, secret) =>
-      secret.length === 0 ? current : current.split(secret).join('[redacted]'),
-    text,
-  );
-}
-
-/**
- * Mask an authentication header wherever it appears in free text.
- *
- * A provider that echoes `Authorization: Bearer …` — in plain text, in a JSON
- * body, or in a JavaScript object-inspection dump — would otherwise publish a
- * credential it received. For chat the probe has no value to match, because the
- * host's LLM service owns the credential, so masking the field shape covers
- * that path without guessing what the secret is.
- *
- * The value is matched as a whole token rather than up to the first space: with
- * a `Bearer`/`Basic`/… scheme, the scheme is part of the value, so stopping at
- * the space would leave the credential itself behind.
- */
-const AUTH_FIELD =
-  'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
-
-function redactAuthHeaders(text: string): string {
-  // One pass over the field name and separator, then the whole value: a quoted
-  // value (JSON double quotes, a JS object dump with single quotes, backticks)
-  // or everything up to a structural terminator. The unquoted branch must
-  // consume spaces too, because an auth scheme is only the prefix — stopping at
-  // the first space would leave the credential itself in place.
-  const pattern = new RegExp(
-    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
-    'giu',
-  );
-  return text.replace(
-    pattern,
-    (_match, prefix: string) => `${prefix}[redacted]`,
-  );
-}
-
-/** Mask known secrets and recognisable auth headers in an arbitrary value. */
-function redactValue(
-  value: unknown,
-  secrets: readonly string[],
-  seen: WeakSet<object> = new WeakSet(),
-): unknown {
-  if (typeof value === 'string')
-    return redact(redactAuthHeaders(value), secrets);
-  if (Array.isArray(value)) {
-    const items: readonly unknown[] = value;
-    return items.map((item) => redactValue(item, secrets, seen));
-  }
-  if (value !== null && typeof value === 'object') {
-    if (seen.has(value)) return '[circular]';
-    seen.add(value);
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        redactValue(item, secrets, seen),
-      ]),
-    );
-  }
-  return value;
-}
-
 function attemptOf(
   record: ModelAttemptRecord,
   secrets: readonly string[],
@@ -374,7 +309,10 @@ function classify(evidence: FailureEvidence): ProbeFailure {
 /** The HTTP status an attempt recorded, when the adapter rejected one. */
 function httpStatusOf(attempts: readonly ProbeAttempt[]): number | null {
   for (const entry of attempts) {
-    const match = /^HTTP (\d{3})$/u.exec(entry.error ?? '');
+    // The adapter appends the provider's explanation after the status, so the
+    // pattern matches a prefix rather than the whole string. Anchor on the
+    // boundary so `HTTP 4010` cannot be read as 401.
+    const match = /^HTTP (\d{3})(?:\b|$)/u.exec(entry.error ?? '');
     if (match !== null) return Number(match[1]);
   }
   return null;

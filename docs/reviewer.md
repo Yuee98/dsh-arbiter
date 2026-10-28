@@ -71,7 +71,7 @@ reviewer:
 
 **失败处理**：所选类型不可用（网络、认证、配额、超时）→ error-escalate，写明故障原因；可询问时交人处理，否则 fallback-deny，不因故障自动放行。要用另一种类型，用户自己改配置。
 
-**关于 `decision` 类型的 provider 抽象**：当前不引入协议层。Clef 与 Jev **API 兼容**（Cloudflare 明确写 "fully Jev-API compatible"，且两者的 `state` + `questions(choice/noul/score)` schema 一致），因此配置页只暴露 `url` + `model` + `apiKeyRef` 三个字段，配一个 tooltip 说明支持哪些服务（Cloudflare Workers AI、Jev、本地部署的兼容实现）。**等真正出现不兼容时再引入协议层**——现在做抽象是投机。
+**关于 `decision` 类型的 provider 抽象**：当前不引入协议层。Clef 与 Jev 在**语义层**兼容（`state` + `questions(choice/noul/score)` 与同一套答案词汇、同一外层的 `{model, answers, usage}`），因此配置页只暴露 `url` + `model` + `apiKeyRef` 三个字段，配一个 tooltip 说明支持哪些服务。**传输层并不通用**：请求体形状与 `model` 取值随入口变化（见[三种入口](#design-5-3)），由 URL 路径判定，不需要用户再做一次选择。**等真正出现语义不兼容时再引入协议层**——现在做抽象是投机。
 
 **术语澄清**：这里的"类型"是插件内部的抽象，不是 DSH 的 provider 适配器概念。`chat` 类型走 `ctx.llm.stream()`，`decision` 类型直接发 REST 请求。
 
@@ -109,11 +109,21 @@ reviewer:
 
 ## Decision model 后端（Clef / Jev）
 
-**API 形态**：通用的 `state` + `questions` 形态（Clef 与 Jev 兼容）。以下以 Cloudflare Workers AI 端点为例（`POST /accounts/{id}/ai/run/@cf/cloudflare/clef`）：
+**API 形态**：两边共用 `state` + `questions` 语义和同一套答案词汇，但 **HTTP 传输随入口而变**，不能只凭"API 兼容"就假设请求体一致。已实测的三种入口：
+
+| 入口 | 请求体 | `model` 取值 |
+|---|---|---|
+| `POST /accounts/{acct}/ai/run/@cf/cloudflare/{model}` | 平铺 `{model,state,questions}` | 短名，须等于路径末段（`clef` / `clef-flash` / `clef-omni`） |
+| `POST /accounts/{acct}/ai/run` | `input` 包装 `{model,input:{state,questions}}` | 完整 ID（`@cf/cloudflare/clef`、`typesafe/jev`） |
+| `POST https://api.typesafe.ai/v1/systemone` | 平铺 `{model,state,questions}` | 版本名（`jev-1.13.0`） |
+
+插件按 URL 路径推导请求体：路径以 `/ai/run` 结尾用包装，其余用平铺；无法解析的路径也按平铺处理，不拒绝既有自定义端点。因此配置页不需要新增"适配器类型"选项。
+
+以下以 Cloudflare 模型专用端点为例：
 
 ```jsonc
 {
-  "model": "clef-flash",        // clef | clef-flash
+  "model": "clef",              // 须与路径末段一致：clef | clef-flash | clef-omni
   "state": "<CUSTOM_RULES + PROJECT_RULES + CONTEXT + EVIDENCE + PRIOR_VERDICTS + PENDING_ACTION + DERIVED_FACTS>",   // 见 §5.2.2–§5.2.4
   "questions": {
     "risk": {
@@ -165,9 +175,22 @@ reviewer:
 }
 ```
 
-**`score` 的 criteria 必须给满 11 项**（索引即等级 0..10），中间级也要有实际描述——否则模型对中间级没有锚点，评分会塌到两端。配置页保存前应校验该项数为 11 且无空串。
+**`score` 的 criteria 上限是 10 项**（官方 schema `minItems: 2, maxItems: 10`）。当前插件构造 11 项（0..10），**真实 Cloudflare 与真实 TypeSafe 都会在请求校验阶段返回 422**：
 
-**响应**（字段形状已核实）：
+```text
+questions.risk.score.criteria: List should have at most 10 items after validation, not 11
+```
+
+这是**已知且刻意延后**的评级契约变更（0..10 → 0..9 需重算阈值与锚点），不是传输层缺陷。在它修好之前，decision 后端对两个真实后端均无法完成一次审查；本地开发服务 `clef-apc` 未实现该项校验，因此会放行，不能据此判断线上可用。
+
+**响应外层信封**（字段形状已用真实凭据核实）：
+
+| 入口 | 信封 | 答案位置 |
+|---|---|---|
+| Cloudflare（含通用入口） | `{ result: { model, answers, usage }, success, errors, messages }` | `result.answers` |
+| TypeSafe 原生 | `{ model, answers, usage }` | `answers` |
+
+`success === false` 优先于任何结构完整的答案：那是故障，不是回答，必须进入 error-escalate。原生入口没有 `success` 字段，不能要求它存在。失败时的说明取 `errors[].message` / `error.message` / `detail.message`，写入 attempt 与最终 error，但只取说明字段，不拼接请求 state、工具输出或文件内容。
 
 - `noul` → `{ type: "noul", noul: <0..1 概率> }`
 - `choice` → `{ type: "choice", choice, probabilities, confidence }`
