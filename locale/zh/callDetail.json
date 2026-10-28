@@ -139,5 +139,6 @@
   "minimalVerdictHint": "审计与裁决历史都没有这条调用；下列内容来自当前会话记录，不包含阶段链与原始材料。",
   "conjunction": "合取证据（当时的判定依据）",
   "conjunctionWitness": "{target}：同时满足的节点 {text}",
-  "conjunctionNoWitness": "这条记录没有留下可显示的合取节点。"
+  "conjunctionNoWitness": "这条记录没有留下可显示的合取节点。",
+  "dialogDescription": "查看工具调用的裁决结果、决策依据与原始审计材料。"
 }

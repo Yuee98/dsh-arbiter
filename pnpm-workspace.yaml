@@ -2,6 +2,7 @@
 packages:
   - .
 allowBuilds:
+  '@parcel/watcher': false
   esbuild: true
 engineStrict: true
 minimumReleaseAge: 1440

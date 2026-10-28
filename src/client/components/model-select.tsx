@@ -10,7 +10,7 @@ import {
   isSessionChoice,
 } from '../model-choice.js';
 import type { ModelChoice } from '../model-choice.js';
-import { inputStyle } from './controls.js';
+import { inputClassName } from './controls.js';
 import type { ModelCatalogView, ModelGroupView } from '../view-types.js';
 
 export type CatalogLoad = 'loading' | 'ready' | 'failed';
@@ -99,7 +99,7 @@ export function ModelSelect(props: {
     t('reviewer.model.unlisted', { provider, model });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div className="arb:flex arb:flex-col arb:gap-1.5">
       <input
         type="search"
         value={props.query}
@@ -108,7 +108,7 @@ export function ModelSelect(props: {
         onChange={(event) => {
           props.onQuery(event.target.value);
         }}
-        style={inputStyle}
+        className={inputClassName}
       />
       <select
         aria-label={t('reviewer.model.label')}
@@ -135,7 +135,7 @@ export function ModelSelect(props: {
             model: selected.model,
           });
         }}
-        style={inputStyle}
+        className={inputClassName}
       >
         <option value={encodeChoice(SESSION_CHOICE)}>
           {t('reviewer.model.session')}
@@ -203,42 +203,50 @@ function CatalogStatus(props: {
   readonly entry: CatalogEntry;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const style = {
-    color: 'var(--dsw-alias-label-tertiary)',
-    fontSize: 11.5,
-  } as const;
   const { catalog, status } = props;
   if (status === 'loading') {
-    return <span style={style}>{t('reviewer.model.loading')}</span>;
+    return (
+      <span className="arb:text-[11.5px] arb:text-tertiary">
+        {t('reviewer.model.loading')}
+      </span>
+    );
   }
   if (status === 'failed' || catalog === null) {
     return (
-      <span role="status" style={style}>
+      <span role="status" className="arb:text-[11.5px] arb:text-tertiary">
         {t('reviewer.model.failed')}
       </span>
     );
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div className="arb:flex arb:flex-col arb:gap-0.5">
       {catalog.supported ? null : (
-        <span style={style}>{t('reviewer.model.unsupported')}</span>
+        <span className="arb:text-[11.5px] arb:text-tertiary">
+          {t('reviewer.model.unsupported')}
+        </span>
       )}
       {catalog.supported && catalog.groups.length === 0 ? (
-        <span style={style}>{t('reviewer.model.empty')}</span>
+        <span className="arb:text-[11.5px] arb:text-tertiary">
+          {t('reviewer.model.empty')}
+        </span>
       ) : null}
       {catalog.groups.length > 0 && props.optionCount === 0 ? (
-        <span style={style}>{t('reviewer.model.noMatch')}</span>
+        <span className="arb:text-[11.5px] arb:text-tertiary">
+          {t('reviewer.model.noMatch')}
+        </span>
       ) : null}
       {props.entry === 'unlisted' ? (
-        <span style={style}>{t('reviewer.model.notInCatalog')}</span>
+        <span className="arb:text-[11.5px] arb:text-tertiary">
+          {t('reviewer.model.notInCatalog')}
+        </span>
       ) : null}
       {props.entry === 'filtered' ? (
-        <span role="status" style={style}>
+        <span role="status" className="arb:text-[11.5px] arb:text-tertiary">
           {t('reviewer.model.filteredOut')}
         </span>
       ) : null}
       {catalog.failures.map((failure) => (
-        <span key={failure.id} style={style}>
+        <span key={failure.id} className="arb:text-[11.5px] arb:text-tertiary">
           {t('reviewer.model.providerFailed', { provider: failure.name })}
         </span>
       ))}

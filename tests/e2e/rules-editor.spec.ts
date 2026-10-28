@@ -155,7 +155,7 @@ test.describe('rule editing in the real host', () => {
         row.getByRole('textbox', { name: '表达式', exact: true }),
       ).toHaveCount(0);
       await row
-        .getByRole('button', { name: /^编辑规则/, exact: false })
+        .getByRole('button', { name: /^(展开|编辑)规则/, exact: false })
         .click();
       await expect(
         row.getByRole('textbox', { name: '表达式', exact: true }).first(),
@@ -222,7 +222,7 @@ test.describe('rule editing in the real host', () => {
         reloadedRow.getByRole('combobox', { name: /^行为/ }),
       ).toHaveValue('force-review');
       await reloadedRow
-        .getByRole('button', { name: /^编辑规则/, exact: false })
+        .getByRole('button', { name: /^(展开|编辑)规则/, exact: false })
         .click();
       await expect(
         reloadedRow
@@ -244,6 +244,7 @@ test.describe('rule editing in the real host', () => {
     await plugin.getByRole('button', { name: '新建规则', exact: true }).click();
     const row = plugin.locator('[data-rule-row]');
     await row.getByRole('button', { name: '删除条件', exact: true }).click();
+    await row.locator('[data-confirming="true"]').click();
     await expect(plugin.getByText(/没有匹配条件/)).toBeVisible();
     await expect(
       row.getByRole('button', { name: '添加条件', exact: true }),
@@ -279,9 +280,6 @@ test.describe('rule editing in the real host', () => {
     await plugin.getByRole('button', { name: '新建规则', exact: true }).click();
     const row = plugin.locator('[data-rule-row]');
     await expect(row.getByRole('region', { name: '匹配条件' })).toBeVisible();
-    // Expand both optional areas, so the audited state is the real editor.
-    await row.getByText('高级选项', { exact: true }).click();
-    await row.getByText('更多', { exact: true }).click();
 
     const results = await new AxeBuilder({ page })
       .include('[data-arbiter-root]')

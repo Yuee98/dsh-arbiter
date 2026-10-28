@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
+import { cn } from './ui/cn.js';
 
 /**
  * First-release navigation. Offline rule suggestions, analysis and policy
@@ -26,40 +27,27 @@ export function PageTabs({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 4,
-        borderBottom: '0.5px solid var(--dsw-alias-border-l2)',
-        flexWrap: 'wrap',
-      }}
-    >
-      {TABS.map(([id, label]) => (
-        <button
-          key={id}
-          type="button"
-          onClick={() => {
-            onTab(id);
-          }}
-          style={{
-            padding: '8px 12px',
-            border: 0,
-            borderBottom:
-              tab === id
-                ? '2px solid var(--dsw-alias-state-business-primary)'
-                : '2px solid transparent',
-            background: 'transparent',
-            color:
-              tab === id
-                ? 'var(--dsw-alias-label-primary)'
-                : 'var(--dsw-alias-label-secondary)',
-            cursor: 'pointer',
-            fontSize: 12.5,
-          }}
-        >
-          {t(label)}
-        </button>
-      ))}
+    <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-1 arb:border-b arb:border-border-default arb:pb-2">
+      {TABS.map(([id, label]) => {
+        const isActive = tab === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              onTab(id);
+            }}
+            className={cn(
+              'arb:cursor-pointer arb:rounded-md arb:border-0 arb:px-3 arb:py-1.5 arb:text-xs arb:font-medium arb:transition-colors arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent',
+              isActive
+                ? 'arb:bg-layer-3 arb:text-primary arb:shadow-xs'
+                : 'arb:bg-transparent arb:text-secondary hover:arb:bg-layer-2/80 hover:arb:text-primary',
+            )}
+          >
+            {t(label)}
+          </button>
+        );
+      })}
     </div>
   );
 }

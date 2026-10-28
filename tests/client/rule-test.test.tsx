@@ -187,9 +187,9 @@ describe('rule test panel', () => {
     );
     // Collapsed by default: the sample is not rendered until asked for.
     expect(screen.queryByTestId('rule-test-body')).toBeNull();
-    await user.click(screen.getByRole('button', { name: '展开测试区' }));
+    await user.click(screen.getByRole('button', { name: '规则测试' }));
     expect(screen.getByTestId('rule-test-body')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: '收起测试区' }));
+    await user.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByTestId('rule-test-body')).toBeNull();
 
     // The list's counter is what re-opens it, including for the same rule.

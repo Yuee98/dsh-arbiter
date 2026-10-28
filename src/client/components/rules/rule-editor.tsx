@@ -1,51 +1,29 @@
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-
 import { isStructuralTarget } from '../../../types.js';
-
 import type { Translate } from '../../i18n.js';
 import { useArbiterTranslation } from '../../i18n-provider.js';
+import type { DraftRule } from '../../view-types.js';
 import { issueText } from '../../view-issues.js';
-import { Button, Select, TextInput } from '../controls.js';
+import { Button, RadioGroup, TextInput } from '../controls.js';
+import { cn } from '../ui/cn.js';
 import {
   addCondition,
   listText,
   listValue,
+  pendingExactKey,
   removeCondition,
   ruleFieldLabel,
   withCondition,
 } from './draft.js';
-import type { RuleIssue } from './draft.js';
-import type { DraftRule } from '../../view-types.js';
+import type {
+  PendingExactType,
+  PendingExactTypeMap,
+  RuleIssue,
+} from './draft.js';
 import { RuleConditionEditor } from './rule-condition.js';
 
-const groupStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-} as const;
-
-const headingStyle = {
-  margin: 0,
-  fontSize: 12.5,
-  fontWeight: 600,
-} as const;
-
-/** A limit stated in place, not an error: it describes what the rule does. */
-const noteStyle = {
-  margin: 0,
-  fontSize: 11.5,
-  lineHeight: 1.5,
-  color: 'var(--dsw-alias-label-tertiary)',
-} as const;
-
-/**
- * Whether a conjunction spans more than one kind of structural node.
- *
- * Only then can the two facts come from different statements. A rule over one
- * target cannot, and a rule over only tool/argument conditions has no statement
- * to be confused about.
- */
 function crossesStructuralTargets(rule: DraftRule): boolean {
   const targets = new Set(
     rule.conditions
@@ -55,86 +33,87 @@ function crossesStructuralTargets(rule: DraftRule): boolean {
   return targets.size > 1;
 }
 
-const labelStyle = {
-  display: 'flex',
-  flexDirection: 'column' as const,
-  gap: 4,
-  fontSize: 12,
-  color: 'var(--dsw-alias-label-secondary)',
-};
-
-/**
- * The expanded rule body.
- *
- * The header keeps the switch and the verdict dropdown, so this area never
- * repeats them. It owns only the scope, the OR condition list, the note and the
- * optional review hint. Every field is a draft edit; nothing is applied here.
- */
 export function RuleEditor(props: {
   readonly rule: DraftRule;
   readonly issues: readonly RuleIssue[];
+  readonly pendingExactTypes?: PendingExactTypeMap | undefined;
+  readonly onPendingTypeChange?:
+    | ((
+        ruleId: string,
+        conditionIndex: number,
+        type: PendingExactType | null,
+      ) => void)
+    | undefined;
+  readonly onRemoveCondition?:
+    ((ruleId: string, conditionIndex: number) => void) | undefined;
   readonly onChange: (mutator: (rule: DraftRule) => void) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { rule, onChange, issues } = props;
+  const {
+    rule,
+    onChange,
+    issues,
+    pendingExactTypes,
+    onPendingTypeChange,
+    onRemoveCondition,
+  } = props;
+
+  const [armedConditionIndex, setArmedConditionIndex] = useState<number | null>(
+    null,
+  );
+  const [lastRuleId, setLastRuleId] = useState(rule.id);
+  if (rule.id !== lastRuleId) {
+    setLastRuleId(rule.id);
+    setArmedConditionIndex(null);
+  }
+
   return (
-    <div style={groupStyle}>
-      <p
-        style={{
-          margin: 0,
-          fontSize: 11.5,
-          color: 'var(--dsw-alias-label-tertiary)',
-        }}
-      >
+    <div className="arb:flex arb:flex-col arb:gap-3">
+      <p className="arb:m-0 arb:text-xs arb:text-tertiary">
         {t('rules.idDetail', { id: rule.id })}
       </p>
 
       <ScopeFields rule={rule} onChange={onChange} />
 
-      <section style={groupStyle} aria-label={t('rules.conditions')}>
-        <h4 style={headingStyle}>
-          {rule.conditions.length > 1
-            ? t('rules.combineHeading')
-            : t('rules.oneConditionHeading')}
-        </h4>
+      <section
+        className="arb:flex arb:flex-col arb:gap-2.5"
+        aria-label={t('rules.conditions')}
+      >
         {rule.conditions.length > 1 ? (
-          // The connective is only meaningful with two conditions, and it is
-          // never rewritten when conditions are added or removed: the value is
-          // kept so a rule set to "any" does not silently narrow to "all".
-          <Select
-            ariaLabel={t('rules.combine')}
-            value={rule.combine ?? 'all'}
-            options={['all', 'any'] as const}
-            labels={{
-              all: t('rules.combineOption.all'),
-              any: t('rules.combineOption.any'),
-            }}
-            onChange={(value) => {
-              onChange((next) => {
-                next.combine = value;
-              });
-            }}
-          />
-        ) : null}
+          <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-3">
+            <span className="arb:text-xs arb:font-semibold arb:text-primary">
+              {t('rules.combine')}
+            </span>
+            <RadioGroup
+              ariaLabel={t('rules.combine')}
+              name={`combine-${rule.id}`}
+              value={rule.combine ?? 'all'}
+              options={['all', 'any'] as const}
+              labels={{
+                all: t('rules.combineOption.all'),
+                any: t('rules.combineOption.any'),
+              }}
+              onChange={(value) => {
+                onChange((next) => {
+                  next.combine = value;
+                });
+              }}
+            />
+          </div>
+        ) : (
+          <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
+            {t('rules.oneConditionHeading')}
+          </h4>
+        )}
         {rule.conditions.length > 1 &&
         (rule.combine ?? 'all') === 'all' &&
         crossesStructuralTargets(rule) ? (
-          // A call-level conjunction does not claim the two facts belong to the
-          // same statement. Saying so is the difference between a rule the user
-          // understands and one that looks narrower than it is.
-          <p role="note" style={noteStyle}>
+          <p role="note" className="arb:m-0 arb:text-xs arb:text-tertiary">
             {t('rules.combineCrossTarget')}
           </p>
         ) : null}
         {rule.conditions.length === 0 ? (
-          <p
-            role="note"
-            style={{
-              margin: 0,
-              fontSize: 12,
-              color: 'var(--dsw-alias-state-error-primary)',
-            }}
-          >
+          <p role="note" className="arb:m-0 arb:text-xs arb:text-error">
             {t('rules.conditionsEmpty')}
           </p>
         ) : null}
@@ -143,12 +122,30 @@ export function RuleEditor(props: {
             key={`condition-${String(conditionIndex)}`}
             index={conditionIndex}
             condition={condition}
+            pendingType={
+              pendingExactTypes?.[pendingExactKey(rule.id, conditionIndex)] ??
+              null
+            }
+            onPendingTypeChange={(nextType) => {
+              onPendingTypeChange?.(rule.id, conditionIndex, nextType);
+            }}
             onChange={(mutator) => {
               onChange((next) => {
                 withCondition(next.conditions, conditionIndex, mutator);
               });
             }}
+            isArmed={armedConditionIndex === conditionIndex}
+            onArm={() => {
+              setArmedConditionIndex(conditionIndex);
+            }}
+            onDisarm={() => {
+              setArmedConditionIndex((current) =>
+                current === conditionIndex ? null : current,
+              );
+            }}
             onRemove={() => {
+              setArmedConditionIndex(null);
+              onRemoveCondition?.(rule.id, conditionIndex);
               onChange((next) => {
                 removeCondition(next.conditions, conditionIndex);
               });
@@ -157,18 +154,21 @@ export function RuleEditor(props: {
         ))}
         <div>
           <Button
+            className="arb:inline-flex arb:items-center arb:gap-1.5"
             onClick={() => {
+              setArmedConditionIndex(null);
               onChange((next) => {
                 addCondition(next.conditions);
               });
             }}
           >
-            {t('rules.addCondition')}
+            <Plus className="arb:h-3.5 arb:w-3.5" />
+            <span>{t('rules.addCondition')}</span>
           </Button>
         </div>
       </section>
 
-      <label style={labelStyle}>
+      <label className="arb:flex arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
         <span>{t('rules.comment')}</span>
         <TextInput
           ariaLabel={t('rules.comment')}
@@ -183,55 +183,36 @@ export function RuleEditor(props: {
         />
       </label>
 
-      <details>
-        <summary
-          style={{
-            cursor: 'pointer',
-            fontSize: 12,
-            color: 'var(--dsw-alias-label-secondary)',
+      {/* Flatten hint in RuleEditor without details/summary */}
+      <label className="arb:flex arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
+        <span>{t('rules.hint')}</span>
+        <TextInput
+          ariaLabel={t('rules.hint')}
+          value={rule.hint ?? ''}
+          onChange={(value) => {
+            onChange((next) => {
+              if (value.length === 0) delete next.hint;
+              else next.hint = value;
+            });
           }}
-        >
-          {t('rules.advanced')}
-        </summary>
-        <label style={{ ...labelStyle, marginTop: 8 }}>
-          <span>{t('rules.hint')}</span>
-          <TextInput
-            ariaLabel={t('rules.hint')}
-            value={rule.hint ?? ''}
-            onChange={(value) => {
-              onChange((next) => {
-                if (value.length === 0) delete next.hint;
-                else next.hint = value;
-              });
-            }}
-          />
-          <span
-            style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' }}
-          >
-            {t('rules.hintHint')}
-          </span>
-        </label>
-      </details>
+        />
+        <span className="arb:text-[11.5px] arb:text-tertiary">
+          {t('rules.hintHint')}
+        </span>
+      </label>
 
       <RuleIssueList issues={issues} t={t} />
     </div>
   );
 }
 
-/**
- * A comma-separated scope list.
- *
- * The visible text is local while the field is being edited, so typing
- * `bash, deploy` is not rewritten after the first comma. The draft is updated
- * from the same text on every keystroke; blur restores the canonical rendering
- * of whatever the draft actually holds (for example after `bash, ,` is typed).
- */
 function ScopeFields(props: {
   readonly rule: DraftRule;
   readonly onChange: (mutator: (rule: DraftRule) => void) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
   const { rule, onChange } = props;
+
   function setList(field: 'tools' | 'agents', value: string): void {
     onChange((next) => {
       const entries = listValue(value);
@@ -247,11 +228,17 @@ function ScopeFields(props: {
       };
     });
   }
+
   return (
-    <section style={groupStyle} aria-label={t('rules.scopeTitle')}>
-      <h4 style={headingStyle}>{t('rules.scopeTitle')}</h4>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ ...labelStyle, flex: 1, minWidth: 200 }}>
+    <section
+      className="arb:flex arb:flex-col arb:gap-2"
+      aria-label={t('rules.scopeTitle')}
+    >
+      <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
+        {t('rules.scopeTitle')}
+      </h4>
+      <div className="arb:flex arb:flex-wrap arb:gap-2.5">
+        <label className="arb:flex arb:min-w-[180px] arb:flex-1 arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
           <span>{t('rules.tools')}</span>
           <ListField
             ariaLabel={t('rules.tools')}
@@ -262,7 +249,7 @@ function ScopeFields(props: {
             }}
           />
         </label>
-        <label style={{ ...labelStyle, flex: 1, minWidth: 200 }}>
+        <label className="arb:flex arb:min-w-[180px] arb:flex-1 arb:flex-col arb:gap-1 arb:text-xs arb:text-secondary">
           <span>{t('rules.agents')}</span>
           <ListField
             ariaLabel={t('rules.agents')}
@@ -285,6 +272,7 @@ function ListField(props: {
   readonly onChange: (value: string) => void;
 }): ReactNode {
   const [editing, setEditing] = useState<string | null>(null);
+
   return (
     <TextInput
       ariaLabel={props.ariaLabel}
@@ -296,7 +284,6 @@ function ListField(props: {
         props.onChange(value);
       }}
       onBlur={() => {
-        // Show what the draft actually holds once the field is not focused.
         setEditing(null);
       }}
     />
@@ -308,22 +295,21 @@ function RuleIssueList(props: {
   readonly t: Translate;
 }): ReactNode {
   if (props.issues.length === 0) return null;
+
   return (
-    <div role="status" style={{ ...groupStyle, gap: 6 }}>
-      <h4 style={headingStyle}>{props.t('rules.issues')}</h4>
+    <div role="status" className="arb:flex arb:flex-col arb:gap-1.5">
+      <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
+        {props.t('rules.issues')}
+      </h4>
       {props.issues.map(({ issue, field, severity }, position) => (
         <p
           key={`${severity}-${String(position)}`}
           data-rule-issue={severity}
           data-rule-field={ruleFieldLabel(field)}
-          style={{
-            margin: 0,
-            fontSize: 12,
-            color:
-              severity === 'error'
-                ? 'var(--dsw-alias-state-error-primary)'
-                : 'var(--dsw-alias-label-secondary)',
-          }}
+          className={cn(
+            'arb:m-0 arb:text-xs',
+            severity === 'error' ? 'arb:text-error' : 'arb:text-secondary',
+          )}
         >
           {issueText(issue, props.t)}
         </p>

@@ -14,8 +14,8 @@
   "arguments": "工具参数",
   "argumentsPlaceholder": "{ … }",
   "importOpen": "从调用记录带入",
-  "open": "展开测试区",
-  "close": "收起测试区",
+  "open": "规则测试",
+  "close": "关闭",
   "importEmpty": "暂无可带入的调用记录。",
   "importUnavailable": "审计记录不可用，无法带入调用记录。",
   "importFailed": "读取调用记录失败：{error}",
@@ -98,5 +98,8 @@
   "combineAll": "本规则要求下列条件全部满足（同一匹配对象上的条件须由同一个节点同时满足）。",
   "groupMatch": "已同时满足",
   "groupNoMatch": "无法同时满足",
-  "groupUnknown": "结构未读全，无法判断"
+  "groupUnknown": "结构未读全，无法判断",
+  "clearFocusedRule": "切换为整套规则测试",
+  "dialogDescription": "针对当前未保存的规则草稿模拟评估单次工具调用。",
+  "importCommandEmpty": "（无命令摘要）"
 }

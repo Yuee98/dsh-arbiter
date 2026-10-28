@@ -1,26 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-
+import type { SessionKind } from '../../../types.js';
 import { ApiError, postJson } from '../../api.js';
 import { ruleTestResponse } from '../../decoders/rules.js';
 import { useArbiterTranslation } from '../../i18n-provider.js';
-import type { SessionKind } from '../../../types.js';
 import { configErrors, errorText } from '../../view-helpers.js';
 import { issuesText } from '../../view-issues.js';
 import type { ConfigIssueView } from '../../view-issues.js';
 import type { Draft, DraftRule, RuleTestResultView } from '../../view-types.js';
+import { Button, Field, Notice, Select, TextInput } from '../controls.js';
 import {
-  Button,
-  Notice,
-  Section,
-  Select,
-  TextInput,
-  inputStyle,
-} from '../controls.js';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog.js';
 import { ruleName } from './draft.js';
 import { RuleTestImport } from './rule-test-import.js';
-import type { ImportedTestSample } from './rule-test-source.js';
-import { RuleTestConclusion, RuleTestDetails } from './rule-test-result.js';
 import {
   buildSample,
   defaultTool,
@@ -32,22 +29,14 @@ import type {
   SampleProblem,
   TestInputMode,
 } from './rule-test-model.js';
+import { RuleTestConclusion, RuleTestDetails } from './rule-test-result.js';
+import type { ImportedTestSample } from './rule-test-source.js';
 
-/** A rejected draft: its targets, and the rules those targets were read from. */
 interface RejectedDraft {
   readonly targets: readonly IssueTarget[];
   readonly rules: Draft['rules'];
 }
 
-/**
- * The location actions for a rejected draft.
- *
- * They are withdrawn as soon as the draft changes: the path the backend reported
- * addresses a position in the submitted rule list, so after an insert, delete or
- * reorder the same ordinal can name a different condition. Requiring a retest is
- * the honest answer — an action that silently focuses another field would look
- * like an exact location and be wrong.
- */
 function IssueLocators(props: {
   readonly issues: RejectedDraft;
   readonly currentRules: Draft['rules'];
@@ -59,7 +48,7 @@ function IssueLocators(props: {
     return <Notice kind="info" text={t('ruleTest.issuesOutdated')} />;
   }
   return (
-    <>
+    <div className="arb:flex arb:flex-col arb:gap-1.5">
       {props.issues.targets.map((target) => (
         <div key={target.path}>
           <Button
@@ -71,69 +60,32 @@ function IssueLocators(props: {
           </Button>
         </div>
       ))}
-    </>
+    </div>
   );
 }
 
-/** One answer, kept with the signature of the sample and draft that produced it. */
 interface Answered {
   readonly result: RuleTestResultView;
   readonly signature: string;
 }
 
-/**
- * The rule tester.
- *
- * Two boundaries define it. It evaluates the whole current draft, never the saved
- * document, and it answers through the host route that runs the same evaluator as
- * the gate — this component decides nothing about matching. It also writes
- * nothing: no tool runs, the Reviewer is never asked, and no approval audit row
- * is produced.
- *
- * A result is tied to the sample and rules that produced it. Editing either one
- * keeps the old answer readable but marks it as needing another run, which is
- * more useful than silently presenting a stale verdict as current.
- */
 export function RuleTest(props: {
   readonly draft: Draft;
-  /**
-   * Asked to bring one condition's error into view.
-   *
-   * The tester owns the request it produced: a rejected selector comes back with
-   * the rule and condition path, and the operator can jump there instead of
-   * reading a bare path. The panel decides how to show the condition, so this
-   * component does not reach into the editor.
-   */
-  readonly onLocateIssue?: (target: IssueTarget) => void;
-  /**
-   * The rule whose header "test" action opened the tester.
-   *
-   * The prop names here are the ones the rule-list panel already passes, so this
-   * component can replace the placeholder tester without changing its wiring.
-   */
   readonly focusedRule: DraftRule | null;
-  /**
-   * Bumped by the rule list each time its "test" action runs.
-   *
-   * The counter, not the rule id, is what opens and focuses the tester: asking
-   * to test the rule that is already selected must still bring the sample into
-   * view, and it must never start a run by itself.
-   */
   readonly focusRequest: number;
+  readonly renderTrigger?: boolean | undefined;
+  readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
+  readonly onLocateIssue?: (target: IssueTarget) => void;
+  readonly onClearFocus?: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  // Requests start at zero, so a non-zero initial value means the list already
-  // asked for this tester and the block opens on first render.
+  const locatingRef = useRef(false);
+  const internalOpenerRef = useRef<HTMLElement | null>(null);
+
   const [handled, setHandled] = useState(0);
 
-  // A header action opens the block and moves focus to its sample. Focus moves
-  // to the container rather than the textarea so screen readers announce the
-  // block's label first; the operator then tabs into the sample.
-  //
-  // The request only sets the intent: the body does not exist yet in that
-  // render, so focusing happens in the effect that runs once it is mounted.
   const [pendingFocus, setPendingFocus] = useState(false);
   useEffect(() => {
     if (props.focusRequest === handled) return;
@@ -141,88 +93,111 @@ export function RuleTest(props: {
     setOpen(true);
     setPendingFocus(true);
   }, [props.focusRequest, handled]);
+
   useEffect(() => {
     if (!pendingFocus || !open) return;
     bodyRef.current?.focus();
     setPendingFocus(false);
   }, [pendingFocus, open]);
 
+  const handleLocate = (target: IssueTarget): void => {
+    locatingRef.current = true;
+    setOpen(false);
+    props.onLocateIssue?.(target);
+  };
+
   return (
-    <Section
-      title={t('ruleTest.title')}
-      description={t('ruleTest.draftNotice')}
-      ariaLabel={t('ruleTest.title')}
-    >
-      {props.focusedRule === null ? null : (
-        // The tester answers about one rule, so it names that rule; a focus
-        // request that landed on a different rule would otherwise be invisible.
-        <p
-          data-testid="rule-test-target"
-          style={{
-            margin: 0,
-            fontSize: 12,
-            color: 'var(--dsw-alias-label-secondary)',
-          }}
-        >
-          {t('ruleTest.testTarget', {
-            name: ruleName(props.focusedRule, t),
-          })}
-        </p>
-      )}
-      {open ? (
-        <div
-          ref={bodyRef}
-          tabIndex={-1}
-          data-testid="rule-test-body"
-          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              {t('ruleTest.close')}
-            </Button>
-          </div>
-          <RuleTestForm
-            draft={props.draft}
-            focusedRule={props.focusedRule}
-            {...(props.onLocateIssue === undefined
-              ? {}
-              : { onLocateIssue: props.onLocateIssue })}
-          />
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 8 }}>
+    <>
+      {props.renderTrigger !== false ? (
+        <div className="arb:flex arb:gap-2">
           <Button
-            onClick={() => {
+            onClick={(event) => {
+              internalOpenerRef.current = event.currentTarget;
               setOpen(true);
             }}
           >
             {t('ruleTest.open')}
           </Button>
         </div>
-      )}
-    </Section>
+      ) : null}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          data-rule-tester-dialog=""
+          surface="rule-test-dialog"
+          closeLabel={t('ruleTest.close')}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            bodyRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            if (locatingRef.current) {
+              event.preventDefault();
+              locatingRef.current = false;
+              return;
+            }
+            event.preventDefault();
+            const opener =
+              props.openerRef?.current ?? internalOpenerRef.current;
+            if (opener !== null && document.contains(opener)) {
+              opener.focus();
+            } else {
+              const fallback =
+                document.querySelector<HTMLElement>(
+                  '[data-arbiter-surface="rules-panel"] button, [data-arbiter-root] button, button',
+                ) ?? null;
+              fallback?.focus();
+            }
+          }}
+          className="arb:max-h-[90vh] arb:max-w-4xl arb:overflow-y-auto"
+        >
+          <DialogHeader>
+            <DialogTitle>{t('ruleTest.title')}</DialogTitle>
+            <DialogDescription>
+              {t('ruleTest.dialogDescription')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div
+            ref={bodyRef}
+            tabIndex={-1}
+            data-testid="rule-test-body"
+            data-rule-test=""
+            className="arb:flex arb:flex-col arb:gap-3"
+          >
+            <Notice kind="info" text={t('ruleTest.draftNotice')} />
+
+            {props.focusedRule !== null ? (
+              <div
+                data-testid="rule-test-target"
+                className="arb:flex arb:items-center arb:justify-between arb:gap-2 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2.5 arb:text-xs arb:text-secondary"
+              >
+                <span>
+                  {t('ruleTest.testTarget', {
+                    name: ruleName(props.focusedRule, t),
+                  })}
+                </span>
+                {props.onClearFocus !== undefined ? (
+                  <Button onClick={props.onClearFocus} tone="plain">
+                    {t('ruleTest.clearFocusedRule')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            <RuleTestForm
+              draft={props.draft}
+              focusedRule={props.focusedRule}
+              onLocateIssue={handleLocate}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-/**
- * The editable sample, reset when the focused rule changes.
- *
- * Switching rules seeds a starter sample for the new rule but keeps the answer
- * already on screen; that answer is marked stale by the form instead of being
- * discarded.
- */
-function useFocusedRuleSample(rule: DraftRule | null): {
-  readonly mode: TestInputMode;
-  readonly setMode: (mode: TestInputMode) => void;
-  readonly tool: string;
-  readonly setTool: (tool: string) => void;
-  readonly text: string;
-  readonly setText: (text: string) => void;
-} {
+function useFocusedRuleSample(rule: DraftRule | null) {
   const initialMode = defaultMode(rule);
   const [mode, setMode] = useState<TestInputMode>(initialMode);
   const [tool, setTool] = useState(() => defaultTool(rule));
@@ -248,28 +223,13 @@ function RuleTestForm(props: {
     props.focusedRule,
   );
   const [identity, setIdentity] = useState<SessionKind>('main');
-  // The directory the sample is evaluated in. Empty means "let the host use its
-  // own process directory", which is only a display default: a redirect rule
-  // needs a real cwd to resolve against.
   const [cwd, setCwd] = useState('');
   const [problem, setProblem] = useState<SampleProblem | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  /**
-   * The rejected draft's location targets, kept with the exact rule snapshot
-   * they were resolved against.
-   *
-   * A condition ordinal is only meaningful inside that snapshot: deleting an
-   * earlier condition moves a later one into position, so a retained action
-   * would focus a different field while still claiming to point at the error.
-   */
   const [issues, setIssues] = useState<RejectedDraft | null>(null);
   const [answer, setAnswer] = useState<Answered | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // A result becomes stale when the sample, the focused rule or any draft rule
-  // changes. The signature covers the whole rule list because the tester
-  // evaluates all of it, and the focused rule because the rule conclusion is
-  // read from it.
   const signature = useMemo(() => {
     const sample = buildSample({ tool, identity, mode, text });
     if (!sample.ok) return null;
@@ -292,9 +252,6 @@ function RuleTestForm(props: {
 
   const stale = answer !== null && signature !== answer.signature;
 
-  // An imported call brings its own identity and working directory: both are
-  // evaluation inputs, so the sample is replayed under the context it was
-  // judged in rather than under the form's current values.
   const importSample = useCallback(
     (imported: ImportedTestSample): void => {
       setTool(imported.sample.tool);
@@ -351,12 +308,8 @@ function RuleTestForm(props: {
             },
       );
     } catch (error) {
-      // Invalid draft rules are a draft problem, not a transport failure: the
-      // backend names the rule and condition so the editor can be corrected.
       if (error instanceof ApiError) {
         const reported = configErrors(error.payload);
-        // Resolved against the draft that was submitted, and kept with it: the
-        // actions are only offered while those rules are still the current ones.
         setIssues({
           targets: reported.map((issue) =>
             issueTarget(issue.path, props.draft.rules),
@@ -374,7 +327,7 @@ function RuleTestForm(props: {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="arb:flex arb:flex-col arb:gap-3">
       <RuleTestInputs
         tool={tool}
         identity={identity}
@@ -409,17 +362,12 @@ function RuleTestForm(props: {
             : t('ruleTest.argumentsPlaceholder')
         }
         rows={mode === 'command' ? 3 : 6}
-        style={{
-          ...inputStyle,
-          height: 'auto',
-          padding: 8,
-          fontFamily: 'var(--dsw-font-mono, monospace)',
-        }}
+        className="arb:w-full arb:rounded-md arb:border arb:border-border-default arb:bg-layer-3 arb:p-2.5 arb:font-mono arb:text-xs arb:text-primary arb:focus:border-accent arb:focus:outline-none"
       />
       {problem === null ? null : (
         <Notice kind="error" text={problemText(problem, t)} />
       )}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div className="arb:flex arb:items-center arb:gap-2">
         <Button
           onClick={() => {
             run().catch((error: unknown) => {
@@ -447,7 +395,7 @@ function RuleTestForm(props: {
         <div
           data-testid="rule-test-answer"
           data-arbiter-test-answer=""
-          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+          className="arb:flex arb:flex-col arb:gap-3"
         >
           <RuleTestConclusion
             result={answer.result}
@@ -461,7 +409,6 @@ function RuleTestForm(props: {
   );
 }
 
-/** Argument conditions read an object, so a rule with one starts in JSON mode. */
 function defaultMode(rule: DraftRule | null): TestInputMode {
   return rule?.conditions.some(
     (condition) => condition.target === 'argument',
@@ -479,13 +426,6 @@ function defaultText(rule: DraftRule | null, mode: TestInputMode): string {
   return typeof pattern === 'string' ? sampleFor(pattern) : 'gh pr view 42';
 }
 
-/**
- * A runnable starter for a plain command condition.
- *
- * A regex or glob pattern is not a command, so the placeholder sample stays
- * generic; turning an expression into a concrete command would imply the tester
- * saw an input it never saw.
- */
 function sampleFor(pattern: string): string {
   return /^[\w .:/-]+$/u.test(pattern) ? pattern : 'gh pr view 42';
 }
@@ -506,13 +446,6 @@ function problemText(
   }
 }
 
-/**
- * Turn a rejected draft into the rule and condition it names.
- *
- * The backend already sends paths such as `rules[2].conditions[0].path`, which is
- * exactly where a bad JSONPath lives; keeping that path lets the reader find the
- * condition instead of being told only that the tester failed.
- */
 function invalidDraftText(
   error: ApiError,
   issues: readonly ConfigIssueView[],
@@ -523,13 +456,6 @@ function invalidDraftText(
   return `${t('ruleTest.invalidRules')}\n${issuesText(issues, t)}`;
 }
 
-/**
- * Tool, agent, input mode and working directory.
- *
- * These are the evaluation inputs, not presentation: each one changes what the
- * evaluator sees, so they stay visible above the sample instead of behind a
- * "advanced" disclosure.
- */
 function RuleTestInputs(props: {
   readonly tool: string;
   readonly identity: SessionKind;
@@ -544,56 +470,59 @@ function RuleTestInputs(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 8,
-        flexWrap: 'wrap',
-        alignItems: 'flex-end',
-      }}
-    >
-      <div style={{ width: 170 }}>
-        <TextInput
-          ariaLabel={t('ruleTest.tool')}
-          value={props.tool}
-          onChange={props.onTool}
-          monospace
-        />
+    <div className="arb:flex arb:flex-wrap arb:items-end arb:gap-2">
+      <div className="arb:w-40">
+        <Field label={t('ruleTest.tool')}>
+          <TextInput
+            ariaLabel={t('ruleTest.tool')}
+            value={props.tool}
+            onChange={props.onTool}
+            monospace
+          />
+        </Field>
       </div>
-      <div style={{ width: 170 }}>
-        <Select
-          ariaLabel={t('ruleTest.agent')}
-          value={props.identity}
-          options={['main', 'subagent'] as const}
-          labels={{
-            main: t('ruleTest.agentMain'),
-            subagent: t('ruleTest.agentSubagent'),
-          }}
-          onChange={props.onIdentity}
-        />
+      <div className="arb:w-40">
+        <Field label={t('ruleTest.agent')}>
+          <Select
+            ariaLabel={t('ruleTest.agent')}
+            value={props.identity}
+            options={['main', 'subagent'] as const}
+            labels={{
+              main: t('ruleTest.agentMain'),
+              subagent: t('ruleTest.agentSubagent'),
+            }}
+            onChange={props.onIdentity}
+          />
+        </Field>
       </div>
-      <div style={{ width: 190 }}>
-        <Select
-          ariaLabel={t('ruleTest.mode')}
-          value={props.mode}
-          options={['command', 'arguments'] as const}
-          labels={{
-            command: t('ruleTest.modeCommand'),
-            arguments: t('ruleTest.modeArguments'),
-          }}
-          onChange={props.onMode}
-        />
+      <div className="arb:w-44">
+        <Field label={t('ruleTest.mode')}>
+          <Select
+            ariaLabel={t('ruleTest.mode')}
+            value={props.mode}
+            options={['command', 'arguments'] as const}
+            labels={{
+              command: t('ruleTest.modeCommand'),
+              arguments: t('ruleTest.modeArguments'),
+            }}
+            onChange={props.onMode}
+          />
+        </Field>
       </div>
-      <div style={{ width: 220 }}>
-        <TextInput
-          ariaLabel={t('ruleTest.cwd')}
-          value={props.cwd}
-          onChange={props.onCwd}
-          placeholder={t('ruleTest.cwdPlaceholder')}
-          monospace
-        />
+      <div className="arb:w-52">
+        <Field label={t('ruleTest.cwd')}>
+          <TextInput
+            ariaLabel={t('ruleTest.cwd')}
+            value={props.cwd}
+            onChange={props.onCwd}
+            placeholder={t('ruleTest.cwdPlaceholder')}
+            monospace
+          />
+        </Field>
       </div>
-      <RuleTestImport disabled={props.busy} onImport={props.onImport} />
+      <div className="arb:mb-0.5">
+        <RuleTestImport disabled={props.busy} onImport={props.onImport} />
+      </div>
     </div>
   );
 }

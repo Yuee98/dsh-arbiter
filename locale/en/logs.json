@@ -51,6 +51,7 @@
   },
   "pager": {
     "label": "Pagination",
+    "first": "First page",
     "previous": "Previous page",
     "next": "Next page",
     "position": "Page {page} / {pages}",

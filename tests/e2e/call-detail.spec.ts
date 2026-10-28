@@ -152,11 +152,9 @@ test(
     await expect(raw).toHaveAttribute('aria-expanded', 'false');
     await expect(plugin.getByText('工具输入', { exact: true })).toHaveCount(0);
     await raw.click();
+    await expect(plugin.getByText('工具输入', { exact: true })).toBeVisible();
     await expect(
-      plugin.getByRole('button', { name: '工具输入', exact: true }),
-    ).toBeVisible();
-    await expect(
-      plugin.getByRole('button', { name: '工具输入 schema', exact: true }),
+      plugin.getByText('工具输入 schema', { exact: true }),
     ).toBeVisible();
   },
 );

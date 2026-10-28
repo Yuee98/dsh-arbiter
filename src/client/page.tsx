@@ -1,31 +1,42 @@
-import { saveResponse, validationResponse } from './decoders/state.js';
-import { PageTabs } from './components/page-tabs.js';
-import type { TabId } from './components/page-tabs.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ApiError, postJson } from './api.js';
 import { ConfigActions } from './components/config-actions.js';
 import type { SaveStatus } from './components/config-actions.js';
 import { Notice } from './components/controls.js';
+import { PageTabs } from './components/page-tabs.js';
+import type { TabId } from './components/page-tabs.js';
+import {
+  clearRulePendingExact,
+  pendingExactIssues,
+  rebasePendingExactOnRemoveCondition,
+  setPendingExactType,
+} from './components/rules/draft.js';
+import type {
+  PendingExactType,
+  PendingExactTypeMap,
+} from './components/rules/draft.js';
+import { ArbiterPortalProvider } from './components/ui/portal-context.js';
+import { saveResponse, validationResponse } from './decoders/state.js';
 import { useCoexistenceFeed } from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
+import { reportFindings, useLoadState } from './page-load.js';
+import type { ValidationState } from './page-load.js';
+import { AboutPanel } from './panels/about.js';
+import { AdvancedPanel } from './panels/advanced.js';
+import { LogsPanel } from './panels/logs.js';
+import { ReviewerPanel } from './panels/reviewer.js';
+import { RulesPanel } from './panels/rules.js';
+import { StatusPanel } from './panels/status.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
 import type { ConfigIssueView } from './view-issues.js';
-import { reportFindings, useLoadState } from './page-load.js';
-import type { ValidationState } from './page-load.js';
 import type {
   Draft,
   SaveResponse,
-  StateResponse,
   SlotProps,
+  StateResponse,
 } from './view-types.js';
-import { StatusPanel } from './panels/status.js';
-import { RulesPanel } from './panels/rules.js';
-import { ReviewerPanel } from './panels/reviewer.js';
-import { AdvancedPanel } from './panels/advanced.js';
-import { LogsPanel } from './panels/logs.js';
-import { AboutPanel } from './panels/about.js';
 
 interface SaveFailure {
   readonly status: number;
@@ -38,8 +49,9 @@ function draftErrors(payload: unknown): readonly ConfigIssueView[] {
 }
 
 function failureOf(error: unknown): SaveFailure {
-  if (error instanceof ApiError)
+  if (error instanceof ApiError) {
     return { status: error.status, code: error.code, message: error.message };
+  }
   return {
     status: 0,
     code: 'request-failed',
@@ -47,10 +59,117 @@ function failureOf(error: unknown): SaveFailure {
   };
 }
 
+function usePendingExactState(
+  onDraft: (mutator: (draft: Draft) => void) => void,
+) {
+  const [pendingExactTypes, setPendingExactTypes] =
+    useState<PendingExactTypeMap>({});
+
+  const handlePendingTypeChange = useCallback(
+    (ruleId: string, conditionIndex: number, type: PendingExactType | null) => {
+      setPendingExactTypes((current) =>
+        setPendingExactType(current, ruleId, conditionIndex, type),
+      );
+    },
+    [],
+  );
+
+  const handleRemoveCondition = useCallback(
+    (ruleId: string, conditionIndex: number) => {
+      setPendingExactTypes((current) =>
+        rebasePendingExactOnRemoveCondition(current, ruleId, conditionIndex),
+      );
+    },
+    [],
+  );
+
+  const handleDeleteRule = useCallback(
+    (ruleId: string) => {
+      setPendingExactTypes((current) => clearRulePendingExact(current, ruleId));
+      onDraft((d) => {
+        const at = d.rules.findIndex((candidate) => candidate.id === ruleId);
+        if (at >= 0) d.rules.splice(at, 1);
+      });
+    },
+    [onDraft],
+  );
+
+  return {
+    pendingExactTypes,
+    setPendingExactTypes,
+    handlePendingTypeChange,
+    handleRemoveCondition,
+    handleDeleteRule,
+  };
+}
+
+function useConfigValidation(props: {
+  readonly draft: Draft | null;
+  readonly pendingExactTypes: PendingExactTypeMap;
+  readonly validationRevision: React.MutableRefObject<number>;
+  readonly setValidation: React.Dispatch<React.SetStateAction<ValidationState>>;
+  readonly setError: (msg: string | null) => void;
+}) {
+  const t = useArbiterTranslation();
+  const {
+    draft,
+    pendingExactTypes,
+    validationRevision,
+    setValidation,
+    setError,
+  } = props;
+
+  return useCallback(async (): Promise<void> => {
+    if (draft === null) return;
+    const revision = validationRevision.current;
+    const incompleteIssues = pendingExactIssues(
+      draft,
+      pendingExactTypes,
+      t('rules.incompleteExactValue'),
+    );
+    if (incompleteIssues.length > 0) {
+      setValidation((current) =>
+        reportFindings(current.sourceWarnings, {
+          errors: incompleteIssues,
+          warnings: [],
+        }),
+      );
+      return;
+    }
+
+    try {
+      const response = await postJson(
+        '/validate',
+        { config: draft },
+        validationResponse,
+      );
+      if (validationRevision.current !== revision) return;
+      setValidation((current) =>
+        reportFindings(current.sourceWarnings, {
+          errors: response.errors,
+          warnings: response.warnings,
+        }),
+      );
+    } catch (errorValue) {
+      setError(errorText(errorValue));
+    }
+  }, [
+    draft,
+    pendingExactTypes,
+    setError,
+    setValidation,
+    t,
+    validationRevision,
+  ]);
+}
+
 export function ArbiterPage(_props: SlotProps): ReactNode {
   const t = useArbiterTranslation();
   const [state, setState] = useState<StateResponse | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(
+    null,
+  );
   const [dirty, setDirty] = useState(false);
   const [tab, setTab] = useState<TabId>('status');
   const [error, setError] = useState<string | null>(null);
@@ -64,44 +183,14 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     sourceWarnings: [],
   });
   const generation = useRef(0);
-  /**
-   * Findings belong to the draft revision that produced them.
-   *
-   * Editing invalidates the current revision, and a late `/validate` answer is
-   * dropped when its revision is no longer current, so a rule never keeps an
-   * error that was reported for different content.
-   */
   const validationRevision = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
     setError(errorText(failure));
   }, []);
-  // The feed keeps the conflict view live; the payload's value only seeds it.
   const coexistence = useCoexistenceFeed(state, onFailure);
-
-  const load = useLoadState({
-    generation,
-    validationRevision,
-    setBusy,
-    setError,
-    setState,
-    setDraft,
-    setDirty,
-    setSaveStatus,
-    setAuditNotice,
-    setValidation,
-  });
-
-  useEffect(() => {
-    load().catch(onFailure);
-  }, [load, onFailure]);
 
   const onDraft = useCallback((mutator: (draft: Draft) => void): void => {
     validationRevision.current += 1;
-    // Only the draft-validation findings are invalidated by an edit. The loaded
-    // source's own warnings are about the document on disk, which the edit has
-    // not touched — clearing them here would hide an unresolved problem (a
-    // misspelled field in an externally edited file) the moment the user nudges
-    // any unrelated setting. `sourceWarnings` is replaced only by a reload.
     setValidation((current) =>
       reportFindings(current.sourceWarnings, { errors: [], warnings: [] }),
     );
@@ -114,32 +203,64 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     });
   }, []);
 
-  const validate = useCallback(async (): Promise<void> => {
-    if (draft === null) return;
-    const revision = validationRevision.current;
-    try {
-      const response = await postJson(
-        '/validate',
-        { config: draft },
-        validationResponse,
-      );
-      // A draft edit while the request was in flight makes this answer stale.
-      if (validationRevision.current !== revision) return;
-      setValidation((current) =>
-        reportFindings(current.sourceWarnings, {
-          errors: response.errors,
-          warnings: response.warnings,
-        }),
-      );
-    } catch (errorValue) {
-      setError(errorText(errorValue));
-    }
-  }, [draft]);
+  const {
+    pendingExactTypes,
+    setPendingExactTypes,
+    handlePendingTypeChange,
+    handleRemoveCondition,
+    handleDeleteRule,
+  } = usePendingExactState(onDraft);
+
+  const setDraftFromLoad = useCallback(
+    (action: React.SetStateAction<Draft | null>) => {
+      setDraft(action);
+      setPendingExactTypes({});
+    },
+    [setPendingExactTypes],
+  );
+
+  const load = useLoadState({
+    generation,
+    validationRevision,
+    setBusy,
+    setError,
+    setState,
+    setDraft: setDraftFromLoad,
+    setDirty,
+    setSaveStatus,
+    setAuditNotice,
+    setValidation,
+  });
+
+  useEffect(() => {
+    load().catch(onFailure);
+  }, [load, onFailure]);
+
+  const validate = useConfigValidation({
+    draft,
+    pendingExactTypes,
+    validationRevision,
+    setValidation,
+    setError,
+  });
 
   const save = useCallback(async (): Promise<void> => {
     if (state === null || draft === null) return;
-    // Findings from this save belong to the draft submitted here.
     const revision = validationRevision.current;
+    const incompleteIssues = pendingExactIssues(
+      draft,
+      pendingExactTypes,
+      t('rules.incompleteExactValue'),
+    );
+    if (incompleteIssues.length > 0) {
+      setSaveStatus('failed');
+      setValidation((current) => ({ ...current, errors: incompleteIssues }));
+      setError(
+        t('config.invalid', { errors: issuesText(incompleteIssues, t) }),
+      );
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -151,12 +272,7 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         { revision: state.fileRevision, config: draft },
         saveResponse,
       );
-      // Reload first: the reload clears transient state, so the saved-and-
-      // effective feedback is published after the fresh identities arrive. A
-      // draft edited during the request is preserved instead of discarded.
       await load({ submittedRevision: revision });
-      // Saved and effective are reported separately: the API only returns this
-      // payload after the candidate was written and applied.
       setSaveStatus(response.changed ? 'saved' : 'unchanged');
       setAuditNotice(
         response.auditError === null
@@ -167,7 +283,6 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       const failure = failureOf(errorValue);
       setSaveStatus('failed');
       if (failure.status === 409 && failure.code === 'config-conflict') {
-        // The draft is kept: the user merges it against the changed file.
         setNotice(t('config.conflict'));
         return;
       }
@@ -175,11 +290,9 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
         const errors = draftErrors(
           errorValue instanceof ApiError ? errorValue.payload : null,
         );
-        // The errors describe the draft that was submitted. If the editor has
-        // moved on, they must not be attached to whatever rule now sits at that
-        // index; the failure is still reported, without per-rule findings.
-        if (validationRevision.current === revision)
+        if (validationRevision.current === revision) {
           setValidation((current) => ({ ...current, errors }));
+        }
         setError(t('config.invalid', { errors: issuesText(errors, t) }));
         return;
       }
@@ -187,17 +300,11 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [draft, load, state, t]);
+  }, [draft, load, pendingExactTypes, state, t]);
 
   if (state === null || draft === null) {
     return (
-      <div
-        style={{
-          padding: 24,
-          fontSize: 13,
-          color: 'var(--dsw-alias-label-secondary)',
-        }}
-      >
+      <div className="arb:p-6 arb:text-sm arb:text-secondary">
         {error === null
           ? t('config.loading')
           : t('config.loadFailed', { error })}
@@ -206,35 +313,63 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
   }
 
   return (
-    <div
-      data-arbiter-root
-      style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-    >
-      <ConfigActions
-        fileRevision={state.fileRevision}
-        effectiveRevision={state.effectiveRevision}
-        snapshotId={state.configSnapshotId}
-        format={state.configFormat}
-        formatExplicit={state.configFormatExplicit}
-        documentPath={state.documentPath}
-        dirty={dirty}
-        busy={busy}
-        canSave={state.fileRevision !== null}
-        status={saveStatus}
-        auditNotice={auditNotice}
-        onValidate={() => {
-          validate().catch(onFailure);
-        }}
-        onReload={() => {
-          load().catch(onFailure);
-        }}
-        onSave={() => {
-          save().catch(onFailure);
-        }}
-      />
+    <ArbiterPortalProvider container={portalContainer}>
+      <div data-arbiter-root="" className="arb:flex arb:flex-col arb:gap-4">
+        <div ref={setPortalContainer} data-arbiter-portal-root="" />
 
-      <PageTabs tab={tab} onTab={setTab} />
+        <ConfigActions
+          fileRevision={state.fileRevision}
+          effectiveRevision={state.effectiveRevision}
+          snapshotId={state.configSnapshotId}
+          format={state.configFormat}
+          formatExplicit={state.configFormatExplicit}
+          documentPath={state.documentPath}
+          dirty={dirty}
+          busy={busy}
+          canSave={state.fileRevision !== null}
+          status={saveStatus}
+          auditNotice={auditNotice}
+          onValidate={() => {
+            validate().catch(onFailure);
+          }}
+          onReload={() => {
+            load().catch(onFailure);
+          }}
+          onSave={() => {
+            save().catch(onFailure);
+          }}
+        />
 
+        <PageTabs tab={tab} onTab={setTab} />
+
+        <PageNotices error={error} notice={notice} validation={validation} />
+
+        <PageTabBody
+          tab={tab}
+          state={state}
+          coexistenceView={coexistence.view}
+          draft={draft}
+          validation={validation}
+          pendingExactTypes={pendingExactTypes}
+          onDraft={onDraft}
+          onPendingTypeChange={handlePendingTypeChange}
+          onRemoveCondition={handleRemoveCondition}
+          onDeleteRule={handleDeleteRule}
+        />
+      </div>
+    </ArbiterPortalProvider>
+  );
+}
+
+function PageNotices(props: {
+  readonly error: string | null;
+  readonly notice: string | null;
+  readonly validation: ValidationState;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const { error, notice, validation } = props;
+  return (
+    <>
       {error === null ? null : <Notice kind="error" text={error} />}
       {notice === null ? null : <Notice kind="ok" text={notice} />}
       {validation.errors.length === 0 ? null : (
@@ -243,30 +378,70 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
       {validation.warnings.length === 0 ? null : (
         <Notice kind="info" text={issuesText(validation.warnings, t)} />
       )}
-
-      {tab === 'status' ? (
-        <StatusPanel
-          state={{ ...state, coexistence: coexistence.view }}
-          draft={draft}
-          onDraft={onDraft}
-        />
-      ) : null}
-      {tab === 'rules' ? (
-        <RulesPanel
-          draft={draft}
-          onDraft={onDraft}
-          errors={validation.errors}
-          warnings={validation.warnings}
-        />
-      ) : null}
-      {tab === 'reviewer' ? (
-        <ReviewerPanel draft={draft} onDraft={onDraft} />
-      ) : null}
-      {tab === 'advanced' ? (
-        <AdvancedPanel draft={draft} onDraft={onDraft} />
-      ) : null}
-      {tab === 'logs' ? <LogsPanel /> : null}
-      {tab === 'about' ? <AboutPanel state={state} /> : null}
-    </div>
+    </>
   );
+}
+
+function PageTabBody(props: {
+  readonly tab: TabId;
+  readonly state: StateResponse;
+  readonly coexistenceView: ReturnType<typeof useCoexistenceFeed>['view'];
+  readonly draft: Draft;
+  readonly validation: ValidationState;
+  readonly pendingExactTypes: PendingExactTypeMap;
+  readonly onDraft: (mutator: (draft: Draft) => void) => void;
+  readonly onPendingTypeChange: (
+    ruleId: string,
+    conditionIndex: number,
+    type: PendingExactType | null,
+  ) => void;
+  readonly onRemoveCondition: (ruleId: string, conditionIndex: number) => void;
+  readonly onDeleteRule: (ruleId: string) => void;
+}): ReactNode {
+  const {
+    tab,
+    state,
+    coexistenceView,
+    draft,
+    validation,
+    pendingExactTypes,
+    onDraft,
+    onPendingTypeChange,
+    onRemoveCondition,
+    onDeleteRule,
+  } = props;
+
+  if (tab === 'status') {
+    return (
+      <StatusPanel
+        state={{ ...state, coexistence: coexistenceView }}
+        draft={draft}
+        onDraft={onDraft}
+      />
+    );
+  }
+  if (tab === 'rules') {
+    return (
+      <RulesPanel
+        draft={draft}
+        onDraft={onDraft}
+        errors={validation.errors}
+        warnings={validation.warnings}
+        pendingExactTypes={pendingExactTypes}
+        onPendingTypeChange={onPendingTypeChange}
+        onRemoveCondition={onRemoveCondition}
+        onDeleteRule={onDeleteRule}
+      />
+    );
+  }
+  if (tab === 'reviewer') {
+    return <ReviewerPanel draft={draft} onDraft={onDraft} />;
+  }
+  if (tab === 'advanced') {
+    return <AdvancedPanel draft={draft} onDraft={onDraft} />;
+  }
+  if (tab === 'logs') {
+    return <LogsPanel />;
+  }
+  return <AboutPanel state={state} />;
 }

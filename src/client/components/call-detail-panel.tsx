@@ -8,10 +8,17 @@
  * can render that directly.
  */
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog.js';
 import { useCallDetail } from './use-call-detail.js';
 import type { CallDetailState } from '../view-types.js';
 
@@ -45,13 +52,18 @@ function AbsentState({
   switch (state.kind) {
     case 'loading':
       return (
-        <p style={{ margin: 0, fontSize: 12.5 }}>{t('callDetail.loading')}</p>
+        <p className="arb:m-0 arb:text-xs arb:text-secondary">
+          {t('callDetail.loading')}
+        </p>
       );
     case 'ready':
       return <CallDetail detail={state.detail} />;
     case 'record-unavailable':
       return (
-        <div data-call-detail-state="record-unavailable">
+        <div
+          data-call-detail-state="record-unavailable"
+          className="arb:flex arb:flex-col arb:gap-3"
+        >
           <Notice kind="info" text={t('callDetail.recordUnavailable')} />
           {fallback === undefined ? null : (
             <div data-call-detail-fallback={fallback.tool}>
@@ -59,10 +71,12 @@ function AbsentState({
                 title={t('callDetail.minimalVerdict')}
                 description={t('callDetail.minimalVerdictHint')}
               >
-                <p style={{ margin: 0, fontSize: 12.5 }}>
+                <p className="arb:m-0 arb:text-xs arb:font-medium arb:text-primary">
                   {`${fallback.sourceLabel} · ${fallback.tool}`}
                 </p>
-                <p style={{ margin: 0, fontSize: 12.5 }}>{fallback.reason}</p>
+                <p className="arb:m-0 arb:text-xs arb:text-secondary">
+                  {fallback.reason}
+                </p>
               </Section>
             </div>
           )}
@@ -76,12 +90,17 @@ function AbsentState({
       );
     case 'failed':
       return (
-        <div data-call-detail-state="failed">
+        <div
+          data-call-detail-state="failed"
+          className="arb:flex arb:flex-col arb:gap-3"
+        >
           <Notice
             kind="error"
             text={`${t('callDetail.loadFailed')} ${state.message}`}
           />
-          <Button onClick={onRetry}>{t('callDetail.retry')}</Button>
+          <div>
+            <Button onClick={onRetry}>{t('callDetail.retry')}</Button>
+          </div>
         </div>
       );
   }
@@ -96,6 +115,7 @@ function AbsentState({
 export function CallDetailPanel(props: {
   readonly callId: string;
   readonly onClose?: () => void;
+  readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
   /**
    * The caller's own recorded facts, shown only when no source holds the call.
    *
@@ -106,19 +126,45 @@ export function CallDetailPanel(props: {
 }): ReactNode {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
-  // No wrapper heading: the detail renders its own title, so a caller cannot
-  // end up with two different names for the same view.
+  const openerRef = useRef<HTMLElement | null>(null);
+
   return (
-    <div
-      data-call-detail-panel={props.callId}
-      style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+    <Dialog
+      open={true}
+      onOpenChange={(open) => {
+        if (!open) props.onClose?.();
+      }}
     >
-      {props.onClose === undefined ? null : (
-        <div>
-          <Button onClick={props.onClose}>{t('callDetail.close')}</Button>
-        </div>
-      )}
-      <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
-    </div>
+      <DialogContent
+        data-call-detail-panel={props.callId}
+        data-arbiter-surface="call-detail-dialog"
+        showCloseButton={true}
+        closeLabel={t('callDetail.close')}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const opener = props.openerRef?.current ?? openerRef.current;
+          if (opener !== null && document.contains(opener)) {
+            opener.focus();
+          } else {
+            const fallback =
+              document.querySelector<HTMLElement>(
+                '[data-arbiter-surface="logs-panel"] button, [data-arbiter-surface="denials-panel"] button, [data-arbiter-root] button, button',
+              ) ?? null;
+            fallback?.focus();
+          }
+        }}
+        className="arb:flex arb:max-h-[85vh] arb:max-w-3xl arb:flex-col arb:gap-4 arb:overflow-y-auto"
+      >
+        <DialogHeader className="arb:border-b arb:border-border-default arb:pb-3 arb:pr-8">
+          <DialogTitle className="arb:text-base arb:font-semibold arb:text-primary">
+            {t('callDetail.title', { callId: props.callId })}
+          </DialogTitle>
+          <DialogDescription className="arb:sr-only">
+            {t('callDetail.dialogDescription')}
+          </DialogDescription>
+        </DialogHeader>
+        <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
+      </DialogContent>
+    </Dialog>
   );
 }

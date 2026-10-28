@@ -3,6 +3,7 @@
   "entry": [
     "src/index.ts",
     "src/client/index.tsx",
+    "src/client/styles/tailwind.css",
     "scripts/repair-session.ts",
     "tests/e2e/**/*.spec.ts",
     // Loaded by the isolated host as a plugin module, not imported by a test.
@@ -12,6 +13,7 @@
   "ignoreExportsUsedInFile": true,
   "project": [
     "src/**/*.{ts,tsx}",
+    "src/**/*.css",
     "tests/**/*.{ts,tsx}",
     "scripts/**/*.ts",
     "tooling/**/*.mjs",
@@ -21,6 +23,6 @@
   "ignoreBinaries": ["actionlint", "zizmor"],
   // The session package ships with DSH and is resolved from the running
   // installation at runtime; it is intentionally not a declared dependency.
-  "ignoreDependencies": ["@deepseek-ai/dsh-session"],
+  "ignoreDependencies": ["@deepseek-ai/dsh-session", "@tailwindcss/cli"],
   "treatConfigHintsAsErrors": true,
 }

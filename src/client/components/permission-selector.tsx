@@ -106,7 +106,8 @@ export function PermissionSelector(props: {
   return (
     <span
       data-arbiter-permission=""
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      data-arbiter-surface="permission-selector"
+      className="arb:relative arb:inline-flex arb:items-center arb:gap-1.5"
     >
       <button
         ref={trigger}
@@ -125,20 +126,9 @@ export function PermissionSelector(props: {
         onClick={() => {
           setOpen(!open);
         }}
-        style={{
-          height: 28,
-          maxWidth: 220,
-          padding: '0 8px',
-          borderRadius: 6,
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--dsw-alias-label-secondary)',
-          cursor: interactive ? 'pointer' : 'default',
-          fontSize: 13,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
+        className={`arb:h-7 arb:max-w-[220px] arb:truncate arb:rounded-md arb:border-0 arb:bg-transparent arb:px-2 arb:text-[13px] arb:text-secondary ${
+          interactive ? 'arb:cursor-pointer' : 'arb:cursor-default'
+        }`}
       >
         {admission.state.pending ? t('permission.busy') : label}
       </button>
@@ -172,14 +162,9 @@ export function PermissionSelector(props: {
       <span
         role="status"
         aria-live="polite"
-        style={{
-          fontSize: 11.5,
-          color:
-            failure === null
-              ? 'var(--dsw-alias-label-tertiary)'
-              : 'var(--dsw-alias-state-error-primary)',
-          maxWidth: 260,
-        }}
+        className={`arb:max-w-[260px] arb:text-[11.5px] ${
+          failure === null ? 'arb:text-tertiary' : 'arb:text-error'
+        }`}
       >
         {failure ?? ''}
       </span>
@@ -199,19 +184,7 @@ function Menu(props: {
       id={props.id}
       role="menu"
       aria-label={t('permission.label')}
-      style={{
-        position: 'absolute',
-        bottom: 34,
-        zIndex: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 240,
-        padding: 4,
-        borderRadius: 8,
-        border: '0.5px solid var(--dsw-alias-border-l4)',
-        background: 'var(--dsw-alias-bg-layer-3)',
-        boxShadow: '0 4px 16px rgb(0 0 0 / 18%)',
-      }}
+      className="arb:absolute arb:bottom-[34px] arb:z-20 arb:flex arb:min-w-[240px] arb:flex-col arb:rounded-lg arb:border arb:border-border-default arb:bg-layer-3 arb:p-1 arb:shadow-lg"
     >
       {props.items.map((item) => (
         <button
@@ -224,31 +197,12 @@ function Menu(props: {
           onClick={() => {
             props.onChoose(item.id, item.danger);
           }}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 2,
-            padding: '6px 8px',
-            borderRadius: 6,
-            border: 'none',
-            background: 'transparent',
-            textAlign: 'left',
-            cursor: 'pointer',
-            fontSize: 12.5,
-            color: item.danger
-              ? 'var(--dsw-alias-state-error-primary)'
-              : 'var(--dsw-alias-label-primary)',
-          }}
+          className={`arb:flex arb:cursor-pointer arb:flex-col arb:items-start arb:gap-0.5 arb:rounded-md arb:border-0 arb:bg-transparent arb:px-2 arb:py-1.5 arb:text-left arb:text-[12.5px] hover:arb:bg-layer-4 ${
+            item.danger ? 'arb:text-error' : 'arb:text-primary'
+          }`}
         >
-          <span style={{ fontWeight: 500 }}>{item.label}</span>
-          <span
-            style={{
-              fontSize: 11.5,
-              color: 'var(--dsw-alias-label-tertiary)',
-              whiteSpace: 'normal',
-            }}
-          >
+          <span className="arb:font-medium">{item.label}</span>
+          <span className="arb:text-[11.5px] arb:text-tertiary">
             {item.hint}
           </span>
         </button>
@@ -256,16 +210,7 @@ function Menu(props: {
       <button
         type="button"
         onClick={props.onClose}
-        style={{
-          marginTop: 2,
-          padding: '4px 8px',
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--dsw-alias-label-tertiary)',
-          fontSize: 11.5,
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
+        className="arb:mt-0.5 arb:cursor-pointer arb:border-0 arb:bg-transparent arb:px-2 arb:py-1 arb:text-left arb:text-[11.5px] arb:text-tertiary hover:arb:text-primary"
       >
         {t('permission.confirm.cancel')}
       </button>
@@ -286,41 +231,18 @@ function Confirmation(props: {
       role="dialog"
       aria-modal="false"
       aria-labelledby={`${acknowledgeId}-title`}
-      style={{
-        position: 'absolute',
-        bottom: 34,
-        zIndex: 21,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        width: 300,
-        padding: 12,
-        borderRadius: 8,
-        border: '0.5px solid var(--dsw-alias-border-l4)',
-        background: 'var(--dsw-alias-bg-layer-3)',
-        color: 'var(--dsw-alias-label-primary)',
-      }}
+      className="arb:absolute arb:bottom-[34px] arb:z-30 arb:flex arb:w-[300px] arb:flex-col arb:gap-2 arb:rounded-lg arb:border arb:border-border-default arb:bg-layer-3 arb:p-3 arb:text-primary arb:shadow-lg"
     >
-      <strong id={`${acknowledgeId}-title`} style={{ fontSize: 13 }}>
+      <strong
+        id={`${acknowledgeId}-title`}
+        className="arb:text-[13px] arb:font-semibold"
+      >
         {t('permission.confirm.title')}
       </strong>
-      <span
-        style={{
-          fontSize: 12,
-          color: 'var(--dsw-alias-label-secondary)',
-          whiteSpace: 'normal',
-        }}
-      >
+      <span className="arb:text-xs arb:text-secondary">
         {t('permission.confirm.description')}
       </span>
-      <label
-        style={{
-          display: 'flex',
-          gap: 6,
-          alignItems: 'flex-start',
-          fontSize: 12,
-        }}
-      >
+      <label className="arb:flex arb:items-start arb:gap-1.5 arb:text-xs">
         <input
           type="checkbox"
           checked={props.acknowledged}
@@ -330,14 +252,19 @@ function Confirmation(props: {
         />
         <span>{t('permission.confirm.acknowledge')}</span>
       </label>
-      <span style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button type="button" onClick={props.onCancel}>
+      <span className="arb:flex arb:justify-end arb:gap-2">
+        <button
+          type="button"
+          onClick={props.onCancel}
+          className="arb:cursor-pointer arb:rounded arb:border arb:border-border-subtle arb:bg-layer-2 arb:px-2 arb:py-1 arb:text-xs arb:text-secondary hover:arb:text-primary"
+        >
           {t('permission.confirm.cancel')}
         </button>
         <button
           type="button"
           disabled={!props.acknowledged}
           onClick={props.onConfirm}
+          className="arb:cursor-pointer arb:rounded arb:border-0 arb:bg-accent arb:px-2 arb:py-1 arb:text-xs arb:text-accent-foreground disabled:arb:cursor-not-allowed disabled:arb:opacity-50"
         >
           {t('permission.confirm.enable')}
         </button>

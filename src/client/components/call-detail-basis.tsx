@@ -15,7 +15,7 @@
 
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
-import { Collapsible } from './call-detail-collapsible.js';
+import { Collapsible, CollapsibleCard } from './call-detail-collapsible.js';
 import { stageLabel, verdictLabel } from './call-detail-labels.js';
 import { JsonBlock, Notice } from './controls.js';
 import { formatTime } from '../view-helpers.js';
@@ -25,27 +25,30 @@ import type {
 } from '../../types.js';
 import type { CallDetailView } from '../view-types.js';
 
+const labelClass =
+  'arb:py-1 arb:pr-3 arb:text-left arb:font-normal arb:align-top arb:text-secondary arb:whitespace-nowrap';
+
 /** The matched rule, or the review strategy when no rule decided the call. */
 function Grounds({ detail }: { readonly detail: CallDetailView }): ReactNode {
   const t = useArbiterTranslation();
   const { rule, policyStrategy } = detail.basis;
   if (rule !== null) {
     return (
-      <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+      <table className="arb:border-collapse arb:text-[12.5px]">
         <tbody>
           <tr>
-            <th scope="row" style={labelStyle}>
+            <th scope="row" className={labelClass}>
               {t('callDetail.hitRule')}
             </th>
-            <td style={{ padding: '3px 0' }}>
-              <code>{rule.ruleId}</code>
+            <td className="arb:py-0.5">
+              <code className="arb:font-mono">{rule.ruleId}</code>
             </td>
           </tr>
           <tr>
-            <th scope="row" style={labelStyle}>
+            <th scope="row" className={labelClass}>
               {t('callDetail.ruleName')}
             </th>
-            <td style={{ padding: '3px 0' }} data-call-detail-rule-name>
+            <td className="arb:py-0.5" data-call-detail-rule-name>
               {rule.ruleName === null
                 ? t('callDetail.ruleNameMissing')
                 : rule.ruleName}
@@ -56,21 +59,14 @@ function Grounds({ detail }: { readonly detail: CallDetailView }): ReactNode {
     );
   }
   return (
-    <div style={{ fontSize: 12.5 }} data-call-detail-strategy>
+    <div className="arb:text-[12.5px]" data-call-detail-strategy>
       {t('callDetail.strategy')}:{' '}
-      <code>{policyStrategy ?? t('callDetail.unknown')}</code>
+      <code className="arb:font-mono">
+        {policyStrategy ?? t('callDetail.unknown')}
+      </code>
     </div>
   );
 }
-
-const labelStyle = {
-  padding: '3px 12px 3px 0',
-  textAlign: 'left' as const,
-  fontWeight: 400,
-  verticalAlign: 'top' as const,
-  color: 'var(--dsw-alias-label-secondary)',
-  whiteSpace: 'nowrap' as const,
-};
 
 /** The stage chain as it actually happened, in order. */
 function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
@@ -80,9 +76,9 @@ function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
     // The record carries only result strings, so no stage name, reason or rule
     // is invented for it.
     return (
-      <div style={{ fontSize: 12.5 }} data-call-detail-chain="results">
+      <div className="arb:text-[12.5px]" data-call-detail-chain="results">
         <div>{t('callDetail.chainResultsOnly')}</div>
-        <ol style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+        <ol className="arb:mt-1.5 arb:pl-5">
           {trace.map((result, index) => (
             <li key={`${String(index)}-${result}`}>
               {verdictLabel(t, result)}
@@ -95,7 +91,7 @@ function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
   return (
     <ol
       data-call-detail-chain="stages"
-      style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 12.5 }}
+      className="arb:mt-1.5 arb:pl-5 arb:text-[12.5px]"
     >
       {chain.map((stage) => (
         <li key={`${String(stage.seq)}-${stage.stage}`}>
@@ -105,22 +101,17 @@ function Chain({ detail }: { readonly detail: CallDetailView }): ReactNode {
           {stage.ruleId === null ? null : (
             <>
               {' '}
-              (<code>{stage.ruleId}</code>)
+              (<code className="arb:font-mono">{stage.ruleId}</code>)
             </>
           )}
           {stage.decisionRules.length === 0 ? null : (
             <span> [{stage.decisionRules.join(', ')}]</span>
           )}
           {stage.ts === null ? null : (
-            <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>
-              {' '}
-              {formatTime(stage.ts)}
-            </span>
+            <span className="arb:text-tertiary"> {formatTime(stage.ts)}</span>
           )}
           {stage.reason === null ? null : (
-            <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
-              {stage.reason}
-            </div>
+            <div className="arb:text-secondary">{stage.reason}</div>
           )}
           {stage.conjunction === null ? null : (
             <Conjunction evidence={stage.conjunction} />
@@ -151,16 +142,14 @@ function Conjunction(props: {
   );
   return (
     <div
-      style={{ marginTop: 2, fontSize: 11.5 }}
+      className="arb:mt-0.5 arb:text-[11.5px]"
       data-call-detail-conjunction=""
     >
-      <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
-        {t('callDetail.conjunction')}
-      </div>
+      <div className="arb:text-secondary">{t('callDetail.conjunction')}</div>
       {matched.length === 0 ? (
         <div>{t('callDetail.conjunctionNoWitness')}</div>
       ) : (
-        <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+        <ul className="arb:mt-0.5 arb:pl-4">
           {matched.map((group) => (
             <li
               key={`${group.target}-${String(group.conditionIndices[0])}`}
@@ -205,25 +194,25 @@ function DecisionRules({
   return (
     <>
       {decisionRules.length === 0 ? null : (
-        <div style={{ fontSize: 12.5 }}>
-          <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+        <div className="arb:text-[12.5px]">
+          <div className="arb:text-secondary">
             {t('callDetail.decisionRules')}
           </div>
-          <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+          <ul className="arb:mt-1 arb:pl-5">
             {decisionRules.map((rule) => (
               <li key={rule}>
-                <code>{rule}</code>
+                <code className="arb:font-mono">{rule}</code>
               </li>
             ))}
           </ul>
         </div>
       )}
       {snapshotMissing.length === 0 ? null : (
-        <div style={{ fontSize: 12.5 }} data-call-detail-snapshot-missing>
-          <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>
+        <div className="arb:text-[12.5px]" data-call-detail-snapshot-missing>
+          <div className="arb:text-secondary">
             {t('callDetail.snapshotMissingInputs')}
           </div>
-          <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+          <ul className="arb:mt-1 arb:pl-5">
             {snapshotMissing.map((item) => (
               <li key={item}>{item}</li>
             ))}
@@ -234,18 +223,19 @@ function DecisionRules({
   );
 }
 
-/** What the review was given: evidence, materials and their truncation facts. */
-function SubmittedEvidence({
+/** What the review was given and signals derived: evidence, materials and signals. */
+function BasisCollapsibles({
   detail,
 }: {
   readonly detail: CallDetailView;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { evidence, materials, evidenceTruncated } = detail.basis;
-  if (evidence.length === 0 && materials.length === 0) {
-    // The reason for the emptiness differs by what the record proves, so each
-    // state gets its own sentence: a short-circuit never had evidence, a review
-    // that lost its record did, and an old row may not say.
+  const { evidence, materials, evidenceTruncated, signals, effect } =
+    detail.basis;
+  const hasEvidence = evidence.length > 0 || materials.length > 0;
+  const hasSignals = signals !== null || effect !== null;
+
+  if (!hasEvidence && !hasSignals) {
     const text =
       detail.basis.reviewState === 'reviewed'
         ? t('callDetail.evidenceLost')
@@ -253,26 +243,52 @@ function SubmittedEvidence({
           ? t('callDetail.noEvidenceNotNeeded')
           : t('callDetail.reviewUnknown');
     return (
-      <div style={{ fontSize: 12.5 }} data-call-detail-evidence="none">
+      <div className="arb:text-[12.5px]" data-call-detail-evidence="none">
         {text}
       </div>
     );
   }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="arb:flex arb:flex-col arb:gap-1.5">
       {evidenceTruncated ? (
-        <div style={{ fontSize: 12 }}>{t('callDetail.evidenceTruncated')}</div>
+        <div className="arb:text-xs">{t('callDetail.evidenceTruncated')}</div>
       ) : null}
-      <Collapsible
-        summary={t('callDetail.evidence', { count: evidence.length })}
-      >
-        <JsonBlock value={evidence} />
-      </Collapsible>
-      <Collapsible
-        summary={t('callDetail.materials', { count: materials.length })}
-      >
-        <JsonBlock value={materials} />
-      </Collapsible>
+      <CollapsibleCard>
+        {hasEvidence ? (
+          <>
+            <Collapsible
+              summary={t('callDetail.evidence', { count: evidence.length })}
+            >
+              <JsonBlock value={evidence} />
+            </Collapsible>
+            <Collapsible
+              summary={t('callDetail.materials', { count: materials.length })}
+            >
+              <JsonBlock value={materials} />
+            </Collapsible>
+          </>
+        ) : null}
+        {hasSignals ? (
+          <Collapsible summary={t('callDetail.signals')}>
+            <div className="arb:flex arb:flex-col arb:gap-1.5">
+              {signals === null ? null : (
+                <section aria-label={t('callDetail.signals')}>
+                  <JsonBlock value={signals} />
+                </section>
+              )}
+              {effect === null ? null : (
+                <section aria-label={t('callDetail.effect')}>
+                  <div className="arb:text-[12.5px]">
+                    {t('callDetail.effect')}
+                  </div>
+                  <JsonBlock value={effect} />
+                </section>
+              )}
+            </div>
+          </Collapsible>
+        ) : null}
+      </CollapsibleCard>
     </div>
   );
 }
@@ -292,57 +308,31 @@ function Conflicts({ detail }: { readonly detail: CallDetailView }): ReactNode {
     <div data-call-detail-conflicts>
       <Notice kind="info" text={t('callDetail.conflictsTitle')} />
       {conflicts.length === 0 ? null : (
-        <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <table className="arb:border-collapse arb:text-[12.5px]">
           <thead>
-            <tr style={{ textAlign: 'left' }}>
-              <th style={labelStyle}>{t('callDetail.conflictField')}</th>
-              <th style={labelStyle}>{t('callDetail.conflictObserved')}</th>
+            <tr className="arb:text-left">
+              <th className={labelClass}>{t('callDetail.conflictField')}</th>
+              <th className={labelClass}>{t('callDetail.conflictObserved')}</th>
             </tr>
           </thead>
           <tbody>
             {conflicts.map((conflict) => (
               <tr key={conflict.field}>
-                <td style={{ padding: '3px 12px 3px 0' }}>
-                  <code>{conflict.field}</code>
+                <td className="arb:py-1 arb:pr-3">
+                  <code className="arb:font-mono">{conflict.field}</code>
                 </td>
-                <td style={{ padding: '3px 0' }}>
-                  {conflict.observed.join(' / ')}
-                </td>
+                <td className="arb:py-1">{conflict.observed.join(' / ')}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       {conflictsTruncated ? (
-        <p style={{ margin: 0, fontSize: 12 }}>
+        <p className="arb:m-0 arb:text-xs">
           {t('callDetail.conflictsTruncated')}
         </p>
       ) : null}
     </div>
-  );
-}
-
-/** The signals the policy read, and the effect it derived from them. */
-function Signals({ detail }: { readonly detail: CallDetailView }): ReactNode {
-  const t = useArbiterTranslation();
-  const { signals, effect } = detail.basis;
-  if (signals === null && effect === null) return null;
-  return (
-    <Collapsible summary={t('callDetail.signals')}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {signals === null ? null : (
-          <section aria-label={t('callDetail.signals')}>
-            <JsonBlock value={signals} />
-          </section>
-        )}
-        {effect === null ? null : (
-          <section aria-label={t('callDetail.effect')}>
-            <div style={{ fontSize: 12.5 }}>{t('callDetail.effect')}</div>
-            <JsonBlock value={effect} />
-          </section>
-        )}
-      </div>
-    </Collapsible>
   );
 }
 
@@ -358,22 +348,19 @@ export function CallDetailBasis({
       role="group"
       aria-label={t('callDetail.basisTitle')}
       data-call-detail-basis
-      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+      className="arb:flex arb:flex-col arb:gap-2.5"
     >
-      <strong style={{ fontSize: 13 }}>{t('callDetail.basisTitle')}</strong>
+      <strong className="arb:text-[13px]">{t('callDetail.basisTitle')}</strong>
       <Conflicts detail={detail} />
       <Grounds detail={detail} />
       <div>
-        <div
-          style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)' }}
-        >
+        <div className="arb:text-[12.5px] arb:text-secondary">
           {t('callDetail.chain')}
         </div>
         <Chain detail={detail} />
       </div>
       <DecisionRules detail={detail} />
-      <SubmittedEvidence detail={detail} />
-      <Signals detail={detail} />
+      <BasisCollapsibles detail={detail} />
     </div>
   );
 }

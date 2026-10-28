@@ -1,5 +1,7 @@
+import { RotateCw } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button, Field, Select, TextInput } from './controls.js';
+import { IconButton } from './ui/button.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { RESULT_OPTIONS, verdictLabel } from '../log-list.js';
 import type { LogQuery } from '../log-list.js';
@@ -39,18 +41,11 @@ function FilterToggle(props: {
   readonly onChange: (checked: boolean) => void;
 }): ReactNode {
   return (
-    <label
-      style={{
-        display: 'flex',
-        gap: 6,
-        alignItems: 'center',
-        fontSize: 12.5,
-        paddingBottom: 6,
-      }}
-    >
+    <label className="arb:flex arb:items-center arb:gap-1.5 arb:pb-1.5 arb:text-xs arb:text-primary">
       <input
         type="checkbox"
         checked={props.checked}
+        className="arb:rounded arb:border-border-default arb:accent-accent"
         onChange={(event) => {
           props.onChange(event.target.checked);
         }}
@@ -73,11 +68,15 @@ export function LogFilters({
   onDraft,
   onApply,
   onClear,
+  onRefresh,
+  busy = false,
 }: {
   readonly draft: LogQuery;
   readonly onDraft: (draft: LogQuery) => void;
   readonly onApply: () => void;
   readonly onClear: () => void;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly busy?: boolean | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   const labels: Record<string, string> = { '': t('logs.all') };
@@ -89,15 +88,14 @@ export function LogFilters({
     onDraft({ ...draft, ...patch });
   };
   return (
-    <div
+    <form
       role="group"
       aria-label={t('logs.filters.apply')}
-      style={{
-        display: 'flex',
-        gap: 8,
-        alignItems: 'flex-end',
-        flexWrap: 'wrap',
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply();
       }}
+      className="arb:flex arb:flex-wrap arb:items-end arb:gap-2"
     >
       <FilterField label={t('logs.result')} width={170}>
         <Select
@@ -204,14 +202,23 @@ export function LogFilters({
         panel's request generation decides which answer wins, so an overlapping
         read is safe rather than a reason to block the interaction.
       */}
-      <div style={{ paddingBottom: 1 }}>
-        <Button onClick={onApply} tone="primary">
+      <div className="arb:flex arb:items-center arb:gap-1.5 arb:pb-[1px]">
+        <Button type="submit" tone="primary">
           {t('logs.filters.apply')}
         </Button>
+        <Button type="button" onClick={onClear}>
+          {t('logs.filters.clear')}
+        </Button>
+        {onRefresh !== undefined ? (
+          <IconButton
+            label={t('logs.refresh')}
+            icon={RotateCw}
+            disabled={busy}
+            onClick={onRefresh}
+            className={busy ? 'arb:animate-spin' : ''}
+          />
+        ) : null}
       </div>
-      <div style={{ paddingBottom: 1 }}>
-        <Button onClick={onClear}>{t('logs.filters.clear')}</Button>
-      </div>
-    </div>
+    </form>
   );
 }

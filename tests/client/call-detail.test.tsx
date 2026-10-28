@@ -15,7 +15,7 @@
  *     empty detail.
  */
 
-import { act, screen } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, test } from 'vitest';
 
@@ -231,19 +231,18 @@ describe('shared call detail', () => {
       screen.getByRole('button', { name: '原始材料（默认折叠）' }),
     );
 
-    // The attempt is its own disclosure; opening it reveals the material.
-    const attempt = screen.getByRole('button', { name: '第 1 次尝试' });
-    expect(attempt).toHaveAttribute('aria-expanded', 'false');
-    await user.click(attempt);
-    expect(
-      screen.getByRole('button', { name: '提交的请求' }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '模型原文' }));
+    // The attempt is rendered as a flat card section rather than nested disclosures.
+    expect(screen.getByText('第 1 次尝试')).toBeInTheDocument();
+    expect(screen.getByText('提交的请求')).toBeInTheDocument();
+    expect(screen.getByText('模型原文')).toBeInTheDocument();
     // The model's own answer is shown verbatim, as stored.
-    const answer = screen.getByText(/authorized/u);
-    expect(answer.textContent).toContain('risk');
+    const answers = screen.getAllByText(/authorized/u);
+    expect(answers.length).toBeGreaterThanOrEqual(1);
+    expect(answers[0]?.textContent).toContain('risk');
     // The runtime's own reason is a separate layer, not this answer text.
-    expect(answer.textContent).not.toContain('the review rejected this call');
+    expect(answers[0]?.textContent).not.toContain(
+      'the review rejected this call',
+    );
   });
 
   test('shows the policy signals without presenting them as the verdict', async () => {
@@ -541,6 +540,68 @@ describe('call detail localization', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('判定依据')).toBeInTheDocument();
   });
+
+  test('multi-attempt call allows selecting attempts with aria-pressed buttons and updates evidence', async () => {
+    const body = auditDetailBody();
+    body.detail.raw['modelAttempts'] = [
+      {
+        requestId: 'call-1:model:1',
+        attempt: 1,
+        backend: 'chat',
+        protocol: 'arbiter-chat-json-v1',
+        templateId: 'tpl-1',
+        request: { system: 'prompt 1' },
+        responseText: '{"risk":1,"authorized":0}',
+        parsed: { risk: 1, authorized: 0 },
+        error: null,
+        startedAt: 1_700_000_000_002,
+        durationMs: 120,
+        estimatedInputTokens: 900,
+        usage: null,
+      },
+      {
+        requestId: 'call-1:model:2',
+        attempt: 2,
+        backend: 'chat',
+        protocol: 'arbiter-chat-json-v1',
+        templateId: 'tpl-2',
+        request: { system: 'prompt 2' },
+        responseText: '{"risk":9,"authorized":1}',
+        parsed: { risk: 9, authorized: 1 },
+        error: null,
+        startedAt: 1_700_000_000_200,
+        durationMs: 150,
+        estimatedInputTokens: 950,
+        usage: null,
+      },
+    ];
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('heading', { name: '调用详情 · call-1' });
+
+    // Open raw materials collapsible
+    await user.click(screen.getByRole('button', { name: /原始材料/u }));
+
+    // Group of attempts
+    const attempt1 = screen.getByRole('button', { name: '第 1 次尝试' });
+    const attempt2 = screen.getByRole('button', { name: '第 2 次尝试' });
+    expect(attempt1).toHaveAttribute('aria-pressed', 'true');
+    expect(attempt2).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText(/"system": "prompt 1"/u)).toBeInTheDocument();
+
+    // Switch to attempt 2 via click
+    await user.click(attempt2);
+    expect(attempt1).toHaveAttribute('aria-pressed', 'false');
+    expect(attempt2).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/"system": "prompt 2"/u)).toBeInTheDocument();
+
+    // Switch back to attempt 1 via keyboard (Space)
+    attempt1.focus();
+    await user.keyboard(' ');
+    expect(attempt1).toHaveAttribute('aria-pressed', 'true');
+    expect(attempt2).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText(/"system": "prompt 1"/u)).toBeInTheDocument();
+  });
 });
 
 describe('the log list entry', () => {
@@ -594,5 +655,119 @@ describe('the log list entry', () => {
       await screen.findByRole('heading', { name: '调用详情 · row-1' }),
     ).toBeInTheDocument();
     expect(verdictRegion()).toHaveTextContent('审查拒绝');
+  });
+
+  test('closing call detail restores focus to log row button', async () => {
+    server.use(
+      http.get('*/api/arbiter/logs', () =>
+        HttpResponse.json({
+          ok: true,
+          total: 1,
+          limit: 25,
+          rows: [
+            {
+              callId: 'row-focus',
+              ts: 1_700_000_000_000,
+              sessionId: 'session-1',
+              sessionKind: 'main',
+              tool: 'bash',
+              command: 'echo hello',
+              result: 'allow',
+              ruleId: null,
+              unreadable: false,
+            },
+          ],
+          nextCursor: null,
+          prevCursor: null,
+          anchor: { ts: 1_700_000_000_000, callId: 'row-focus' },
+          newer: 0,
+          remaining: 0,
+        }),
+      ),
+      http.get('*/api/arbiter/log', () => {
+        const body = auditDetailBody();
+        return HttpResponse.json({
+          ok: true,
+          detail: { ...body.detail, callId: 'row-focus' },
+        });
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    const rowBtn = await screen.findByRole('button', { name: /echo hello/u });
+    rowBtn.focus();
+    await user.click(rowBtn);
+
+    expect(
+      await screen.findByRole('heading', { name: '调用详情 · row-focus' }),
+    ).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: '关闭详情' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '调用详情 · row-focus' }),
+      ).toBeNull();
+    });
+    expect(rowBtn).toHaveFocus();
+  });
+
+  test('closing call detail when log row is removed safely falls back to surviving button', async () => {
+    server.use(
+      http.get('*/api/arbiter/logs', () =>
+        HttpResponse.json({
+          ok: true,
+          total: 1,
+          limit: 25,
+          rows: [
+            {
+              callId: 'row-fallback',
+              ts: 1_700_000_000_000,
+              sessionId: 'session-1',
+              sessionKind: 'main',
+              tool: 'bash',
+              command: 'echo fallback',
+              result: 'allow',
+              ruleId: null,
+              unreadable: false,
+            },
+          ],
+          nextCursor: null,
+          prevCursor: null,
+          anchor: { ts: 1_700_000_000_000, callId: 'row-fallback' },
+          newer: 0,
+          remaining: 0,
+        }),
+      ),
+      http.get('*/api/arbiter/log', () => {
+        const body = auditDetailBody();
+        return HttpResponse.json({
+          ok: true,
+          detail: { ...body.detail, callId: 'row-fallback' },
+        });
+      }),
+    );
+    const { user } = renderClient(<LogsPanel />);
+    const rowBtn = await screen.findByRole('button', {
+      name: /echo fallback/u,
+    });
+    await user.click(rowBtn);
+
+    expect(
+      await screen.findByRole('heading', { name: '调用详情 · row-fallback' }),
+    ).toBeInTheDocument();
+
+    // Disconnect the row
+    rowBtn.remove();
+
+    const closeBtn = screen.getByRole('button', { name: '关闭详情' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '调用详情 · row-fallback' }),
+      ).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: '应用筛选' })).toHaveFocus();
   });
 });

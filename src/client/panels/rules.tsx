@@ -1,51 +1,62 @@
-import { useEffect, useState } from 'react';
+import { FlaskConical, Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-
-import type { DraftRule, RulesPanelProps } from '../view-types.js';
-import { useArbiterTranslation } from '../i18n-provider.js';
 import { Button, Section } from '../components/controls.js';
-import { RuleList } from '../components/rules/rule-list.js';
-import { RuleTest } from '../components/rules/rule-test.js';
 import { addRule, nextRuleId } from '../components/rules/draft.js';
+import type {
+  PendingExactType,
+  PendingExactTypeMap,
+} from '../components/rules/draft.js';
 import { focusConditionField } from '../components/rules/rule-issue-locate.js';
 import type { LocateRequest } from '../components/rules/rule-issue-locate.js';
+import { RuleList } from '../components/rules/rule-list.js';
+import { RuleTest } from '../components/rules/rule-test.js';
+import { useArbiterTranslation } from '../i18n-provider.js';
+import type { DraftRule, RulesPanelProps } from '../view-types.js';
 
-/**
- * Rule management: the list, the inline editor and the tester entry.
- *
- * The panel owns only view state — which row is open and which rule a test
- * action focused. The draft and its mutator come from the page, so the tester
- * reads the same unsaved draft and a later issue can replace its body without
- * touching the list.
- */
-export function RulesPanel(props: RulesPanelProps): ReactNode {
+export interface ExtendedRulesPanelProps extends RulesPanelProps {
+  readonly pendingExactTypes?: PendingExactTypeMap;
+  readonly onPendingTypeChange?: (
+    ruleId: string,
+    conditionIndex: number,
+    type: PendingExactType | null,
+  ) => void;
+  readonly onRemoveCondition?: (ruleId: string, conditionIndex: number) => void;
+  readonly onDeleteRule?: (ruleId: string) => void;
+}
+
+export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
   const t = useArbiterTranslation();
-  const { draft, onDraft } = props;
+  const {
+    draft,
+    onDraft,
+    pendingExactTypes,
+    onPendingTypeChange,
+    onRemoveCondition,
+    onDeleteRule,
+  } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  const ruleTestOpenerRef = useRef<HTMLElement | null>(null);
   const [locateRequest, setLocateRequest] = useState<LocateRequest>({
     ruleId: null,
     conditionIndex: null,
     nonce: 0,
   });
 
-  // A row is identified by its stable id, so reordering keeps it open; only
-  // removing the rule clears the selection.
   useEffect(() => {
     if (
       selectedId !== null &&
       !draft.rules.some((rule) => rule.id === selectedId)
-    )
+    ) {
       setSelectedId(null);
+    }
   }, [draft.rules, selectedId]);
 
   const focusedRule: DraftRule | null =
     draft.rules.find((rule) => rule.id === focusedId) ?? null;
 
-  // Selecting the rule expands its editor; this puts the caret in the field the
-  // rejected issue actually names. It runs after the expanded body is rendered,
-  // and only reads the editor's own row and accessible labels.
   useEffect(() => {
     if (locateRequest.nonce === 0) return;
     focusConditionField(locateRequest, {
@@ -57,7 +68,7 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
   return (
     <>
       <Section title={t('rules.title')} description={t('rules.description')}>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="arb:flex arb:items-center arb:gap-2">
           <Button
             onClick={() => {
               const id = nextRuleId(draft.rules);
@@ -67,7 +78,18 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
               setSelectedId(id);
             }}
           >
-            {t('rules.add')}
+            <Plus className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
+            <span>{t('rules.add')}</span>
+          </Button>
+          <Button
+            onClick={(event) => {
+              ruleTestOpenerRef.current = event.currentTarget;
+              setFocusedId(null);
+              setFocusRequest((current) => current + 1);
+            }}
+          >
+            <FlaskConical className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
+            <span>{t('ruleTest.open')}</span>
           </Button>
         </div>
         <RuleList
@@ -77,20 +99,19 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
           {...(props.warnings === undefined
             ? {}
             : { warnings: props.warnings })}
+          pendingExactTypes={pendingExactTypes}
           onSelect={setSelectedId}
           onDraft={onDraft}
-          onTest={(id) => {
+          onTest={(id, opener) => {
+            ruleTestOpenerRef.current = opener ?? null;
             setFocusedId(id);
             setFocusRequest((current) => current + 1);
           }}
+          onPendingTypeChange={onPendingTypeChange}
+          onRemoveCondition={onRemoveCondition}
+          onDeleteRule={onDeleteRule}
         />
-        <p
-          style={{
-            margin: 0,
-            color: 'var(--dsw-alias-label-tertiary)',
-            fontSize: 11.5,
-          }}
-        >
+        <p className="arb:m-0 arb:text-xs arb:text-tertiary">
           {t('rules.syntax')}
         </p>
       </Section>
@@ -99,10 +120,11 @@ export function RulesPanel(props: RulesPanelProps): ReactNode {
         draft={draft}
         focusedRule={focusedRule}
         focusRequest={focusRequest}
-        // A rejected selector names its rule by stable id, resolved when the
-        // error arrived, so a later insert or reorder cannot retarget it.
-        // Selecting the rule expands its editor, which owns the condition
-        // fields and their focus.
+        openerRef={ruleTestOpenerRef}
+        renderTrigger={false}
+        onClearFocus={() => {
+          setFocusedId(null);
+        }}
         onLocateIssue={(target) => {
           if (target.ruleId === null) return;
           setSelectedId(target.ruleId);

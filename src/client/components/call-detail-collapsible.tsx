@@ -8,36 +8,65 @@
  * than purely visual.
  */
 
+import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { cn } from './ui/cn.js';
+
+export function CollapsibleCard(props: {
+  readonly children: ReactNode;
+  readonly className?: string | undefined;
+}): ReactNode {
+  return (
+    <div
+      className={cn(
+        'arb:overflow-hidden arb:rounded-lg arb:border arb:border-border-subtle arb:bg-layer-2',
+        props.className,
+      )}
+    >
+      {props.children}
+    </div>
+  );
+}
 
 export function Collapsible(props: {
   readonly summary: string;
   readonly children: ReactNode;
-  readonly level?: 'group' | 'item';
+  readonly level?: 'group' | 'item' | undefined;
+  readonly className?: string | undefined;
 }): ReactNode {
   const [open, setOpen] = useState(false);
+
   return (
-    <div data-collapsible={props.level ?? 'group'}>
+    <div
+      data-collapsible={props.level ?? 'group'}
+      className={cn(
+        'arb:border-b arb:border-border-subtle arb:last:border-b-0',
+        props.className,
+      )}
+    >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => {
           setOpen((current) => !current);
         }}
-        style={{
-          cursor: 'pointer',
-          border: 'none',
-          background: 'none',
-          padding: 0,
-          font: 'inherit',
-          color: 'var(--dsw-alias-label-primary)',
-          textAlign: 'left',
-        }}
+        className="arb:flex arb:w-full arb:cursor-pointer arb:items-center arb:gap-2 arb:border-0 arb:bg-transparent arb:px-3.5 arb:py-2.5 arb:text-left arb:text-xs arb:font-medium arb:text-primary arb:transition-colors arb:hover:bg-layer-3/60 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-accent"
       >
-        {props.summary}
+        <ChevronRight
+          className={cn(
+            'arb:h-3.5 arb:w-3.5 arb:shrink-0 arb:text-secondary arb:transition-transform arb:duration-200',
+            open && 'arb:rotate-90',
+          )}
+          aria-hidden="true"
+        />
+        <span>{props.summary}</span>
       </button>
-      {open ? <div style={{ marginTop: 6 }}>{props.children}</div> : null}
+      {open ? (
+        <div className="arb:border-t arb:border-border-subtle arb:bg-layer-1/50 arb:p-3">
+          {props.children}
+        </div>
+      ) : null}
     </div>
   );
 }

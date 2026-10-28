@@ -1,0 +1,60 @@
+@import 'tailwindcss/theme.css' prefix(arb);
+@import 'tailwindcss/utilities.css' prefix(arb);
+@source "../**/*.{ts,tsx}";
+
+@theme inline {
+  --color-canvas: var(--arb-bg-canvas);
+  --color-layer-1: var(--arb-bg-layer-1);
+  --color-layer-2: var(--arb-bg-layer-2);
+  --color-layer-3: var(--arb-bg-layer-3);
+  --color-layer-4: var(--arb-bg-layer-4);
+  --color-border-subtle: var(--arb-border-subtle);
+  --color-border-default: var(--arb-border-default);
+  --color-primary: var(--arb-text-primary);
+  --color-secondary: var(--arb-text-secondary);
+  --color-tertiary: var(--arb-text-tertiary);
+  --color-accent: var(--arb-accent);
+  --color-accent-foreground: var(--arb-text-on-accent);
+  --color-error: var(--arb-error);
+  --color-success: var(--arb-success);
+  --color-warning: var(--arb-warning);
+}
+
+:where([data-arbiter-root], [data-arbiter-surface]),
+:where([data-arbiter-root], [data-arbiter-surface]) * {
+  box-sizing: border-box;
+}
+
+:where([data-arbiter-root], [data-arbiter-surface]) {
+  --arb-bg-canvas: var(--dsw-alias-bg-module-platform, #18181b);
+  --arb-bg-layer-1: var(--dsw-alias-bg-layer-1, #18181b);
+  --arb-bg-layer-2: var(--dsw-alias-bg-layer-2, #27272a);
+  --arb-bg-layer-3: var(--dsw-alias-bg-layer-3, #27272a);
+  --arb-bg-layer-4: var(--dsw-alias-bg-layer-4, #3f3f46);
+  --arb-border-subtle: var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.08));
+  --arb-border-default: var(--dsw-alias-border-l4, rgba(255, 255, 255, 0.15));
+  --arb-text-primary: var(--dsw-alias-label-primary, #f4f4f5);
+  --arb-text-secondary: var(--dsw-alias-label-secondary, #a1a1aa);
+  --arb-text-tertiary: var(--dsw-alias-label-tertiary, #71717a);
+  --arb-text-on-accent: var(--dsw-alias-label-primary-foreground, #ffffff);
+  --arb-accent: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-primary, #2563eb) 90%,
+    black
+  );
+  --arb-error: var(--dsw-alias-state-error-primary, #ef4444);
+  --arb-success: var(--dsw-alias-state-success-primary, #22c55e);
+  --arb-warning: var(
+    --dsw-alias-state-warn-primary,
+    var(--dsw-alias-state-warning-primary, #f59e0b)
+  );
+  --arb-font-mono: var(
+    --dsw-font-mono,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace
+  );
+}

@@ -15,6 +15,7 @@
   "test": "Test",
   "edit": "Edit",
   "collapse": "Collapse",
+  "expandRule": "Expand rule \"{name}\"",
   "editRule": "Edit rule \"{name}\"",
   "disabled": " (disabled)",
   "hasErrors": " (has validation errors)",
@@ -106,5 +107,18 @@
     "any": "Any may match"
   },
   "combineCrossTarget": "These conditions are checked across the whole call: the matching command and redirect may belong to different statements. The rule does not claim they describe one operation.",
-  "unknownField": "Unknown field: {field}"
+  "unknownField": "Unknown field: {field}",
+  "confirmDeleteRule": "Confirm delete rule: {name}",
+  "confirmDeleteCondition": "Confirm delete condition {index}",
+  "confirmDeleteShort": "Confirm",
+  "dragRule": "Drag to reorder rule: {name}",
+  "duplicateRule": "Duplicate rule: {name}",
+  "moveUpRule": "Move rule up: {name}",
+  "moveDownRule": "Move rule down: {name}",
+  "deleteRule": "Delete rule: {name}",
+  "testRule": "Test rule: {name}",
+  "selectBooleanValue": "Select boolean value...",
+  "booleanTrue": "true",
+  "booleanFalse": "false",
+  "incompleteExactValue": "Complete the exact-match condition value before saving, or switch the value type back to string or null"
 }

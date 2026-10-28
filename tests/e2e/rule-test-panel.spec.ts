@@ -108,13 +108,13 @@ test.describe('rule tester panel', () => {
           has: page.getByRole('checkbox', { name: '启用规则「测试环境免审」' }),
         });
       await expect(plugin.getByTestId('rule-test-answer')).toHaveCount(0);
-      await ruleRow.getByRole('button', { name: '测试', exact: true }).click();
-      const tester = plugin.getByRole('region', { name: '规则测试' });
+      await ruleRow.getByRole('button', { name: /^测试/ }).click();
+      const tester = page.getByRole('dialog', { name: '规则测试' });
       await expect(tester).toBeVisible();
       // The row action opened the block and moved focus into it; assert both,
       // because an always-visible section would satisfy a visibility check
       // while leaving keyboard users where they were.
-      const body = plugin.getByTestId('rule-test-body');
+      const body = tester.getByTestId('rule-test-body');
       await expect(body).toBeVisible();
       await expect(body).toBeFocused();
       // The rule's own scope seeds the tool, and its argument condition starts
@@ -227,7 +227,7 @@ test.describe('rule tester panel', () => {
         .filter({
           has: page.getByRole('checkbox', { name: '启用规则「双条件」' }),
         });
-      await brokenRow.getByRole('button', { name: /^编辑/ }).click();
+      await brokenRow.getByRole('button', { name: /^(展开|编辑)/ }).click();
       const pathFields = brokenRow.getByRole('textbox', { name: 'JSONPath' });
       await expect(pathFields).toHaveCount(2);
       await pathFields.nth(1).fill('$.');
@@ -240,8 +240,8 @@ test.describe('rule tester panel', () => {
         .filter({
           has: page.getByRole('checkbox', { name: '启用规则「测试环境免审」' }),
         });
-      await otherRow.getByRole('button', { name: '测试', exact: true }).click();
-      const tester = plugin.getByRole('region', { name: '规则测试' });
+      await otherRow.getByRole('button', { name: /^测试/ }).click();
+      const tester = page.getByRole('dialog', { name: '规则测试' });
       await tester
         .getByRole('button', { name: '运行测试', exact: true })
         .click();

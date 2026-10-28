@@ -36,18 +36,11 @@ function Fact(props: {
     <tr data-call-detail-fact={props.label}>
       <th
         scope="row"
-        style={{
-          padding: '3px 12px 3px 0',
-          textAlign: 'left',
-          fontWeight: 400,
-          verticalAlign: 'top',
-          color: 'var(--dsw-alias-label-secondary)',
-          whiteSpace: 'nowrap',
-        }}
+        className="arb:py-1 arb:pr-3 arb:text-left arb:font-normal arb:align-top arb:text-secondary arb:whitespace-nowrap"
       >
         {props.label}
       </th>
-      <td style={{ padding: '3px 0' }}>{props.children}</td>
+      <td className="arb:py-1 arb:text-primary">{props.children}</td>
     </tr>
   );
 }
@@ -64,35 +57,24 @@ function FinalVerdict({
     <section
       aria-label={t('callDetail.finalVerdict')}
       data-call-detail-verdict
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        padding: '8px 10px',
-        borderRadius: 6,
-        background: 'var(--dsw-alias-bg-module-platform)',
-      }}
+      className="arb:flex arb:flex-col arb:gap-1 arb:rounded-md arb:bg-canvas arb:p-2.5"
     >
-      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-        <span
-          style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)' }}
-        >
+      <div className="arb:flex arb:items-baseline arb:gap-2">
+        <span className="arb:text-[12.5px] arb:text-secondary">
           {t('callDetail.finalVerdict')}
         </span>
-        <strong style={{ fontSize: 14 }}>
+        <strong className="arb:text-sm arb:text-primary">
           {verdict === null
             ? t('callDetail.verdictUnknown')
             : verdictLabel(t, verdict)}
         </strong>
         {cancelled ? (
-          <span
-            style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}
-          >
+          <span className="arb:text-xs arb:text-secondary">
             {t('callDetail.cancelled')}
           </span>
         ) : null}
       </div>
-      <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>
+      <div className="arb:whitespace-pre-wrap arb:text-[12.5px] arb:text-primary">
         {verdictReason === null ? t('callDetail.reasonMissing') : verdictReason}
       </div>
     </section>
@@ -112,18 +94,18 @@ function ExecutionResult({
   return (
     <div data-call-detail-execution>
       <div>{executionLabel(t, execution.status)}</div>
-      <div style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' }}>
+      <div className="arb:text-[11.5px] arb:text-secondary">
         {t('callDetail.executionNote')}
       </div>
       {execution.startedAt === null ? null : (
-        <div style={{ fontSize: 11.5 }}>
+        <div className="arb:text-[11.5px]">
           {t('callDetail.executionStarted', {
             time: formatTime(execution.startedAt),
           })}
         </div>
       )}
       {execution.finishedAt === null ? null : (
-        <div style={{ fontSize: 11.5 }}>
+        <div className="arb:text-[11.5px]">
           {t('callDetail.executionFinished', {
             time: formatTime(execution.finishedAt),
           })}
@@ -170,10 +152,10 @@ function Overview({ detail }: { readonly detail: CallDetailView }): ReactNode {
     <div
       role="group"
       aria-label={t('callDetail.overview')}
-      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+      className="arb:flex arb:flex-col arb:gap-2.5"
     >
       <FinalVerdict detail={detail} />
-      <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+      <table className="arb:border-collapse arb:text-[12.5px]">
         <tbody>
           <Fact label={t('callDetail.tool')}>{overview.tool}</Fact>
           <Fact label={t('callDetail.time')}>{formatTime(overview.ts)}</Fact>
@@ -200,10 +182,14 @@ function Overview({ detail }: { readonly detail: CallDetailView }): ReactNode {
             </Fact>
           )}
           <Fact label={t('callDetail.configRevision')}>
-            <code>{overview.configRevision ?? t('callDetail.unknown')}</code>
+            <code className="arb:font-mono">
+              {overview.configRevision ?? t('callDetail.unknown')}
+            </code>
           </Fact>
           <Fact label={t('callDetail.fingerprint')}>
-            <code>{overview.fingerprint ?? t('callDetail.unknown')}</code>
+            <code className="arb:font-mono">
+              {overview.fingerprint ?? t('callDetail.unknown')}
+            </code>
           </Fact>
           <Fact label={t('callDetail.workspace')}>
             {overview.cwd ?? overview.workspace ?? t('callDetail.unknown')}
@@ -237,8 +223,8 @@ function UnreadableRecord({
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
-    <div data-call-detail-unreadable style={{ fontSize: 12.5 }}>
-      <p style={{ margin: '0 0 8px' }}>{t('callDetail.unreadable')}</p>
+    <div data-call-detail-unreadable className="arb:text-[12.5px]">
+      <p className="arb:m-0 arb:mb-2">{t('callDetail.unreadable')}</p>
       {detail.unreadableReason === null ? null : (
         <JsonBlock value={detail.unreadableReason} />
       )}
@@ -263,12 +249,9 @@ export function CallDetail({
   return (
     <div
       data-call-detail={detail.callId}
-      style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      className="arb:flex arb:flex-col arb:gap-3"
     >
-      <Section
-        title={t('callDetail.title', { callId: detail.callId })}
-        description={t('callDetail.description')}
-      >
+      <Section description={t('callDetail.description')}>
         <SourceNotice detail={detail} />
         {detail.unreadable ? (
           <UnreadableRecord detail={detail} />

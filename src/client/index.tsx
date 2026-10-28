@@ -15,11 +15,13 @@ import {
   PermissionSelector,
   PERMISSION_SLOT_PRIORITY,
 } from './components/permission-selector.js';
+import { acquireArbiterStyles } from './styles/style-manager.js';
 import type { ClientContext, SlotProps } from './view-types.js';
 
 export { ArbiterPage } from './page.js';
 
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => acquireArbiterStyles(), 'arbiter:styles');
   const i18n = createArbiterI18n(ctx.locale);
   ctx.effect(() => i18n.dispose, 'Arbiter locale dictionary');
   const bridge = createHostBridge((name) => ctx.get(name));

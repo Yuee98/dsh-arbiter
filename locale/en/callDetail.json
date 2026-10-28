@@ -139,5 +139,6 @@
   "minimalVerdictHint": "Neither the audit nor the verdict history has this call; the following comes from the current session record and has no decision chain or raw material.",
   "conjunction": "Conjunction evidence (as decided then)",
   "conjunctionWitness": "{target}: node satisfying all of them — {text}",
-  "conjunctionNoWitness": "This record carries no conjunction node to show."
+  "conjunctionNoWitness": "This record carries no conjunction node to show.",
+  "dialogDescription": "Inspect the tool call verdict, decision basis, and raw audit materials."
 }

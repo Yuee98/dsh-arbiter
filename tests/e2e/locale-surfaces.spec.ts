@@ -457,13 +457,16 @@ test('every plugin surface switches between the released Chinese and English cop
     ).toHaveValue(LONG_RULE.name);
     // The tester entry is the same control the editor owns.
     await ruleRow
-      .getByRole('button', { name: zhRules.test, exact: true })
+      .getByRole('button', { name: new RegExp(`^${zhRules.test}`) })
       .click();
-    const zhTester = plugin.getByRole('region', { name: zhRuleTest.title });
+    const zhTester = page.getByRole('dialog', { name: zhRuleTest.title });
     await expect(zhTester).toBeVisible();
     await expect(
       zhTester.getByRole('button', { name: zhRuleTest.run, exact: true }),
     ).toBeVisible();
+    await zhTester
+      .getByRole('button', { name: zhRuleTest.close, exact: true })
+      .click();
     expect(await clippedText(page, '[data-arbiter-root]')).toEqual([]);
     expectNoLeak(await plugin.innerText());
 
@@ -517,6 +520,11 @@ test('every plugin surface switches between the released Chinese and English cop
     const baselineRendered = await renderedAttemptBlocks(page);
     expect(baselineRaw.length).toBeGreaterThan(0);
     expect(baselineRaw.join('\n')).toContain('reviewed-sample');
+    await page
+      .locator('[data-call-detail-panel]')
+      .getByRole('button', { name: /^(关闭|Close)/ })
+      .click();
+    await expect(page.locator('[data-call-detail-panel]')).toBeHidden();
     // Return to the configuration frame; the journey continues from there.
     await openConfiguration(page);
 
@@ -539,9 +547,9 @@ test('every plugin surface switches between the released Chinese and English cop
       englishRow.getByRole('textbox', { name: enRules.name, exact: true }),
     ).toHaveValue(LONG_RULE.name);
     await englishRow
-      .getByRole('button', { name: enRules.test, exact: true })
+      .getByRole('button', { name: new RegExp(`^${enRules.test}`) })
       .click();
-    const enTester = english.getByRole('region', { name: enRuleTest.title });
+    const enTester = page.getByRole('dialog', { name: enRuleTest.title });
     await expect(enTester).toBeVisible();
     await expect(
       enTester.getByRole('button', { name: enRuleTest.run, exact: true }),
@@ -550,6 +558,9 @@ test('every plugin surface switches between the released Chinese and English cop
     await expect(
       enTester.getByLabel(enRuleTest.tool, { exact: true }),
     ).toBeVisible();
+    await enTester
+      .getByRole('button', { name: enRuleTest.close, exact: true })
+      .click();
     expect(await clippedText(page, '[data-arbiter-root]')).toEqual([]);
     expectNoLeak(await english.innerText());
 
@@ -659,18 +670,19 @@ test('every plugin surface switches between the released Chinese and English cop
     // The shared detail title interpolates the call id; its released prefix is
     // the part that must be translated, so the check uses that prefix.
     const detailPrefix = enCallDetail.title.split('{callId}')[0] ?? '';
+    const enDetail = page.locator('[data-call-detail-panel]');
     await expect(
-      english.getByRole('heading', {
+      enDetail.getByRole('heading', {
         name: new RegExp(`^${detailPrefix.trim()}`),
       }),
     ).toBeVisible();
     await expect(
-      english.getByRole('region', {
+      enDetail.getByRole('region', {
         name: enCallDetail.finalVerdict,
         exact: true,
       }),
     ).toBeVisible();
-    expectNoLeak(await english.innerText());
+    expectNoLeak(await enDetail.innerText());
     // ---- AC6: the English read still matches the Chinese baseline --------
     // The values below were captured before the first switch, so a rewrite on
     // the way into English would show up as a difference here.
@@ -691,6 +703,8 @@ test('every plugin surface switches between the released Chinese and English cop
     // The record is unchanged; this proves the panel still renders the same
     // payload values, which a rendering-only change could otherwise slip past.
     expect(await renderedAttemptBlocks(page)).toEqual(baselineRendered);
+    await enDetail.getByRole('button', { name: /^(关闭|Close)/ }).click();
+    await expect(enDetail).toBeHidden();
 
     // The coexistence alert needs a real conflicting provider, so its bilingual
     // rendering is asserted where that composition exists: `coexistence.spec.ts`
@@ -741,6 +755,11 @@ test('every plugin surface switches between the released Chinese and English cop
       }),
     ).toBeVisible();
     expectNoLeak(await page.locator('[data-arbiter-row]').innerText());
+    await page
+      .locator('[data-call-detail-panel]')
+      .getByRole('button', { name: /^(关闭|Close)/ })
+      .click();
+    await expect(page.locator('[data-call-detail-panel]')).toBeHidden();
 
     // ---- Switching back restores the Chinese copy in place ---------------
     await switchLanguage(page, '中文');
@@ -792,6 +811,11 @@ test('every plugin surface switches between the released Chinese and English cop
     // payload values, which a rendering-only change could otherwise slip past.
     expect(await renderedAttemptBlocks(page)).toEqual(baselineRendered);
     expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
+    await page
+      .locator('[data-call-detail-panel]')
+      .getByRole('button', { name: /^(关闭|Close)/ })
+      .click();
+    await expect(page.locator('[data-call-detail-panel]')).toBeHidden();
     await openConfiguration(page);
     const back = page.locator('[data-arbiter-root]');
     await back

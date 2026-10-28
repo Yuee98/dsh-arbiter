@@ -219,6 +219,58 @@ export function moveRule(
   rules[target] = current;
 }
 
+/**
+ * Reorder a rule within its same-verdict priority group while preserving the
+ * exact positions of rules belonging to any other verdict. Cross-verdict drop
+ * is a no-op that returns false without mutating rules.
+ */
+export function reorderRuleWithinVerdict(
+  rules: DraftRule[],
+  activeId: string,
+  overId: string,
+): boolean {
+  if (activeId === overId) return false;
+  const activeRule = rules.find((rule) => rule.id === activeId);
+  const overRule = rules.find((rule) => rule.id === overId);
+  if (
+    activeRule === undefined ||
+    overRule === undefined ||
+    activeRule.verdict !== overRule.verdict
+  ) {
+    return false;
+  }
+
+  const verdict = activeRule.verdict;
+  const slots: number[] = [];
+  const group: DraftRule[] = [];
+
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i];
+    if (r !== undefined && r.verdict === verdict) {
+      slots.push(i);
+      group.push(r);
+    }
+  }
+
+  const fromIndex = group.findIndex((rule) => rule.id === activeId);
+  const toIndex = group.findIndex((rule) => rule.id === overId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return false;
+
+  const [moved] = group.splice(fromIndex, 1);
+  if (moved === undefined) return false;
+  group.splice(toIndex, 0, moved);
+
+  for (let k = 0; k < slots.length; k++) {
+    const slotIndex = slots[k];
+    const item = group[k];
+    if (slotIndex !== undefined && item !== undefined) {
+      rules[slotIndex] = item;
+    }
+  }
+
+  return true;
+}
+
 function splitList(value: string): readonly string[] {
   return value
     .split(',')
@@ -393,4 +445,113 @@ export function removeCondition(
   index: number,
 ): void {
   conditions.splice(index, 1);
+}
+
+export type PendingExactType = 'number' | 'boolean';
+export type PendingExactTypeMap = Readonly<Record<string, PendingExactType>>;
+
+export function isBlankPattern(pattern: RuleCondition['pattern']): boolean {
+  if (pattern === null) return false;
+  if (typeof pattern === 'number' || typeof pattern === 'boolean') return false;
+  return pattern.trim().length === 0;
+}
+
+export function pendingExactKey(
+  ruleId: string,
+  conditionIndex: number,
+): string {
+  return `${ruleId}:${String(conditionIndex)}`;
+}
+
+export function setPendingExactType(
+  map: PendingExactTypeMap,
+  ruleId: string,
+  conditionIndex: number,
+  next: PendingExactType | null,
+): PendingExactTypeMap {
+  const key = pendingExactKey(ruleId, conditionIndex);
+  if (next === null) {
+    if (!(key in map)) return map;
+    const nextMap: Record<string, PendingExactType> = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (k !== key) nextMap[k] = v;
+    }
+    return nextMap;
+  }
+  if (map[key] === next) return map;
+  return { ...map, [key]: next };
+}
+
+export function rebasePendingExactOnRemoveCondition(
+  map: PendingExactTypeMap,
+  ruleId: string,
+  removedIndex: number,
+): PendingExactTypeMap {
+  const prefix = `${ruleId}:`;
+  const next: Record<string, PendingExactType> = {};
+  let changed = false;
+
+  for (const [key, value] of Object.entries(map)) {
+    if (!key.startsWith(prefix)) {
+      next[key] = value;
+      continue;
+    }
+    changed = true;
+    const idx = Number(key.slice(prefix.length));
+    if (idx === removedIndex) {
+      continue;
+    }
+    if (idx > removedIndex) {
+      next[`${prefix}${String(idx - 1)}`] = value;
+    } else {
+      next[key] = value;
+    }
+  }
+
+  return changed ? next : map;
+}
+
+export function clearRulePendingExact(
+  map: PendingExactTypeMap,
+  ruleId: string,
+): PendingExactTypeMap {
+  const prefix = `${ruleId}:`;
+  const next: Record<string, PendingExactType> = {};
+  let changed = false;
+
+  for (const [key, value] of Object.entries(map)) {
+    if (key.startsWith(prefix)) {
+      changed = true;
+    } else {
+      next[key] = value;
+    }
+  }
+
+  return changed ? next : map;
+}
+
+export function pendingExactIssues(
+  draft: Draft,
+  pendingMap: PendingExactTypeMap,
+  message: string,
+): readonly ConfigIssueView[] {
+  const issues: ConfigIssueView[] = [];
+  draft.rules.forEach((rule, ruleIndex) => {
+    rule.conditions.forEach((condition, conditionIndex) => {
+      if (condition.target === 'argument' && condition.kind === 'exact') {
+        const key = pendingExactKey(rule.id, conditionIndex);
+        const pending = pendingMap[key];
+        if (
+          (pending === 'number' && typeof condition.pattern !== 'number') ||
+          (pending === 'boolean' && typeof condition.pattern !== 'boolean')
+        ) {
+          issues.push({
+            path: `rules[${String(ruleIndex)}].conditions[${String(conditionIndex)}].pattern`,
+            message,
+          });
+        }
+      }
+    });
+  });
+  return issues;
 }

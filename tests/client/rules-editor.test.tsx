@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, test } from 'vitest';
 
@@ -144,8 +144,7 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('combobox', { name: /^行为/ }),
       'deny',
     );
-    await user.click(within(row(id)).getByText('更多'));
-    await user.click(within(row(id)).getByRole('button', { name: '复制' }));
+    await user.click(within(row(id)).getByRole('button', { name: /^复制/ }));
 
     expect(rows()).toHaveLength(2);
     const copy = rows()[1];
@@ -165,12 +164,8 @@ describe('rule list header and inline editing', () => {
     const user = await openRules();
     const id = await addRule(user);
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
-    await user.selectOptions(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-      'any',
-    );
-    await user.click(within(row(id)).getByText('更多'));
-    await user.click(within(row(id)).getByRole('button', { name: '复制' }));
+    await user.click(within(row(id)).getByRole('radio', { name: '任一满足' }));
+    await user.click(within(row(id)).getByRole('button', { name: /^复制/ }));
 
     const copyId = rows()[1]?.getAttribute('data-rule-row') ?? '';
     // A copy is the same rule with a new id: dropping the connective would leave
@@ -180,11 +175,11 @@ describe('rule list header and inline editing', () => {
       within(row(copyId)).getByRole('checkbox', { name: /任一满足/ }),
     ).toBeInTheDocument();
     await user.click(
-      within(row(copyId)).getByRole('button', { name: /编辑规则/ }),
+      within(row(copyId)).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
-      within(row(copyId)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('any');
+      within(row(copyId)).getByRole('radio', { name: '任一满足' }),
+    ).toBeChecked();
     expect(conditionGroups(copyId)).toHaveLength(2);
   });
 
@@ -293,24 +288,150 @@ describe('rule list header and inline editing', () => {
     // A new rule starts on "all": adding a condition narrows it.
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(conditionGroups(id)).toHaveLength(2);
-    expect(within(row(id)).getByText('满足以下全部条件')).toBeVisible();
-    const combine = within(row(id)).getByRole('combobox', {
-      name: '条件组合方式',
+    expect(within(row(id)).getByText('条件组合方式')).toBeVisible();
+    const allRadio = within(row(id)).getByRole('radio', {
+      name: '全部满足',
     });
-    expect(combine).toHaveValue('all');
+    expect(allRadio).toBeChecked();
 
     // Switch to "any", drop back to one condition, then add another: the value
     // must survive the round trip instead of being reset to the default.
-    await user.selectOptions(combine, 'any');
+    const anyRadio = within(row(id)).getByRole('radio', {
+      name: '任一满足',
+    });
+    await user.click(anyRadio);
     const second = conditionGroups(id)[1];
     if (second === undefined)
       throw new Error('the second condition is missing');
     await user.click(within(second).getByRole('button', { name: '删除条件' }));
+    await user.click(within(second).getByRole('button', { name: /确认删除/ }));
     expect(conditionGroups(id)).toHaveLength(1);
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('any');
+      within(row(id)).getByRole('radio', { name: '任一满足' }),
+    ).toBeChecked();
+  });
+
+  test('keyboard condition deletion confirmation cannot transfer to another condition after index shift', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+
+    // Initial rule has 1 condition (A). Add condition B and condition C.
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+
+    let groups = conditionGroups(id);
+    expect(groups).toHaveLength(3);
+    const [firstA, firstB, firstC] = groups;
+    if (firstA === undefined || firstB === undefined || firstC === undefined) {
+      throw new Error('missing condition groups');
+    }
+
+    // Differentiate each condition pattern: A -> 'echo A', B -> 'echo B', C -> 'echo C'
+    const patternA = within(firstA).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternA);
+    await user.type(patternA, 'echo A');
+
+    const patternB = within(firstB).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternB);
+    await user.type(patternB, 'echo B');
+
+    const patternC = within(firstC).getByRole('textbox', {
+      name: '表达式',
+    });
+    await user.clear(patternC);
+    await user.type(patternC, 'echo C');
+
+    // Step 1: Using keyboard activation, arm Delete on condition B (index 1).
+    const delBtnB = within(firstB).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnB.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition B must now display the confirm button.
+    const confirmBtnB = within(firstB).getByRole('button', {
+      name: /确认删除/,
+    });
+    expect(confirmBtnB).toBeInTheDocument();
+
+    // Step 2: Using keyboard activation, arm Delete on condition A (index 0).
+    const delBtnA = within(firstA).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnA.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition A is armed; Condition B must be disarmed (no confirm button).
+    const confirmBtnA = within(firstA).getByRole('button', {
+      name: /确认删除/,
+    });
+    expect(confirmBtnA).toBeInTheDocument();
+    expect(
+      within(firstB).queryByRole('button', { name: /确认删除/ }),
+    ).toBeNull();
+
+    // Step 3: Confirm deletion of condition A via keyboard.
+    confirmBtnA.focus();
+    await user.keyboard('{Enter}');
+
+    // Condition A is deleted. There are now 2 conditions: B (now index 0) and C (now index 1).
+    groups = conditionGroups(id);
+    expect(groups).toHaveLength(2);
+    const [survivingB, survivingC] = groups;
+    if (survivingB === undefined || survivingC === undefined) {
+      throw new Error('missing surviving condition groups');
+    }
+
+    expect(
+      within(survivingB).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('echo B');
+    expect(
+      within(survivingC).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('echo C');
+
+    // Step 4: Verify Condition C (now index 1) is NOT armed!
+    expect(
+      within(survivingC).queryByRole('button', { name: /确认删除/ }),
+    ).toBeNull();
+
+    // Step 5: Verify one activation of C's Delete cannot remove C (it only arms it).
+    const delBtnC = within(survivingC).getByRole('button', {
+      name: '删除条件',
+    });
+    delBtnC.focus();
+    await user.keyboard('{Enter}');
+
+    // C is now armed, but NOT deleted (length remains 2).
+    groups = conditionGroups(id);
+    expect(groups).toHaveLength(2);
+    const updatedC = groups[1];
+    if (updatedC === undefined) throw new Error('missing condition C');
+    expect(
+      within(updatedC).getByRole('button', { name: /确认删除/ }),
+    ).toBeInTheDocument();
+
+    // Step 6: Save and verify saved conditions contain exactly B and C.
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id,
+            conditions: [{ pattern: 'echo B' }, { pattern: 'echo C' }],
+          },
+        ],
+      },
+    });
   });
 
   test('multi-value mode, case-insensitivity and the path reach the save body', async () => {
@@ -515,7 +636,7 @@ describe('rule list header and inline editing', () => {
       within(row(id)).queryByRole('textbox', { name: '表达式' }),
     ).toBeNull();
     await user.click(
-      within(row(id)).getByRole('button', { name: /^编辑规则/ }),
+      within(row(id)).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
@@ -556,8 +677,27 @@ describe('rule list header and inline editing', () => {
     const third = await addRule(user);
 
     // All three start on force-review, so the move is allowed.
-    await user.click(within(row(third)).getByText('更多'));
-    await user.click(within(row(third)).getByRole('button', { name: '上移' }));
+    for (const [i, el] of rows().entries()) {
+      el.getBoundingClientRect = () => ({
+        top: i * 100,
+        bottom: (i + 1) * 100,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 100,
+        x: 0,
+        y: i * 100,
+        toJSON: () => {},
+      });
+    }
+    const dragHandle = within(row(third)).getByRole('button', {
+      name: /^拖拽/,
+    });
+    dragHandle.focus();
+    fireEvent.keyDown(dragHandle, { code: 'Space', key: ' ' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fireEvent.keyDown(document, { code: 'ArrowUp', key: 'ArrowUp' });
+    fireEvent.keyDown(document, { code: 'Space', key: ' ' });
     expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
       first,
       third,
@@ -569,20 +709,65 @@ describe('rule list header and inline editing', () => {
       within(row(second)).getByRole('combobox', { name: /^行为/ }),
       'deny',
     );
-    await user.click(within(row(second)).getByText('更多'));
     expect(
-      within(row(second)).getByRole('button', { name: '上移' }),
+      within(row(second)).getByRole('button', { name: /^拖拽/ }),
     ).toBeDisabled();
-    expect(
-      within(row(second)).getByRole('button', { name: '下移' }),
-    ).toBeDisabled();
-    await user.click(within(row(second)).getByText('更多'));
 
-    await user.click(within(row(third)).getByText('更多'));
-    await user.click(within(row(third)).getByRole('button', { name: '删除' }));
+    // Two-step inline delete: first arm, then confirm
+    await user.click(
+      within(row(third)).getByRole('button', { name: /^删除规则/ }),
+    );
+    await user.click(
+      within(row(third)).getByRole('button', { name: /^确认删除/ }),
+    );
     expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
       first,
       second,
+    ]);
+  });
+
+  test('drag and drop reordering moves rule within same verdict and collapses open rule on drag start', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const first = await addRule(user);
+    const second = await addRule(user);
+
+    // Expand the first rule
+    await user.click(within(row(first)).getByRole('button', { name: /^展开/ }));
+    expect(within(row(first)).getByText('匹配条件')).toBeInTheDocument();
+
+    for (const [i, el] of rows().entries()) {
+      el.getBoundingClientRect = () => ({
+        top: i * 100,
+        bottom: (i + 1) * 100,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 100,
+        x: 0,
+        y: i * 100,
+        toJSON: () => {},
+      });
+    }
+
+    const dragHandle = within(row(second)).getByRole('button', {
+      name: /^拖拽/,
+    });
+    dragHandle.focus();
+    fireEvent.keyDown(dragHandle, { code: 'Space', key: ' ' });
+
+    // Drag start must collapse the open rule
+    await waitFor(() => {
+      expect(within(row(first)).queryByText('匹配条件')).toBeNull();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    fireEvent.keyDown(document, { code: 'ArrowUp', key: 'ArrowUp' });
+    fireEvent.keyDown(document, { code: 'Space', key: ' ' });
+
+    expect(rows().map((entry) => entry.getAttribute('data-rule-row'))).toEqual([
+      second,
+      first,
     ]);
   });
 
@@ -634,7 +819,7 @@ describe('rule list header and inline editing', () => {
     expect(tools).toHaveValue('bash, deploy');
   });
 
-  test('a blank exact pattern offers no value type, so nothing is invented', async () => {
+  test('a blank exact pattern allows selecting null or keeping string without inventing values', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
@@ -647,29 +832,29 @@ describe('rule list header and inline editing', () => {
       '$.retries',
     );
 
-    // No value yet, so there is nothing to type: the choice is withheld and the
-    // panel says why, rather than writing a 0 or a false nobody entered.
+    // Value type selector is always available
     expect(
-      within(row(id)).queryByRole('combobox', { name: '值类型' }),
-    ).toBeNull();
-    expect(within(row(id)).getByText('填写表达式后可选择')).toBeInTheDocument();
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+    ).toHaveValue('string');
 
-    // The saved body keeps the blank string the user has; it is never turned
-    // into a typed value. An exact `''` is a valid string value, while the
-    // rejected case is an empty *condition list*, which this test does not
-    // exercise.
+    // Selecting null sets pattern to null
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'null',
+    );
+
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
       expect(saved).toHaveLength(1);
     });
     expect(saved[0]).toMatchObject({
       config: {
-        rules: [{ id, conditions: [{ target: 'argument', pattern: '' }] }],
+        rules: [{ id, conditions: [{ target: 'argument', pattern: null }] }],
       },
     });
   });
 
-  test('a whitespace-only pattern is not converted into a number', async () => {
+  test('selecting number on blank exact condition blocks save until completed', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
@@ -681,26 +866,79 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
       '$.count',
     );
+
+    // Select number on blank pattern: enters pending state without inventing 0
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'number',
+    );
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('');
+
+    // Attempting to save blocks and reports incomplete issue
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    expect(saved).toHaveLength(0);
+    expect(await screen.findByText(/配置校验失败，未保存/)).toHaveTextContent(
+      /请先完成精确匹配条件的值输入/,
+    );
+
+    // Typing a valid number completes the condition
     await user.type(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
-      ' ',
+      '5',
     );
-    // Whitespace has no numeric value, so the number choice is still withheld.
-    expect(
-      within(row(id)).queryByRole('combobox', { name: '值类型' }),
-    ).toBeNull();
-    expect(
-      within(row(id)).getByRole('textbox', { name: '表达式' }),
-    ).toHaveValue(' ');
-
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
       expect(saved).toHaveLength(1);
     });
-    // The whitespace expression is sent as-is; nothing became 0.
     expect(saved[0]).toMatchObject({
       config: {
-        rules: [{ id, conditions: [{ target: 'argument', pattern: ' ' }] }],
+        rules: [{ id, conditions: [{ target: 'argument', pattern: 5 }] }],
+      },
+    });
+  });
+
+  test('switching target away from argument discards pending exact type and allows saving string condition', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: 'JSONPath' }),
+      '$.count',
+    );
+
+    // Enter pending number state
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+      'number',
+    );
+    expect(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+    ).toHaveValue('');
+
+    // Switch target to tool
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配对象' }),
+      'tool',
+    );
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'bash',
+    );
+
+    // Save succeeds without incomplete exact value error
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [{ id, conditions: [{ target: 'tool', pattern: 'bash' }] }],
       },
     });
   });
@@ -729,8 +967,8 @@ describe('rule list header and inline editing', () => {
     // scratch counts as "no value yet". Text is never auto-converted here.
     await user.clear(pattern);
     expect(
-      within(row(id)).queryByRole('combobox', { name: '值类型' }),
-    ).toBeNull();
+      within(row(id)).getByRole('combobox', { name: '值类型' }),
+    ).toHaveValue('string');
     expect(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
     ).toHaveValue('');
@@ -804,7 +1042,7 @@ describe('rule list header and inline editing', () => {
       within(row(id)).getByRole('textbox', { name: '显示名称' }),
       '只读查询',
     );
-    await user.click(within(row(id)).getByRole('button', { name: '测试' }));
+    await user.click(within(row(id)).getByRole('button', { name: /^测试/ }));
 
     // The tester is only a focus request: the block opens, carries the rule it
     // answers about, and no sample is submitted until the operator asks.
@@ -871,6 +1109,7 @@ describe('rule validation feedback', () => {
     const [first] = conditionGroups(id);
     if (first === undefined) throw new Error('the condition is missing');
     await user.click(within(first).getByRole('button', { name: '删除条件' }));
+    await user.click(within(first).getByRole('button', { name: /确认删除/ }));
 
     // The draft stays editable and explains why it cannot be applied.
     expect(screen.getByText(/没有匹配条件/)).toBeInTheDocument();
@@ -938,7 +1177,7 @@ describe('rule validation feedback', () => {
     const user = await openRules();
     // The warning is attached to the allow rule, not to the reviewer rule.
     await user.click(
-      within(row('rule-1')).getByRole('button', { name: /^编辑规则/ }),
+      within(row('rule-1')).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row('rule-1')).getByText(
@@ -946,7 +1185,7 @@ describe('rule validation feedback', () => {
       ),
     ).toBeInTheDocument();
     await user.click(
-      within(row('rule-2')).getByRole('button', { name: /^编辑规则/ }),
+      within(row('rule-2')).getByRole('button', { name: /^(展开|编辑)规则/ }),
     );
     expect(
       within(row('rule-2')).queryByText(/可能被 force-review 规则/),
@@ -1116,8 +1355,12 @@ describe('rule validation feedback', () => {
     const kept = await addRule(user);
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     // The user deletes the offending rule before the rejection arrives.
-    await user.click(within(row(doomed)).getByText('更多'));
-    await user.click(within(row(doomed)).getByRole('button', { name: '删除' }));
+    await user.click(
+      within(row(doomed)).getByRole('button', { name: /^删除规则/ }),
+    );
+    await user.click(
+      within(row(doomed)).getByRole('button', { name: /^确认删除/ }),
+    );
     gate.release();
     await answered;
 
@@ -1264,7 +1507,7 @@ describe('rule tester selector location', () => {
 
     // Run from the tester for the first rule; the rejection belongs to the
     // second one, so locating it has to move as well as expand.
-    await user.click(within(row(first)).getByRole('button', { name: '测试' }));
+    await user.click(within(row(first)).getByRole('button', { name: /^测试/ }));
     await user.click(screen.getByRole('button', { name: '运行测试' }));
     const locate = await screen.findByRole('button', {
       name: '定位到 rules[1].conditions[1].path',
@@ -1304,12 +1547,12 @@ describe('condition combining', () => {
     // One condition: both values judge identically, so offering the choice would
     // ask a question that has no consequence.
     expect(
-      within(row(id)).queryByRole('combobox', { name: '条件组合方式' }),
+      within(row(id)).queryByRole('radiogroup', { name: '条件组合方式' }),
     ).toBeNull();
     await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
     expect(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-    ).toHaveValue('all');
+      within(row(id)).getByRole('radio', { name: '全部满足' }),
+    ).toBeChecked();
   });
 
   test('a conjunction over two kinds of structure states its limitation', async () => {
@@ -1326,10 +1569,7 @@ describe('condition combining', () => {
     expect(within(row(id)).getByText(/可能来自不同的语句/)).toBeVisible();
 
     // Switching to "any" removes the claim, so the note must go with it.
-    await user.selectOptions(
-      within(row(id)).getByRole('combobox', { name: '条件组合方式' }),
-      'any',
-    );
+    await user.click(within(row(id)).getByRole('radio', { name: '任一满足' }));
     expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
   });
 
@@ -1493,5 +1733,68 @@ describe('source warnings after a save', () => {
     expect(
       within(row(id)).getByRole('textbox', { name: '表达式' }),
     ).toHaveValue('typed during reload');
+  });
+
+  test('closing rule tester restores focus to toolbar opener button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const testToolbarBtn = screen.getByRole('button', { name: '规则测试' });
+    testToolbarBtn.focus();
+    await user.click(testToolbarBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    expect(testToolbarBtn).toHaveFocus();
+  });
+
+  test('closing rule tester restores focus to per-rule test button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const ruleTestBtn = within(row(id)).getByRole('button', {
+      name: /测试规则/,
+    });
+    ruleTestBtn.focus();
+    await user.click(ruleTestBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    expect(ruleTestBtn).toHaveFocus();
+  });
+
+  test('closing rule tester when opener is removed safely falls back to surviving button', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const testToolbarBtn = screen.getByRole('button', { name: '规则测试' });
+    await user.click(testToolbarBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(dialog).toBeInTheDocument();
+
+    // Disconnect toolbar button
+    testToolbarBtn.remove();
+
+    const closeBtn = screen.getByRole('button', { name: '关闭' });
+    await user.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    });
+    // Active element safely fell back to surviving button
+    expect(screen.getByRole('button', { name: '校验草稿' })).toHaveFocus();
   });
 });

@@ -13,12 +13,13 @@
  */
 
 import type { ReactNode } from 'react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import { useArbiterTranslation } from '../i18n-provider.js';
 import type { ArbiterDenialSource, ArbiterDenialView } from '../view-types.js';
 import { CallDetailPanel } from './call-detail-panel.js';
 import { Button } from './controls.js';
+import { Badge } from './ui/badge.js';
 
 /**
  * The one-line sentence naming which stage refused.
@@ -56,81 +57,43 @@ export function DenialRow(props: {
   const t = useArbiterTranslation();
   const regionId = `${useId()}-detail`;
   const [open, setOpen] = useState(false);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
   const reason = props.denial.reason;
   return (
     <div
       data-arbiter-row={props.callId}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        // A Chat row is placed inside the host's own flow item, whose body may
-        // be a zero-height container. Owning an explicit block size and margin
-        // keeps the row measurable and clickable there instead of relying on a
-        // parent that collapses.
-        margin: '4px 0',
-        padding: '6px 10px',
-        minHeight: 32,
-        boxSizing: 'border-box',
-        alignSelf: 'stretch',
-        // Amber is the requested "Arbiter refused this" cue. It is derived from
-        // the host's own warning tone so light and dark themes both keep a
-        // readable contrast instead of pinning one literal orange.
-        borderLeft: '3px solid var(--dsw-alias-state-warning-primary, #c26a00)',
-        borderRadius: 'var(--dsw-radius-sm, 4px)',
-        background:
-          'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #c26a00) 10%, transparent)',
-        fontSize: 12.5,
-      }}
+      data-arbiter-surface="denial-row"
+      className="arb:my-1 arb:flex arb:min-h-8 arb:self-stretch arb:flex-col arb:gap-1.5 arb:rounded-sm arb:border-l-[3px] arb:border-warning arb:bg-warning/10 arb:px-2.5 arb:py-1.5 arb:text-[12.5px]"
     >
       <div
         role="status"
         data-arbiter-denial={props.denial.source}
         data-call-id={props.callId}
-        style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+        className="arb:flex arb:flex-col arb:gap-1"
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              color: 'var(--dsw-alias-state-warning-primary, #c26a00)',
-              fontSize: 12,
-            }}
-          >
+        <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-1.5">
+          <span aria-hidden="true" className="arb:text-xs arb:text-warning">
             ●
           </span>
-          <strong style={{ fontWeight: 600 }}>{t('denials.badge')}</strong>
+          <Badge tone="warning">{t('denials.badge')}</Badge>
           <span
             data-denial-source={props.denial.source}
-            style={{ color: 'var(--dsw-alias-label-secondary)' }}
+            className="arb:text-secondary"
           >
             <span>{t('denials.sourceLabel')}</span>
             <span aria-hidden="true">{' · '}</span>
             <span>{t(SOURCE_KEYS[props.denial.source])}</span>
           </span>
-          <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>
-            {props.tool}
-          </span>
+          <span className="arb:text-secondary">{props.tool}</span>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+        <div className="arb:flex arb:items-baseline arb:gap-2">
+          <span className="arb:min-w-0 arb:break-words">
             {reason ?? t('denials.reasonMissing')}
           </span>
           {props.denial.truncated ? (
             <span
               data-denial-truncated="true"
-              style={{
-                color: 'var(--dsw-alias-label-tertiary)',
-                fontSize: 11.5,
-                whiteSpace: 'nowrap',
-              }}
+              className="arb:whitespace-nowrap arb:text-[11.5px] arb:text-tertiary"
             >
               {t('denials.truncated')}
             </span>
@@ -139,6 +102,7 @@ export function DenialRow(props: {
       </div>
       <div>
         <Button
+          ref={openerRef}
           onClick={() => {
             setOpen((current) => !current);
           }}
@@ -147,9 +111,13 @@ export function DenialRow(props: {
         </Button>
       </div>
       {open ? (
-        <div id={regionId} style={{ paddingTop: 4 }}>
+        <div id={regionId} className="arb:pt-1">
           <CallDetailPanel
             callId={props.callId}
+            openerRef={openerRef}
+            onClose={() => {
+              setOpen(false);
+            }}
             // The row already holds this call's recorded tool and reason. When
             // the audit store and the decision history both lack the call (a
             // boundary refusal or a teardown fallback never writes one), the

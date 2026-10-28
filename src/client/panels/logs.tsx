@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CallDetailPanel } from '../components/call-detail-panel.js';
 import { Button, Notice, Section } from '../components/controls.js';
@@ -22,6 +22,7 @@ export function LogsPanel(): ReactNode {
   const t = useArbiterTranslation();
   const pages = useLogPages();
   const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const callDetailOpenerRef = useRef<HTMLElement | null>(null);
 
   const notice = pages.notice;
   return (
@@ -32,42 +33,27 @@ export function LogsPanel(): ReactNode {
           onDraft={pages.setDraft}
           onApply={pages.applyFilters}
           onClear={pages.clearFilters}
+          onRefresh={pages.refresh}
+          busy={pages.busy}
         />
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
-          <Button onClick={pages.refresh} disabled={pages.busy} tone="primary">
-            {pages.busy ? t('logs.loading') : t('logs.refresh')}
-          </Button>
-          {notice === null ? null : (
-            <>
-              <span
-                role="status"
-                style={{
-                  fontSize: 12,
-                  color: 'var(--dsw-alias-label-secondary)',
-                }}
-              >
-                {t('logs.newRecords', { count: notice.count })}
-              </span>
-              <Button onClick={pages.backToLatest} disabled={pages.busy}>
-                {t('logs.backToLatest')}
-              </Button>
-            </>
-          )}
-        </div>
+        {notice === null ? null : (
+          <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-2 arb:rounded-md arb:border arb:border-border-default arb:bg-layer-2 arb:px-3 arb:py-2">
+            <span role="status" className="arb:text-xs arb:text-secondary">
+              {t('logs.newRecords', { count: notice.count })}
+            </span>
+            <Button onClick={pages.backToLatest} disabled={pages.busy}>
+              {t('logs.backToLatest')}
+            </Button>
+          </div>
+        )}
         {pages.error === null ? null : (
           <Notice kind="error" text={pages.error} />
         )}
         <LogTable
           rows={pages.loaded?.rows ?? []}
           emptyText={pages.error === null ? pages.emptyText : ''}
-          onOpen={(callId) => {
+          onOpen={(callId, opener) => {
+            callDetailOpenerRef.current = opener ?? null;
             setOpenCallId(callId);
           }}
         />
@@ -81,11 +67,13 @@ export function LogsPanel(): ReactNode {
           busy={pages.busy}
           onNext={pages.next}
           onPrevious={pages.previous}
+          onFirst={pages.backToLatest}
         />
       </Section>
       {openCallId === null ? null : (
         <CallDetailPanel
           callId={openCallId}
+          openerRef={callDetailOpenerRef}
           onClose={() => {
             setOpenCallId(null);
           }}

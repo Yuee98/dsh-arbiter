@@ -49,9 +49,7 @@ function ConflictRow({
       <strong>{severityText(t, conflict.severity)}</strong>{' '}
       {reasonText(t, conflict)}
       {conflict.entryId === null ? null : (
-        <span
-          style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 }}
-        >
+        <span className="arb:text-[11.5px] arb:text-tertiary">
           {' '}
           {t('coexistence.entry', { entry: conflict.entryId })}
         </span>
@@ -123,28 +121,17 @@ export function CoexistenceSection({
   return (
     <section
       data-arbiter-coexistence
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        marginBottom: 24,
-      }}
+      className="arb:mb-6 arb:flex arb:flex-col arb:gap-2"
     >
       <div>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+        <h3 className="arb:m-0 arb:text-[15px] arb:font-semibold">
           {t('coexistence.title')}
         </h3>
-        <p
-          style={{
-            margin: '4px 0 0',
-            color: 'var(--dsw-alias-label-secondary)',
-            fontSize: 12.5,
-          }}
-        >
+        <p className="arb:mt-1 arb:text-[12.5px] arb:text-secondary">
           {t('coexistence.description')}
         </p>
       </div>
-      <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+      <div className="arb:text-[12.5px] arb:leading-relaxed">
         <div>{officialStateText(t, coexistence.official)}</div>
         <div>
           {t('coexistence.autoSlotState', {
@@ -156,7 +143,7 @@ export function CoexistenceSection({
       {coexistence.conflicts.length === 0 ? (
         <Notice kind="ok" text={t('coexistence.none')} />
       ) : (
-        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12.5 }}>
+        <ul className="arb:m-0 arb:pl-5 arb:text-[12.5px]">
           {[...blocking, ...warnings].map((conflict) => (
             <ConflictRow key={conflict.id} conflict={conflict} />
           ))}
@@ -217,22 +204,9 @@ export function CoexistenceAlert({
   return (
     <div
       data-arbiter-coexistence-notice
+      data-arbiter-surface="coexistence-overlay"
       role="status"
-      style={{
-        position: 'fixed',
-        right: 24,
-        bottom: 24,
-        maxWidth: 420,
-        zIndex: 40,
-        border: '0.5px solid var(--dsw-alias-border-l4)',
-        borderRadius: 8,
-        background: 'var(--dsw-alias-bg-layer-3)',
-        padding: 12,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        fontSize: 12.5,
-      }}
+      className="arb:fixed arb:right-6 arb:bottom-6 arb:z-40 arb:flex arb:max-w-[420px] arb:flex-col arb:gap-2 arb:rounded-lg arb:border arb:border-border-default arb:bg-layer-3 arb:p-3 arb:text-[12.5px] arb:shadow-lg"
     >
       <strong>{t('coexistence.notice.warningTitle')}</strong>
       {pending.map((notice) => (
@@ -243,7 +217,7 @@ export function CoexistenceAlert({
           })}
         </span>
       ))}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="arb:flex arb:justify-end">
         <Button
           onClick={() => {
             onAcknowledge(pending.map((notice) => notice.id));
@@ -276,35 +250,25 @@ function BlockingAlert({
       role="alertdialog"
       aria-label={t('coexistence.notice.blockingTitle')}
       data-arbiter-coexistence-alert
+      data-arbiter-surface="coexistence-overlay"
       style={{
         position: 'fixed',
-        right: 24,
-        bottom: 24,
-        zIndex: 60,
-        maxWidth: 560,
-        background: 'var(--dsw-alias-bg-layer-1)',
-        border: '0.5px solid var(--dsw-alias-border-l4)',
-        borderRadius: 10,
-        boxShadow: '0 8px 28px rgba(0, 0, 0, 0.18)',
-        padding: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        fontSize: 13,
-        lineHeight: 1.7,
+        right: '24px',
+        bottom: '24px',
       }}
+      className="arb:fixed arb:right-6 arb:bottom-6 arb:z-50 arb:flex arb:max-w-[560px] arb:flex-col arb:gap-3 arb:rounded-xl arb:border arb:border-border-default arb:bg-layer-1 arb:p-5 arb:text-[13px] arb:leading-relaxed arb:shadow-2xl"
     >
-      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+      <h3 className="arb:m-0 arb:text-base arb:font-semibold">
         {t('coexistence.notice.blockingTitle')}
       </h3>
-      <p style={{ margin: 0 }}>
+      <p className="arb:m-0">
         {t('coexistence.notice.blockingBody', { source: notice.source })}
       </p>
-      <p style={{ margin: 0 }}>{t('coexistence.notice.blockingGuidance')}</p>
+      <p className="arb:m-0">{t('coexistence.notice.blockingGuidance')}</p>
       {coexistence.official.present ? null : (
-        <p style={{ margin: 0 }}>{t('coexistence.notice.detectionOnly')}</p>
+        <p className="arb:m-0">{t('coexistence.notice.detectionOnly')}</p>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+      <div className="arb:flex arb:justify-end arb:gap-2">
         {onOpenPluginManager === undefined ? null : (
           <Button
             onClick={() => {

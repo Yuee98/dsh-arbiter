@@ -1,12 +1,17 @@
+import { Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-
+import { useEffect, useRef, useState } from 'react';
 import type { RuleKind, RuleTarget } from '../../../types.js';
-import { useState } from 'react';
-
 import { useArbiterTranslation } from '../../i18n-provider.js';
-import { Button, Select, TextInput } from '../controls.js';
-import { convertExactPattern, exactType, patternText } from './draft.js';
-import type { MutableRuleCondition } from './draft.js';
+import { Select, TextInput, inputClassName } from '../controls.js';
+import { IconButton } from '../ui/button.js';
+import {
+  convertExactPattern,
+  exactType,
+  isBlankPattern,
+  patternText,
+} from './draft.js';
+import type { MutableRuleCondition, PendingExactType } from './draft.js';
 
 const TARGETS: readonly RuleTarget[] = [
   'command',
@@ -20,65 +25,53 @@ const VALUE_TYPES = ['string', 'number', 'boolean', 'null'] as const;
 
 type ValueType = (typeof VALUE_TYPES)[number];
 
-/**
- * A pattern with no value yet.
- *
- * An empty exact pattern is stored as the empty string, so its JSON type is
- * "string". The type selector is withheld until a value exists: choosing
- * "number" for a blank field has nothing to convert and would otherwise either
- * write a `0` nobody typed or claim a type the saved value does not have.
- */
-function isBlank(pattern: MutableRuleCondition['pattern']): boolean {
-  return patternText(pattern).trim().length === 0;
-}
-
-const labelStyle = {
-  color: 'var(--dsw-alias-label-secondary)',
-  fontSize: 11.5,
-} as const;
-
-const rowStyle = {
-  display: 'flex',
-  flexDirection: 'column' as const,
-  gap: 4,
-  minWidth: 120,
-};
-
-/**
- * One condition.
- *
- * The condition always shows its explicit object, because that choice decides
- * the rest of the form: only the tool-argument object takes a JSONPath and a
- * multi-value mode, and only an exact pattern keeps a JSON type.
- */
 export function RuleConditionEditor(props: {
   readonly index: number;
   readonly condition: MutableRuleCondition;
+  readonly pendingType?: PendingExactType | null;
+  readonly onPendingTypeChange?: (type: PendingExactType | null) => void;
   readonly onChange: (
     mutator: (condition: MutableRuleCondition) => void,
   ) => void;
+  readonly isArmed?: boolean | undefined;
+  readonly onArm?: (() => void) | undefined;
+  readonly onDisarm?: (() => void) | undefined;
   readonly onRemove: () => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { condition, onChange } = props;
+  const { condition, onChange, onPendingTypeChange } = props;
   const isArgument = condition.target === 'argument';
   const isExact = condition.kind === 'exact';
+  const isTypedExact = isArgument && isExact;
+
+  const [localPendingType, setLocalPendingType] =
+    useState<PendingExactType | null>(null);
+
+  const effectivePendingType =
+    props.pendingType !== undefined ? props.pendingType : localPendingType;
+
+  const setEffectivePendingType = (next: PendingExactType | null): void => {
+    onPendingTypeChange?.(next);
+    setLocalPendingType(next);
+  };
+
+  const isBlank = isBlankPattern(condition.pattern);
+
+  const currentExactType: ValueType = isTypedExact
+    ? (effectivePendingType ?? exactType(condition.pattern))
+    : 'string';
+
   return (
     <div
       role="group"
       aria-label={t('rules.conditionIndex', { index: props.index + 1 })}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: '10px 12px',
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 6,
-      }}
+      className="arb:flex arb:flex-col arb:gap-2 arb:rounded-md arb:border arb:border-border-subtle arb:p-2.5"
     >
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ ...rowStyle, width: 150 }}>
-          <span style={labelStyle}>{t('rules.target')}</span>
+      <div className="arb:flex arb:flex-wrap arb:gap-2.5">
+        <div className="arb:flex arb:w-36 arb:flex-col arb:gap-1">
+          <span className="arb:text-[11.5px] arb:text-secondary">
+            {t('rules.target')}
+          </span>
           <Select
             ariaLabel={t('rules.target')}
             value={condition.target}
@@ -91,29 +84,27 @@ export function RuleConditionEditor(props: {
               argument: t('rules.targetOption.argument'),
             }}
             onChange={(value) => {
+              if (value !== 'argument') {
+                setEffectivePendingType(null);
+              }
               onChange((next) => {
                 next.target = value;
-                // With no expression yet, the target's own default mode applies:
-                // a command is whole-value RE2, a selected argument is exact.
-                if (patternText(next.pattern).length === 0)
+                if (patternText(next.pattern).length === 0) {
                   next.kind = value === 'argument' ? 'exact' : 'regex';
-                // Every target except `argument` compares text: the command
-                // match text, a tool name, or a redirect/assignment word. A
-                // typed exact value is therefore written as its JSON text
-                // instead of staying a number/boolean the target cannot yield.
-                if (value !== 'argument' && typeof next.pattern !== 'string')
+                }
+                if (value !== 'argument') {
                   next.pattern = patternText(next.pattern);
-                // `path` and `multi` belong to the argument target only. A target
-                // change drops them rather than leaving an invalid combination.
-                if (value === 'argument') return;
-                delete next.path;
-                delete next.multi;
+                  delete next.path;
+                  delete next.multi;
+                }
               });
             }}
           />
         </div>
-        <div style={{ ...rowStyle, width: 130 }}>
-          <span style={labelStyle}>{t('rules.kind')}</span>
+        <div className="arb:flex arb:w-32 arb:flex-col arb:gap-1">
+          <span className="arb:text-[11.5px] arb:text-secondary">
+            {t('rules.kind')}
+          </span>
           <Select
             ariaLabel={t('rules.kind')}
             value={condition.kind}
@@ -124,19 +115,23 @@ export function RuleConditionEditor(props: {
               glob: t('rules.kindOption.glob'),
             }}
             onChange={(value) => {
+              if (value !== 'exact') {
+                setEffectivePendingType(null);
+              }
               onChange((next) => {
                 next.kind = value;
-                // RE2 and glob read text; an exact number/boolean/null has no
-                // equivalent expression, so its JSON spelling becomes the text.
-                if (value !== 'exact' && typeof next.pattern !== 'string')
+                if (value !== 'exact' && typeof next.pattern !== 'string') {
                   next.pattern = patternText(next.pattern);
+                }
               });
             }}
           />
         </div>
         {isArgument ? (
-          <div style={{ ...rowStyle, flex: 1, minWidth: 220 }}>
-            <span style={labelStyle}>{t('rules.jsonPath')}</span>
+          <div className="arb:flex arb:min-w-[200px] arb:flex-1 arb:flex-col arb:gap-1">
+            <span className="arb:text-[11.5px] arb:text-secondary">
+              {t('rules.jsonPath')}
+            </span>
             <TextInput
               ariaLabel={t('rules.jsonPath')}
               value={condition.path ?? ''}
@@ -152,8 +147,10 @@ export function RuleConditionEditor(props: {
           </div>
         ) : null}
         {isArgument ? (
-          <div style={{ ...rowStyle, width: 110 }}>
-            <span style={labelStyle}>{t('rules.multi')}</span>
+          <div className="arb:flex arb:w-28 arb:flex-col arb:gap-1">
+            <span className="arb:text-[11.5px] arb:text-secondary">
+              {t('rules.multi')}
+            </span>
             <Select
               ariaLabel={t('rules.multi')}
               value={condition.multi ?? 'any'}
@@ -172,122 +169,251 @@ export function RuleConditionEditor(props: {
         ) : null}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {isExact && !isBlank(condition.pattern) ? (
-          <div style={{ ...rowStyle, width: 110 }}>
-            <span style={labelStyle}>{t('rules.valueType')}</span>
-            <Select
-              ariaLabel={t('rules.valueType')}
-              value={exactType(condition.pattern)}
-              options={VALUE_TYPES}
-              labels={{
-                string: t('rules.valueTypeOption.string'),
-                number: t('rules.valueTypeOption.number'),
-                boolean: t('rules.valueTypeOption.boolean'),
-                null: t('rules.valueTypeOption.null'),
-              }}
-              onChange={(value) => {
-                onChange((next) => {
-                  next.pattern = convertExactPattern(next.pattern, value);
-                });
-              }}
-            />
-          </div>
-        ) : null}
-        {isExact && isBlank(condition.pattern) ? (
-          <div style={{ ...rowStyle, width: 110 }}>
-            <span style={labelStyle}>{t('rules.valueType')}</span>
-            <span
-              style={{
-                ...labelStyle,
-                lineHeight: '30px',
-                color: 'var(--dsw-alias-label-tertiary)',
-              }}
-            >
-              {t('rules.valueTypeAfterInput')}
-            </span>
-          </div>
-        ) : null}
-        <div style={{ ...rowStyle, flex: 1, minWidth: 240 }}>
-          <span style={labelStyle}>{t('rules.pattern')}</span>
-          <ExactValue
-            type={isExact ? exactType(condition.pattern) : 'string'}
+      <div className="arb:flex arb:flex-wrap arb:gap-2.5">
+        {isTypedExact ? (
+          <ExactTypeSelector
+            currentExactType={currentExactType}
+            isBlank={isBlank}
             condition={condition}
+            onSetEffectivePendingType={setEffectivePendingType}
+            onChange={onChange}
+          />
+        ) : null}
+        <div className="arb:flex arb:min-w-[240px] arb:flex-1 arb:flex-col arb:gap-1">
+          <span className="arb:text-[11.5px] arb:text-secondary">
+            {t('rules.pattern')}
+          </span>
+          <ExactValue
+            isTypedExact={isTypedExact}
+            type={currentExactType}
+            pendingType={effectivePendingType}
+            condition={condition}
+            onCommitType={() => {
+              setEffectivePendingType(null);
+            }}
             onChange={onChange}
           />
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <label
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            fontSize: 12,
-          }}
-        >
+      <div className="arb:flex arb:items-center arb:justify-between arb:pt-1">
+        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
           <input
             type="checkbox"
             checked={condition.caseSensitive === false}
             onChange={(event) => {
               onChange((next) => {
-                // Absence of the field is the confirmed default: sensitive.
                 if (event.target.checked) next.caseSensitive = false;
                 else delete next.caseSensitive;
               });
             }}
+            className="arb:rounded arb:border-border-default arb:accent-accent"
           />
           {t('rules.caseInsensitive')}
         </label>
-        <Button onClick={props.onRemove} tone="plain">
-          {t('rules.removeCondition')}
-        </Button>
+        <InlineDeleteConditionButton
+          index={props.index}
+          isArmed={props.isArmed}
+          onArm={props.onArm}
+          onDisarm={props.onDisarm}
+          onRemove={props.onRemove}
+        />
       </div>
     </div>
   );
 }
 
-/** The pattern editor; an exact `null` is a value rather than an empty input. */
-function ExactValue(props: {
-  readonly type: ValueType;
+function InlineDeleteConditionButton(props: {
+  readonly index: number;
+  readonly isArmed?: boolean | undefined;
+  readonly onArm?: (() => void) | undefined;
+  readonly onDisarm?: (() => void) | undefined;
+  readonly onRemove: () => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const [localArmed, setLocalArmed] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const isControlled = props.isArmed !== undefined;
+  const isArmed = isControlled ? props.isArmed : localArmed;
+
+  const onDisarmRef = useRef(props.onDisarm);
+  onDisarmRef.current = props.onDisarm;
+
+  const handleArm = () => {
+    if (props.onArm) props.onArm();
+    else setLocalArmed(true);
+  };
+
+  useEffect(() => {
+    if (!isArmed) return;
+
+    const disarm = () => {
+      if (onDisarmRef.current) onDisarmRef.current();
+      else setLocalArmed(false);
+    };
+
+    const timer = window.setTimeout(disarm, 3000);
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        buttonRef.current &&
+        event.target instanceof Node &&
+        !buttonRef.current.contains(event.target)
+      ) {
+        disarm();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        disarm();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isArmed]);
+
+  if (isArmed) {
+    return (
+      <button
+        ref={buttonRef}
+        type="button"
+        data-confirming="true"
+        aria-label={t('rules.confirmDeleteCondition', {
+          index: props.index + 1,
+        })}
+        onClick={props.onRemove}
+        className="arb:inline-flex arb:h-7 arb:items-center arb:gap-1.5 arb:rounded arb:border arb:border-error arb:bg-error arb:px-2 arb:text-xs arb:font-medium arb:text-white arb:shadow-xs arb:transition-colors arb:hover:bg-error/90 arb:focus-visible:outline-none arb:focus-visible:ring-1 arb:focus-visible:ring-error"
+      >
+        <Trash2 className="arb:h-3.5 arb:w-3.5" />
+        <span>{t('rules.confirmDeleteShort')}</span>
+      </button>
+    );
+  }
+
+  return (
+    <IconButton
+      ref={buttonRef}
+      label={t('rules.removeCondition')}
+      icon={Trash2}
+      className="arb:h-7 arb:border arb:border-border-default arb:bg-layer-3 arb:text-error arb:transition-colors hover:arb:border-error/40 hover:arb:bg-error/10"
+      onClick={handleArm}
+    />
+  );
+}
+
+function ExactTypeSelector(props: {
+  readonly currentExactType: ValueType;
+  readonly isBlank: boolean;
   readonly condition: MutableRuleCondition;
+  readonly onSetEffectivePendingType: (type: PendingExactType | null) => void;
   readonly onChange: (
     mutator: (condition: MutableRuleCondition) => void,
   ) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { condition, onChange } = props;
-  if (props.type === 'null') {
-    return (
-      <div
-        style={{
-          ...labelStyle,
-          lineHeight: '30px',
-        }}
-      >
-        {t('rules.valueTypeOption.null')}
-      </div>
-    );
-  }
-  if (props.type === 'boolean') {
-    return (
+  const {
+    currentExactType,
+    isBlank,
+    condition,
+    onSetEffectivePendingType,
+    onChange,
+  } = props;
+
+  return (
+    <div className="arb:flex arb:w-28 arb:flex-col arb:gap-1">
+      <span className="arb:text-[11.5px] arb:text-secondary">
+        {t('rules.valueType')}
+      </span>
       <Select
-        ariaLabel={t('rules.pattern')}
-        value={condition.pattern === true ? 'true' : 'false'}
-        options={['true', 'false'] as const}
+        ariaLabel={t('rules.valueType')}
+        value={currentExactType}
+        options={VALUE_TYPES}
+        labels={{
+          string: t('rules.valueTypeOption.string'),
+          number: t('rules.valueTypeOption.number'),
+          boolean: t('rules.valueTypeOption.boolean'),
+          null: t('rules.valueTypeOption.null'),
+        }}
         onChange={(value) => {
-          onChange((next) => {
-            next.pattern = value === 'true';
-          });
+          if (value === 'null') {
+            onSetEffectivePendingType(null);
+            onChange((next) => {
+              next.pattern = null;
+            });
+            return;
+          }
+          if (value === 'string') {
+            onSetEffectivePendingType(null);
+            onChange((next) => {
+              next.pattern =
+                condition.pattern === null
+                  ? ''
+                  : patternText(condition.pattern);
+            });
+            return;
+          }
+          if (value === 'boolean') {
+            if (
+              typeof condition.pattern === 'boolean' ||
+              condition.pattern === 'true' ||
+              condition.pattern === 'false'
+            ) {
+              onSetEffectivePendingType(null);
+              onChange((next) => {
+                next.pattern =
+                  condition.pattern === true || condition.pattern === 'true';
+              });
+            } else {
+              onSetEffectivePendingType('boolean');
+            }
+            return;
+          }
+          // value === 'number'
+          if (
+            typeof condition.pattern === 'number' ||
+            (!isBlank &&
+              Number.isFinite(Number(patternText(condition.pattern))))
+          ) {
+            onSetEffectivePendingType(null);
+            onChange((next) => {
+              next.pattern = convertExactPattern(next.pattern, 'number');
+            });
+          } else {
+            onSetEffectivePendingType('number');
+          }
         }}
       />
-    );
-  }
-  if (props.type === 'number') {
+    </div>
+  );
+}
+
+function ExactValue(props: {
+  readonly isTypedExact: boolean;
+  readonly type: ValueType;
+  readonly pendingType: PendingExactType | null;
+  readonly condition: MutableRuleCondition;
+  readonly onCommitType: () => void;
+  readonly onChange: (
+    mutator: (condition: MutableRuleCondition) => void,
+  ) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const { isTypedExact, condition, onChange, onCommitType } = props;
+
+  if (!isTypedExact) {
     return (
-      <NumberPattern
-        value={condition.pattern}
+      <TextInput
+        ariaLabel={t('rules.pattern')}
+        value={patternText(condition.pattern)}
         onChange={(value) => {
           onChange((next) => {
             next.pattern = value;
@@ -296,6 +422,74 @@ function ExactValue(props: {
       />
     );
   }
+
+  if (props.type === 'null') {
+    return (
+      <div className="arb:flex arb:h-[30px] arb:items-center arb:text-xs arb:text-secondary">
+        {t('rules.valueTypeOption.null')}
+      </div>
+    );
+  }
+
+  if (props.type === 'boolean') {
+    if (typeof condition.pattern === 'boolean') {
+      return (
+        <Select
+          ariaLabel={t('rules.pattern')}
+          value={condition.pattern ? 'true' : 'false'}
+          options={['true', 'false'] as const}
+          labels={{
+            true: t('rules.booleanTrue'),
+            false: t('rules.booleanFalse'),
+          }}
+          onChange={(value) => {
+            onCommitType();
+            onChange((next) => {
+              next.pattern = value === 'true';
+            });
+          }}
+        />
+      );
+    }
+
+    return (
+      <Select
+        ariaLabel={t('rules.pattern')}
+        value=""
+        options={['', 'true', 'false'] as const}
+        labels={{
+          '': t('rules.selectBooleanValue'),
+          true: t('rules.booleanTrue'),
+          false: t('rules.booleanFalse'),
+        }}
+        onChange={(value) => {
+          if (value === 'true' || value === 'false') {
+            onCommitType();
+            onChange((next) => {
+              next.pattern = value === 'true';
+            });
+          }
+        }}
+      />
+    );
+  }
+
+  if (props.type === 'number') {
+    return (
+      <NumberPattern
+        value={
+          typeof condition.pattern === 'number' ? condition.pattern : undefined
+        }
+        onChange={(value) => {
+          onCommitType();
+          onChange((next) => {
+            next.pattern = value;
+          });
+        }}
+      />
+    );
+  }
+
   return (
     <TextInput
       ariaLabel={t('rules.pattern')}
@@ -311,50 +505,32 @@ function ExactValue(props: {
   );
 }
 
-/**
- * A numeric exact pattern.
- *
- * Typing `-`, `1.` or an empty field is a valid intermediate state, so the
- * visible text is local while focused and only a complete number is committed.
- * Rendering the parsed value on every keystroke would turn `1.` into `1` and
- * make `1.5` become `15`.
- */
 function NumberPattern(props: {
-  readonly value: MutableRuleCondition['pattern'];
-  readonly onChange: (value: MutableRuleCondition['pattern']) => void;
+  readonly value: number | undefined;
+  readonly onChange: (value: number) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
   const [draft, setDraft] = useState<string | null>(null);
+
   return (
     <input
       type="text"
       inputMode="decimal"
       aria-label={t('rules.pattern')}
-      value={draft ?? patternText(props.value)}
+      value={
+        draft ?? (props.value !== undefined ? patternText(props.value) : '')
+      }
       onChange={(event) => {
         const text = event.target.value;
         setDraft(text);
-        // Only a complete, finite number replaces the stored pattern; while the
-        // text is incomplete the previous value stays in the draft.
         const parsed = Number(text);
         if (text.trim().length === 0 || !Number.isFinite(parsed)) return;
         props.onChange(parsed);
       }}
       onBlur={() => {
-        // Show the value the draft actually holds once editing ends.
         setDraft(null);
       }}
-      style={{
-        boxSizing: 'border-box',
-        height: 30,
-        border: '0.5px solid var(--dsw-alias-border-l4)',
-        borderRadius: 6,
-        background: 'var(--dsw-alias-bg-layer-3)',
-        color: 'var(--dsw-alias-label-primary)',
-        padding: '0 8px',
-        fontSize: 12.5,
-        width: '100%',
-      }}
+      className={inputClassName}
     />
   );
 }
