@@ -273,8 +273,11 @@ function readCase(entry: SampleCase): ReadCase {
     if (parsed.raw === undefined) return { ok: false, error: 'rejected' };
     return { ok: true, signals: signalsFromChat(parsed.raw, 0) };
   }
+  // `entry.signals.response` is the answers object; which envelope carries it
+  // is the transport's business, so the case stays envelope-agnostic by using
+  // the native root placement.
   const parsed = parseDecisionResponse(
-    { result: { response: entry.signals.response } },
+    { answers: entry.signals.response },
     DEFAULT_CONFIG.policy.normal,
   );
   if (!parsed.ok) return { ok: false, error: parsed.error };

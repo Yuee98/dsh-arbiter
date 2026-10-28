@@ -17,6 +17,7 @@ import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
+import { runDecisionReviewer } from '../src/reviewer/decision.js';
 import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';
@@ -786,6 +787,69 @@ describe('credential boundary in stored material', () => {
       model: 'clef-flash',
       state: 'STATE',
     });
+    db.close();
+  });
+
+  test('an attempt produced by the adapter stores the masked echo, not the credential', async () => {
+    // The record is built by the real adapter rather than by this test: the
+    // guarantee is about what the adapter hands the writer, and a hand-built
+    // record would assert the test's own masking instead.
+    const sentinel = 'sk-adapter-echo-sentinel';
+    const result = await runDecisionReviewer(
+      {
+        fetch: () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                model: 'clef',
+                answers: {},
+                usage: { input_tokens: 1, note: sentinel },
+                echo: sentinel,
+                errors: [{ message: `rejected ${sentinel}` }],
+              }),
+              { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+          ),
+        credentials: { resolve: () => Promise.resolve({ value: sentinel }) },
+        decision: {
+          url: 'https://example.test/ai/run',
+          model: 'clef',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds: DEFAULT_CONFIG.policy.normal,
+        signal: new AbortController().signal,
+      },
+      PROBE_SNAPSHOT,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'echo-call',
+    );
+    expect(result.ok).toBe(false);
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(
+      record({
+        callId: 'echo-call',
+        result: 'review-deny',
+        modelAttempts: result.attempts,
+      }),
+    );
+    await store.flush();
+    store.close();
+    const db = new DatabaseSync(path);
+    const rows = listField(
+      {
+        rows: db
+          .prepare('SELECT response_text, error, usage FROM model_calls')
+          .all(),
+      },
+      'rows',
+    );
+    // Each column is stored independently, so the whole row is checked.
+    const stored = JSON.stringify(rows);
+    expect(stored).not.toContain(sentinel);
+    expect(stored).toContain('[redacted]');
     db.close();
   });
 

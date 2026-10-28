@@ -88,6 +88,86 @@ describe('configuration', () => {
     );
   });
 
+  test('rejects a URL that cannot be parsed, not just one without a scheme', () => {
+    // `https://` satisfies the scheme pattern and then throws when the adapter
+    // reads its pathname; a configuration error is the place to say so.
+    const parsed = parseConfig({
+      reviewer: {
+        type: 'decision',
+        decision: { url: 'https://', apiKeyRef: 'K', model: 'clef' },
+      },
+    });
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'reviewer.decision.url',
+          code: 'reviewer.url-scheme',
+        }),
+      ]),
+    );
+  });
+
+  test.each([
+    ['https://api.cloudflare.com/client/v4/accounts/a/ai/run'],
+    ['https://api.typesafe.ai/v1/systemone'],
+  ])('requires a model for %s', (url) => {
+    // `asString` accepts an explicit empty string, so presence is this check's
+    // job rather than the field parser's.
+    const parsed = parseConfig({
+      reviewer: {
+        type: 'decision',
+        decision: { url, apiKeyRef: 'K', model: '' },
+      },
+    });
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'reviewer.decision.model',
+          code: 'reviewer.model-required',
+        }),
+      ]),
+    );
+  });
+
+  test('rejects a model the Cloudflare model-specific path does not serve', () => {
+    const parsed = parseConfig({
+      reviewer: {
+        type: 'decision',
+        decision: {
+          url: 'https://api.cloudflare.com/client/v4/accounts/a/ai/run/@cf/cloudflare/clef',
+          apiKeyRef: 'K',
+          model: 'clef-flash',
+        },
+      },
+    });
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'reviewer.decision.model',
+          code: 'reviewer.model-mismatch',
+        }),
+      ]),
+    );
+  });
+
+  test('does not impose model equality on an unrecognized custom path', () => {
+    // The narrow recognizer matters here: a broader `<vendor>/<model>` rule
+    // would reject this endpoint even though it is a valid custom service.
+    const parsed = parseConfig({
+      reviewer: {
+        type: 'decision',
+        decision: {
+          url: 'https://example.test/ai/run/acme/review',
+          apiKeyRef: 'K',
+          model: 'custom',
+        },
+      },
+    });
+    expect(
+      parsed.errors.filter((error) => error.code === 'reviewer.model-mismatch'),
+    ).toEqual([]);
+  });
+
   test('warns about a broad allow shadowed by force-review', () => {
     const parsed = parseConfig({
       format: 'arbiter-config-v2',
