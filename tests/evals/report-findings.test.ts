@@ -1805,3 +1805,87 @@ describe('Codex review: a dangling symlink into evidence is refused', () => {
     });
   });
 });
+
+describe('Codex review: a cyclic symlink does not crash the report', () => {
+  it('reports a damaged dataset whose cases directory links to itself', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+        name: 'cyclic',
+      });
+      // A dataset directory that points at itself. `readDataset` cannot enumerate it, so the
+      // dataset reads as unreadable — a state reporting must survive, because that is how the
+      // damage is discovered. The resolver must not recurse without bound while comparing the
+      // protected path.
+      const { symlink, rm } = await import('node:fs/promises');
+      await rm(join(dataset, 'cases'), { recursive: true, force: true });
+      await symlink('.', join(dataset, 'cases'));
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: (line) => out.push(line),
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          // The ordinary destination inside the run directory.
+          output: null,
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(err.join('\n')).not.toContain('Maximum call stack');
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain(
+        'cells 1 planned, 1 recorded, 0 missing',
+      );
+      // The run's own evidence is intact and the report was written beside it.
+      await expect(
+        readFile(join(directory, 'report.json'), 'utf8'),
+      ).resolves.toBeTruthy();
+    });
+  });
+
+  it('still refuses a dangling link into a cyclic dataset', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+        name: 'cyclic',
+      });
+      const { symlink, rm } = await import('node:fs/promises');
+      await rm(join(dataset, 'cases'), { recursive: true, force: true });
+      await symlink('.', join(dataset, 'cases'));
+      const link = `${join(created.path, 'injected')}.json`;
+      await symlink(join(dataset, 'cases/injected.json'), link);
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: link.replace(/\.json$/u, ''),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      // The dataset is unreadable, but its paths are still protected, so the guard still
+      // refuses rather than crashing.
+      expect(err.join('\n')).not.toContain('Maximum call stack');
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+    });
+  });
+});

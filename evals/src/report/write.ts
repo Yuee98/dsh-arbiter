@@ -216,33 +216,51 @@ function sameOrInside(path: string, directory: string): boolean {
  *   - a *dangling* link. `writeFile` follows it and creates the target, so a destination that
  *     is a link into protected evidence would modify that evidence even though neither spelling
  *     exists as a file. `existsSync` reported such an entry as absent, which is how the guard
- *     stepped past it.
+ *     once stepped past it.
  *   - a destination whose own name is new but whose directory is a link. Resolving the parent
  *     is enough, and it is what makes `--out alias/report` compare equal to the real directory.
  *
- * The leaf is therefore resolved through its own link target when it has one — following a
- * bounded chain so a link-to-link is handled — and the parent through its real path.
+ * The traversal is bounded rather than trusting a chain to end. A cyclic link — including a
+ * dataset directory linked to itself, which a damaged dataset is allowed to contain — would
+ * otherwise recurse until the stack overflows, and a report that crashes on a damaged dataset
+ * cannot describe it. Revisiting a path, or exceeding the hop limit, yields the path as written:
+ * an unresolved answer, which is the conservative one for a containment test, because it can
+ * only make a caller compare two shorter strings rather than miss a collision.
  */
 function resolvedName(path: string): string {
+  return resolveWithCycleGuard(path, new Set<string>(), 0);
+}
+
+/** How many link hops a destination may take before it is treated as unresolved. */
+const MAX_LINK_HOPS = 32;
+
+/** The resolver's body, carrying the visited set and hop count across one traversal. */
+function resolveWithCycleGuard(
+  path: string,
+  visited: Set<string>,
+  hops: number,
+): string {
   const normalised = normalize(path);
+  if (visited.has(normalised) || hops > MAX_LINK_HOPS) return normalised;
+  visited.add(normalised);
   try {
     return normalize(realpathSync(normalised));
   } catch {
-    // Nothing at this path: fall through to resolve it by parts.
+    // Nothing resolves here: fall through and resolve the path by parts.
   }
   const parent = dirname(normalised);
   const leaf = basename(normalised);
   const resolvedParent =
-    parent === normalised ? normalised : resolvedName(parent);
+    parent === normalised
+      ? normalised
+      : resolveWithCycleGuard(parent, visited, hops);
   const candidate = join(resolvedParent, leaf);
   const target = linkTargetOf(candidate);
   if (target === null) return candidate;
   const absolute = isAbsolute(target)
     ? target
     : resolve(resolvedParent, target);
-  // A link whose target is itself a link is followed once more; a chain longer than that is
-  // not something a report destination legitimately is, and stopping keeps this total.
-  return resolvedName(absolute);
+  return resolveWithCycleGuard(absolute, visited, hops + 1);
 }
 
 /**
