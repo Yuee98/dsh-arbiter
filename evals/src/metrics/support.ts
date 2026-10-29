@@ -46,6 +46,17 @@ export function median(values: readonly number[]): number | null {
   return left === null || right === null ? null : (left + right) / 2;
 }
 
+/**
+ * The mean of a list, rounded for publication, or null when nothing was reported.
+ *
+ * The same rounding the rates get: a figure in a report is a summary, and a value with
+ * sixteen significant digits invites a reader to treat float noise as precision.
+ */
+export function meanRounded(values: readonly number[]): number | null {
+  const value = mean(values);
+  return value === null ? null : fixed(value);
+}
+
 /** The largest value, or null for an empty list. */
 export function maxOf(values: readonly number[]): number | null {
   let best: number | null = null;

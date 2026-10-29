@@ -99,6 +99,8 @@ export function settlementSection(report: EvaluationReport): string {
     row(['人工通道', settlement.channel]),
     row(['计数口径', settlement.projection ? '推演' : '实际']),
     '',
+    row(['结算', '数量']),
+    separator(2),
     ...settlementRows(settlement.overall),
     '',
     '`归一为拒绝` 与 `deny` 分开：前者是「本应问人但没有通道」，后者是审查结论本身。混成一个数字会把可用性问题读成质量结论。',

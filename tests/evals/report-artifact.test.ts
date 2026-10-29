@@ -570,6 +570,34 @@ describe('the rendered documents agree with the JSON', () => {
     });
   });
 
+  it('rounds a published mean instead of printing float noise', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(created);
+      const report = await build(directory);
+      // The three observed risk bands average to a repeating decimal; a report that
+      // printed all sixteen digits would invite a reader to read precision into it.
+      for (const shape of report.diagnostics.shape) {
+        if (shape.mean === null) continue;
+        expect(Number.isInteger(shape.mean * 1_000_000)).toBe(true);
+      }
+      const markdown = renderMarkdown(report);
+      expect(markdown).not.toMatch(/\d\.\d{7,}/u);
+    });
+  });
+
+  it('gives the settlement table a header so a reader knows what the numbers are', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(created);
+      const markdown = renderMarkdown(await build(directory));
+      const settlement = markdown.slice(
+        markdown.indexOf('第三层：实际模式'),
+        markdown.indexOf('归一为拒绝` 与'),
+      );
+      expect(settlement).toContain('| 结算 | 数量 |');
+      expect(settlement).toContain('| --- | --- |');
+    });
+  });
+
   it('meets the acceptance rule that a missing record is a visible gap', async () => {
     await withArea(async (created) => {
       const directory = await twoCaseRun(created);

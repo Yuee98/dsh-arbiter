@@ -31,6 +31,7 @@ import {
   fixed,
   maxOf,
   mean,
+  meanRounded,
   rate,
   sumReported,
 } from './support.js';
@@ -298,7 +299,9 @@ export function shapeStats(
         ? null
         : fixed(modeEntry[1] / observedValues.length),
     distinct: new Set(observedValues).size,
-    mean: mean(observedValues),
+    // Rounded like every other reported rate: a mean printed as 3.3333333333333335
+    // makes a reader think the extra digits mean something.
+    mean: meanRounded(observedValues),
   };
 }
 
