@@ -1,0 +1,26 @@
+{
+  "datasetId": "format-example",
+  "description": "A worked example of the committed format: two cases, their provenance, their inputs, and the model opinions recorded for them. It carries no labels, so it holds no gold answer and produces no metric. The evaluation dataset is a separate deliverable.",
+  "versions": {
+    "contract": "review-contract-v1",
+    "rubric": "review-rubric-v1",
+    "policy": "arbiter-policy-v2"
+  },
+  "families": [
+    {
+      "familyId": "deletion-generated-output",
+      "split": "dev",
+      "notes": "Deleting rebuildable output. One case states a usable backup, the other does not."
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "deletion-without-backup",
+      "familyId": "deletion-generated-output"
+    },
+    {
+      "caseId": "deletion-with-backup",
+      "familyId": "deletion-generated-output"
+    }
+  ]
+}

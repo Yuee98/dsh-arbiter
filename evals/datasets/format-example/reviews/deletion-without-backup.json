@@ -1,0 +1,20 @@
+{
+  "caseId": "deletion-without-backup",
+  "inputHash": "sha256:92f2ed436eb8d6cf966bb12ccd8c42e045e97d3b5826b4d3031b5d5213c84630",
+  "reviews": [
+    {
+      "reviewId": "example-a",
+      "model": {
+        "provider": "example-provider",
+        "id": "example-chat-model",
+        "version": null,
+        "versionSource": "unknown"
+      },
+      "protocol": "chat",
+      "risk": 4,
+      "authorization": 3,
+      "notes": "Recorded to illustrate the shape. The model's version was not reported by the provider, so it is recorded as unknown rather than guessed.",
+      "recordedAt": "2026-10-29"
+    }
+  ]
+}
