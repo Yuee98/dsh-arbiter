@@ -20,7 +20,8 @@
     "spent",
     "cells",
     "resumed",
-    "notes"
+    "notes",
+    "fixtureDigest"
   ],
   "properties": {
     "documentVersion": {
@@ -194,6 +195,18 @@
       "items": {
         "type": "string"
       }
+    },
+    "fixtureDigest": {
+      "description": "The digest of the scripted socket this run replays, or null for a live run. The plan names a fixture path, and a path says nothing about contents: freezing the digest stops one run from combining responses produced by two different backends.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {

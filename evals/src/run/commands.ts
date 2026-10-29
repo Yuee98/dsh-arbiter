@@ -25,6 +25,7 @@ import { readDataset } from '../data/read.js';
 import { compileCheckers } from '../data/schemas.js';
 import type { ReviewCase } from '../data/types.js';
 
+import { digestOf } from '../data/hash.js';
 import {
   executionDigest,
   planDigest,
@@ -526,6 +527,7 @@ export async function executeRun(
       resolvedPlan,
       checkers,
       dataset.dataset.digest,
+      fixture === null ? undefined : digestOf(fixture),
     );
     if (!existing.ok) {
       for (const problem of existing.problems) io.err(`problem ${problem}`);
@@ -572,6 +574,15 @@ export async function executeRun(
     plan: resolvedPlan,
     cases,
     datasetDigest: dataset.dataset.digest,
+    fixture: fixture ??
+      // A live run has no scripted socket; an empty fixture documents that rather than
+      // leaving the field ambiguous.
+      {
+        fixtureVersion: 'eval-offline-fixture-v1',
+        description: '',
+        cells: {},
+        notes: [],
+      },
     versions,
     now,
   });
@@ -783,11 +794,27 @@ export async function inspectResume(
     command.directory ??
       defaultRunDirectory(resolvedPlan.datasetId, command.planPath),
   );
+  // A read-only inspection still loads the fixture, because its contents are part of what
+  // the run froze: reporting which cells a continuation would run is only useful if the
+  // scripts those cells would replay are the same ones.
+  let inspectedFixture: RunFixture | null = null;
+  if (resolvedPlan.fixture !== null) {
+    const loaded = await readFixture(
+      fixturePathOf(resolve(io.root, command.planPath), resolvedPlan.fixture),
+      checkers,
+    );
+    if (!loaded.ok) {
+      io.err(`problem ${loaded.message}`);
+      return 1;
+    }
+    inspectedFixture = loaded.fixture;
+  }
   const existing = await readExisting(
     directory,
     resolvedPlan,
     checkers,
     dataset.dataset.digest,
+    inspectedFixture === null ? undefined : digestOf(inspectedFixture),
   );
   if (!existing.ok) {
     for (const problem of existing.problems) io.err(`problem ${problem}`);

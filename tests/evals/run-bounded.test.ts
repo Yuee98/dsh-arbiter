@@ -232,6 +232,7 @@ async function runPlanIn(parts: {
     cases,
     datasetDigest: datasetDigestOfCoreV1,
     versions,
+    fixture: parts.fixture,
     now: () => 0,
   });
   if (!created.ok) throw new Error(created.problems.join('; '));
@@ -818,6 +819,7 @@ describe('bounds', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -917,6 +919,7 @@ describe('continuation', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -1005,6 +1008,7 @@ describe('continuation', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       expect(created.ok).toBe(true);
@@ -1083,6 +1087,7 @@ describe('the run on disk', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       expect(created.ok).toBe(true);
@@ -1474,6 +1479,7 @@ describe('corrections from review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -1681,6 +1687,7 @@ describe('corrections from review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -1765,6 +1772,7 @@ describe('corrections from the second review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -1949,6 +1957,7 @@ describe('corrections from the third review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2018,6 +2027,7 @@ describe('corrections from the third review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2081,6 +2091,7 @@ describe('corrections from the third review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2177,6 +2188,7 @@ describe('corrections from the bot review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2271,6 +2283,7 @@ describe('corrections from the bot review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2368,6 +2381,7 @@ describe('corrections from the fourth review', () => {
         cases,
         datasetDigest: datasetDigestOfCoreV1,
         versions,
+        fixture: fixtureOf({}),
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
@@ -2565,6 +2579,55 @@ describe('case evidence keeps its declared authority', () => {
       // A tool transcript cannot grant permission, so it is a fact with no evidence level.
       expect(tool?.role).toBe('fact');
       expect(tool?.evidence).toBeNull();
+    });
+  });
+});
+
+describe('admission waits for a held reservation to settle', () => {
+  it('runs the second cell once the first returns what it did not use', async () => {
+    // The finding: a shortfall can be a *held* reservation rather than a spent one. Stopping
+    // then truncates the run for a property of the schedule, so the same plan at a lower
+    // concurrency runs more cells and the results are not comparable.
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
+        // Two workers, four attempts, three attempts reserved per cell. The second worker
+        // cannot be admitted while the first holds three; once the first settles in one
+        // attempt, two come back and there is room.
+        targets: [chatTarget('chat-a', { maxRepairRetries: 2 })],
+        bounds: bounds({ concurrency: 2, maxAttempts: 4 }),
+      });
+      const cells = cellGrid(plan).cells;
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf(
+          Object.fromEntries(
+            cells.map((cell) => [
+              cell.cellId,
+              // Three scripted answers each, so each cell *reserves* three attempts while it
+              // is in flight. The adapter spends one and owes the other two back, which is
+              // exactly the balance a second worker has to wait for.
+              fixtureCell({
+                chat: [chatAnswer(2, 10), chatAnswer(2, 10), chatAnswer(2, 10)],
+              }),
+            ]),
+          ),
+        ),
+        directory: join(area.path, 'run'),
+      });
+      // The run was not truncated by the reservation: every cell that fits the *spent*
+      // budget ran.
+      const statuses = result.records.map((record) => record.status);
+      expect(statuses.length).toBeGreaterThanOrEqual(2);
+      expect(statuses.every((status) => status === 'reviewed')).toBe(true);
+      // Two attempts were spent in total, well inside the four declared.
+      expect(result.index.ok).toBe(true);
+      if (!result.index.ok) return;
+      expect(result.index.existing.index.spent.attempts).toBeLessThanOrEqual(4);
     });
   });
 });

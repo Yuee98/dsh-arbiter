@@ -433,6 +433,14 @@ export interface RunIndex {
     readonly caseIds: readonly string[];
   };
   readonly versions: RunVersions;
+  /**
+   * The digest of the scripted socket this run replays, or null for a live run.
+   *
+   * The plan names a fixture path, and a path says nothing about contents: an edited
+   * fixture would let one run combine responses from two different backends while its
+   * identity claimed a single experiment.
+   */
+  readonly fixtureDigest: string | null;
   readonly transport: RunTransportName;
   readonly bounds: RunBounds;
   readonly spent: RunSpend;

@@ -202,7 +202,21 @@ export async function dispatch(
   const now = options.now ?? (() => Date.now());
   const budget = new Budget(options.plan, options.alreadySpentAttempts ?? 0);
   const results: DispatchResult[] = [];
-  const state = { cursor: 0, stopped: null as StopReason | null };
+  const state = {
+    cursor: 0,
+    stopped: null as StopReason | null,
+    /**
+     * Workers currently holding a reservation.
+     *
+     * A reservation is temporary, not spent: a cell that reserves three attempts and uses
+     * one returns two. Declaring the budget exhausted while another worker still holds a
+     * reservation therefore truncates the run for a property of the *schedule* rather than
+     * the experiment — the same plan at a lower concurrency would run more cells, which
+     * makes results incomparable across a bound that is supposed to be an operational
+     * choice.
+     */
+    inFlight: 0,
+  };
 
   const settle = async (result: DispatchResult): Promise<void> => {
     results.push(result);
@@ -287,6 +301,14 @@ export async function dispatch(
         estimatedInputTokens: material.material.estimatedInputTokens,
         inputCap: options.plan.bounds.maxInputTokens,
       });
+      if (!reserved.ok && reservationMayFree(state, options)) {
+        // The shortfall can be a *held* reservation rather than a spent one, so wait for a
+        // worker to settle and try the same cell again. The cell is put back rather than
+        // abandoned, because failing to fit now says nothing about the balance later.
+        state.cursor -= 1;
+        await settlementSignal();
+        continue;
+      }
       if (!reserved.ok) {
         // The budget, not this cell, is what ran out: stopping dispatch is the
         // honest outcome, and every remaining cell is recorded as not-run.
@@ -301,6 +323,7 @@ export async function dispatch(
         await abandonRest('the run stopped after its budget was exhausted');
         return;
       }
+      state.inFlight += 1;
       const { result: settledCell, abandoned } = await runUnderTimeout({
         cell,
         caseEntry,
@@ -310,6 +333,7 @@ export async function dispatch(
         now,
         reservedAttempts: ceiling,
       });
+      state.inFlight -= 1;
       if (abandoned) {
         // The stop is published *before* the await, not after it. A worker that stopped
         // only once its record had been persisted would leave a window in which a peer
@@ -544,4 +568,33 @@ function stopExplanation(reason: StopReason | null): string {
     case null:
       return 'the run was cancelled before this cell started';
   }
+}
+
+/**
+ * Whether waiting could make an unaffordable cell affordable.
+ *
+ * Only when another worker holds a reservation: that balance is expected to grow back when
+ * the worker returns what it did not use. With nothing in flight, the shortfall is the
+ * budget itself and waiting would never help.
+ */
+function reservationMayFree(
+  state: { readonly inFlight: number },
+  options: DispatchOptions,
+): boolean {
+  if (state.inFlight === 0) return false;
+  // A cancelled run should not wait at all.
+  return !options.signal.aborted;
+}
+
+/**
+ * Wait for the next settlement, so a worker can try admission again.
+ *
+ * A zero-delay turn of the event loop is enough: the worker that holds the reservation is
+ * already awaiting its transport, and its release happens in the settle path. Nothing is
+ * recorded for a cell that is simply waiting its turn.
+ */
+async function settlementSignal(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 }

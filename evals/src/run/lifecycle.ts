@@ -26,7 +26,7 @@
 import { mkdir, open, readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { canonicalJson } from '../data/hash.js';
+import { canonicalJson, digestOf } from '../data/hash.js';
 import type { ReviewCase } from '../data/types.js';
 
 import {
@@ -60,6 +60,8 @@ export interface CreateRunOptions {
   readonly cases: readonly ReviewCase[];
   readonly datasetDigest: string;
   readonly versions: RunVersions;
+  /** The scripted socket this run will replay; its contents are frozen with the plan. */
+  readonly fixture: RunFixture;
   /** Wall clock, injected so a test never depends on the real one. */
   readonly now: () => number;
 }
@@ -118,6 +120,10 @@ export async function createRun(
       caseIds: options.plan.caseIds ?? [],
     },
     versions: options.versions,
+    // The fixture *contents* are part of the frozen experiment, not just its path. A run
+    // that replayed one scripted socket must not continue against another: the responses
+    // would then come from two different backends under one run identity.
+    fixtureDigest: digestOf(options.fixture),
     transport: options.plan.transport,
     bounds: options.plan.bounds,
     spent: emptySpend(grid.cells.length),
@@ -222,6 +228,7 @@ export async function readExisting(
   plan: RunPlan,
   checkers: RunCheckers,
   datasetDigest?: string,
+  fixtureDigest?: string,
 ): Promise<ResumeRead> {
   let indexRaw: unknown;
   try {
@@ -265,6 +272,17 @@ export async function readExisting(
       ok: false,
       problems: [
         `the dataset revision moved since this run was frozen: recorded ${index.dataset.digest}, now ${datasetDigest}`,
+      ],
+    };
+  }
+  if (fixtureDigest !== undefined && index.fixtureDigest !== fixtureDigest) {
+    // The scripted socket changed between passes. Continuing would mix responses from two
+    // backends inside one experiment, and a report could not tell which one produced a
+    // cell's answer.
+    return {
+      ok: false,
+      problems: [
+        `the offline fixture changed since this run was frozen: recorded ${String(index.fixtureDigest)}, now ${fixtureDigest}`,
       ],
     };
   }

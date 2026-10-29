@@ -210,6 +210,7 @@ describe('run document schema', () => {
         implementation: 'i',
         node: '24.0.0',
       },
+      fixtureDigest: null,
       transport: 'offline',
       bounds: bounds(),
       spent: {
@@ -250,6 +251,7 @@ describe('run document schema', () => {
         artifact: 'eval-run-artifact-v1',
         implementation: 'i',
       },
+      fixtureDigest: null,
       transport: 'offline',
       bounds: bounds(),
       spent: {
@@ -370,6 +372,7 @@ describe('reading a run directory', () => {
           caseIds: plan.caseIds,
         },
         versions: versionsWithNode(),
+        fixtureDigest: null,
         transport: 'offline',
         bounds: plan.bounds,
         spent: {
@@ -434,6 +437,7 @@ describe('reading a run directory', () => {
           caseIds: plan.caseIds,
         },
         versions: versionsWithNode(),
+        fixtureDigest: null,
         transport: 'offline',
         bounds: plan.bounds,
         spent: {
@@ -773,6 +777,7 @@ describe('a dispatched failure is a gap when its record is gone', () => {
         implementation: 'i',
         node: '24.0.0',
       },
+      fixtureDigest: null,
       transport: 'offline',
       bounds: plan.bounds,
       spent: {

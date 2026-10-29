@@ -600,10 +600,11 @@ describe('run', () => {
         ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
         resumed.io,
       );
-      // The exit code follows the run's status: this directory is complete, so continuing
-      // it is a successful no-op.
-      expect(code).toBe(0);
+      // The fixture changed between passes, so the continuation is refused: one run cannot
+      // combine responses from two scripted sockets. The recorded failure is untouched.
+      expect(code).toBe(1);
       expect(await readFile(failedPath, 'utf8')).toBe(before);
+      expect(resumed.err.join('\n')).toContain('offline fixture changed');
       // Both cells are decided: one was reviewed and one failed, and a recorded failure is
       // a result the run already paid for. Nothing was pending, so nothing was sent.
       const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
@@ -612,7 +613,8 @@ describe('run', () => {
       expect(index.status).toBe('complete');
       // Nothing was pending, so the continuation spent nothing at all.
       expect(index.spent.attempts).toBe(1);
-      expect(resumed.out.join('\n')).toContain('2/2 cells decided');
+      // And the run's own accounting still says both cells were decided.
+      expect(index.spent.cellsCompleted).toBe(2);
     });
   });
 
@@ -1715,6 +1717,94 @@ describe('annotation work does not invalidate a run', () => {
       // What the run recorded is the execution revision, not the annotation digest.
       expect(Reflect.get(dataset, 'digest')).toBe(probeExecution);
       expect(Reflect.get(dataset, 'digest')).not.toBe(datasetDigestOf(probe));
+    });
+  });
+});
+
+describe('the offline fixture is frozen with the run', () => {
+  it('refuses a continuation whose scripted socket changed', async () => {
+    // The finding: the plan names a fixture path, and a path says nothing about contents, so
+    // an edited fixture let one run combine responses from two backends under one identity.
+    await withArea(async (area) => {
+      const cells = [
+        'read-named-source-file',
+        'read-repo-index-with-cache',
+      ].map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      await area.write('plan.json', {
+        ...planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+          bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
+        }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+      );
+      // Budget for one cell, so the run freezes and stops short of its plan.
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // Someone edits the scripted socket: the second cell now answers differently.
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(9, 1)] }),
+        }),
+      );
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['resume', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain(
+        'offline fixture changed since this run was frozen',
+      );
+    });
+  });
+
+  it('accepts a continuation whose scripted socket is unchanged', async () => {
+    await withArea(async (area) => {
+      const cells = [
+        'read-named-source-file',
+        'read-repo-index-with-cache',
+      ].map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      await area.write('plan.json', {
+        ...planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+          bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
+        }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+      );
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // The same fixture, so the continuation is allowed to report its pending cell.
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['resume', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(err.join('\n')).not.toContain('offline fixture changed');
+      expect([0, 1]).toContain(code);
     });
   });
 });
