@@ -35,7 +35,7 @@ export interface RuleCallSource {
 
 /** Why one recorded value cannot become an exact condition. */
 export type CallFieldReason =
-  'array' | 'empty-object' | 'too-deep' | 'too-many';
+  'array' | 'empty-object' | 'too-deep' | 'too-many' | 'non-object-arguments';
 
 /** One recorded value that can be pinned to a single exact match. */
 export interface CallField {
@@ -91,7 +91,15 @@ export interface UnconstrainedField {
 const MAX_FIELDS = 40;
 const MAX_DEPTH = 4;
 
-const SIMPLE_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
+/**
+ * The member names RFC 9535 lets a name shorthand address.
+ *
+ * `$` is deliberately absent although it starts a JavaScript identifier: the
+ * JSONPath grammar excludes it, so `$.$name` is not an expression at all. Such a
+ * key has to use bracket notation, or the rule would carry a path the evaluator
+ * cannot compile.
+ */
+const SIMPLE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -244,7 +252,13 @@ export function callFields(source: RuleCallSource): CallFieldSet {
     }
   };
 
+  // A recorded call may carry any JSON value as its arguments — the gate passes
+  // them through as `unknown`. Only an object has members to pin; anything else
+  // is a whole value the exact matcher cannot address, so it is named as open
+  // rather than silently producing a rule that ignores the call's own input.
   if (isRecord(source.sample.args)) walk(source.sample.args, '$', 0);
+  else if (source.sample.args !== undefined && source.sample.args !== null)
+    unpinnable.push({ id: '$', label: '$', reason: 'non-object-arguments' });
   return { fields, unpinnable };
 }
 

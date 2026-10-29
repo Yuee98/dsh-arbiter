@@ -237,5 +237,7 @@ function unfixedText(
       return t('rules.fromCallUnfixedNested', { field: entry.label });
     case 'too-many':
       return t('rules.fromCallUnfixedTooMany', { field: entry.label });
+    case 'non-object-arguments':
+      return t('rules.fromCallUnfixedNonObject');
   }
 }

@@ -534,6 +534,65 @@ describe('creating a rule draft from a recorded call', () => {
     ).toBeNull();
   });
 
+  test('the recorded call survives a trip to another tab and back', async () => {
+    baseHandlers();
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const dialog = await openDraftDialog(user);
+    await user.click(within(dialog).getByRole('button', { name: '生成草稿' }));
+
+    // Switching tabs unmounts the rules panel. The rule's recorded call has to
+    // survive that: otherwise looking at the log and coming back would silently
+    // retarget the later test at a default sample.
+    await user.click(await screen.findByRole('button', { name: '状态与模式' }));
+    await user.click(await screen.findByRole('button', { name: '规则' }));
+    await user.click(await screen.findByRole('button', { name: /^测试规则/u }));
+    const tester = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(
+      within(tester).getByText(`本次测试使用调用记录 ${CALL_ID} 的原始输入。`),
+    ).toBeVisible();
+    expect(within(tester).getByLabelText('工具参数')).toHaveValue(
+      JSON.stringify(DEPLOY_ARGS, null, 2),
+    );
+  });
+
+  test('an array argument call can still be tested and saved', async () => {
+    baseHandlers();
+    server.use(
+      http.get('*/api/arbiter/log', () => {
+        const body = detailBody();
+        return HttpResponse.json({
+          ok: true,
+          detail: {
+            ...body.detail,
+            overview: { ...body.detail.overview, tool: 'example' },
+            raw: { ...body.detail.raw, arguments: ['one', 'two'] },
+          },
+        });
+      }),
+    );
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const dialog = await openDraftDialog(user);
+
+    // The whole array is named as unconstrained rather than dropped, because an
+    // exact condition cannot address it.
+    expect(dialog).toHaveTextContent('参数整体不是对象');
+    await user.click(
+      within(dialog).getByRole('button', { name: '生成草稿并测试' }),
+    );
+
+    const tester = await screen.findByRole('dialog', { name: '规则测试' });
+    // The tester replays the recorded array as-is: the gate accepts any JSON
+    // arguments value, so refusing it here would make the call unreplayable.
+    expect(within(tester).getByLabelText('工具参数')).toHaveValue(
+      JSON.stringify(['one', 'two'], null, 2),
+    );
+    await user.click(within(tester).getByRole('button', { name: '运行测试' }));
+    const conclusion = await screen.findByTestId('rule-test-rule');
+    expect(conclusion).toHaveAttribute('data-arbiter-test-rule-state', 'match');
+  });
+
   test('a call without stored input offers no draft and says so', async () => {
     baseHandlers();
     server.use(

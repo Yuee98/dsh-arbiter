@@ -44,12 +44,16 @@ export interface TestSample {
  * Each problem belongs to a specific control: a missing tool and a malformed
  * JSON document are input problems, never a rule result. The component renders
  * them next to that control instead of as "no rule matched".
+ *
+ * There is deliberately no "wrong shape" problem. A recorded call's arguments are
+ * `unknown` all the way to the evaluator, so an array, a string or a number is a
+ * real input a rule may have judged; refusing it here would make a recorded call
+ * unreplayable in the tester that is supposed to answer for it.
  */
 export type SampleProblem =
   | { readonly kind: 'tool-required' }
   | { readonly kind: 'command-required' }
-  | { readonly kind: 'json-syntax'; readonly message: string }
-  | { readonly kind: 'json-shape' };
+  | { readonly kind: 'json-syntax'; readonly message: string };
 
 export type SampleBuild =
   | { readonly ok: true; readonly sample: TestSample }
@@ -61,7 +65,8 @@ export type SampleBuild =
  * Command text is passed through unchanged: normalizing it is the shell
  * reader's job (#8), and doing it here would give the tester a different command
  * from the gate's. Argument JSON is parsed so a syntax error is located at the
- * input rather than becoming a non-match.
+ * input rather than becoming a non-match; any value JSON can express is accepted,
+ * because that is what the gate and the evaluator accept.
  */
 export function buildSample(input: TestInput): SampleBuild {
   const tool = input.tool.trim();
@@ -87,8 +92,6 @@ export function buildSample(input: TestInput): SampleBuild {
       },
     };
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
-    return { ok: false, problem: { kind: 'json-shape' } };
   return { ok: true, sample: { tool, args: parsed, input: input.text } };
 }
 

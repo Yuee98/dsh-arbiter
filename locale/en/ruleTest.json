@@ -104,7 +104,6 @@
   "toolRequired": "Enter a tool name first.",
   "commandRequired": "Enter the command text.",
   "jsonSyntax": "Invalid arguments JSON: {message}",
-  "jsonShape": "The arguments must be a JSON object.",
   "invalidRules": "Some rules in the draft failed validation, so the whole rule set cannot be tested:",
   "locateIssue": "Go to {path}",
   "issuesOutdated": "The draft changed, so the original error positions no longer match the same condition; run the test again.",

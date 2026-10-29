@@ -12,8 +12,7 @@ import {
   importedSampleOf,
   ruleCallSource,
 } from '../components/rules/rule-from-call-model.js';
-import type { RuleCallSource } from '../components/rules/rule-from-call-model.js';
-import { useRulesPanelCall } from '../components/rules/rule-from-call-state.js';
+import type { useRulesPanelCall } from '../components/rules/rule-from-call-state.js';
 import { focusConditionField } from '../components/rules/rule-issue-locate.js';
 import type { LocateRequest } from '../components/rules/rule-issue-locate.js';
 import { RuleList } from '../components/rules/rule-list.js';
@@ -32,25 +31,13 @@ export interface ExtendedRulesPanelProps extends RulesPanelProps {
   readonly onRemoveCondition?: (ruleId: string, conditionIndex: number) => void;
   readonly onDeleteRule?: (ruleId: string) => void;
   /**
-   * A call another surface asked to turn into a draft, e.g. an open call detail.
+   * The call-draft state, owned by the page.
    *
-   * `nonce` identifies the request: opening the same call twice is two requests.
-   * The panel opens its dialog from it and never builds a draft on its own.
+   * It lives above this panel because a tab switch unmounts the panel, and a rule
+   * built from a call has to keep its recorded call across that navigation. This
+   * component therefore reads and dispatches only; it never owns the association.
    */
-  readonly initialCall?: PendingRuleCall | undefined;
-  /**
-   * Told once a request has been opened.
-   *
-   * The caller drops it so switching tabs and coming back does not reopen a
-   * dialog the user already answered; the request is one action, not a state.
-   */
-  readonly onConsumeCall?: (() => void) | undefined;
-}
-
-/** One request from another surface to open the draft dialog for a call. */
-export interface PendingRuleCall {
-  readonly nonce: number;
-  readonly source: RuleCallSource;
+  readonly calls: ReturnType<typeof useRulesPanelCall>;
 }
 
 export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
@@ -70,22 +57,9 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
     conditionIndex: null,
     nonce: 0,
   });
-  const calls = useRulesPanelCall();
+  const calls = props.calls;
   const { state: callState } = calls;
   const pending = callState.source;
-  const initialCall = props.initialCall;
-
-  // Another surface (an open call detail) asked for this call. The nonce makes
-  // one request one dialog, so re-opening the same call still shows it again.
-  const handledInitial = useRef(0);
-  const consumeCall = props.onConsumeCall;
-  useEffect(() => {
-    if (initialCall === undefined) return;
-    if (initialCall.nonce === handledInitial.current) return;
-    handledInitial.current = initialCall.nonce;
-    calls.pickSource(initialCall.source);
-    consumeCall?.();
-  }, [initialCall, calls, consumeCall]);
 
   useEffect(() => {
     if (

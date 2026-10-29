@@ -505,8 +505,6 @@ function problemText(
       return t('ruleTest.commandRequired');
     case 'json-syntax':
       return t('ruleTest.jsonSyntax', { message: problem.message });
-    case 'json-shape':
-      return t('ruleTest.jsonShape');
   }
 }
 

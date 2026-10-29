@@ -161,5 +161,6 @@
   "fromCallNoSource": "这次调用没有可用于创建规则的记录输入，因此无法从它生成草稿。",
   "fromCallCreateFailed": "创建规则草稿失败：{error}",
   "fromCallTrigger": "从调用记录创建规则",
-  "fromCallClose": "关闭"
+  "fromCallClose": "关闭",
+  "fromCallUnfixedNonObject": "未限定：这次调用的参数整体不是对象（例如数组或单个值），精确匹配无法表达它，因此草稿只固定工具名。"
 }

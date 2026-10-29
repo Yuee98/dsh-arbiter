@@ -315,6 +315,89 @@ describe('a draft built from a call decides that call', () => {
   });
 });
 
+/**
+ * Every offered field must actually match through the evaluator.
+ *
+ * A field the dialog offers but the engine cannot address would let a rule
+ * describe the call and then fail to match it — for a deny rule that means the
+ * restriction the user wrote never applies. These cases are built with
+ * `JSON.parse` so the source object is exactly what a recorded call stores.
+ */
+describe('every offered field matches through the evaluator', () => {
+  const KEY_CASES: readonly (readonly [string, string])[] = [
+    ['an ordinary name', 'dryRun'],
+    ['a dotted name', 'a.b'],
+    ['a spaced name', 'odd key'],
+    ['a leading digit', '0'],
+    ['a leading dollar', '$dollar'],
+    ['the prototype member name', '__proto__'],
+    ['an inherited member name', 'constructor'],
+    ['a nested member name', 'nested.value'],
+  ];
+
+  it.each(KEY_CASES)(
+    'pins %s as a rule that matches the call',
+    (_label, key) => {
+      const args: unknown = JSON.parse(
+        key === 'nested.value'
+          ? '{"nested":{"value":"pinned"},"dryRun":true}'
+          : JSON.stringify({ [key]: 'pinned', dryRun: true }),
+      );
+      const recorded = ruleCallSource('call-key', 'deploy', args, {
+        identity: 'main',
+        cwd: null,
+      });
+      const fieldSet = callFields(recorded);
+      const rule = draftRuleFromCall({
+        rules: [],
+        fields: fieldSet.fields,
+        selected: initialSelection(fieldSet.fields),
+        verdict: 'force-review',
+        comment: 'call-key',
+      });
+      if (rule === null) throw new Error('expected a draft');
+      expect(pathOf([rule], 'deploy', args)).toBe('force-review');
+    },
+  );
+});
+
+describe('a call whose arguments are not an object', () => {
+  it('names the whole value as unconstrained instead of dropping it', () => {
+    const arraySource = ruleCallSource(
+      'call-array',
+      'example',
+      JSON.parse('["one","two"]'),
+      { identity: 'main', cwd: null },
+    );
+    const fieldSet = callFields(arraySource);
+    expect(fieldIds(fieldSet)).toEqual(['tool']);
+    expect(fieldSet.unpinnable).toEqual([
+      { id: '$', label: '$', reason: 'non-object-arguments' },
+    ]);
+    expect(
+      unconstrainedFields(fieldSet, initialSelection(fieldSet.fields)),
+    ).toEqual([{ id: '$', label: '$', kind: 'non-object-arguments' }]);
+  });
+
+  it('still produces a rule that the evaluator matches', () => {
+    const args: unknown = JSON.parse('["one","two"]');
+    const arraySource = ruleCallSource('call-array', 'example', args, {
+      identity: 'main',
+      cwd: null,
+    });
+    const fieldSet = callFields(arraySource);
+    const rule = draftRuleFromCall({
+      rules: [],
+      fields: fieldSet.fields,
+      selected: initialSelection(fieldSet.fields),
+      verdict: 'force-review',
+      comment: 'call-array',
+    });
+    if (rule === null) throw new Error('expected a draft');
+    expect(pathOf([rule], 'example', args)).toBe('force-review');
+  });
+});
+
 describe('the recorded sample a draft carries for the tester', () => {
   it('replays the call as its recorded argument object and context', () => {
     const recorded = source('deploy', DEPLOY_ARGS, {
