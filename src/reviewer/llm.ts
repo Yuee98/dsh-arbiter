@@ -112,6 +112,24 @@ export interface CollectedChat {
 }
 
 /**
+ * A stream that failed after the provider had already reported usage.
+ *
+ * A provider that reports tokens and then fails its own call was still billed for
+ * them, and that is exactly the attempt an operator most needs to see. Carrying
+ * the payload on the error is what keeps it: throwing a plain string would lose the
+ * only record of what the failure cost.
+ */
+export class ChatStreamError extends Error {
+  readonly usage: unknown;
+
+  constructor(message: string, usage: unknown) {
+    super(message);
+    this.name = 'ChatStreamError';
+    this.usage = usage;
+  }
+}
+
+/**
  * Read one chat stream to its end.
  *
  * A stream that ends without a terminal finish never completed, and a call with
@@ -136,12 +154,16 @@ export async function collectChatText(
       continue;
     }
     if (type === 'finish') {
-      throwIfFailed(chunk['reason']);
+      if (!isStop(chunk['reason'])) throw failureOf(chunk['reason'], usage);
       finished = true;
     }
   }
-  if (!finished) throw new Error('reviewer emitted no terminal finish');
-  if (text.trim().length === 0) throw new Error('reviewer returned no text');
+  if (!finished) {
+    throw new ChatStreamError('reviewer emitted no terminal finish', usage);
+  }
+  if (text.trim().length === 0) {
+    throw new ChatStreamError('reviewer returned no text', usage);
+  }
   return { text, usage };
 }
 
@@ -152,21 +174,30 @@ function field(value: unknown, key: string): unknown {
 }
 
 /**
- * Reject a finish chunk whose reason is not a normal stop.
+ * Whether a finish reason is a normal stop.
  *
  * A provider that ends its stream with a failure reason is reporting its own
- * outcome, and reporting that as a successful empty answer would turn a provider
- * fault into a parser fault. The code and message are included because the
- * connection test classifies the stage from them.
+ * outcome, and treating that as a successful empty answer would turn a provider
+ * fault into a parser fault.
  */
-function throwIfFailed(reason: unknown): void {
-  if (reason === null || typeof reason !== 'object') return;
-  const kind = field(reason, 'kind');
-  if (kind === 'stop') return;
+function isStop(reason: unknown): boolean {
+  if (reason === null || typeof reason !== 'object') return true;
+  return field(reason, 'kind') === 'stop';
+}
+
+/**
+ * The error a failed finish reason names.
+ *
+ * The code and message are included because the connection test classifies the
+ * stage from them; the usage is carried along so a billed failure is still
+ * recorded.
+ */
+function failureOf(reason: unknown, usage: unknown): ChatStreamError {
   const failure = field(reason, 'failure');
   const code = field(failure, 'code');
   const message = field(failure, 'message');
-  throw new Error(
-    `reviewer ended with ${String(kind)} ${typeof code === 'string' ? code : ''}: ${typeof message === 'string' ? message : ''}`,
+  return new ChatStreamError(
+    `reviewer ended with ${String(field(reason, 'kind'))} ${typeof code === 'string' ? code : ''}: ${typeof message === 'string' ? message : ''}`,
+    usage,
   );
 }

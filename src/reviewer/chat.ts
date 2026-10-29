@@ -19,6 +19,7 @@
 import type { ChatReviewerConfig } from '../types.js';
 import { attemptIdOf, type ReviewAttempt } from './attempt.js';
 import {
+  ChatStreamError,
   chatRoute,
   collectChatText,
   type ChatRoute,
@@ -199,7 +200,10 @@ export async function runChatTransport(
           responseText: null,
           parsed: null,
           error: failure,
-          rawUsage: null,
+          // A provider that fails its own call may still have reported usage
+          // before doing so, and a billed failure is exactly the attempt an
+          // operator needs to see. Nothing else about the failure is reused.
+          rawUsage: error instanceof ChatStreamError ? error.usage : null,
         }),
       );
       // Provider failures are not retried; only format failures are.

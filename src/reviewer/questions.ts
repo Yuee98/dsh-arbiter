@@ -26,13 +26,26 @@ export const SCORE_FIELDS = ['risk', 'authorization'] as const;
 
 export type ScoreField = (typeof SCORE_FIELDS)[number];
 
+/** One `score` question, as the decision wire format states it. */
+export interface ScoreQuestion {
+  readonly type: 'score';
+  readonly instructions: string;
+  readonly criteria: readonly string[];
+}
+
+/** The two questions one review is asked. */
+export interface ScoreQuestions {
+  readonly risk: ScoreQuestion;
+  readonly authorization: ScoreQuestion;
+}
+
 /**
  * The `questions` object for one review.
  *
  * The instructions state what the criterion list grades and how the bands relate;
  * they deliberately do not restate the matrix, a threshold or an expected answer.
  */
-export function buildQuestions(): unknown {
+export function buildQuestions(): ScoreQuestions {
   return {
     risk: {
       type: 'score',
