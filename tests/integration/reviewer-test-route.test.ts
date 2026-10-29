@@ -45,14 +45,7 @@ interface Started {
   readonly edits: () => number;
 }
 
-const VALID_CHAT = JSON.stringify({
-  risk: 1,
-  authorized: 8,
-  secrets: false,
-  destructive: false,
-  egress: false,
-  bulk: false,
-});
+const VALID_CHAT = JSON.stringify({ risk: 1, authorization: 8 });
 
 function streamOf(
   chunks: readonly Record<string, unknown>[],
@@ -190,7 +183,7 @@ describe('reviewer test route', () => {
         status: 'passed',
         backend: 'chat',
         model: { provider: 'draft-provider', model: 'draft-model' },
-        protocol: 'arbiter-chat-json-v1',
+        protocol: 'arbiter-chat-json-v2',
         repairs: 0,
       },
     });
@@ -257,12 +250,6 @@ describe('reviewer test route', () => {
 
   test('a decision probe never returns the resolved credential', async () => {
     const secret = 'sk-probe-credential-must-not-escape';
-    const probabilities = Object.fromEntries(
-      Array.from({ length: 11 }, (_, index) => [
-        String(index),
-        index === 6 ? 1 : 0,
-      ]),
-    );
     const { routes } = await startHost({
       credentials: credentials(secret),
     });
@@ -292,14 +279,11 @@ describe('reviewer test route', () => {
       ok: true,
       probe: { status: 'failed', backend: 'decision' },
     });
-    // The distribution fixture above documents the contracted answer shape; the
-    // probe never got one, so the failure stays a request failure.
     // The unreachable port never accepted the connection, so the stage is the
     // transport, not the output contract.
     expect(JSON.parse(text)).toMatchObject({
       probe: { failure: 'network' },
     });
-    expect(probabilities).toBeDefined();
   });
 
   test('the probe leaves no runtime side effect', async () => {
