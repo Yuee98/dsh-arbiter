@@ -197,21 +197,23 @@ export function conditionViews(result: RuleResult): readonly ConditionView[] {
  */
 export interface CoverageView {
   /**
-   * Matches a higher-priority rule actually beat.
+   * Matches a decisive higher-priority rule actually beat.
    *
-   * An `allow` that matched but is not the reported rule is *not* automatically
-   * shadowed: `allow` coverage accumulates across rules, so a second allow can be
-   * what makes the call coverable at all. Removing it would turn the answer into
-   * `review(default)`, which is the opposite of "did not take effect".
+   * Only a rule that ended the call can outrank another one. A matched `allow`
+   * under `review(default)` was not outranked by anything — that path is decided
+   * by no rule — and allow coverage accumulates across rules, so neither case may
+   * be reported as "did not take effect".
    */
   readonly shadowed: readonly RuleMatchDetail[];
   /**
-   * Other `allow` matches beside the credited one.
+   * Other `allow` matches that no decisive rule displaced.
    *
-   * Neither "shadowed" nor "contributed" is established for these: the evaluator
-   * does not publish which rule supplied which part of the coverage. The panel
-   * therefore reports that they matched at the same priority and states the
-   * accumulation rule, instead of claiming either effect on the result.
+   * This covers both a credited `allow` and a `review(default)` fallback where the
+   * allows were collectively insufficient. Neither "shadowed" nor "contributed"
+   * is established for them: the evaluator does not publish which rule supplied
+   * which part of the coverage. The panel therefore reports that they matched at
+   * the same priority and states the accumulation rule, instead of claiming
+   * either effect on the result.
    */
   readonly additionalAllows: readonly RuleMatchDetail[];
   readonly unknown: readonly string[];
@@ -222,11 +224,18 @@ export interface CoverageView {
 export function coverageView(result: RuleTestResultView): CoverageView {
   const path = finalPath(result);
   const secondary = result.matches.filter((match) => !match.effective);
-  // Coverage accumulates only when an `allow` is what decided the call. Under a
-  // deny or a forced path another matched allow really was outranked.
-  const allowDecided = path.kind === 'rule' && path.verdict === 'allow';
+  /**
+   * True only when a decisive higher-priority rule is what ended the call.
+   *
+   * A `review(default)` path was decided by no rule at all, so nothing outranked
+   * a matched `allow` there: the allows simply did not accumulate enough
+   * coverage. Calling that "did not take effect" would blame priority for a
+   * coverage outcome. An `allow` path is excluded too, because allow coverage
+   * accumulates across rules.
+   */
+  const allowWasOutranked = path.kind === 'rule' && path.verdict !== 'allow';
   const isAlsoMatchedAllow = (match: RuleMatchDetail): boolean =>
-    allowDecided && match.verdict === 'allow';
+    match.verdict === 'allow' && !allowWasOutranked;
   return {
     shadowed: secondary.filter((match) => !isAlsoMatchedAllow(match)),
     additionalAllows: secondary.filter(isAlsoMatchedAllow),
