@@ -91,7 +91,23 @@ export function chatScore(value: unknown):
 export function exactDecimal(value: number): string | null {
   if (!Number.isFinite(value)) return null;
   const text = String(value);
-  return /^-?\d+(?:\.\d+)?$/u.test(text) ? text : null;
+  const plain = /^-?\d+(?:\.\d+)?$/u.exec(text);
+  if (plain !== null) return text;
+  // A short value can render in exponent form ("1e-7"), which is still an exact
+  // decimal. Expand it without rounding, so the digits are preserved rather than
+  // dropped from the cumulative sum.
+  const exponent = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/u.exec(text);
+  if (exponent === null) return null;
+  const [, sign = '', whole = '0', fraction = '', shift = '0'] = exponent;
+  const digits = `${whole}${fraction}`;
+  const point = whole.length + Number(shift);
+  if (point <= 0) {
+    return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  }
+  if (point >= digits.length) {
+    return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  }
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 /**
@@ -306,7 +322,13 @@ function cumulativeDecimal(
     const index = Number(key);
     if (index < base || index > level) continue;
     const exact = exactDecimal(value);
-    if (exact !== null) parts.push(exact);
+    if (exact === null) {
+      // Validation accepts only finite values, so this is unreachable for an
+      // accepted distribution. Refusing loudly beats contributing an implicit
+      // zero, which would silently change the median.
+      throw new RangeError(`level ${key} has no exact decimal form`);
+    }
+    parts.push(exact);
   }
   return addDecimals(parts);
 }

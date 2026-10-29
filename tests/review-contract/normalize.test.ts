@@ -25,6 +25,7 @@ import {
   chatScore,
   compareToHalf,
   evaluateReview,
+  exactDecimal,
   cumulative,
   distributionToPublic,
   readProtocolScores,
@@ -211,6 +212,45 @@ describe('exact-half arithmetic', () => {
     expect(outcome.authorization).toBe(3);
     expect(outcome.requiredAuthorization).toBe(10);
     expect(outcome.verdict).toBe('review-escalate');
+  });
+
+  test('a probability in exponent form still counts toward the median', () => {
+    // `String(1e-7)` is "1e-7", so a parser that only accepted plain decimals
+    // silently dropped this value and read F(1) as 0.4999999 instead of 0.5.
+    expect(String(1e-7)).toBe('1e-7');
+    // The exact form is available and loses no digits.
+    expect(exactDecimal(1e-7)).toBe('0.0000001');
+    expect(exactDecimal(1.5e-7)).toBe('0.00000015');
+    expect(exactDecimal(1.25e-8)).toBe('0.0000000125');
+    // A large value expands the other way, and still loses nothing.
+    expect(exactDecimal(1e21)).toBe('1000000000000000000000');
+    const authorization = dist({ '0': 0.4999999, '1': 1e-7, '9': 0.5 });
+    // F(1) is exactly one half, so authorization reaches band 2.
+    expect(bandFromNative(authorization, 'authorization')).toBe(2);
+  });
+
+  test('the exponent-form answer escalates at risk 7', () => {
+    // The false allow this defect produced: A10 instead of A2 at a risk that
+    // requires A10.
+    const risk = dist({ '6': 1 });
+    const authorization = dist({ '0': 0.4999999, '1': 1e-7, '9': 0.5 });
+    const outcome = evaluateReview({
+      scores: { source: 'decision', risk, authorization },
+    });
+    expect(outcome.status).toBe('scored');
+    if (outcome.status !== 'scored')
+      throw new Error('expected a scored review');
+    expect(outcome.authorization).toBe(2);
+    expect(outcome.verdict).toBe('review-escalate');
+  });
+
+  test('an unreadable value is refused rather than counted as zero', () => {
+    // Validation admits only finite numbers, so this cannot arise from an accepted
+    // answer; the assertion pins that the accumulation refuses loudly instead of
+    // contributing an implicit zero, which would move the median.
+    const broken: Record<string, number> = dist({});
+    broken['0'] = Number.NaN;
+    expect(() => bandFromNative(broken, 'authorization')).toThrow(RangeError);
   });
 
   test('the matrix verdict follows the corrected band', () => {
