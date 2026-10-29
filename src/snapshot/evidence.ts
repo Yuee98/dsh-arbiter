@@ -7,14 +7,17 @@
  * answer keeps the question it answered so its scope survives. Everything else
  * — tool text, file content, assistant prose, checkpoint summaries — is never
  * upgraded to human authorization.
+ *
+ * Human evidence is not scoped to the current turn. A permission or restriction
+ * given three turns ago stays in force until something newer and applicable
+ * conflicts with it, so each item records the turn it came from instead of being
+ * filtered by it. What the current turn does own is the tool history; see
+ * `window.ts`.
  */
 
-import type {
-  ContextCheckpoint,
-  ContextToolCall,
-  EvidenceItem,
-} from '../types.js';
-import type { SessionLike, SessionEventLike } from './types.js';
+import type { ContextCheckpoint, EvidenceItem } from '../types.js';
+import type { SessionEventLike } from './types.js';
+import type { SessionLog } from './log.js';
 
 const EVIDENCE_TEXT_LIMIT = 4_000;
 const CHECKPOINT_TEXT_LIMIT = 2_000;
@@ -41,17 +44,6 @@ function messageText(content: unknown): string {
         : [];
     })
     .join('\n');
-}
-
-function eventsOf(session: SessionLike): readonly SessionEventLike[] {
-  if (typeof session.snapshotEvents === 'function') {
-    try {
-      return session.snapshotEvents();
-    } catch {
-      return [];
-    }
-  }
-  return [];
 }
 
 function eventTs(event: SessionEventLike): number {
@@ -243,10 +235,16 @@ function continuedAnswer(event: SessionEventLike): AskAnswer | null {
   };
 }
 
+/** The turn marker to record, or no field when the log named no turn. */
+function turnField(turn: number | null): { readonly turn?: number } {
+  return turn === null ? {} : { turn };
+}
+
 function evidenceItem(
   kind: 'session-human' | 'parent-human',
   sessionId: string,
   answer: AskAnswer,
+  turn: number | null,
 ): EvidenceItem {
   const truncated = answer.text.length > EVIDENCE_TEXT_LIMIT;
   const question = answer.questions
@@ -260,6 +258,7 @@ function evidenceItem(
     evidence: 'explicit',
     sourcePriority: SOURCE_PRIORITY[kind],
     text: truncated ? answer.text.slice(0, EVIDENCE_TEXT_LIMIT) : answer.text,
+    ...turnField(turn),
     ...(question.length === 0 ? {} : { question }),
     ...(answer.callId === null ? {} : { askCallId: answer.callId }),
     ...(truncated
@@ -273,6 +272,7 @@ function originalHumanItem(
   sessionId: string,
   ts: number,
   text: string,
+  turn: number | null,
 ): EvidenceItem {
   const truncated = text.length > EVIDENCE_TEXT_LIMIT;
   return {
@@ -282,6 +282,7 @@ function originalHumanItem(
     evidence: 'explicit',
     sourcePriority: SOURCE_PRIORITY[kind],
     text: truncated ? text.slice(0, EVIDENCE_TEXT_LIMIT) : text,
+    ...turnField(turn),
     ...(truncated ? { truncated: true, originalLength: text.length } : {}),
   };
 }
@@ -298,7 +299,9 @@ function isShortAnswer(text: string): boolean {
  *
  * A plain chat "同意" is only meaningful with the operation it answered, so the
  * preceding assistant question is attached as context. It stays context: the
- * assistant text is never evidence and never authorizes anything.
+ * assistant text is never evidence and never authorizes anything. The search
+ * stops at a turn boundary too, because a question cannot survive into a later
+ * turn in which other work happened.
  */
 function precedingQuestion(
   events: readonly SessionEventLike[],
@@ -310,6 +313,9 @@ function precedingQuestion(
     // Another user message or a compaction summary starts a separate exchange:
     // an answer after either cannot be attributed to a question beyond it.
     if (event.type === 'user/message') return null;
+    // A turn boundary ends the exchange as well: the answer belongs to whatever
+    // was asked inside the turn it was given in.
+    if (event.type === 'turn/start' || event.type === 'turn/end') return null;
     // A tool exchange is a boundary too. An ask result may already carry the
     // human's answer, so a later "continue" must not be attributed to the
     // question that a completed ask already answered.
@@ -327,13 +333,19 @@ function precedingQuestion(
   return null;
 }
 
-/** Original human messages plus real ask answers, oldest first. */
+/**
+ * Original human messages plus real ask answers, oldest first.
+ *
+ * Turn attribution travels with every item so a consumer can tell a same-turn
+ * instruction from an older standing one; neither is dropped here, because an
+ * older restriction stays in force until something conflicts with it.
+ */
 export function humanEvidence(
-  session: SessionLike,
+  log: SessionLog,
   kind: 'session-human' | 'parent-human',
+  sessionId: string,
 ): EvidenceItem[] {
-  const sessionId = session.id ?? 'unknown';
-  const events = eventsOf(session);
+  const events = log.own;
   const calls = askCalls(events);
   const out: EvidenceItem[] = [];
   events.forEach((event, index) => {
@@ -346,7 +358,8 @@ export function humanEvidence(
     if (typeof source['rpcId'] !== 'string') return;
     const text = messageText(event.data['content']);
     if (text.trim().length === 0) return;
-    const item = originalHumanItem(kind, sessionId, eventTs(event), text);
+    const turn = log.turnOf[index] ?? null;
+    const item = originalHumanItem(kind, sessionId, eventTs(event), text, turn);
     // A bare "同意" keeps the operation it answered. The quoted question is
     // context only: it cannot authorize more than the human's own words, and
     // with no reliable question the answer stays unscoped rather than guessed.
@@ -355,32 +368,35 @@ export function humanEvidence(
       : null;
     out.push(question === null ? item : { ...item, question });
   });
-  for (const event of events) {
+  const answered: EvidenceItem[] = [];
+  events.forEach((event, index) => {
     const answer = foregroundAnswer(event, calls) ?? continuedAnswer(event);
-    if (answer === null || answer.text.trim().length === 0) continue;
-    out.push(evidenceItem(kind, sessionId, answer));
-  }
-  return out.sort((left, right) => left.ts - right.ts);
+    if (answer === null || answer.text.trim().length === 0) return;
+    answered.push(
+      evidenceItem(kind, sessionId, answer, log.turnOf[index] ?? null),
+    );
+  });
+  return [...out, ...answered].sort((left, right) => left.ts - right.ts);
 }
 
 /** Direct-parent relay only; sibling and grandparent senders are excluded. */
 export function relayEvents(
-  session: SessionLike,
+  log: SessionLog,
   parentSession: string,
 ): EvidenceItem[] {
   const out: EvidenceItem[] = [];
-  for (const event of eventsOf(session)) {
-    if (event.type !== 'user/message' || !isRecord(event.data)) continue;
+  log.own.forEach((event, index) => {
+    if (event.type !== 'user/message' || !isRecord(event.data)) return;
     const source = event.data['source'];
-    if (!isRecord(source)) continue;
+    if (!isRecord(source)) return;
     if (
       source['kind'] !== 'agent-message' ||
       source['senderSessionId'] !== parentSession
     ) {
-      continue;
+      return;
     }
     const text = messageText(event.data['content']);
-    if (text.trim().length === 0) continue;
+    if (text.trim().length === 0) return;
     const truncated = text.length > EVIDENCE_TEXT_LIMIT;
     out.push({
       ts: eventTs(event),
@@ -389,87 +405,50 @@ export function relayEvents(
       evidence: 'implied',
       sourcePriority: SOURCE_PRIORITY['parent-relay'],
       text: truncated ? text.slice(0, EVIDENCE_TEXT_LIMIT) : text,
+      ...turnField(log.turnOf[index] ?? null),
       ...(truncated ? { truncated: true, originalLength: text.length } : {}),
     });
-  }
+  });
   return out.sort((left, right) => left.ts - right.ts);
 }
 
 function checkpointOf(event: SessionEventLike): ContextCheckpoint | null {
-  if (event.type === 'user/message' && isRecord(event.data)) {
-    const source = event.data['source'];
-    if (isRecord(source) && source['kind'] === 'compact-checkpoint') {
-      const text = messageText(event.data['content']);
-      if (text.trim().length > 0) {
-        return {
-          ts: eventTs(event),
-          text: text.slice(0, CHECKPOINT_TEXT_LIMIT),
-        };
-      }
-    }
-  }
-  return null;
+  if (event.type !== 'user/message' || !isRecord(event.data)) return null;
+  const source = event.data['source'];
+  if (!isRecord(source) || source['kind'] !== 'compact-checkpoint') return null;
+  const text = messageText(event.data['content']);
+  if (text.trim().length === 0) return null;
+  return {
+    ts: eventTs(event),
+    text: text.slice(0, CHECKPOINT_TEXT_LIMIT),
+  };
 }
 
-/** Whether the session carries a compaction summary at all. */
-export function compacted(session: SessionLike): boolean {
-  return eventsOf(session).some((event) => checkpointOf(event) !== null);
+/** Whether this session carries a compaction summary at all. */
+export function compacted(log: SessionLog): boolean {
+  return log.own.some((event) => checkpointOf(event) !== null);
 }
 
 /**
- * Whether a session's human history could be read at all.
+ * The newest `maxItems` compaction summaries.
  *
- * `readable: false` means the caller must not conclude "no human messages" —
- * the originals are unavailable, which is unknown rather than empty.
+ * A summary is lossy context: it restores what the session was about and never
+ * authorizes anything. It is kept because a long session would otherwise lose
+ * every early fact, and it is capped because it is not the material being
+ * reviewed.
  */
-export function readable(session: SessionLike): boolean {
-  if (typeof session.snapshotEvents !== 'function') return false;
-  try {
-    session.snapshotEvents();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function checkpointEvents(
-  session: SessionLike,
+  log: SessionLog,
   maxItems: number,
-  argumentMaxChars: number,
-  currentCallId: string,
-): {
-  readonly checkpoints: ContextCheckpoint[];
-  readonly toolCalls: ContextToolCall[];
-} {
+): readonly ContextCheckpoint[] {
   const checkpoints: ContextCheckpoint[] = [];
-  const toolCalls: ContextToolCall[] = [];
-  for (const event of eventsOf(session)) {
+  for (const event of log.own) {
     const checkpoint = checkpointOf(event);
     if (checkpoint !== null) checkpoints.push(checkpoint);
-    if (event.type !== 'tool/call' || !isRecord(event.data)) continue;
-    if (event.data['callId'] === currentCallId) continue;
-    const name = event.data['name'];
-    const rawArguments = event.data['arguments'];
-    if (typeof name !== 'string') continue;
-    const text =
-      typeof rawArguments === 'string'
-        ? rawArguments
-        : JSON.stringify(rawArguments ?? {});
-    const truncated = text.length > argumentMaxChars;
-    toolCalls.push({
-      ts: eventTs(event),
-      tool: name,
-      arguments: truncated ? `${text.slice(0, argumentMaxChars)}…` : text,
-      ...(truncated ? { argumentsTruncated: true } : {}),
-    });
   }
   checkpoints.sort((left, right) => left.ts - right.ts);
-  toolCalls.sort((left, right) => left.ts - right.ts);
-  return {
-    // `slice(-0)` is `slice(0)`: a configured zero must select no checkpoints.
-    checkpoints: maxItems <= 0 ? [] : checkpoints.slice(-maxItems),
-    toolCalls,
-  };
+  // `slice(-0)` is `slice(0)`: a configured zero must select no checkpoints.
+  return maxItems <= 0 ? [] : checkpoints.slice(-maxItems);
 }
 
 function newestFirst(items: readonly EvidenceItem[]): EvidenceItem[] {
@@ -490,6 +469,12 @@ export interface EvidenceLimits {
  * order — this session's human input, then the parent's, then the relay — newest
  * first inside each layer. The selected set is then ordered by time for display;
  * that display order never overrides the source priority.
+ *
+ * Two items survive every capacity cut regardless of layer: the newest human
+ * statement of this session and the newest parent original. Inside one layer the
+ * newer instruction wins on the point in conflict, so the withdrawal that would
+ * reverse an earlier approval must never be the item dropped. Both are still
+ * ordinary evidence — the reservation changes what is seen, never what it means.
  */
 export function mergeEvidence(
   sessionHuman: readonly EvidenceItem[],
@@ -501,20 +486,34 @@ export function mergeEvidence(
   // `slice(-0)` is `slice(0)`; a configured zero must mean zero, not "all".
   const parentLimit = Math.max(0, limits.parentHumanItems);
   const parentRecent = parentLimit === 0 ? [] : parentHuman.slice(-parentLimit);
-  const reservedCount = Math.min(
+  // The newest parent original is what a child's own chatter would crowd out
+  // first, so it is reserved rather than merely ranked.
+  const floor = Math.min(
     Math.max(0, limits.parentFloor),
     parentRecent.length,
     maxItems,
   );
-  const reserved = reservedCount > 0 ? parentRecent.slice(-reservedCount) : [];
+  const reserved = floor > 0 ? parentRecent.slice(-floor) : [];
   const reservedItems = new Set<EvidenceItem>(reserved);
+  const newestSessionHuman = newestFirst(sessionHuman)[0];
+  const withNewestHuman =
+    newestSessionHuman === undefined || reservedItems.has(newestSessionHuman)
+      ? reserved
+      : [...reserved, newestSessionHuman];
+  for (const item of withNewestHuman) reservedItems.add(item);
   const rest = [
     ...newestFirst(sessionHuman),
     ...newestFirst(parentRecent.filter((item) => !reservedItems.has(item))),
     ...newestFirst(relay),
+  ].filter((item) => !reservedItems.has(item));
+  const slots = Math.max(
+    0,
+    maxItems - Math.min(withNewestHuman.length, maxItems),
+  );
+  const selected = [
+    ...withNewestHuman.slice(0, maxItems),
+    ...rest.slice(0, slots),
   ];
-  const slots = Math.max(0, maxItems - reserved.length);
-  const selected = [...reserved, ...rest.slice(0, slots)];
   selected.sort((left, right) => right.ts - left.ts);
   // Compare against the whole population, not only the pre-sliced candidates:
   // `parentHumanItems` itself can hide parent originals, and that loss must be

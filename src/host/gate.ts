@@ -13,11 +13,8 @@ import { stageView, type StageView } from './stage.js';
 import { decisionFeedback, modelReasonFor } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
 import type { HistoryStatus } from '../types.js';
-import {
-  buildReviewSnapshot,
-  type AgentLike,
-  type BuiltSnapshot,
-} from '../snapshot.js';
+import { buildCallSnapshot } from './call-snapshot.js';
+import type { AgentLike, BuiltSnapshot } from '../snapshot.js';
 import type {
   AdmissionScopeReason,
   CommandRule,
@@ -59,7 +56,22 @@ function ruleNameStage(name: string | null): { readonly ruleName?: string } {
   return name === null ? {} : { ruleName: name };
 }
 
-/** Gate admission, rule evaluation and reviewer hand-off. */
+/** The identity every gate lifecycle row repeats about the call it decided. */
+function callIdentity(
+  exec: ToolExecutionLike,
+  sessionId: string | undefined,
+): {
+  readonly callId: string;
+  readonly tool: string;
+  readonly sessionId: string | null;
+} {
+  return {
+    callId: exec.callId,
+    tool: exec.name,
+    sessionId: sessionId ?? exec.agent?.session.id ?? null,
+  };
+}
+
 /** What the audit row keeps about this evaluation. */
 function auditEffect(
   evaluation: ReturnType<typeof evaluateCall>,
@@ -135,9 +147,7 @@ export class CallGate {
       const skipped = this.releaseBeforeBypass(exec);
       if (skipped !== null) return skipped;
       lifecycle('gate/skipped', {
-        callId: exec.callId,
-        tool: exec.name,
-        sessionId: exec.agent?.session.id ?? null,
+        ...callIdentity(exec, undefined),
         accepting: runtime.accepting,
         reason: runtime.config.enabled ? 'not-accepting' : 'plugin-disabled',
       });
@@ -149,8 +159,7 @@ export class CallGate {
     // channel, and no admission can be resolved for it.
     if (agent === undefined) {
       lifecycle('gate/skipped', {
-        callId: exec.callId,
-        tool: exec.name,
+        ...callIdentity(exec, undefined),
         sessionId: null,
         reason: 'no-agent',
       });
@@ -165,9 +174,7 @@ export class CallGate {
     try {
       const sessionId = agent.session.id ?? 'unknown';
       lifecycle('gate/entered', {
-        callId: exec.callId,
-        tool: exec.name,
-        sessionId,
+        ...callIdentity(exec, sessionId),
         active: runtime.active,
       });
       const call = await this.prepare(exec, agent);
@@ -194,9 +201,7 @@ export class CallGate {
   ): Promise<PreToolDecision> | PreToolDecision {
     if (reason === 'boundary-unconfirmed') {
       this.host.lifecycle('gate/refused', {
-        callId: exec.callId,
-        tool: exec.name,
-        sessionId: exec.agent?.session.id ?? null,
+        ...callIdentity(exec, undefined),
         reason,
       });
       return deny(
@@ -204,9 +209,7 @@ export class CallGate {
       );
     }
     this.host.lifecycle('gate/skipped', {
-      callId: exec.callId,
-      tool: exec.name,
-      sessionId: exec.agent?.session.id ?? null,
+      ...callIdentity(exec, undefined),
       reason,
     });
     return next();
@@ -228,9 +231,7 @@ export class CallGate {
     const narrowed = this.permissions.admissions.releaseOne(session);
     if (narrowed !== 'unsafe') return null;
     this.host.lifecycle('gate/refused', {
-      callId: exec.callId,
-      tool: exec.name,
-      sessionId: session.id ?? null,
+      ...callIdentity(exec, session.id),
       reason: 'boundary-unconfirmed',
     });
     return deny(
@@ -461,41 +462,6 @@ export class CallGate {
     return null;
   }
 
-  private async snapshot(
-    call: PreparedCall,
-  ): Promise<{ bundle: BuiltSnapshot; llm: LlmLike }> {
-    const { runtime, services } = this.host;
-    const llm = services.llm;
-    if (llm === undefined) throw new Error('llm service is unavailable');
-    const path = call.evaluation.path;
-    const hint =
-      path.kind === 'rule' && path.verdict === 'force-review'
-        ? path.hint
-        : undefined;
-    const bundle = await buildReviewSnapshot({
-      agent: call.agent,
-      ...(services.sessions === undefined
-        ? {}
-        : { sessions: services.sessions }),
-      tool: call.exec.name,
-      arguments: call.exec.arguments,
-      callId: call.exec.callId,
-      cwd: call.cwd,
-      // The snapshot must describe the configuration the rule evaluation used,
-      // so a change landing while the snapshot is being built cannot make the
-      // submitted request and the recorded revision disagree.
-      config: call.view.config,
-      facts: call.evaluation.facts,
-      ...(hint === undefined ? {} : { hint }),
-      priorVerdicts: call.prior,
-      historyStatus: call.historyStatus,
-      sessionRecordGap:
-        runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
-      configRevision: call.view.revision,
-    });
-    return { bundle, llm };
-  }
-
   private async review(call: PreparedCall): Promise<PreToolDecision> {
     if (this.history.breakerOpen(call.session.id ?? 'unknown')) {
       call.trace.push({
@@ -517,7 +483,7 @@ export class CallGate {
     }
     let snapshot: { bundle: BuiltSnapshot; llm: LlmLike };
     try {
-      snapshot = await this.snapshot(call);
+      snapshot = await buildCallSnapshot(this.host, call);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       call.trace.push({
@@ -554,6 +520,15 @@ export class CallGate {
         snapshot: snapshot.bundle.snapshot,
         reviewReason: message,
       });
+    }
+    // Material the host could not supply makes any score unusable, so it is
+    // settled before the model is asked: spending the call would only produce a
+    // number that has to be discarded.
+    if (snapshot.bundle.snapshot.completeness.status === 'insufficient') {
+      return this.settlement.insufficientMaterial(
+        call,
+        snapshot.bundle.snapshot,
+      );
     }
     this.noteReview(call.session.id ?? 'unknown');
     const result = await this.requestModel(call, snapshot.bundle, snapshot.llm);
@@ -641,8 +616,7 @@ export class CallGate {
       runtime.configSnapshotId,
       call.sessionKind,
     );
-    const mode = view.mode;
-    const current = { ...call, mode };
+    const current = { ...call, mode: view.mode };
     const strategy = view.strategy;
     const thresholds = view.thresholds;
     const extras = {

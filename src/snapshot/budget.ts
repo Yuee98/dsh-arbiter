@@ -29,15 +29,14 @@ import type {
   ReviewSnapshot,
   SnapshotMaterial,
 } from '../types.js';
+import type { CompletenessInput, MaterialTrims } from './completeness.js';
+import { buildCompleteness, missingLines } from './completeness.js';
 
 /** Fields that carry submitted program text in the host's tool schemas. */
 const ACTION_TEXT_FIELDS = ['code', 'program', 'command'] as const;
 
 /** Keep enough of the trimmed action for a review to still see its shape. */
 const MIN_ACTION_CHARS = 32;
-
-const ACTION_TRUNCATED =
-  'the pending action text was truncated by the input budget; the original request is preserved separately';
 
 interface BudgetState {
   evidence: ReviewSnapshot['evidence'];
@@ -51,7 +50,16 @@ interface BudgetState {
   evidenceTruncated: boolean;
   contextTruncated: boolean;
   historyTruncated: boolean;
-  readonly missing: Set<string>;
+  /**
+   * Which `CONTEXT`-family items the trimmer actually removed.
+   *
+   * Both the tool-call window and the compaction summaries are reported under
+   * the documented `CONTEXT` segment, because that is the published name for
+   * this step of the trim order. The completeness report needs the finer fact, so
+   * it is tracked here rather than by inventing a second public segment name.
+   */
+  checkpointsTrimmed: boolean;
+  toolCallsTrimmed: boolean;
   readonly truncatedSegments: Set<string>;
 }
 
@@ -65,16 +73,51 @@ function prunedProjectRulesMaterial(
   );
 }
 
+/**
+ * The trims this state made, in the shape the completeness report consumes.
+ *
+ * Deriving them from the recorded segments instead of tracking a second flag
+ * keeps the two descriptions of "what was cut" from drifting apart.
+ */
+function trimsOf(state: BudgetState): MaterialTrims {
+  const segments = state.truncatedSegments;
+  return {
+    action: segments.has('ACTION'),
+    evidence: segments.has('EVIDENCE'),
+    toolArguments: state.toolCallsTrimmed,
+    checkpoints: state.checkpointsTrimmed,
+    priorVerdicts: segments.has('PRIOR_VERDICTS'),
+    projectRules: segments.has('PROJECT_RULES'),
+    derivedFacts: segments.has('DERIVED_FACTS'),
+  };
+}
+
+/**
+ * Re-derive completeness for the material actually submitted.
+ *
+ * The builder's first report describes the material it selected; this second
+ * pass adds what the budget then removed. Rebuilding rather than appending keeps
+ * one function deciding which cut blocks, so a trimmed human message cannot be
+ * reported as harmless simply because the trim happened later.
+ */
+function completenessOf(
+  input: Omit<CompletenessInput, 'trimmed'>,
+  state: BudgetState,
+): ReviewSnapshot['completeness'] {
+  return buildCompleteness({ ...input, trimmed: trimsOf(state) });
+}
+
 function candidateSnapshot(
   base: Omit<ReviewSnapshot, 'budget'>,
   state: BudgetState,
   maxInputTokens: number,
+  input: Omit<CompletenessInput, 'trimmed'>,
 ): ReviewSnapshot {
+  const completeness = completenessOf(input, state);
   return {
     ...base,
     action: state.action,
     materials: state.materials,
-    missing: [...state.missing],
     evidence: state.evidence,
     context: state.context,
     checkpoints: state.checkpoints,
@@ -84,6 +127,8 @@ function candidateSnapshot(
     evidenceTruncated: state.evidenceTruncated,
     contextTruncated: state.contextTruncated,
     historyTruncated: state.historyTruncated,
+    completeness,
+    missing: missingLines(completeness),
     budget: {
       maxInputTokens,
       estimatedInputTokens: 0,
@@ -194,7 +239,6 @@ function trimAction(state: BudgetState): boolean {
   if (keep < Math.min(MIN_ACTION_CHARS, originalChars)) return false;
   state.action = shrinkAction(state.action, current.field, originalChars, keep);
   state.truncatedSegments.add('ACTION');
-  state.missing.add(ACTION_TRUNCATED);
   return true;
 }
 
@@ -202,8 +246,8 @@ function trimCheckpoints(state: BudgetState): boolean {
   if (state.checkpoints.length === 0) return false;
   state.checkpoints = state.checkpoints.slice(0, -1);
   state.contextTruncated = true;
+  state.checkpointsTrimmed = true;
   state.truncatedSegments.add('CONTEXT');
-  state.missing.add('checkpoint summaries were truncated by the input budget');
   return true;
 }
 
@@ -216,10 +260,8 @@ function truncateNext(state: BudgetState): boolean {
   if (state.context.length > 0) {
     state.context = state.context.slice(0, -1);
     state.contextTruncated = true;
+    state.toolCallsTrimmed = true;
     state.truncatedSegments.add('CONTEXT');
-    state.missing.add(
-      'prior tool-call context was truncated by the input budget',
-    );
     return true;
   }
   if (trimCheckpoints(state)) return true;
@@ -227,23 +269,18 @@ function truncateNext(state: BudgetState): boolean {
     state.prior = state.prior.slice(0, -1);
     state.historyTruncated = true;
     state.truncatedSegments.add('PRIOR_VERDICTS');
-    state.missing.add('prior verdicts were truncated by the input budget');
     return true;
   }
   if (state.evidence.length > 1) {
     state.evidence = state.evidence.slice(0, -1);
     state.evidenceTruncated = true;
     state.truncatedSegments.add('EVIDENCE');
-    state.missing.add(
-      'authorization evidence was truncated by the input budget',
-    );
     return true;
   }
   if (state.projectRules !== null) {
     state.projectRules = null;
     state.materials = prunedProjectRulesMaterial(state.materials);
     state.truncatedSegments.add('PROJECT_RULES');
-    state.missing.add('PROJECT_RULES was omitted by the input budget');
     return true;
   }
   if (state.facts !== null) {
@@ -266,7 +303,6 @@ function truncateNext(state: BudgetState): boolean {
     // rather than re-reporting an already-trimmed object.
     state.facts = facts.truncated === true ? null : emptied;
     state.truncatedSegments.add('DERIVED_FACTS');
-    state.missing.add('derived facts were reduced by the input budget');
     return true;
   }
   return trimAction(state);
@@ -348,16 +384,25 @@ function overBudget(
   base: Omit<ReviewSnapshot, 'budget'>,
   state: BudgetState,
   maxInputTokens: number,
+  material: Omit<CompletenessInput, 'trimmed'>,
 ): boolean {
   const rendered = renderedSnapshot(
-    candidateSnapshot(base, state, maxInputTokens),
+    candidateSnapshot(base, state, maxInputTokens, material),
   );
   return rendered.snapshot.budget.estimatedInputTokens > maxInputTokens;
 }
 
+/**
+ * Trim one request to fit the input budget, then describe what was trimmed.
+ *
+ * `material` is the builder's own description of the material it selected. It is
+ * re-evaluated here for every trimming state, so the persisted completeness and
+ * `missing[]` describe the submission rather than the selection it started from.
+ */
 export function truncateSnapshot(
   base: Omit<ReviewSnapshot, 'budget'>,
   maxInputTokens: number,
+  material: Omit<CompletenessInput, 'trimmed'>,
 ): RenderedRequest {
   const state: BudgetState = {
     evidence: [...base.evidence],
@@ -371,7 +416,8 @@ export function truncateSnapshot(
     evidenceTruncated: base.evidenceTruncated,
     contextTruncated: base.contextTruncated,
     historyTruncated: base.historyTruncated,
-    missing: new Set(base.missing),
+    checkpointsTrimmed: false,
+    toolCallsTrimmed: false,
     truncatedSegments: new Set(),
   };
   // The loop is bounded by removable material, not by a fixed iteration count:
@@ -388,10 +434,14 @@ export function truncateSnapshot(
     // Enough halvings for the action to reach its minimum floor.
     64;
   for (let step = 0; step < maxSteps; step += 1) {
-    if (!overBudget(base, state, maxInputTokens)) {
-      return renderedSnapshot(candidateSnapshot(base, state, maxInputTokens));
+    if (!overBudget(base, state, maxInputTokens, material)) {
+      return renderedSnapshot(
+        candidateSnapshot(base, state, maxInputTokens, material),
+      );
     }
     if (!truncateNext(state)) break;
   }
-  return renderedSnapshot(candidateSnapshot(base, state, maxInputTokens));
+  return renderedSnapshot(
+    candidateSnapshot(base, state, maxInputTokens, material),
+  );
 }

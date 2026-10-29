@@ -155,6 +155,15 @@ function materialsBlock(snapshot: ReviewSnapshot): string {
   ].join('\n');
 }
 
+/**
+ * The budget block, which is also where material completeness is stated.
+ *
+ * Completeness belongs here rather than in a block of its own: BUDGET already
+ * lists what this submission could not carry, so `material_status` and
+ * `blocking_gaps` classify that same list instead of repeating it. `blocking_gaps`
+ * is the only part a decision depends on — missing material is why a review can
+ * come back as insufficient rather than scored.
+ */
 function budgetBlock(snapshot: ReviewSnapshot): string {
   return [
     'BUDGET',
@@ -163,6 +172,15 @@ function budgetBlock(snapshot: ReviewSnapshot): string {
       estimated_input_tokens: snapshot.budget.estimatedInputTokens,
       truncated_segments: snapshot.budget.truncatedSegments,
       action_truncated: snapshot.action.truncated ?? null,
+      // Stated only when it changes the outcome. `missing` already carries every
+      // reason and `truncated_segments` every trim, so an ordinary review adds
+      // nothing here and pays no tokens for it.
+      ...(snapshot.completeness.status === 'insufficient'
+        ? {
+            material_status: snapshot.completeness.status,
+            blocking_gaps: snapshot.completeness.gaps.map((gap) => gap.source),
+          }
+        : {}),
     }),
   ].join('\n');
 }
@@ -190,6 +208,7 @@ export function renderUser(snapshot: ReviewSnapshot): string {
     json({ cwd: snapshot.cwd }),
     'CONTEXT',
     json({
+      ...(snapshot.turn === null ? {} : { turn: snapshot.turn }),
       tool_calls: snapshot.context,
       checkpoints: snapshot.checkpoints,
       context_truncated: snapshot.contextTruncated,

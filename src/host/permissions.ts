@@ -164,7 +164,22 @@ export class PermissionLifecycle {
   ): void {
     if (event.type === 'turn/start') {
       const id = session.id;
-      if (id !== undefined) this.history.resetBreaker(id);
+      if (id === undefined) return;
+      this.history.resetBreaker(id);
+      this.onTurnStart(id, event.data);
+      return;
+    }
+    if (event.type === 'turn/end' && typeof session.id === 'string') {
+      // A closed turn is no longer "current". Keeping the number would let the
+      // next call's window read the finished turn's calls as its own history.
+      this.host.runtime.currentTurn.delete(session.id);
+      return;
+    }
+    if (event.type === 'session/end-seed' && typeof session.id === 'string') {
+      // A restored seed inherits no turn identity from before this process: the
+      // log may have been compacted or renumbered, so the next call reads its
+      // turn from the log alone instead of reusing a stale number.
+      this.host.runtime.currentTurn.delete(session.id);
       return;
     }
     if (event.type === 'command/run' && isRecord(event.data)) {
@@ -184,6 +199,22 @@ export class PermissionLifecycle {
       if (this.hasCommandInFlight(session.id)) return;
       this.scheduleExit(session.id, 'permission/preset');
     }
+  }
+
+  /**
+   * Track the turn the host announced.
+   *
+   * The number comes from the event itself and is never derived locally: a
+   * resumed session, a retried step and a timed answer all keep the host's own
+   * turn, which is exactly what stops any of them from looking like a new one.
+   * `turn/start` is only recorded when it carries a usable integer; a missing
+   * number leaves the session unknown rather than defaulting to zero.
+   */
+  private onTurnStart(sessionId: string, data: unknown): void {
+    if (!isRecord(data)) return;
+    const turn = data['turn'];
+    if (typeof turn !== 'number' || !Number.isInteger(turn)) return;
+    this.host.runtime.currentTurn.set(sessionId, turn);
   }
 
   private onCommandRun(

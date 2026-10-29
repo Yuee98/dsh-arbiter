@@ -6,30 +6,40 @@
  * sources rather than re-reading a moving session later. Truncation and missing
  * material are input facts: they never throw, never change the review chain and
  * never decide the outcome by themselves.
+ *
+ * The material is assembled from five readers, each owning one question:
+ *
+ *   - `log.ts`          — what the session log says, read once, split by session.
+ *   - `window.ts`       — the current turn's tool history, in order.
+ *   - `evidence.ts`     — human authorization and restrictions, across turns.
+ *   - `assemble.ts`     — the parent chain and the layer-preserving merge.
+ *   - `guidance.ts`     — the two configured guidance sources.
+ *
+ * `completeness.ts` then reports what they observed, which is the M0 status the
+ * decision layer consumes. This module only wires them together and describes
+ * the outcome; it never interprets authorization itself.
  */
 
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type {
   ArbiterConfig,
-  ContextToolCall,
   DerivedFacts,
-  EvidenceItem,
   HistoryStatus,
   PriorVerdictItem,
   ReviewSnapshot,
   SessionKind,
-  SnapshotMaterial,
 } from './types.js';
 import type { AgentLike, SessionLike, SessionsLike } from './snapshot/types.js';
+import { checkpointEvents } from './snapshot/evidence.js';
+import { assembleEvidence } from './snapshot/assemble.js';
+import type { CompletenessInput } from './snapshot/completeness.js';
 import {
-  checkpointEvents,
-  compacted,
-  humanEvidence,
-  readable,
-  relayEvents,
-  mergeEvidence,
-} from './snapshot/evidence.js';
+  buildCompleteness,
+  missingLines,
+  NO_TRIMS,
+} from './snapshot/completeness.js';
+import { guidanceMaterials, readProjectRules } from './snapshot/guidance.js';
+import { currentTurnOf, toolWindow } from './snapshot/window.js';
+import { readSessionLog } from './snapshot/log.js';
 import { truncateSnapshot } from './snapshot/budget.js';
 export type {
   SessionEventLike,
@@ -37,177 +47,10 @@ export type {
   AgentLike,
   SessionsLike,
 } from './snapshot/types.js';
-
-const PROJECT_RULES_LIMIT = 2_000;
-const CUSTOM_RULES_LIMIT = 2_000;
-/** The two guidance sources share this combined ceiling. */
-const GUIDANCE_LIMIT = 3_000;
+export { materialAvailabilityOf } from './snapshot/completeness.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-interface ProjectRulesResult {
-  readonly text: string | null;
-  readonly material: SnapshotMaterial;
-  readonly missing: string | null;
-}
-
-function absentProjectRules(
-  enabled: boolean,
-  path: string | undefined,
-  chars: number,
-  truncated: boolean,
-): ProjectRulesResult {
-  return {
-    text: null,
-    material: {
-      id: 'project-rules',
-      enabled,
-      present: false,
-      chars,
-      limit: PROJECT_RULES_LIMIT,
-      truncated,
-      ...(path === undefined ? {} : { path }),
-    },
-    missing: null,
-  };
-}
-
-/** A missing file is normal; any other read error means that source failed. */
-function isMissingFile(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-  );
-}
-
-/**
- * Read the first *existing* candidate file.
- *
- * Candidates are tried in the documented order. A file that exists but cannot be
- * read is reported as that source being unavailable — the plugin does not fall
- * through to a different file's guidance, because that would silently attribute
- * one preference order to text the user did not put first.
- */
-async function readProjectRules(
-  cwd: string,
-  config: ArbiterConfig['context']['projectRules'],
-): Promise<ProjectRulesResult> {
-  const first = config.files[0];
-  if (!config.enabled) {
-    return absentProjectRules(false, undefined, 0, false);
-  }
-  for (const file of config.files) {
-    let text: string;
-    try {
-      text = await readFile(join(cwd, file), 'utf8');
-    } catch (error: unknown) {
-      if (isMissingFile(error)) continue;
-      return {
-        text: null,
-        material: {
-          id: 'project-rules',
-          enabled: true,
-          present: false,
-          chars: 0,
-          limit: PROJECT_RULES_LIMIT,
-          truncated: false,
-          path: file,
-        },
-        missing: `PROJECT_RULES file "${file}" exists but could not be read; this source is unavailable and no other project file is substituted`,
-      };
-    }
-    const truncated = text.length > PROJECT_RULES_LIMIT;
-    return {
-      text: truncated ? text.slice(0, PROJECT_RULES_LIMIT) : text,
-      material: {
-        id: 'project-rules',
-        enabled: true,
-        present: true,
-        chars: truncated ? PROJECT_RULES_LIMIT : text.length,
-        limit: PROJECT_RULES_LIMIT,
-        truncated,
-        path: file,
-      },
-      missing: null,
-    };
-  }
-  return {
-    ...absentProjectRules(true, first, 0, false),
-    missing:
-      'PROJECT_RULES is enabled but none of the configured files could be read',
-  };
-}
-
-interface GuidanceResult {
-  readonly customRules: string;
-  readonly projectText: string | null;
-  readonly materials: readonly SnapshotMaterial[];
-}
-
-function customRulesMaterial(
-  submittedChars: number,
-  truncated: boolean,
-): SnapshotMaterial {
-  return {
-    id: 'custom-rules',
-    enabled: true,
-    present: submittedChars > 0,
-    chars: submittedChars,
-    limit: CUSTOM_RULES_LIMIT,
-    truncated,
-  };
-}
-
-function projectMaterial(
-  material: SnapshotMaterial,
-  submittedChars: number,
-  truncated: boolean,
-): SnapshotMaterial {
-  return {
-    ...material,
-    present: material.present && submittedChars > 0,
-    chars: submittedChars,
-    truncated: material.truncated || truncated,
-  };
-}
-
-/**
- * Apply the per-source caps and the shared guidance ceiling.
- *
- * Every reduction is reflected in `materials`, so the snapshot describes the
- * text that was submitted rather than the text that was read.
- */
-function guidanceMaterials(
-  customRulesRaw: string,
-  project: ProjectRulesResult,
-): GuidanceResult {
-  const customCut = customRulesRaw.length > CUSTOM_RULES_LIMIT;
-  const customRules = customRulesRaw.slice(0, CUSTOM_RULES_LIMIT);
-  const projectSource = project.text;
-  if (projectSource === null) {
-    return {
-      customRules,
-      projectText: null,
-      materials: [
-        project.material,
-        customRulesMaterial(customRules.length, customCut),
-      ],
-    };
-  }
-  const room = Math.max(0, GUIDANCE_LIMIT - customRules.length);
-  const ceilingCut = projectSource.length > room;
-  const projectText = ceilingCut ? projectSource.slice(0, room) : projectSource;
-  return {
-    customRules,
-    projectText: projectText.length === 0 ? null : projectText,
-    materials: [
-      projectMaterial(project.material, projectText.length, ceilingCut),
-      customRulesMaterial(customRules.length, customCut),
-    ],
-  };
 }
 
 export interface SnapshotOptions {
@@ -220,6 +63,14 @@ export interface SnapshotOptions {
   readonly config: ArbiterConfig;
   readonly facts: DerivedFacts | null;
   readonly hint?: string;
+  /**
+   * The turn the host announced and has not closed.
+   *
+   * The gate tracks it from `turn/start` because the pending call's own event is
+   * written after the decision. Omitted means no turn was announced, and the
+   * turn is then resolved from the log alone.
+   */
+  readonly turn?: number | null;
   readonly priorVerdicts: readonly PriorVerdictItem[];
   readonly sessionRecordGap: string | null;
   /**
@@ -239,131 +90,6 @@ export interface BuiltSnapshot {
   readonly system: string;
   readonly user: string;
   readonly estimatedInputTokens: number;
-}
-
-/**
- * Three-state parent authorization presence.
- *
- * `true` and `false` are affirmative claims about the parent's human history,
- * so they require a live, readable, uncompacted history. Everything else — no
- * parent, an unreadable log, or a summary that may have replaced the originals —
- * is `null` (unknown), which the reviewer treats as "could not verify".
- */
-function parentPresence(
-  isMainSession: boolean,
-  parent: SessionLike | undefined,
-  readableParent: boolean,
-  compactedParent: boolean,
-  hasHumanEvidence: boolean,
-): boolean | null {
-  if (isMainSession || parent === undefined) return null;
-  if (!readableParent) return null;
-  if (hasHumanEvidence) return true;
-  return compactedParent ? null : false;
-}
-
-interface EvidenceState {
-  readonly session: SessionLike;
-  readonly parentSession: string | undefined;
-  readonly sessionKind: SessionKind;
-  readonly sessionEvidence: readonly EvidenceItem[];
-  readonly parentEvidence: readonly EvidenceItem[];
-  readonly relay: readonly EvidenceItem[];
-  readonly parent: SessionLike | undefined;
-  readonly merged: {
-    readonly evidence: EvidenceItem[];
-    readonly truncated: boolean;
-  };
-  readonly parentAuthorizationPresent: boolean | null;
-  readonly parentReadable: boolean;
-  readonly compaction: boolean;
-  readonly parentCompaction: boolean;
-}
-
-function snapshotEvidence(options: SnapshotOptions): EvidenceState {
-  const session = options.agent.session;
-  const header = session.header ?? {};
-  const parentId = header.parentSession;
-  const sessionKind: SessionKind =
-    header.origin === 'subagent' || parentId !== undefined
-      ? 'subagent'
-      : 'main';
-  const contextConfig = options.config.context;
-  const parent =
-    parentId === undefined ? undefined : options.sessions?.get?.(parentId);
-  const sessionEvidence = humanEvidence(session, 'session-human');
-  const parentEvidence =
-    parent === undefined ? [] : humanEvidence(parent, 'parent-human');
-  const parentReadable = parent === undefined ? false : readable(parent);
-  const parentCompacted = parent === undefined ? false : compacted(parent);
-  // Three states, not two. `true`/`false` are claims we can only make when the
-  // parent's human history is fully readable; a missing object, an unreadable
-  // log, or a compaction summary that may have replaced human messages means
-  // the originals are unavailable — unknown, never "no human input".
-  const parentAuthorizationPresent = parentPresence(
-    parentId === undefined,
-    parent,
-    parentReadable,
-    parentCompacted,
-    parentEvidence.length > 0,
-  );
-  const relay = parentId === undefined ? [] : relayEvents(session, parentId);
-  const merged = mergeEvidence(sessionEvidence, parentEvidence, relay, {
-    maxItems: contextConfig.evidenceMaxItems,
-    parentHumanItems: contextConfig.parentHumanItems,
-    parentFloor: contextConfig.parentEvidenceFloor,
-  });
-  return {
-    session,
-    parentSession: parentId,
-    sessionKind,
-    sessionEvidence,
-    parentEvidence,
-    relay,
-    parent,
-    merged,
-    parentAuthorizationPresent,
-    parentReadable,
-    compaction: compacted(session),
-    parentCompaction: parentCompacted,
-  };
-}
-
-function snapshotHistory(
-  toolCalls: readonly ContextToolCall[],
-  priorVerdicts: readonly PriorVerdictItem[],
-  maxItems: number,
-) {
-  const combined = [
-    ...toolCalls.map((call) => ({ kind: 'tool' as const, ts: call.ts, call })),
-    ...priorVerdicts.map((verdict) => ({
-      kind: 'verdict' as const,
-      ts: verdict.ts,
-      verdict,
-      callId: verdict.callId,
-    })),
-  ]
-    // Newest first, with a deterministic tie-break. Two verdicts settled in the
-    // same millisecond otherwise keep whatever order the source happened to
-    // produce, which would make the submitted history depend on the source
-    // rather than on the decision.
-    .sort((left, right) => {
-      if (left.ts !== right.ts) return right.ts - left.ts;
-      const leftId = 'callId' in left ? left.callId : '';
-      const rightId = 'callId' in right ? right.callId : '';
-      return leftId < rightId ? 1 : leftId > rightId ? -1 : 0;
-    })
-    .slice(0, maxItems);
-  const selectedCalls = combined.flatMap((entry) =>
-    entry.kind === 'tool' ? [entry.call] : [],
-  );
-  const selectedVerdicts = combined.flatMap((entry) =>
-    entry.kind === 'verdict' ? [entry.verdict] : [],
-  );
-  const historyTruncated =
-    combined.length < toolCalls.length + priorVerdicts.length;
-
-  return { selectedCalls, selectedVerdicts, historyTruncated };
 }
 
 /**
@@ -413,70 +139,10 @@ function historyGap(status: HistoryStatus): string[] {
   }
 }
 
-function missingEvidence(
-  evidence: EvidenceState,
-  sessionRecordGap: string | null,
-  projectRulesMissing: string | null,
-  history: HistoryStatus,
-): string[] {
-  const {
-    sessionEvidence,
-    parentEvidence,
-    relay,
-    parentSession,
-    parent,
-    parentReadable,
-    compaction,
-    parentCompaction,
-  } = evidence;
-  const missing: string[] = [];
-  if (
-    sessionEvidence.length === 0 &&
-    parentEvidence.length === 0 &&
-    relay.length === 0
-  ) {
-    missing.push('no human authorization evidence is readable in this session');
-  }
-  if (
-    [...sessionEvidence, ...parentEvidence, ...relay].some(
-      (item) => item.truncated === true,
-    )
-  ) {
-    missing.push(
-      'one or more authorization evidence messages were truncated; their trailing content is not available',
-    );
-  }
-  if (parentSession !== undefined && parent === undefined) {
-    missing.push(
-      'parent session is not live; parent human evidence is unavailable',
-    );
-  } else if (parentSession !== undefined && !parentReadable) {
-    missing.push(
-      'parent session events could not be read; parent human evidence is unavailable',
-    );
-  }
-  if (compaction) {
-    missing.push(
-      'this session was compacted; human messages from before the compaction summary may no longer be readable',
-    );
-  }
-  if (parentCompaction) {
-    missing.push(
-      'the parent session was compacted; earlier parent human messages may no longer be readable',
-    );
-  }
-  if (projectRulesMissing !== null) missing.push(projectRulesMissing);
-  if (sessionRecordGap !== null) missing.push(sessionRecordGap);
-  missing.push(...historyGap(history));
-
-  return missing;
-}
-
 /**
  * Compose the plugin-owned feedback hint for a truncated or incomplete
  * submission. It states an input fact and offers recovery options; it never
- * claims that truncation caused a decision. The decision layer (DECISION #12)
- * decides whether and where to append it.
+ * claims that truncation caused a decision.
  */
 export function truncationFeedback(snapshot: ReviewSnapshot): string | null {
   const parts: string[] = [];
@@ -493,102 +159,233 @@ export function truncationFeedback(snapshot: ReviewSnapshot): string | null {
   return `Input completeness: ${parts.join('; ')}. Shortening the program or splitting it into smaller calls may allow a complete review.`;
 }
 
-/** Build the immutable snapshot, prompt text and token estimate for one review. */
-export async function buildReviewSnapshot(
+interface HistoryWindow {
+  readonly selectedCalls: readonly ReviewSnapshot['context'][number][];
+  readonly selectedVerdicts: readonly PriorVerdictItem[];
+  readonly truncated: boolean;
+}
+
+/**
+ * Select the tool calls and prior verdicts that share one capacity window.
+ *
+ * They compete for the same slots by recency — a long turn would otherwise push
+ * the very denials this call should see out of the request — and the submitted
+ * calls read oldest first, because they are the steps this call follows.
+ */
+function historyWindow(
+  toolCalls: readonly ReviewSnapshot['context'][number][],
+  priorVerdicts: readonly PriorVerdictItem[],
+  maxItems: number,
+): HistoryWindow {
+  const combined = [
+    ...toolCalls.map((call) => ({ kind: 'tool' as const, ts: call.ts, call })),
+    ...priorVerdicts.map((verdict) => ({
+      kind: 'verdict' as const,
+      ts: verdict.ts,
+      verdict,
+      callId: verdict.callId,
+    })),
+  ]
+    // Newest first, with a deterministic tie-break. Two verdicts settled in the
+    // same millisecond otherwise keep whatever order the source happened to
+    // produce, which would make the submitted history depend on the source
+    // rather than on the decision.
+    .sort((left, right) => {
+      if (left.ts !== right.ts) return right.ts - left.ts;
+      const leftId = 'callId' in left ? left.callId : '';
+      const rightId = 'callId' in right ? right.callId : '';
+      return leftId < rightId ? 1 : leftId > rightId ? -1 : 0;
+    })
+    .slice(0, maxItems);
+  return {
+    // Selection competed on recency; the submitted history reads oldest first.
+    selectedCalls: combined
+      .flatMap((entry) => (entry.kind === 'tool' ? [entry.call] : []))
+      .sort((left, right) => left.ts - right.ts),
+    selectedVerdicts: combined.flatMap((entry) =>
+      entry.kind === 'verdict' ? [entry.verdict] : [],
+    ),
+    truncated: combined.length < toolCalls.length + priorVerdicts.length,
+  };
+}
+
+function sessionKindOf(session: SessionLike): SessionKind {
+  const header = session.header ?? {};
+  return header.origin === 'subagent' || header.parentSession !== undefined
+    ? 'subagent'
+    : 'main';
+}
+
+function actionOf(tool: string, args: unknown): ReviewSnapshot['action'] {
+  return {
+    name: tool,
+    arguments: args,
+    ...(isRecord(args) && typeof args['program'] === 'string'
+      ? { programText: args['program'] }
+      : {}),
+  };
+}
+
+/** Everything the completeness report needs to describe this submission. */
+interface MaterialDescriptionOptions {
+  readonly log: ReturnType<typeof readSessionLog>;
+  readonly evidence: Awaited<ReturnType<typeof assembleEvidence>>;
+  readonly history: HistoryStatus;
+  readonly window: ReturnType<typeof toolWindow>;
+  readonly identity: ReturnType<typeof currentTurnOf>;
+  readonly truncated: boolean;
+  readonly parentId: string | undefined;
+  readonly contextConfig: ArbiterConfig['context'];
+  readonly projectRules: Awaited<ReturnType<typeof readProjectRules>>;
+  readonly sessionRecordGap: string | null;
+}
+
+function describeMaterial(
+  options: MaterialDescriptionOptions,
+): Omit<CompletenessInput, 'trimmed'> {
+  const { evidence, log, window } = options;
+  return {
+    truncatedHumanEvidence: evidence.truncatedHumanEvidence,
+    historyTruncated: options.truncated,
+    sessionReadable: log.readable,
+    sessionError: log.error,
+    parentRequired: options.parentId !== undefined,
+    parentReadable: evidence.parentReadable,
+    parentLive: evidence.parentLive,
+    parentError: evidence.parentError,
+    compaction: evidence.compaction,
+    parentCompaction: evidence.parentCompaction,
+    projectRules: {
+      enabled: options.contextConfig.projectRules.enabled,
+      present: options.projectRules.material.present,
+      missing: options.projectRules.missing,
+    },
+    sessionRecordGap: options.sessionRecordGap,
+    historyGap: historyGap(options.history),
+    evidenceCount: evidence.merged.evidence.length,
+    earlierTurnCalls: window.earlierTurnCalls,
+    windowGap: options.identity.gap,
+    toolCallCount: window.calls.length,
+  };
+}
+
+/** The snapshot's non-budget half, before the input budget trims it. */
+interface SnapshotParts {
+  readonly base: Omit<ReviewSnapshot, 'budget'>;
+  readonly material: Omit<CompletenessInput, 'trimmed'>;
+}
+
+/**
+ * Assemble every material reader's output into one snapshot.
+ *
+ * Kept apart from `buildReviewSnapshot` so the budget step has one obvious input:
+ * the assembled material and the description of what it could not include.
+ */
+async function assembleSnapshot(
   options: SnapshotOptions,
-): Promise<BuiltSnapshot> {
-  const evidence = snapshotEvidence(options);
-  const {
-    session,
-    parentSession,
-    sessionKind,
-    merged,
-    parentAuthorizationPresent,
-  } = evidence;
+): Promise<SnapshotParts> {
+  const session = options.agent.session;
+  const parentId = session.header?.parentSession;
   const contextConfig = options.config.context;
-  const { checkpoints, toolCalls } = checkpointEvents(
+  const log = readSessionLog(session);
+  const evidence = assembleEvidence(log, {
     session,
-    contextConfig.checkpointMaxItems,
-    contextConfig.toolCallArgumentMaxChars,
-    options.callId,
-  );
-  const { selectedCalls, selectedVerdicts, historyTruncated } = snapshotHistory(
-    toolCalls,
+    parentId,
+    sessions: options.sessions,
+    contextConfig,
+  });
+  const identity = currentTurnOf(log, options.callId, options.turn ?? null);
+  const window = toolWindow(log, {
+    currentCallId: options.callId,
+    announcedTurn: options.turn ?? null,
+    maxItems: contextConfig.historyMaxItems,
+    argumentMaxChars: contextConfig.toolCallArgumentMaxChars,
+  });
+  const history = options.historyStatus ?? defaultHistoryStatus();
+  const historyWindowOf = historyWindow(
+    window.calls,
     options.priorVerdicts,
     contextConfig.historyMaxItems,
   );
-  const projectRules = await readProjectRules(
-    options.cwd,
-    contextConfig.projectRules,
-  );
-  const history = options.historyStatus ?? defaultHistoryStatus();
   // The runtime window is already trimmed to `historyMaxItems` before it gets
   // here, so this pass alone cannot see that older verdicts were dropped. The
   // history status observed that cut while selecting, and it is the only place
   // that can still report it.
-  const windowTruncated = historyTruncated || history.windowTruncated;
-  const missing = missingEvidence(
-    evidence,
-    options.sessionRecordGap,
-    projectRules.missing,
-    history,
+  const truncated =
+    historyWindowOf.truncated || history.windowTruncated || window.truncated;
+  const projectRules = await readProjectRules(
+    options.cwd,
+    contextConfig.projectRules,
   );
-
+  const guidance = guidanceMaterials(contextConfig.customRules, projectRules);
+  const material = describeMaterial({
+    log,
+    evidence,
+    history,
+    window,
+    identity,
+    truncated,
+    parentId,
+    contextConfig,
+    projectRules,
+    sessionRecordGap: options.sessionRecordGap,
+  });
   const facts: DerivedFacts | null =
     options.facts === null
       ? null
       : {
           ...options.facts,
-          parentAuthorizationPresent,
-          historyTruncated: windowTruncated || options.facts.historyTruncated,
+          parentAuthorizationPresent: evidence.parentAuthorizationPresent,
+          historyTruncated: truncated || options.facts.historyTruncated,
           overlapsDeniedEffect: options.facts.overlapsDeniedEffect,
         };
-
-  // The two guidance sources share one 3,000-character ceiling, so CUSTOM_RULES
-  // yields first (it is user-global) rather than letting both reach 4,000.
-  // The materials record the text that is actually submitted, so a cut made for
-  // the shared ceiling is visible as truncation rather than hidden behind the
-  // per-file cap.
-  const guidance = guidanceMaterials(contextConfig.customRules, projectRules);
+  const completeness = buildCompleteness({ ...material, trimmed: NO_TRIMS });
   const base: Omit<ReviewSnapshot, 'budget'> = {
     version: 1,
     createdAt: Date.now(),
     configRevision: options.configRevision,
     callId: options.callId,
     sessionId: session.id ?? 'unknown',
-    sessionKind,
-    ...(parentSession === undefined ? {} : { parentSessionId: parentSession }),
+    sessionKind: sessionKindOf(session),
+    ...(parentId === undefined ? {} : { parentSessionId: parentId }),
     tool: options.tool,
     cwd: options.cwd,
-    action: {
-      name: options.tool,
-      arguments: options.arguments,
-      ...(isRecord(options.arguments) &&
-      typeof options.arguments['program'] === 'string'
-        ? { programText: options.arguments['program'] }
-        : {}),
-    },
+    turn: identity.turn,
+    action: actionOf(options.tool, options.arguments),
     facts,
     ...(options.hint === undefined ? {} : { hint: options.hint }),
     projectRules: guidance.projectText,
     customRules: guidance.customRules,
     materials: guidance.materials,
-    evidence: merged.evidence,
-    evidenceTruncated: merged.truncated,
-    parentAuthorizationPresent,
-    context: selectedCalls,
-    checkpoints,
-    contextTruncated: historyTruncated,
-    priorVerdicts: selectedVerdicts,
-    historyTruncated: windowTruncated,
+    evidence: evidence.merged.evidence,
+    evidenceTruncated: evidence.merged.truncated,
+    parentAuthorizationPresent: evidence.parentAuthorizationPresent,
+    context: historyWindowOf.selectedCalls,
+    checkpoints: checkpointEvents(log, contextConfig.checkpointMaxItems),
+    contextTruncated: truncated,
+    priorVerdicts: historyWindowOf.selectedVerdicts,
+    historyTruncated: truncated,
     historyStatus: history,
-    missing,
+    completeness,
+    missing: missingLines(completeness),
   };
-  const truncated = truncateSnapshot(base, contextConfig.maxInputTokens);
+  return { base, material };
+}
+
+/** Build the immutable snapshot, prompt text and token estimate for one review. */
+export async function buildReviewSnapshot(
+  options: SnapshotOptions,
+): Promise<BuiltSnapshot> {
+  const { base, material } = await assembleSnapshot(options);
+  const requested = truncateSnapshot(
+    base,
+    options.config.context.maxInputTokens,
+    material,
+  );
   return {
-    snapshot: truncated.snapshot,
-    system: truncated.system,
-    user: truncated.user,
-    estimatedInputTokens: truncated.snapshot.budget.estimatedInputTokens,
+    snapshot: requested.snapshot,
+    system: requested.system,
+    user: requested.user,
+    estimatedInputTokens: requested.snapshot.budget.estimatedInputTokens,
   };
 }

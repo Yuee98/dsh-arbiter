@@ -23,6 +23,16 @@ export interface SessionLike {
   readonly id?: string;
   readonly header?: SessionHeaderLike;
   snapshotEvents?(): readonly SessionEventLike[];
+  /**
+   * Only the events this session wrote, excluding its inherited seed.
+   *
+   * A subagent's log begins with the parent chain's events, which belong to
+   * another session's turns and tool window. Hosts exposing this accessor let the
+   * split be exact rather than derived from an offset.
+   */
+  ownEvents?(): readonly SessionEventLike[];
+  /** The inherited seed prefix length, when the host reports it. */
+  readonly inheritedEventCount?: number;
   deriveMessages?(): readonly unknown[];
   requestHeader?():
     | { readonly config: { readonly provider: string; readonly model: string } }

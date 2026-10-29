@@ -257,6 +257,16 @@ export interface RuntimeState {
   readonly historyBoundaryAmbiguity: Map<string, string>;
   readonly breakers: Map<string, { readonly denials: number[] }>;
   readonly reviewCounts: Map<string, number>;
+  /**
+   * The host turn each live session is currently in.
+   *
+   * The session log is the authority, so this is a cache of what `turn/start`
+   * announced, not a second counter: it exists because the gate must know the
+   * turn *before* the pending call's own event is written. A session with no
+   * entry has never announced a turn, and the snapshot then reports the turn as
+   * unknown rather than inventing one.
+   */
+  readonly currentTurn: Map<string, number>;
   readonly sessionRecordErrors: Map<string, string>;
   readonly legacyAutoRestores: { readonly at: number }[];
   readonly autoRejections: {

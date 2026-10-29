@@ -430,6 +430,7 @@ function acquireRuntime(
     historyBoundaryAmbiguity: new Map(),
     breakers: new Map(),
     reviewCounts: new Map(),
+    currentTurn: new Map(),
     sessionRecordErrors: new Map(),
     legacyAutoRestores: [],
     autoRejections: [],

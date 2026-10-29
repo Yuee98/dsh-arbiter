@@ -11,6 +11,7 @@ function snapshot(overrides: Partial<ReviewSnapshot> = {}): ReviewSnapshot {
     callId: 'c1',
     sessionId: 's1',
     sessionKind: 'main',
+    turn: 1,
     tool: 'bash',
     cwd: '/workspace',
     action: { name: 'bash', arguments: { command: 'echo hi' } },
@@ -37,6 +38,7 @@ function snapshot(overrides: Partial<ReviewSnapshot> = {}): ReviewSnapshot {
       },
       reset: false,
     },
+    completeness: { status: 'complete', items: [], gaps: [], note: null },
     missing: [],
     budget: {
       maxInputTokens: 10_000,
