@@ -14,7 +14,18 @@
  * - a file whose **tables are gone** is not recreated, because an empty table
  *   would report a lost history as a complete one.
  */
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -267,15 +278,61 @@ function refusalFor(state: AuditFileState): string | null {
 }
 
 /**
- * The refusal reason for one audit path, read without opening the database.
+ * The refusal reason for one audit path, decided without opening the original.
  *
- * The store asks this before it creates a connection, so a file it refuses is
- * never touched by SQLite: no WAL recovery, no checkpoint, no rewritten header.
- * `null` means the file may be opened — it is either absent or already current,
- * and the remaining structural checks run on the live connection.
+ * Two conditions have to hold before a connection may exist:
+ *
+ * 1. the stamp in the file header must match, and
+ * 2. the structure that stamp promises must actually be there.
+ *
+ * The second check cannot read the original either. A current-stamped file can
+ * still be structurally incomplete, and opening it to find out is what lets
+ * SQLite recover a WAL, checkpoint it and drop the `-wal`/`-shm` sidecars — so a
+ * refusal would modify exactly the file it promises to preserve. The structure is
+ * therefore read from a throwaway copy, which carries the sidecars so the copy
+ * sees the same committed state the original has. Only a file that passes both
+ * checks is opened for real.
+ *
+ * `null` means the file may be opened: it is absent, or it is a current database
+ * whose structure this build can actually use.
  */
 export function auditRefusal(path: string): string | null {
-  return refusalFor(auditFileState(path));
+  const state = auditFileState(path);
+  const verdict = refusalFor(state);
+  if (verdict !== null) return verdict;
+  if (state.kind === 'new') return null;
+  return auditStructureRefusal(path);
+}
+
+/**
+ * Refuse a current-stamped file whose structure is incomplete.
+ *
+ * The copy is disposable: it exists to be read, is never promoted to a backup and
+ * is removed before this function returns. Copying the sidecars matters because a
+ * database whose DDL landed only in the WAL would otherwise look unchanged on a
+ * copy made from the main file alone.
+ */
+function auditStructureRefusal(path: string): string | null {
+  const staging = mkdtempSync(join(tmpdir(), 'arbiter-audit-check-'));
+  try {
+    const copy = join(staging, 'arbiter.db');
+    copyFileSync(path, copy);
+    for (const suffix of ['-wal', '-shm'])
+      if (existsSync(`${path}${suffix}`))
+        copyFileSync(`${path}${suffix}`, `${copy}${suffix}`);
+    const probe = new DatabaseSync(copy);
+    try {
+      return structureRefusal(probe);
+    } finally {
+      probe.close();
+    }
+  } catch (error) {
+    // A copy that cannot be read proves nothing about the original, so the file
+    // is refused rather than opened on the strength of a failed inspection.
+    return `audit database could not be inspected without modifying it: ${error instanceof Error ? error.message : String(error)}; reset the audit database`;
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 /** The 16 bytes every SQLite 3 file starts with. */
@@ -364,6 +421,29 @@ function tableNames(db: DatabaseSync): ReadonlySet<string> {
   return names;
 }
 
+/**
+ * What is missing from a current-stamped file, or `null` when nothing is.
+ *
+ * Shared by the copy-based pre-check and the live open so the two can never
+ * disagree about what a usable structure is: the pre-check decides whether the
+ * original may be opened at all, and the live check must then find it complete.
+ */
+function structureRefusal(db: DatabaseSync): string | null {
+  const tables = tableNames(db);
+  const absent = REQUIRED_TABLES.filter((table) => !tables.has(table));
+  if (absent.length > 0)
+    return `audit database is missing the ${absent.join(', ')} table(s); this build does not recreate them, so the audit history must be reset`;
+  const drift = [...requiredColumns()].flatMap(([table, columns]) => {
+    const present = columnNames(db, table);
+    return [...columns]
+      .filter((column) => !present.has(column))
+      .map((column) => `${table}.${column}`);
+  });
+  if (drift.length > 0)
+    return `audit database is missing the ${drift.join(', ')} column(s); this build does not alter an existing structure, so the audit history must be reset`;
+  return null;
+}
+
 /** Create the structure in one transaction, then stamp the version. */
 function createSchema(db: DatabaseSync): void {
   db.exec('BEGIN IMMEDIATE');
@@ -423,21 +503,6 @@ export function openAuditSchema(db: DatabaseSync): void {
       `audit database schema ${String(version)} is not supported by this build (only ${String(SCHEMA_VERSION)} is read); reset the audit database instead of migrating it`,
     );
   }
-  const absent = REQUIRED_TABLES.filter((table) => !tables.has(table));
-  if (absent.length > 0) {
-    throw new AuditSchemaError(
-      `audit database is missing the ${absent.join(', ')} table(s); this build does not recreate them, so the audit history must be reset`,
-    );
-  }
-  const drift = [...requiredColumns()].flatMap(([table, columns]) => {
-    const present = columnNames(db, table);
-    return [...columns]
-      .filter((column) => !present.has(column))
-      .map((column) => `${table}.${column}`);
-  });
-  if (drift.length > 0) {
-    throw new AuditSchemaError(
-      `audit database is missing the ${drift.join(', ')} column(s); this build does not alter an existing structure, so the audit history must be reset`,
-    );
-  }
+  const refusal = structureRefusal(db);
+  if (refusal !== null) throw new AuditSchemaError(refusal);
 }

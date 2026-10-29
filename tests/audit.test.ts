@@ -1853,6 +1853,97 @@ describe('a database from an older release is refused, not migrated', () => {
       expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
   });
 
+  test('every read path answers a refusal instead of an empty result', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-refused-reads-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildPreviousReleaseDatabase(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // A read that succeeds here would be indistinguishable from "this audit
+    // holds nothing", which is the opposite of "this build cannot read it".
+    expect(store.listCalls({}).total).toBe(0);
+    expect(store.listCalls({}).unreadable).toBe(true);
+    expect(store.getCall('previous-call')).toBeNull();
+    expect(store.readCall('previous-call')).toEqual({
+      record: null,
+      unreadable: true,
+    });
+    expect(store.stats()).toBeNull();
+    expect(store.configHistory()).toEqual([]);
+    expect(store.callsForAnalysis(0, Date.now() + 1_000)).toEqual([]);
+    expect(store.recentForReplay()).toEqual([]);
+    expect(store.listCandidates()).toEqual([]);
+    expect(
+      store.verdictsForCalls('previous-session', ['previous-call']),
+    ).toEqual([]);
+    expect(store.priorVerdictStages('previous-call')).toEqual([]);
+    const prior = store.priorVerdictsForSession('previous-session', 10);
+    // The count is "rows this build cannot interpret", which is zero here; the
+    // refusal itself is reported through `paused` and `health()`.
+    expect(prior.verdicts).toEqual([]);
+    expect(prior.unreadableCount).toBe(0);
+    // Mutating entry points stay contained as before.
+    expect(store.clearCalls()).toEqual({ ok: false, deleted: 0 });
+    expect(store.runRetention().deleted).toBe(0);
+    expect(store.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
+    store.close();
+  });
+
+  test('a current-stamped WAL leftover with a table dropped is not touched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-drift-'));
+    dirs.push(dir);
+    // The leftover is produced outside the audit directory so only the audit
+    // files are compared after the refusal.
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-drift-src-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+
+    // A clean current database, then a DROP committed only into the WAL. The
+    // stamp in the main file is already current, so a header-only check would
+    // accept it, and opening it to inspect the structure is exactly what lets
+    // SQLite checkpoint and delete the sidecars.
+    const seed = new AuditStore(
+      join(source, 'arbiter.db'),
+      DEFAULT_CONFIG.audit,
+    );
+    seed.enqueue(record({ callId: 'drift-call', result: 'review-deny' }));
+    await seed.flush();
+    seed.close();
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec('DROP TABLE stages');
+    expect(
+      numberField(writer.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(3);
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // The structure is refused for what is missing, not for its version: the
+    // stamp matches, and that is why this case needed its own check.
+    expect(store.health().lastError).toContain('stages');
+    expect(store.health().lastError).toContain('reset');
+    store.close();
+
+    // The original keeps every file and every byte, sidecars included.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
   test('a newer structure is left untouched and only pauses writes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'arbiter-newer-'));
     dirs.push(dir);
