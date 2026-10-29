@@ -50,15 +50,19 @@ export {
 } from './evaluate.js';
 
 export {
+  addDecimals,
   bandFrom,
   bandFromNative,
   bandFromPublic,
+  compareToHalf,
   chatScore,
   cumulative,
   distributionToPublic,
+  exactDecimal,
   readProtocolScores,
   SUM_TOLERANCE,
   validateNativeDistribution,
+  validatePublicDistribution,
   weightedBand,
 } from './normalize.js';
 

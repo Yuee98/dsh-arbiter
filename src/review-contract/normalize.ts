@@ -74,25 +74,72 @@ export function chatScore(value: unknown):
   return { ok: true, score: value };
 }
 
-/** How many decimal places a protocol probability may carry. */
-const PROBABILITY_DECIMALS = 6;
-
 /**
- * The integer a decimal probability represents, at protocol precision.
+ * The exact decimal this double represents, or null when it has none.
  *
- * Comparing and summing floating-point probabilities directly is not sound for
- * this contract: ten values that sum to one exactly in decimal can accumulate to
- * 0.5000000000000001 or 0.49999999999999994, and N0's whole point is the
- * difference between "at least half" and "more than half". Scaling to integers at
- * the protocol's own precision keeps that distinction exact, so an answer that
- * really is half is treated as half.
+ * A probability arrives as a JavaScript number, and adding several of them can
+ * land either side of one half purely because of binary rounding: ten values that
+ * are exactly one in decimal can accumulate to 0.5000000000000001 or
+ * 0.49999999999999994. N0's whole point is the difference between "at least half"
+ * and "more than half", so the comparison is done on exact decimals instead.
+ *
+ * The shortest round-trip representation of a double is the decimal the protocol
+ * most likely submitted, and every finite double has one, so this is total for
+ * accepted input. A value that somehow has no such form is reported so the caller
+ * can refuse it rather than guess.
  */
-export function toUnits(probability: number): number {
-  return Math.round(probability * 10 ** PROBABILITY_DECIMALS);
+export function exactDecimal(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  const text = String(value);
+  return /^-?\d+(?:\.\d+)?$/u.test(text) ? text : null;
 }
 
-/** One half, in the same units. */
-export const HALF_UNITS = 5 * 10 ** (PROBABILITY_DECIMALS - 1);
+/**
+ * Add exact decimal strings.
+ *
+ * Scaled-integer addition keeps every significant digit: unlike quantizing a
+ * probability to a fixed number of places, it cannot move a value across the half
+ * boundary, because it does not discard anything the answer carried.
+ */
+export function addDecimals(values: readonly string[]): string {
+  let scale = 0;
+  const parts = values.map((text) => {
+    const [whole = '0', fraction = ''] = text.split('.');
+    scale = Math.max(scale, fraction.length);
+    return { whole, fraction };
+  });
+  let total = 0n;
+  for (const { whole, fraction } of parts) {
+    // Integer arithmetic on the scaled digits, so no precision is lost.
+    const scaled = `${whole}${fraction.padEnd(scale, '0')}`;
+    total += BigInt(scaled === '' ? '0' : scaled);
+  }
+  const negative = total < 0n;
+  const digits = (negative ? -total : total)
+    .toString()
+    .padStart(scale + 1, '0');
+  // `scale` digits belong after the point; everything before them is the whole part.
+  const wholePart = digits.slice(0, digits.length - scale);
+  const fractionPart =
+    scale === 0 ? '' : `.${digits.slice(digits.length - scale)}`;
+  return `${negative ? '-' : ''}${wholePart}${fractionPart}`;
+}
+
+/**
+ * Compare an exact decimal sum with one half.
+ *
+ * Returns a positive number when the sum exceeds one half, zero when it is exactly
+ * one half, and a negative number when it is below. The comparison doubles the sum
+ * and compares against one, entirely in integer arithmetic, so it stays exact for
+ * any number of decimal places.
+ */
+export function compareToHalf(sum: string): number {
+  const doubled = addDecimals([sum, sum]);
+  const [whole = '0', fraction = ''] = doubled.split('.');
+  const scaled = BigInt(`${whole}${fraction.padEnd(fraction.length, '0')}`);
+  const one = BigInt(`1${'0'.repeat(fraction.length)}`);
+  return scaled > one ? 1 : scaled < one ? -1 : 0;
+}
 
 /**
  * What went wrong with one decision field, or that nothing did.
@@ -239,7 +286,7 @@ export function cumulative(
   distribution: ScoreDistribution,
   level: number,
 ): number {
-  return cumulativeUnits(distribution, level, 0) / 10 ** PROBABILITY_DECIMALS;
+  return Number(cumulativeDecimal(distribution, level, 0));
 }
 
 /**
@@ -249,17 +296,19 @@ export function cumulative(
  * 0.49999999999999994 depending on the order of the terms, which is precisely the
  * distinction N0 depends on.
  */
-function cumulativeUnits(
+function cumulativeDecimal(
   distribution: ScoreDistribution,
   level: number,
   base: 0 | 1,
-): number {
-  let sum = 0;
+): string {
+  const parts: string[] = [];
   for (const [key, value] of Object.entries(distribution)) {
     const index = Number(key);
-    if (index >= base && index <= level) sum += toUnits(value);
+    if (index < base || index > level) continue;
+    const exact = exactDecimal(value);
+    if (exact !== null) parts.push(exact);
   }
-  return sum;
+  return addDecimals(parts);
 }
 
 /**
@@ -279,11 +328,11 @@ export function bandFrom(
 ): PublicScore {
   const highest = base === 0 ? NATIVE_MAX : 10;
   for (let level = base; level <= highest; level += 1) {
-    // Integer units throughout: an exact half must stay exactly half, or the two
+    // Exact decimals throughout: an exact half must stay exactly half, or the two
     // rules would agree where the contract says they must differ.
-    const running = cumulativeUnits(distribution, level, base);
-    const reached =
-      rule === 'risk' ? running > HALF_UNITS : running >= HALF_UNITS;
+    const running = cumulativeDecimal(distribution, level, base);
+    const comparison = compareToHalf(running);
+    const reached = rule === 'risk' ? comparison > 0 : comparison >= 0;
     if (reached) return publicScoreAt(level, base);
   }
   // Unreachable for a validated distribution: a total of one always crosses one

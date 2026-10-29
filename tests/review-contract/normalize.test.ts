@@ -19,9 +19,12 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  addDecimals,
   bandFromNative,
   bandFromPublic,
   chatScore,
+  compareToHalf,
+  evaluateReview,
   cumulative,
   distributionToPublic,
   readProtocolScores,
@@ -135,8 +138,9 @@ describe('N0 medians', () => {
 describe('exact-half arithmetic', () => {
   // Adding float probabilities in order can turn an exact decimal half into
   // 0.5000000000000001 or 0.49999999999999994. N0 exists to distinguish "at least
-  // half" from "more than half", so the accumulation is done in integer units at
-  // protocol precision and these cases must land exactly on the boundary.
+  // half" from "more than half", so the comparison is made on exact decimals: the
+  // shortest round-trip form of each value, summed in scaled integers. Nothing is
+  // quantized, so a value that genuinely differs from a half keeps differing.
   test('an accumulation just above half is not treated as more than half', () => {
     const distribution = dist({
       '0': 0.1398,
@@ -166,6 +170,47 @@ describe('exact-half arithmetic', () => {
     expect(bandFromNative(distribution, 'authorization')).toBe(6);
     // Risk does not, so it continues to the top band.
     expect(bandFromNative(distribution, 'risk')).toBe(10);
+  });
+
+  test('a sum that truly exceeds half is not rounded down to half', () => {
+    // The counterexample that a fixed six-decimal quantization got wrong: every
+    // value here is a legal probability, and F(2) is 0.5000002 — above half. Rounding
+    // each value to six places would scale them to 499999 units and lose the
+    // distinction, turning A3 into A10.
+    const authorization = dist({
+      '0': 0.1000004,
+      '1': 0.1000004,
+      '2': 0.2999994,
+      '9': 0.4999998,
+    });
+    // The exact decimal sum really is above half, and asserting the float sum keeps
+    // the test honest about why the naive reading is not enough.
+    expect(
+      compareToHalf(addDecimals(['0.1000004', '0.1000004', '0.2999994'])),
+    ).toBeGreaterThan(0);
+    // Authorization reaches half at band 3.
+    expect(bandFromNative(authorization, 'authorization')).toBe(3);
+  });
+
+  test('the matrix verdict for a genuinely above-half answer escalates', () => {
+    // With risk 7 the required authorization is A10, so A3 must escalate. This is
+    // the false allow the quantized comparison produced.
+    const risk = dist({ '6': 1 });
+    const authorization = dist({
+      '0': 0.1000004,
+      '1': 0.1000004,
+      '2': 0.2999994,
+      '9': 0.4999998,
+    });
+    const outcome = evaluateReview({
+      scores: { source: 'decision', risk, authorization },
+    });
+    expect(outcome.status).toBe('scored');
+    if (outcome.status !== 'scored')
+      throw new Error('expected a scored review');
+    expect(outcome.authorization).toBe(3);
+    expect(outcome.requiredAuthorization).toBe(10);
+    expect(outcome.verdict).toBe('review-escalate');
   });
 
   test('the matrix verdict follows the corrected band', () => {
