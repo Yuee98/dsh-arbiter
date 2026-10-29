@@ -239,6 +239,54 @@ function call(
 const allowNext = (): Promise<{ kind: string }> =>
   Promise.resolve({ kind: 'allow' });
 
+/** The stored call row, once the audit store has written it. */
+async function storedCall(callId: string): Promise<{
+  readonly result: string;
+  readonly modelAttempts: readonly {
+    readonly usage: unknown;
+    readonly normalizedUsage: unknown;
+  }[];
+  readonly usage: unknown;
+}> {
+  const store = new AuditStore(
+    join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+    {
+      enabled: true,
+      retentionDays: 30,
+      retentionBytes: 1_073_741_824,
+      maxQueue: 500,
+    },
+  );
+  try {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const row: unknown = store.getCall(callId);
+      if (row !== null && typeof row === 'object') {
+        const result: unknown = Reflect.get(row, 'result');
+        const attempts: unknown = Reflect.get(row, 'modelCalls');
+        if (typeof result === 'string' && Array.isArray(attempts)) {
+          return {
+            result,
+            modelAttempts: attempts.flatMap((entry: unknown) => {
+              if (entry === null || typeof entry !== 'object') return [];
+              const usage: unknown = Reflect.get(entry, 'usage');
+              const normalizedUsage: unknown = Reflect.get(
+                entry,
+                'normalizedUsage',
+              );
+              return [{ usage, normalizedUsage }];
+            }),
+            usage: Reflect.get(row, 'usage') as unknown,
+          };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`no persisted call for ${callId}`);
+  } finally {
+    store.close();
+  }
+}
+
 /** The stage results the audit store persisted for one call. */
 async function storedTrace(callId: string): Promise<readonly string[]> {
   const store = new AuditStore(
@@ -541,6 +589,71 @@ describe('missing approval channel', () => {
       const pinnedDecision = await harness.gate(call(pinned, 'c2'), allowNext);
       expect(pinnedDecision.reason).toContain('fallback-deny');
       expect(pinnedDecision.reason).toContain('host_approval_policy_never');
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('a cancelled review keeps its attempts', () => {
+  test('attempts and usage survive a cancellation that arrives after the request', async () => {
+    // The provider sent usage and was then cancelled. The call must still be
+    // cancelled for the host, but the attempt that was billed has to remain in the
+    // record: dropping it would make the review look free and unattempted.
+    const session = makeSession('cancel-attempts');
+    const controller = new AbortController();
+    let started: (() => void) | undefined;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const llm: HostServices['llm'] = {
+      stream: (options: { readonly signal?: AbortSignal }) => {
+        return (async function* () {
+          started?.();
+          // Reported before the cancellation, exactly as a provider that billed
+          // the request would.
+          yield {
+            type: 'usage',
+            usage: { inputTokens: 900, outputTokens: 20, totalTokens: 920 },
+          };
+          // A real stream rejects once its transport is aborted; holding the
+          // answer until then is what makes the cancellation arrive mid-request.
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, 200);
+            options.signal?.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(new Error('stream aborted'));
+              },
+              { once: true },
+            );
+          });
+          yield { type: 'text-delta', text: '{"risk":2,"authorization":9}' };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+        })();
+      },
+    };
+    const harness = createHarness({ sessions: [session], llm });
+    try {
+      const pending = harness.gate(
+        call(session, 'cancel-1', controller.signal),
+        allowNext,
+      );
+      await startedPromise;
+      controller.abort();
+      const decision = await pending;
+      expect(decision.kind).toBe('cancel');
+      // The record proves the attempt happened, with the usage it reported.
+      const stored = await storedCall('cancel-1');
+      expect(stored.result).toBe('review-cancelled');
+      const attempts = stored.modelAttempts;
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.usage).toMatchObject({ inputTokens: 900 });
+      const usage: unknown = stored.usage;
+      expect(usage).toMatchObject({ attempts: 1 });
+      // The chain names the cancellation rather than a reviewer failure.
+      expect(await storedTrace('cancel-1')).toContain('review-cancelled');
     } finally {
       harness.dispose();
     }

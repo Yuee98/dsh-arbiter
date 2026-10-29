@@ -208,6 +208,7 @@ function attemptOf(model: StoredCall): CallDetailModelAttempt {
     estimatedInputTokens: numberOf(model, 'estimatedInputTokens') ?? 0,
     usage: valueOf(model, 'usage'),
     normalizedUsage: valueOf(model, 'normalizedUsage'),
+    failureKind: textOf(model, 'failureKind'),
   };
 }
 

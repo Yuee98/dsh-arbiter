@@ -179,6 +179,8 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
     // zeros.
     usage: rowJson(model['usage']),
     normalizedUsage: rowJson(model['normalized_usage']),
+    failureKind:
+      typeof model['failure_kind'] === 'string' ? model['failure_kind'] : null,
   };
 }
 

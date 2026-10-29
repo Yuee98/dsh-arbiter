@@ -67,6 +67,8 @@
   "attemptErrorMissing": "No error.",
   "attemptUsage": "Usage",
   "attemptUsageMissing": "No usage recorded.",
+  "attemptUsageNormalized": "Normalized usage",
+  "attemptFailureKind": "Failure kind",
   "missingUnknown": "{count} more missing materials cannot be explained by the current version.",
   "missing": {
     "auditDisabled": "Audit storage is turned off, so the detailed record cannot be read.",

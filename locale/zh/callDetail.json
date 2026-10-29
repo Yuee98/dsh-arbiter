@@ -67,6 +67,8 @@
   "attemptErrorMissing": "没有错误。",
   "attemptUsage": "用量",
   "attemptUsageMissing": "没有记录用量。",
+  "attemptUsageNormalized": "规范化用量",
+  "attemptFailureKind": "失败类别",
   "missingUnknown": "另有 {count} 项材料缺失原因当前版本无法解释。",
   "missing": {
     "auditDisabled": "审计存储已关闭，无法读取详细记录。",

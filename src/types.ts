@@ -284,7 +284,15 @@ export type CallResult =
   | 'human-allow'
   | 'human-deny'
   | 'human-abort'
-  | 'fallback-deny';
+  | 'fallback-deny'
+  /**
+   * The call was cancelled while its review was already out.
+   *
+   * It is a result in its own right because the attempts that reached the provider
+   * were billed and must stay in the record. It is not a verdict: nothing was
+   * decided, and it must never read as a reviewer failure or a human refusal.
+   */
+  | 'review-cancelled';
 
 export interface TraceStage {
   readonly stage: DecisionStage;
@@ -720,6 +728,15 @@ export interface ModelAttemptRecord {
   readonly responseText: string | null;
   readonly parsed: unknown;
   readonly error: string | null;
+  /**
+   * Why this attempt produced no answer, as the transport classified it.
+   *
+   * The three kinds are different facts a reader must not have to infer from the
+   * error text: a provider that declared its own failure, an answer that arrived
+   * and could not be read, and a connection that never carried one. `null` means
+   * the attempt succeeded.
+   */
+  readonly failureKind: string | null;
   /**
    * The provider's usage payload after credential masking, exactly as received.
    *

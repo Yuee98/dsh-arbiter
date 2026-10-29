@@ -134,6 +134,7 @@ export function storedAttemptOf(attempt: ReviewAttempt): {
   readonly responseText: string | null;
   readonly parsed: unknown;
   readonly error: string | null;
+  readonly failureKind: AttemptFailureKind | null;
   readonly usage: unknown;
   readonly normalizedUsage: UsageNormalized | null;
   readonly startedAt: number;
@@ -150,6 +151,7 @@ export function storedAttemptOf(attempt: ReviewAttempt): {
     responseText: attempt.responseText,
     parsed: attempt.parsed,
     error: attempt.error,
+    failureKind: attempt.failureKind,
     usage: attempt.rawUsage,
     normalizedUsage: attempt.normalizedUsage,
     startedAt: attempt.startedAt,

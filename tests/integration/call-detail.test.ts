@@ -38,7 +38,7 @@ import type { CallRecord } from '../../src/audit.js';
 import { apply } from '../../src/index.js';
 import { logRoute } from '../../src/host/audit-routes.js';
 import { installSessionRecordApi } from '../../src/records.js';
-import type { HostEnvironment } from '../../src/host/types.js';
+import type { HostEnvironment, HostServices } from '../../src/host/types.js';
 import type { SessionEventLike } from '../../src/snapshot.js';
 import { capturingGate, createStubContext } from '../helpers/host-stub.js';
 import type { Gate } from '../helpers/host-stub.js';
@@ -139,6 +139,8 @@ function startHarness(
     readonly credentials?: {
       resolve(ref: string): Promise<{ value: string } | undefined>;
     };
+    /** Replaces the scripted reviewer, e.g. to script a repair sequence. */
+    readonly llm?: HostServices['llm'];
   } = {},
 ): Harness {
   const session = options.session ?? makeSession(`session-${String(seq)}`);
@@ -155,7 +157,7 @@ function startHarness(
         get: (id: string) => (id === session.id ? session : undefined),
         list: () => [session],
       },
-      llm: chatAnswer(2, 9),
+      llm: options.llm ?? chatAnswer(2, 9),
       approval: {
         config: { policy: 'ask' },
         request: options.approval ?? (() => Promise.resolve('unavailable')),
@@ -480,6 +482,7 @@ describe('full audit detail', () => {
           estimatedInputTokens: 3,
           usage: null,
           normalizedUsage: null,
+          failureKind: null,
         },
       ],
       scores: null,
@@ -509,6 +512,68 @@ describe('full audit detail', () => {
     // The model's own answer text is still shown, with only the credential masked.
     expect(stringField(attempts[0], 'responseText')).toContain('echoed');
     expect(fieldOf(attempts[0], 'parsed')).toEqual({ risk: 5 });
+  });
+});
+
+describe('per-attempt classification survives storage and a cold read', () => {
+  test('a failed first attempt keeps its category and partial usage', async () => {
+    // The engine repaired once: attempt 1 was unreadable, attempt 2 answered. The
+    // stored record has to keep attempt 1's category and usage, or a reader cannot
+    // tell which attempt cost what and why it produced nothing.
+    const callId = 'repair-attempts';
+    let index = 0;
+    const harness = startHarness({
+      llm: {
+        stream: () => {
+          index += 1;
+          const first = index === 1;
+          return (async function* () {
+            await Promise.resolve();
+            if (first) {
+              // Malformed: the contract requires exactly two members.
+              yield { type: 'text-delta', text: '{"risk":1}' };
+              yield {
+                type: 'usage',
+                usage: { inputTokens: 800, outputTokens: 5, totalTokens: 805 },
+              };
+              yield { type: 'finish', reason: { kind: 'stop' } };
+              return;
+            }
+            yield { type: 'text-delta', text: '{"risk":1,"authorization":2}' };
+            yield {
+              type: 'usage',
+              usage: { inputTokens: 900, outputTokens: 10, totalTokens: 910 },
+            };
+            yield { type: 'finish', reason: { kind: 'stop' } };
+          })();
+        },
+      },
+    });
+    expect(await run(harness, callId, 'echo hi')).toBe('allow');
+    await persisted(harness.host, callId);
+
+    // Cold read: a fresh store over the same file, as a restart would do.
+    const detail = await detailOf(harness.host, callId);
+    const attempts = listField(fieldOf(detail, 'raw'), 'modelAttempts');
+    expect(attempts).toHaveLength(2);
+    const first = attempts[0];
+    const second = attempts[1];
+    // The failure category is the transport's own classification, not a guess.
+    expect(fieldOf(first, 'failureKind')).toBe('unreadable-answer');
+    expect(fieldOf(second, 'failureKind')).toBeNull();
+    // Both attempts keep their own provider payload and its normalization.
+    expect(fieldOf(first, 'usage')).toMatchObject({ inputTokens: 800 });
+    expect(fieldOf(fieldOf(first, 'normalizedUsage'), 'tokens')).toMatchObject({
+      inputTokens: 800,
+    });
+    expect(fieldOf(second, 'usage')).toMatchObject({ inputTokens: 900 });
+    // The aggregate counts both attempts and covers the bucket fully, so a reader
+    // can tell the summary is complete rather than partial.
+    const usage = fieldOf(fieldOf(detail, 'basis'), 'usage');
+    expect(fieldOf(usage, 'attempts')).toBe(2);
+    const input = fieldOf(fieldOf(usage, 'totals'), 'inputTokens');
+    expect(fieldOf(input, 'total')).toBe(1_700);
+    expect(fieldOf(input, 'complete')).toBe(true);
   });
 });
 
@@ -695,6 +760,7 @@ describe('conflicting and partial evidence', () => {
           estimatedInputTokens: 3,
           usage: null,
           normalizedUsage: null,
+          failureKind: null,
         },
       ],
       scores: null,
@@ -762,6 +828,7 @@ describe('conflicting and partial evidence', () => {
           estimatedInputTokens: 3,
           usage: null,
           normalizedUsage: null,
+          failureKind: null,
         },
       ],
       scores: null,

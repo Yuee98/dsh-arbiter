@@ -153,13 +153,29 @@ function Attempt({
             missingText={t('callDetail.attemptErrorMissing')}
           />
         ) : null}
-        {attempt.usage !== null && attempt.usage !== undefined ? (
-          <MaterialCard
-            label={t('callDetail.attemptUsage')}
-            value={attempt.usage}
-            missingText={t('callDetail.attemptUsageMissing')}
-          />
-        ) : null}
+        {attempt.failureKind === null ? null : (
+          <div className="arb:text-[12.5px]" data-call-detail-attempt-failure>
+            {t('callDetail.attemptFailureKind')}:{' '}
+            <code className="arb:font-mono">{attempt.failureKind}</code>
+          </div>
+        )}
+        {/*
+          The provider payload and its normalization are shown side by side: a
+          reader has to be able to tell what the provider said from what this
+          contract read out of it. Both are printed even when one is absent, so
+          "the provider reported nothing" is visible rather than looking like a
+          section that was simply not rendered.
+        */}
+        <MaterialCard
+          label={t('callDetail.attemptUsage')}
+          value={attempt.usage}
+          missingText={t('callDetail.attemptUsageMissing')}
+        />
+        <MaterialCard
+          label={t('callDetail.attemptUsageNormalized')}
+          value={attempt.normalizedUsage}
+          missingText={t('callDetail.attemptUsageMissing')}
+        />
       </div>
     </div>
   );

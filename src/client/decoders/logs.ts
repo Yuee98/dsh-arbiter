@@ -199,6 +199,7 @@ function attempt(value: unknown): CallDetailModelAttemptView {
     estimatedInputTokens: field(source, 'estimatedInputTokens', number),
     usage: field(source, 'usage', unknownValue),
     normalizedUsage: field(source, 'normalizedUsage', unknownValue),
+    failureKind: field(source, 'failureKind', nullable(text)),
   };
 }
 

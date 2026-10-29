@@ -175,6 +175,14 @@ export interface CallDetailModelAttempt {
   readonly usage: unknown;
   /** The same payload under the shared usage mapping, or null when nothing arrived. */
   readonly normalizedUsage: unknown;
+  /**
+   * Why this attempt produced no answer, as the transport classified it.
+   *
+   * `null` means the attempt succeeded. The category is kept apart from the error
+   * text because a provider refusal, an unreadable answer and a broken transport
+   * are different facts, and inferring one from wording is not reliable.
+   */
+  readonly failureKind: string | null;
 }
 
 export interface CallDetailRaw {

@@ -149,7 +149,11 @@ const SCHEMA_SQL = `
           duration_ms INTEGER NOT NULL,
           estimated_input_tokens INTEGER NOT NULL,
           usage TEXT,
-          normalized_usage TEXT
+          normalized_usage TEXT,
+          -- Why this attempt produced no answer, as the transport classified it
+          -- (provider-refusal / unreadable-answer / transport). NULL means the
+          -- attempt succeeded, which is different from "unknown".
+          failure_kind TEXT
         );
         CREATE INDEX IF NOT EXISTS model_calls_call ON model_calls(call_id, attempt);
         CREATE TABLE IF NOT EXISTS candidates (
@@ -205,6 +209,7 @@ const ADDED_COLUMNS: readonly (readonly [string, string, string])[] = [
   ['calls', 'review_stage', 'TEXT'],
   ['calls', 'usage', 'TEXT'],
   ['model_calls', 'normalized_usage', 'TEXT'],
+  ['model_calls', 'failure_kind', 'TEXT'],
   ['stages', 'rule_name', 'TEXT'],
   ['stages', 'config_snapshot_id', 'TEXT'],
   ['model_calls', 'template_id', 'TEXT'],

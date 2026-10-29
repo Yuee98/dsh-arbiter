@@ -131,8 +131,8 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
     `INSERT OR REPLACE INTO model_calls(
           id, call_id, attempt, backend, protocol, request, template_id,
           response_text, parsed, error, started_at, duration_ms,
-          estimated_input_tokens, usage, normalized_usage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          estimated_input_tokens, usage, normalized_usage, failure_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const attempt of record.modelAttempts) {
     modelStatement.run(
@@ -154,6 +154,7 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
       // normalization done under the mapping this build uses.
       nullableJson(attempt.usage),
       nullableJson(attempt.normalizedUsage),
+      attempt.failureKind ?? null,
     );
   }
 }

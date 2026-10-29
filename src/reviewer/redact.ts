@@ -59,11 +59,19 @@ const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
  * regex cannot match a balanced object, and the generic unquoted branch stops at
  * the first `,` or `}` — masking that fragment would leave the rest of the object
  * behind and produce invalid JSON. The spans are therefore located by counting
- * braces (respecting JSON string literals) and the masker skips them.
+ * braces (respecting JSON string literals).
  *
- * Skipping is scoped to the exact JSON spelling of this contract's score member,
- * so a bare or capitalized header inside the same object is still masked: only the
- * span owned by `"authorization"` is exempt, not its contents.
+ * **Being a balanced object is not enough.** An exemption keyed on shape alone
+ * would excuse any object at this key, and an object is the obvious way to smuggle
+ * a credential past a matcher that only rescans auth-named fields:
+ * `{"authorization":{"value":"Bearer …"}}` is not a score, yet it satisfies
+ * "balanced object after the exact key". So a span counts only when its own
+ * top-level members identify a score answer — the same `"type":"score"` the
+ * decision protocol sends. Anything else is ordinary text to the masker.
+ *
+ * Skipping is scoped to that verified span, so a bare or capitalized header inside
+ * the same object is still masked: only the score member is exempt, not its
+ * contents.
  */
 function scoreObjectSpans(
   text: string,
@@ -76,9 +84,12 @@ function scoreObjectSpans(
     match = opener.exec(text)
   ) {
     const start = match.index;
-    // The `{` this member opens: the last character of the match.
+    // The `{` this member opens: the last character of the match. The span keeps
+    // the key so `isScoreMember` can compare offsets against the match start, and
+    // the object itself starts one character later.
+    const objectStart = start + match[0].length - 1;
     let depth = 0;
-    let index = start + match[0].length - 1;
+    let index = objectStart;
     let inString = false;
     let escaped = false;
     for (; index < text.length; index += 1) {
@@ -105,6 +116,9 @@ function scoreObjectSpans(
     // An unterminated object is not a span: the text is truncated, and guessing
     // where it ends is how a masker would drop its own protection.
     if (depth !== 0) continue;
+    // Only a structurally verified score answer is exempt. The check reads the
+    // object's own text, so an object that merely sits at this key is still masked.
+    if (!isScoreObject(text.slice(objectStart, index + 1))) continue;
     spans.push([start, index + 1]);
   }
   return spans;
@@ -154,6 +168,67 @@ function maskStrict(fragment: string, pattern: RegExp): string {
     (_match: string, field: string, separator: string) =>
       `${field}${separator}[redacted]`,
   );
+}
+
+/**
+ * Whether this object's own top-level members identify a score answer.
+ *
+ * The predicate is deliberately narrow: the object must declare the score type the
+ * decision protocol sends. It does not need to validate the distribution — the
+ * parser does that, and this module is not a parser — but it must be impossible for
+ * an arbitrary object carrying a credential to satisfy it. A `"type"` value that is
+ * not `"score"`, a missing `"type"`, or a nested `"type":"score"` (which is not a
+ * top-level member) all fail.
+ */
+function isScoreObject(fragment: string): boolean {
+  // The opening brace is part of the span; the members start after it.
+  const body = fragment.slice(1, -1);
+  const member = /"type"\s*:\s*"([^"]*)"/u.exec(topLevelMembers(body));
+  return member?.[1] === 'score';
+}
+
+/**
+ * The portion of an object body that belongs to its own members.
+ *
+ * Nested objects are replaced by a placeholder, so a `"type":"score"` inside a
+ * nested array or object cannot satisfy {@link isScoreObject}. Text inside string
+ * literals is kept because that is where the member values live.
+ */
+function topLevelMembers(body: string): string {
+  let out = '';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of body) {
+    if (escaped) {
+      if (depth === 0) out += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      if (depth === 0) out += character;
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      inString = !inString;
+      if (depth === 0) out += character;
+      continue;
+    }
+    if (!inString) {
+      if (character === '{' || character === '[') {
+        depth += 1;
+        if (depth === 1) out += ' ';
+        continue;
+      }
+      if (character === '}' || character === ']') {
+        depth -= 1;
+        continue;
+      }
+    }
+    if (depth === 0) out += character;
+  }
+  return out;
 }
 
 /**

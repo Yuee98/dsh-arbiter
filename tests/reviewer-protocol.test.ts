@@ -1274,6 +1274,77 @@ describe('the score object is exempt while every header still masks', () => {
     expect(masked).not.toContain('sk-sibling');
   });
 
+  test('an arbitrary object at that key is not a score and still masks', () => {
+    // The exemption is a *verified score answer*, not "a balanced object after the
+    // exact key". An object is the obvious way to smuggle a credential past a
+    // matcher that only rescans auth-named fields, so shape alone must not be
+    // enough: `value` is not an auth field, and this must still be masked.
+    const smuggled = '{"authorization":{"value":"Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(smuggled)).not.toContain('PRIVATE_TOKEN');
+    // A nested `type: score` does not make its container a score answer either:
+    // the container's own members are what the exemption reads, so the object at
+    // this key is masked as a whole rather than kept intact.
+    const nested =
+      '{"authorization":{"wrapper":{"type":"score"},"value":"Bearertoken"}}';
+    expect(redactAuthHeaders(nested)).toContain('"authorization":[redacted]');
+    // A different answer type, and an object with no type at all, are not scores:
+    // both are masked as a whole at that key instead of being kept intact.
+    expect(
+      redactAuthHeaders('{"authorization":{"type":"noul","noul":0.5}}'),
+    ).toContain('"authorization":[redacted]');
+    expect(redactAuthHeaders('{"authorization":{"value":"TOK"}}')).toContain(
+      '"authorization":[redacted]',
+    );
+  });
+
+  test('a verified score answer is exempt in both envelopes', () => {
+    // The exemption has to keep working for the real answers, or the fix would
+    // trade a security hole for the parseability defect it was introduced to fix.
+    const native = JSON.stringify({
+      model: 'jev',
+      answers: {
+        risk: { type: 'score', probabilities: { '0': 0.5, '9': 0.5 } },
+        authorization: { type: 'score', probabilities: { '9': 1 } },
+      },
+    });
+    expect(
+      () => JSON.parse(redactAuthHeaders(native)) as unknown,
+    ).not.toThrow();
+    const wrapped = JSON.stringify({
+      result: {
+        answers: {
+          authorization: { type: 'score', probabilities: { '9': 1 } },
+        },
+      },
+      success: true,
+    });
+    expect(
+      () => JSON.parse(redactAuthHeaders(wrapped)) as unknown,
+    ).not.toThrow();
+  });
+
+  test('a decision attempt with no known secret still masks a structured echo', async () => {
+    // The chat path is the acute case: the host owns the credential, so the
+    // adapter has no value to substitute and the structural pass is the only
+    // protection. A nested auth-named key must therefore still mask.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","Authorization":"Bearer sk-structural"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-structural');
+  });
+
   test('a credential in a decision attempt record is masked end to end', async () => {
     // The unit rule above is necessary but not sufficient: the boundary the record
     // is built at is `maskAttempt`, so a real attempt is what proves the masked

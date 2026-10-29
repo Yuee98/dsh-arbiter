@@ -208,7 +208,7 @@ function currentIdentity(host: HostEnvironment): StageIdentity {
 
 function pushStage(
   trace: TraceStage[],
-  stage: 'human' | 'fallback',
+  stage: 'human' | 'fallback' | 'review',
   result: string,
   reason: string,
   identity: StageIdentity,
@@ -238,6 +238,9 @@ const TERMINAL_DISPOSITIONS: Readonly<Record<string, SettledDisposition>> = {
   allow: 'allow',
   'review-allow': 'allow',
   'human-allow': 'allow',
+  // A cancelled call is cancelled, not denied: the host must see the same
+  // disposition it would have seen had the call never reached the reviewer.
+  'review-cancelled': 'cancel',
 };
 
 /** The host answer a previously settled outcome dictates. */
@@ -635,6 +638,40 @@ export class CallSettlement {
         },
       );
     });
+  }
+
+  /**
+   * Settle a call whose review was cancelled after at least one attempt.
+   *
+   * The attempt list and its usage are the evidence this exists for: a provider
+   * call that was billed must remain inspectable even though the call itself
+   * produced no decision. The trace keeps an explicit cancellation stage so the
+   * chain cannot be read as a reviewer failure or a human refusal, and the host
+   * still receives a cancellation.
+   */
+  cancelledReview(
+    call: CallContext,
+    reason: string,
+    extras: AuditExtras,
+  ): PreToolDecision {
+    const text = decisionFeedback({
+      result: 'review-cancelled',
+      outcomeReason: reason,
+      ruleId: extras.ruleId,
+      decisionRules: extras.decisionRules,
+      reviewReason: extras.reviewReason,
+      snapshot: extras.snapshot,
+    });
+    pushStage(
+      call.trace,
+      'review',
+      'review-cancelled',
+      reason,
+      currentIdentity(this.host),
+    );
+    const claim = this.claim(call, 'review-cancelled', text);
+    if (!claim.won) return dispositionOf(claim.outcome);
+    return dispositionOf(this.finalize(call, 'review-cancelled', text, extras));
   }
 
   /**

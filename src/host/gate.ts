@@ -579,7 +579,18 @@ export class CallGate {
       this.host.services.llm,
       bundle,
     );
-    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
+    // A cancellation that arrives while the request is already out does not undo
+    // the attempts that reached the provider: they were sent and may have been
+    // billed, so they are persisted with the cancellation instead of being
+    // dropped. The host's disposition is still a cancellation — a cancelled
+    // request must never be settled by the model's score.
+    if (isAborted(call.exec.signal)) {
+      return this.settlement.cancelledReview(
+        call,
+        'the call was cancelled while its review request was in flight',
+        reviewExtras(call.extras, result),
+      );
+    }
     this.noteStage(call, stageOf(result.outcome), reasonOf(result.outcome));
     return await this.settleReviewed(call, result);
   }

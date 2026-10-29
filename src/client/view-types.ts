@@ -299,6 +299,13 @@ export interface CallDetailModelAttemptView {
   readonly usage: unknown;
   /** The same payload under the shared usage mapping, or null. */
   readonly normalizedUsage: unknown;
+  /**
+   * Why this attempt produced no answer, or null when it succeeded.
+   *
+   * Kept apart from the error text: a provider refusal, an unreadable answer and
+   * a broken transport are different facts.
+   */
+  readonly failureKind: string | null;
 }
 
 /**
