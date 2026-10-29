@@ -96,6 +96,49 @@ if (read.ok) {
 
 `pnpm verify` 包含 `check:evals`，因此 CI 默认只跑离线工程与数据校验。
 
+## 报告
+
+```sh
+pnpm evals report <运行目录>                                  # 用运行记录自带的数据集重建三层报告
+pnpm evals report <运行目录> --out validation/review-quality/run-a
+pnpm evals report <运行目录> --mode no-ask --channel unavailable
+```
+
+`report` 只读：它通过 `evals/src/run/artifact.ts` 读保存的记录，不派发、不解析凭据、不调用模型。同一份运行记录的两次重建产出**逐字节相同**的文档，因此它可以被 CI 或回归检查调用，而 `run` 不行。
+
+三个文件一起写出：`<prefix>.json`（报告本身）、`<prefix>.md`（人读）、`<prefix>.html`（自包含，无脚本、无外链）。默认 prefix 在运行目录内；已存在的报告不会被覆盖，除非加 `--force`——报告是证据。
+
+### 三层分开
+
+| 层             | 内容                                                  | 分母                               |
+| -------------- | ----------------------------------------------------- | ---------------------------------- |
+| 一：自动行为   | 误放／误拒／不必要人工／升级而非拒绝／一致            | 有判定且案例有金标标签的格子       |
+| 二：R/A 诊断   | 评分误差、相邻档、合法配对命中、单调性、分布形态      | 裁决者把该字段钉成唯一值的案例     |
+| 三：模式与结算 | allow／deny／询问人工／归一拒绝，以及询问人工是否必要 | 全部格子，但技术故障的结算单独一行 |
+
+**技术失败不属于任何一层。** 超时、取消、传输失败与审查失败都是「没有对本次调用作出陈述」，因此不进比较分母、不算拒绝，只在覆盖表里单独计数。记录缺失（索引声称跑过却没有记录）与派发前已决定（不支持／预算耗尽／未开始）也各占一行。
+
+### 分母与未知
+
+- `labels/` 为空时金标指标没有分母，报告显示 `n/a (0/0)` 并说明这是等待用户裁决的正常状态，**不显示 0% 通过率**。
+- 按格子与**按案例加权**的比率同时给出：相关变体与重复共享 seed，不是独立样本。
+- 无效／未复核／争议标签按 `case-missing`／`input-changed`／`version-drift`／`not-approved`／`no-score`／`indeterminate` 计数并公开，全部带案例 id 与裁决理由原文。
+- 行为参考与实际结果冲突时列入「差异」，从不用引擎输出覆盖人类答案。
+
+### 可比性
+
+同模型双协议只在**一个目标同时支持两种协议**时配对，且只对两侧都确有回答的案例配对；重复按案例 id 取一个值，不放大配对数。模型与协议同时变化时只输出「系统组合」并写明不能归因于单一协议。
+
+### 用量扩展段
+
+逐 attempt、逐次审查、按 model／protocol／target／run 汇总，全部复用 `src/reviewer/usage.ts` 的 `aggregateUsage`，不复制字段映射。每格重算值与记录自带汇总比对，不一致时报告按重算值输出并在自检里标出。
+
+- 六个桶（input／output／total／cache 读／cache 写／reasoning）各自给出合计、报告数、缺失数与 `complete`；未知保持 `null`，明确报告的 0 保持 0。
+- 缓存与 reasoning 子项按 `inclusions` 标注 `contained`／`separate`／`unknown`，**永不并入父项**。
+- 适配器估算的 input token 与 provider 报告分开两栏，不加在一起。
+- 费用是状态：`cost.amount` 恒为 `null`，报告**不输出费用合计**。
+- 超时／取消时未报告的预留 attempt 单列，不编造 token 数。
+
 ## 数据分层
 
 一个数据集是一个目录：
@@ -188,6 +231,8 @@ evals/
   src/data/          读取、schema 校验、跨文件一致性、hash、rubric 比对
   src/annotation/    导出、回填、汇总
   src/cli/           命令解析与命令实现
+  src/metrics/       报告的三层指标、分组、逐例证据与可比性规则
+  src/report/        Markdown／HTML／JSON 渲染、写出与 report 命令
   src/cli.ts         入口（先装 loader hook 再加载其余模块）
   src/cli/register.ts 安装 loader hook（整个仓库唯一按 .ts 扩展名 import 的文件）
 tests/evals/         上述行为的测试
@@ -216,6 +261,6 @@ tests/evals/         上述行为的测试
 
 ## 未完成事项
 
-- 报告、离线回放与实验配置分别由 RQ-11／RQ-20／RQ-14 交付，本目录不包含它们。
+- 离线回放与实验配置分别由 RQ-20／RQ-14 交付，本目录不包含它们。报告见上节。
 - 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。
 - 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。
