@@ -79,7 +79,8 @@ describe('argument parsing', () => {
   });
 
   it('refuses a command it does not implement', () => {
-    expect(parseCommand(['run', 'x'])).toContain('unknown command run');
+    // `run` is a real command now, so the check names one that never will be.
+    expect(parseCommand(['deploy', 'x'])).toContain('unknown command deploy');
   });
 
   it('refuses an unknown option instead of ignoring it', () => {

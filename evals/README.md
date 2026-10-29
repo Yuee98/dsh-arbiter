@@ -14,7 +14,85 @@ pnpm evals export <数据集> --out pack.json --date 2026-10-29
 pnpm evals import <数据集> --fill pack.json [--write]
 ```
 
-`check`、`summary`、`export`、`import` 全部离线，不调用任何模型，也不读写网络。真实请求由运行器任务的独立 CLI 负责，不在本目录的默认路径里。
+`check`、`summary`、`export`、`import` 全部离线，不调用任何模型，也不读写网络。
+
+## 运行器
+
+```sh
+pnpm evals plan <运行计划.json>                        # 展开冻结计划，列出每个格子的支持状态
+pnpm evals run <运行计划.json> --dir <运行目录>          # 实际执行（唯一会发出请求的命令）
+pnpm evals run <运行计划.json> --dir <运行目录> --dry-run # 只报告，不写任何文件
+pnpm evals resume <运行计划.json> --dir <运行目录>       # 报告还缺哪些格子，不执行
+pnpm evals show <运行目录>                             # 离线读取一次完成的运行
+```
+
+**只有 `run` 会发出请求。** `pnpm verify`、`pnpm check:evals` 和 CI 只调用 `check-all`，都不在运行器的默认路径里；真实调用必须显式输入 `run`。离线计划只替换 socket —— 渲染、信封选择、解析、N0 与用量归一化仍走生产代码（`src/reviewer/service.ts` 的 `review()`）。
+
+### 运行目录结构
+
+```
+<运行目录>/
+  plan.json              冻结的选集与配置（写入前即固化为哈希）
+  index.json             运行状态：每个格子的状态、预算余量、总消耗（可重写）
+  records/<cellId>.json  单个格子的不可变记录（写一次，永不重写）
+  fixture.json           离线替身的脚本化 socket（可选，由计划指定）
+```
+
+`index.json` 会被重写，`records/` 不会被重写。因此**记录集合就是实际发生过的尝试集合**：中断只留下已完成的记录，续跑只能向这个集合添加，不能改写已有证据。已消耗的总量由记录重新计算，而不是累加一个可变计数器，所以续跑不会重复计入。
+
+### 单元格与身份
+
+一个 cell 是「一次案例 × 一个目标 × 一个协议 × 一个重复序号」。cell id 由这四项按固定规则拼接（`case~target~protocol~rN`），因此：
+
+- **独立重复是不同 cell**，不会被当成「同一个观测用两次」；
+- **修复重试不是独立重复**：它属于同一次调用的第二个 attempt，记录里标注 `kind: 'repair'`，计入用量，但不增加稳定性样本；
+- 计划里没声明支持的 model × protocol 组合记为 `unsupported`，从不发送、也不写记录 —— 因此不可能被伪造的判定填充。
+
+### 记录内容
+
+每条记录包含：案例身份与输入指纹（与标签审批同一摘要）、入口链说明（`direct-service` 还是宿主链）、目标（计划的 model、实际协议名、**响应体自报的 model**、配置档位）、材料指纹与 M0 报告、公共判定（共用契约的原始 `outcome`）、**每个实际 attempt 的完整响应**（适配器已完成已知凭据遮蔽）、共用映射下的用量汇总、耗时与版本四元组。
+
+**费用是状态，不是数字。** 运行器不代币定价，`cost.amount` 恒为 `null`，`cost.status` 说明原因；填 `0` 会被读成「免费调用」。
+
+**未知不等于 0。** usage 六桶中未报告的字段是 `null`，provider 明确报告 `output_tokens: 0` 时保留 `0`；缓存／reasoning 子项不并入父项，`inclusions` 记录 `contained`／`separate`／`unknown`。
+
+### 有界性
+
+计划必须声明四项上限，运行器逐项执行，不是事后检查：
+
+| 上限             | 行为                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `concurrency`    | 最多这么多个 worker，每 worker 一次一个 cell                                                               |
+| `timeoutMs`      | 每个 cell 自己的时间界，从调用外部强制，超时记为 `timeout` 而非 `cancelled`                                |
+| `maxAttempts`    | 派发前预留该 cell 的最坏 attempt 数（含 transports 自身的修复次数）；不足则停止派发并记 `budget-exhausted` |
+| `maxInputTokens` | 派发前比较该 cell 实际渲染出的输入估计；超出则不发                                                         |
+
+取消通过调用方的 `AbortSignal`：停止新派发，已在途的 cell 以 `cancelled` 结束，从未开始的记为 `not-run`。运行器**不重试 cell** —— 重试会是计划没要求的第二个观测，生产传输已经拥有设计允许的那一次修复。
+
+### 消费接口
+
+报告（RQ-11）与实验配置（RQ-14）通过 `evals/src/run/artifact.ts` 与 `evals/schemas/run*.schema.json` 消费运行记录，不导入执行器：
+
+```ts
+import {
+  readRun,
+  cellSucceeded,
+  scoredOutcome,
+  usageAttemptsOf,
+} from './evals/src/run/artifact.js';
+import { compileRunCheckers } from './evals/src/run/schemas.js';
+
+const checkers = await compileRunCheckers();
+const read = await readRun(directory, checkers); // 按已发布 schema 收窄，不调用模型
+if (read.ok) {
+  for (const record of read.artifact.records) {
+    /* … */
+  }
+  read.artifact.missing; // 声称跑过却没有记录的 cell（真正的缺口）
+}
+```
+
+`readRun` 不联网、不调用模型，因此「同一记录可离线消费」是可执行保证。`usageAttemptsOf(record)` 返回生产 `aggregateUsage` 接受的形状，重算时与记录里的汇总同口径。
 
 `pnpm verify` 包含 `check:evals`，因此 CI 默认只跑离线工程与数据校验。
 
@@ -128,8 +206,16 @@ tests/evals/         上述行为的测试
 
 两处逻辑都在 `scripts/build/package-boundary.ts`。
 
+## 已知上游限制
+
+`src/reviewer/redact.ts` 的 `redactAuthHeaders` 只豁免「`"authorization"` + 未加引号数字」。decision 协议的答案体是 `"authorization": {"type":"score",…}`，值是对象，于是被当成 header 改写为 `[redacted]`，使 `ReviewAttempt.responseText` 变成非法 JSON。
+
+影响范围：**判定与分数不受影响**（解析器读未遮蔽原文，`parsed` 完好，用量按数字字段归一化照常）。受影响的是记录里的 decision 原文可解析性，以及由它派生的 `target.responseModel`（此时为 `null`，而不是回落到配置的 model 名称）。
+
+这是 `src/` 侧缺陷，不在本目录修复；运行器如实保存适配器输出，不做第二次脱敏。
+
 ## 未完成事项
 
-- 正式评估数据集（约 30–50 核心试标）由 RQ-09 交付；当前只有一个格式示例，**不含标签**，因此不产生任何指标。
-- 运行器、报告和离线回放分别由 RQ-10／RQ-11／RQ-20 交付，本目录不包含它们。
-- 真实模型意见由运行器采集；本目录只定义并校验其存储格式，不调用模型。
+- 报告、离线回放与实验配置分别由 RQ-11／RQ-20／RQ-14 交付，本目录不包含它们。
+- 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。
+- 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。

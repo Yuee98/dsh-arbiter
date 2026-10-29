@@ -59,9 +59,13 @@ const MAX_CONCURRENCY = 32;
 /**
  * Problems with a plan's own declarations.
  *
- * Every one of these is a plan that cannot mean what it says: a duplicate target,
- * a protocol no target offers, a bound that is not a bound. Reporting them is the
+ * Every one of these is a plan that cannot mean what it says: a duplicate target, a
+ * target that supports nothing, a bound that is not a bound. Reporting them is the
  * difference between an experiment and a hope.
+ *
+ * A protocol that *some* target does not offer is deliberately not a problem: that is
+ * exactly the grid cell the artifact must record as unsupported, and refusing the plan
+ * would remove the only way to state it.
  */
 export function planProblems(plan: RunPlan): readonly string[] {
   const problems: string[] = [];
@@ -93,14 +97,6 @@ export function planProblems(plan: RunPlan): readonly string[] {
       problems.push(
         `target ${target.targetId} supports neither protocol; omit it or name what it supports`,
       );
-    }
-  }
-  for (const protocol of plan.protocols) {
-    const offers = plan.targets.some((target) =>
-      protocol === 'chat' ? target.chat !== null : target.decision !== null,
-    );
-    if (!offers) {
-      problems.push(`no target supports protocol ${protocol}`);
     }
   }
   if (plan.transport === 'offline' && plan.fixture === null) {
@@ -201,20 +197,29 @@ export function targetOf(plan: RunPlan, targetId: string): RunTarget | null {
 }
 
 /**
- * The output budget one cell's transport needs.
+ * The attempt ceiling one cell can consume.
  *
- * A run-level attempt bound has to be reserved before dispatch, and an attempt's
- * cost is not known until it returns. The reservation therefore uses the ceiling
- * the transport itself enforces — one attempt plus its repair retries — so the
- * bound can never be exceeded by a repair loop the runner did not anticipate.
+ * A run-level attempt bound has to be reserved before dispatch, and an attempt's cost is
+ * not known until it returns. The reservation therefore uses the ceiling the transport
+ * itself enforces — one attempt plus its repair retries — so the bound can never be
+ * exceeded by a repair loop the runner did not anticipate.
+ *
+ * An offline cell is additionally bounded by its own script: the production offline
+ * adapter derives its repair budget from the number of scripted answers it was given, so
+ * a fixture with one script can answer one attempt. Reserving more than that would strand
+ * budget the run could never spend.
  */
 export function attemptCeilingOf(
   target: RunTarget,
   protocol: RunProtocol,
+  options: { readonly scripted?: number } = {},
 ): number {
-  if (protocol === 'chat')
-    return 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0);
-  return 1;
+  const transportCeiling =
+    protocol === 'chat'
+      ? 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0)
+      : 1;
+  if (options.scripted === undefined) return transportCeiling;
+  return Math.max(1, Math.min(transportCeiling, options.scripted));
 }
 
 /**

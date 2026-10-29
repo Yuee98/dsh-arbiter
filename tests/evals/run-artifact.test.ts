@@ -158,14 +158,19 @@ describe('plan expansion', () => {
     );
   });
 
-  it('reports a protocol no target offers instead of silently running nothing', () => {
+  it('leaves a protocol no target offers to the grid, not to a plan refusal', () => {
+    // The cell for a pairing nothing offers is exactly what the artifact must record as
+    // unsupported; refusing the plan would remove the only way to state it.
+    const plan = planOf({
+      protocols: ['chat', 'decision'],
+      targets: [chatTarget()],
+    });
+    expect(planProblems(plan)).toEqual([]);
+    const grid = cellGrid(plan);
+    expect(grid.unsupported).toBe(1);
     expect(
-      planProblems(
-        planOf({ protocols: ['chat', 'decision'], targets: [chatTarget()] }),
-      ).some((problem) =>
-        problem.includes('no target supports protocol decision'),
-      ),
-    ).toBe(true);
+      grid.cells.find((cell) => cell.protocol === 'decision')?.supported,
+    ).toBe(false);
   });
 
   it('reports a duplicate target id', () => {
@@ -381,8 +386,10 @@ describe('reading a run directory', () => {
             protocol: 'chat',
             repeat: 1,
             record: recordPathOf(cellId),
-            status: 'not-run',
-            attempts: 0,
+            // A cell that says it ran and has no evidence is a gap: this is the state a
+            // report must be able to name.
+            status: 'reviewed',
+            attempts: 1,
             stopReason: null,
           },
         ],

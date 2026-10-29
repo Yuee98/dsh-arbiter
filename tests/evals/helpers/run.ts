@@ -27,10 +27,6 @@ import type {
   RunTarget,
 } from '../../../evals/src/run/types.js';
 
-/** The repository root, which the dataset checks read from. */
-export const RUNNER_REPOSITORY_ROOT = new URL('../../../', import.meta.url)
-  .pathname;
-
 /** A fresh temporary directory, removed when the test is done. */
 export interface TemporaryArea {
   readonly path: string;
@@ -180,17 +176,67 @@ export function chatAnswer(
   };
 }
 
+/**
+ * One native score answer, in the endpoint's own envelope.
+ *
+ * A decision answer is not a bare distribution: the endpoint wraps it as
+ * `{type: 'score', probabilities}`. Building the wrapper here rather than at each call
+ * site keeps a test from accidentally scripting an envelope the production parser
+ * could never read, which would look like a parser failure rather than a fixture
+ * mistake.
+ */
+export function scoreAnswer(probabilities: Readonly<Record<string, number>>): {
+  readonly type: 'score';
+  readonly probabilities: Record<string, number>;
+} {
+  return { type: 'score', probabilities: { ...probabilities } };
+}
+
+/**
+ * A complete native distribution from a sparse one.
+ *
+ * The contract accepts exactly ten canonical native levels, so a distribution with two
+ * entries is rejected as incomplete — which is the rule that stops a sparse answer from
+ * being read as a confident one. A test that wants "mostly band 5" therefore has to say
+ * what happens to the other nine, exactly as a real provider does.
+ */
+export function distribution(
+  sparse: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const full: Record<string, number> = {};
+  let assigned = 0;
+  for (const level of Object.keys(sparse).sort((left, right) =>
+    left.localeCompare(right),
+  )) {
+    const value = sparse[level] ?? 0;
+    full[level] = value;
+    assigned += value;
+  }
+  // Whatever mass is unstated is spread evenly over the levels that were not named, so
+  // the total is exactly one and no level is silently invented as the answer.
+  const named = new Set(Object.keys(sparse));
+  const rest = [
+    ...Array.from({ length: 10 }, (_, level) => String(level)),
+  ].filter((level) => !named.has(level));
+  const leftover = Math.max(0, 1 - assigned);
+  for (const level of rest) full[level] = leftover / rest.length;
+  return full;
+}
+
 /** A decision response carrying both distributions and a usage payload. */
 export function decisionAnswer(
-  risk: Record<string, number>,
-  authorization: Record<string, number>,
+  risk: Readonly<Record<string, number>>,
+  authorization: Readonly<Record<string, number>>,
   options: { readonly usage?: unknown; readonly model?: string } = {},
 ): FixtureResponse {
   return {
     status: 200,
     body: JSON.stringify({
       model: options.model ?? 'offline-decision',
-      answers: { risk, authorization },
+      answers: {
+        risk: scoreAnswer(distribution(risk)),
+        authorization: scoreAnswer(distribution(authorization)),
+      },
       ...(options.usage === undefined ? {} : { usage: options.usage }),
     }),
   };

@@ -1,0 +1,530 @@
+/**
+ * The run commands, end to end.
+ *
+ * The claim that matters here is about authority, not convenience: a run reaches a
+ * provider only when someone types `evals run`. So these tests check both directions —
+ * that `plan`, `resume` and `show` never dispatch, and that `run` refuses to start when
+ * it could not do what it was asked — against the real command entry point and real
+ * files, because a mocked command would leave exactly that boundary untested.
+ */
+
+import { readdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { parseCommand, runCli } from '../../evals/src/cli/run.js';
+import type { CliIo } from '../../evals/src/cli/run.js';
+import { parseRunCommand } from '../../evals/src/cli/run-commands.js';
+import { RUN_FILES } from '../../evals/src/run/artifact.js';
+import { defaultRunDirectory, runIdOf } from '../../evals/src/run/commands.js';
+import {
+  cellIdOf,
+  chatAnswer,
+  fixtureCell,
+  fixtureOf,
+  planOf,
+  withArea,
+} from './helpers/run.js';
+
+/**
+ * The repository root, which is what `io.root` is in the real entry point.
+ *
+ * A plan names its dataset repository-relatively, so the commands resolve dataset paths
+ * against this root. A test therefore keeps the real root and puts its own documents in a
+ * temporary directory with absolute paths, which is exactly how an operator runs a plan
+ * kept outside the repository.
+ */
+const REPOSITORY_ROOT = new URL('../../', import.meta.url).pathname;
+
+/** Collect what a command wrote, so an assertion can read it back. */
+function recorder(
+  _area: string,
+  env: Record<string, string> = {},
+): {
+  readonly io: CliIo;
+  readonly out: readonly string[];
+  readonly err: readonly string[];
+} {
+  const out: string[] = [];
+  const err: string[] = [];
+  return {
+    io: {
+      root: REPOSITORY_ROOT,
+      out: (line) => out.push(line),
+      err: (line) => err.push(line),
+      env: (name) => env[name],
+    },
+    out,
+    err,
+  };
+}
+
+/**
+ * One plan and its fixture, written where the plan expects to find them.
+ *
+ * The fixture path is relative to the repository root, which is how a plan names it, so
+ * the whole run stays inside one temporary area without the plan carrying an absolute
+ * path.
+ */
+async function seedPlan(
+  area: {
+    readonly path: string;
+    write(relative: string, document: unknown): Promise<void>;
+  },
+  plan: ReturnType<typeof planOf>,
+  cells: Record<string, ReturnType<typeof fixtureCell>>,
+): Promise<void> {
+  // Absolute paths, so the plan and its fixture live in the temporary area while the
+  // dataset stays the published one this repository ships.
+  await area.write('plan.json', {
+    ...plan,
+    fixture: join(area.path, 'fixture.json'),
+  });
+  await area.write('fixture.json', fixtureOf(cells));
+}
+
+/** The absolute path of a document inside one temporary area. */
+function at(area: { readonly path: string }, name: string): string {
+  return join(area.path, name);
+}
+
+describe('run command parsing', () => {
+  it('parses plan with a document and no flags', () => {
+    expect(parseRunCommand('plan', ['plan.json'])).toEqual({
+      name: 'plan',
+      plan: 'plan.json',
+      dir: null,
+      resume: false,
+      dryRun: false,
+    });
+  });
+
+  it('defaults run to a new dispatch and requires an explicit --resume', () => {
+    const parsed = parseRunCommand('run', ['plan.json']);
+    expect(typeof parsed).not.toBe('string');
+    if (typeof parsed === 'string') return;
+    expect(parsed.resume).toBe(false);
+    expect(parsed.dryRun).toBe(false);
+  });
+
+  it('accepts --dir, --resume and --dry-run on run', () => {
+    const parsed = parseRunCommand('run', [
+      'plan.json',
+      '--dir',
+      'out',
+      '--resume',
+      '--dry-run',
+    ]);
+    expect(typeof parsed).not.toBe('string');
+    if (typeof parsed === 'string') return;
+    expect(parsed.dir).toBe('out');
+    expect(parsed.resume).toBe(true);
+    expect(parsed.dryRun).toBe(true);
+  });
+
+  it('refuses --resume and --dry-run on the commands that would not honour them', () => {
+    // Silently accepting a flag a command ignores is how someone believes a command
+    // wrote nothing when it did not.
+    expect(parseRunCommand('plan', ['plan.json', '--dry-run'])).toContain(
+      'plan does not take --dry-run',
+    );
+    expect(parseRunCommand('resume', ['plan.json', '--resume'])).toContain(
+      'resume does not take --resume',
+    );
+  });
+
+  it('refuses an unknown flag instead of ignoring it', () => {
+    expect(
+      parseRunCommand('run', ['plan.json', '--concurrency', '8']),
+    ).toContain('unknown option --concurrency');
+  });
+
+  it('requires a document, and names the shape it wants', () => {
+    expect(parseRunCommand('run', [])).toContain('run needs a plan document');
+    expect(parseRunCommand('show', [])).toContain('show needs a run directory');
+  });
+
+  it('treats show as a run-directory command, not a plan command', () => {
+    const parsed = parseRunCommand('show', ['out']);
+    expect(typeof parsed).not.toBe('string');
+    if (typeof parsed === 'string') return;
+    expect(parsed.dir).toBe('out');
+    expect(parsed.plan).toBeNull();
+  });
+
+  it('is reached through the top-level parser, and keeps dataset flags out of it', () => {
+    expect(parseCommand(['run', 'plan.json'])).toMatchObject({
+      name: 'run',
+      plan: 'plan.json',
+    });
+    // The dataset parser's flags are not accepted on a run command.
+    expect(parseCommand(['run', 'plan.json', '--out', 'x'])).toContain(
+      'unknown option --out',
+    );
+  });
+
+  it('prints the run commands in the usage text', () => {
+    const usage = parseCommand([]);
+    expect(typeof usage).toBe('string');
+    if (typeof usage !== 'string') return;
+    expect(usage).toContain('run <plan.json>');
+    expect(usage).toContain('resume <plan.json>');
+    expect(usage).toContain('show <run-dir>');
+  });
+});
+
+describe('plan', () => {
+  it('expands a plan without writing a run directory', async () => {
+    await withArea(async (area) => {
+      await seedPlan(area, planOf(), {
+        [cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      const { io, out } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(0);
+      const text = out.join('\n');
+      expect(text).toContain('cells 1: 1 supported, 0 unsupported');
+      expect(text).toContain('bounds concurrency 2');
+      expect(text).toContain('planHash sha256:');
+      // A dry run writes nothing at all.
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('reports an unsupported pairing it would not send', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({ protocols: ['chat', 'decision'] });
+      await seedPlan(area, plan, {
+        [cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      const { io, out } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(0);
+      const text = out.join('\n');
+      expect(text).toContain('1 supported, 1 unsupported');
+      expect(text).toContain('does not offer protocol decision');
+    });
+  });
+
+  it('refuses a plan whose fixture cannot replay a supported cell', async () => {
+    await withArea(async (area) => {
+      await seedPlan(area, planOf(), {});
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      // A cell with no script cannot be replayed, and the dry run says which one.
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('fixture has no entry for');
+    });
+  });
+
+  it('refuses a plan that names a case the dataset does not publish', async () => {
+    await withArea(async (area) => {
+      await seedPlan(area, planOf({ caseIds: ['no-such-case'] }), {});
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('this dataset does not publish');
+    });
+  });
+
+  it('refuses a plan document that is not a plan', async () => {
+    await withArea(async (area) => {
+      await area.write('plan.json', { planVersion: 'eval-run-plan-v0' });
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('plan.json:');
+    });
+  });
+
+  it('names an absent plan by its path', async () => {
+    await withArea(async (area) => {
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'missing.json')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('missing.json does not exist');
+    });
+  });
+
+  it('refuses a live plan that cannot resolve its credential, before writing anything', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        protocols: ['decision'],
+        targets: [
+          {
+            targetId: 'decision-a',
+            provider: 'decision',
+            model: 'clef',
+            modelVersion: null,
+            chat: null,
+            decision: {
+              url: 'https://api.example/v1/systemone',
+              model: 'clef',
+              apiKeyRef: 'OFFLINE_KEY',
+              timeoutMs: 5_000,
+              costTier: 'paid',
+            },
+            credentialRef: 'OFFLINE_KEY',
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      // Starting a live run with no credential would produce a directory full of
+      // identical failures that look like provider outages.
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('a live run needs OFFLINE_KEY');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+});
+
+describe('run', () => {
+  it('dispatches an offline plan and writes its records', async () => {
+    await withArea(async (area) => {
+      const plan = planOf();
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, plan, {
+        [cellId]: fixtureCell({
+          chat: [chatAnswer(2, 10, { input_tokens: 700 })],
+        }),
+      });
+      const { io, out } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain('complete — 1/1 cells decided');
+      const files = await readdir(join(area.path, 'run', RUN_FILES.records));
+      expect(files).toContain(`${cellId}.json`);
+    });
+  });
+
+  it('runs nothing when --dry-run is given', async () => {
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      const { io, out } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--dry-run'],
+        io,
+      );
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain('planHash sha256:');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('reports an interrupted run through resume, then finishes it', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+      });
+      const cells = [
+        cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+        cellIdOf({
+          caseId: 'read-repo-index-with-cache',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+      ];
+      await seedPlan(area, plan, {
+        [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+      });
+      // A first pass that stopped before the second cell: the fixture has no script for
+      // it yet, so `--resume` is what a person runs after adding one.
+      const partial = recorder(area.path);
+      await runCli(['plan', at(area, 'plan.json')], partial.io);
+      expect(partial.out.join('\n')).toContain('2 supported');
+
+      const first = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      expect(first).toBe(0);
+
+      const resumed = recorder(area.path);
+      const inspectCode = await runCli(
+        ['resume', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        resumed.io,
+      );
+      expect(inspectCode).toBe(0);
+      // The continuation reports that nothing is pending, and touches nothing.
+      expect(resumed.out.join('\n')).toContain(
+        '2/2 cells have a record, 0 pending',
+      );
+    });
+  });
+
+  it('refuses a resume whose plan no longer matches the run', async () => {
+    await withArea(async (area) => {
+      const plan = planOf();
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, plan, {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      await area.write('plan.json', planOf({ repeats: 2 }));
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['resume', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain(
+        'does not match the run it would continue',
+      );
+    });
+  });
+
+  it('refuses to continue a directory that holds no run', async () => {
+    await withArea(async (area) => {
+      await seedPlan(area, planOf(), {});
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['resume', at(area, 'plan.json'), '--dir', at(area, 'nothing')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('holds no run to continue');
+    });
+  });
+});
+
+describe('show', () => {
+  it('reads a finished run and prints its cells without a model call', async () => {
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({
+          chat: [chatAnswer(2, 10, { input_tokens: 640, output_tokens: 8 })],
+        }),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // The scripted socket is deleted before reading, so a reader that needed it would
+      // fail. `show` must not.
+      const { io, out } = recorder(area.path);
+      const code = await runCli(['show', at(area, 'run')], io);
+      expect(code).toBe(0);
+      const text = out.join('\n');
+      expect(text).toContain('reviewed scored 2/10 review-allow');
+      expect(text).toContain('usage review-usage-v1');
+      expect(text).toContain('versions contract review-contract-v1');
+    });
+  });
+
+  it('reports a reviewed cell whose record file is gone as a gap', async () => {
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // Delete the record but keep the index: a cell that says it ran and has no
+      // evidence is exactly the gap this reader exists to name.
+      await rm(join(area.path, 'run', RUN_FILES.records, `${cellId}.json`));
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['show', at(area, 'run')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('planned the cell but never wrote it');
+    });
+  });
+
+  it('does not report a settled cell that never had a record as missing', async () => {
+    await withArea(async (area) => {
+      // A decision pairing a chat-only target is decided by the plan and writes no
+      // record. Reading it as missing evidence would report a refusal as data loss.
+      const plan = planOf({ protocols: ['chat', 'decision'] });
+      await seedPlan(area, plan, {
+        [cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['show', at(area, 'run')], io);
+      expect(code).toBe(0);
+      expect(err).toEqual([]);
+    });
+  });
+
+  it('refuses a directory that is not a run', async () => {
+    await withArea(async (area) => {
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['show', at(area, 'nothing')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('the run has no plan');
+    });
+  });
+});
+
+describe('where a run writes', () => {
+  it('derives a directory under .local from the dataset and the plan name', () => {
+    expect(defaultRunDirectory('core-v1', '.local/plans/dev.json')).toBe(
+      '.local/evals/runs/core-v1/dev',
+    );
+  });
+
+  it('derives a run id from the plan hash, so two runs of one plan share it', () => {
+    const plan = planOf();
+    const hash = 'sha256:0123456789abcdef0123456789abcdef';
+    expect(runIdOf(plan, hash)).toBe('core-v1-0123456789ab');
+  });
+});

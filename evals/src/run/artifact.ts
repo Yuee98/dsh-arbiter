@@ -171,6 +171,25 @@ export function usageAttemptsOf(record: CellRecord): readonly {
   }));
 }
 
+/**
+ * The cell statuses that must have a record file.
+ *
+ * These are the statuses a *dispatched* cell can settle at, and a dispatched cell always
+ * produces a record: the runner writes one even when the request failed, so the attempts
+ * it made are kept. A status outside this set is a decision reached without an attempt —
+ * a plan-level refusal, an exhausted budget, a cell the run never reached — and having
+ * no record is exactly right for it.
+ *
+ * Stating the rule this way rather than as a list of statuses allowed to be absent is
+ * what makes a missing record an error: a cell that says it ran and has no evidence is a
+ * gap, not a settled decision.
+ */
+const NEEDS_RECORD: ReadonlySet<CellState['status']> = new Set([
+  'reviewed',
+  'cancelled',
+  'timeout',
+]);
+
 /** One run directory, as a consumer sees it. */
 export interface RunArtifact {
   readonly index: RunIndex;
@@ -243,7 +262,10 @@ export async function readRun(
   for (const cell of indexChecked.document.cells) {
     const raw = await readJson(join(directory, cell.record));
     if (raw === null) {
-      missing.push(cell);
+      // A cell that never produced an attempt has no record by design: an unsupported
+      // pairing was refused by the plan, an exhausted budget stopped dispatch, and a
+      // cancelled run never started the cell. A cell that says it ran must have one.
+      if (NEEDS_RECORD.has(cell.status)) missing.push(cell);
       continue;
     }
     const checked = checkers.record(raw);

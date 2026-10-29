@@ -1,0 +1,593 @@
+/**
+ * The run subcommands: plan, run, resume and inspect.
+ *
+ * The separation the issue asks for is enforced here rather than documented: nothing
+ * in `pnpm verify`, `pnpm check:evals` or CI writes a run directory or reaches a
+ * provider. `evals run` is the only command that dispatches, and it refuses to start
+ * without a plan and, for a live plan, without a resolvable credential. Every other
+ * command — including `resume` with `--dry-run` — only reads.
+ *
+ * The four commands also cover the two halves of the acceptance rule that "an
+ * interrupted run continues without overwriting": `run --resume` continues in place,
+ * and `resume --dry-run` prints exactly which cells are missing without touching a
+ * file, so an operator can see the continuation before spending anything.
+ */
+
+import { mkdir, readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
+import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
+import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
+
+import { datasetDigest } from '../annotation/summary.js';
+import { inspectDataset } from '../data/inspect.js';
+import { readDataset } from '../data/read.js';
+import { compileCheckers } from '../data/schemas.js';
+import type { ReviewCase } from '../data/types.js';
+
+import {
+  planDigest,
+  readFixture,
+  readRun,
+  recordPathOf,
+  RUN_FILES,
+  writeJson,
+} from './artifact.js';
+import { createRun, readExisting, resumeRun } from './lifecycle.js';
+import { cellGrid, planProblems } from './plan.js';
+import { compileRunCheckers } from './schemas.js';
+import type { RunCheckers } from './schemas.js';
+import type { RunFixture, RunPlan, RunVersions } from './types.js';
+import { RUNNER_IMPLEMENTATION_VERSION, RUN_PLAN_VERSION } from './types.js';
+
+/** Where one command writes its human-readable output. */
+export interface RunIo {
+  readonly root: string;
+  readonly out: (line: string) => void;
+  readonly err: (line: string) => void;
+  /** Reads one environment variable; abstracted so a test needs no real credential. */
+  readonly env?: (name: string) => string | undefined;
+}
+
+/** What `run` was asked to do. */
+export interface RunCommand {
+  readonly planPath: string;
+  readonly directory: string | null;
+  readonly resume: boolean;
+  readonly dryRun: boolean;
+  /** The caller's lifetime, supplied by the entry point. */
+  readonly signal: AbortSignal;
+}
+
+/** The versions every record of this build carries. */
+export function versionsFor(plan: RunPlan): RunVersions {
+  return {
+    contract: REVIEW_CONTRACT_VERSION,
+    prompt: REVIEW_PROMPT_VERSION,
+    usageMapping: USAGE_MAPPING_VERSION,
+    plan: plan.planVersion,
+    artifact: 'eval-run-artifact-v1',
+    implementation: RUNNER_IMPLEMENTATION_VERSION,
+    node: process.versions.node,
+  };
+}
+
+/** A non-array object, for narrowing a parsed document without asserting its type. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** One dataset's cases and digest, checked before a plan is resolved against it. */
+interface LoadedDataset {
+  readonly cases: readonly ReviewCase[];
+  readonly digest: string;
+  readonly datasetId: string;
+}
+
+/**
+ * Read and validate one dataset, or say what is wrong with it.
+ *
+ * The rubric version comes from the committed snapshot, not from the plan: a run reads
+ * the same document the annotation tools do, so a plan cannot declare a semantics the
+ * repository does not publish. Only problems that make the data unusable block a run;
+ * a stale *label* does not, because a run reads cases and never labels.
+ */
+async function loadDataset(
+  io: RunIo,
+  datasetPath: string,
+): Promise<
+  | { readonly ok: true; readonly dataset: LoadedDataset }
+  | { readonly ok: false; readonly problems: readonly string[] }
+> {
+  const checkers = await compileCheckers();
+  let rubric: unknown;
+  try {
+    rubric = JSON.parse(
+      await readFile(resolve(io.root, 'evals/rubrics/rubric-v1.json'), 'utf8'),
+    ) as unknown;
+  } catch {
+    return {
+      ok: false,
+      problems: ['evals/rubrics/rubric-v1.json is not readable JSON'],
+    };
+  }
+  const rubricVersion = isRecord(rubric) ? rubric['rubricVersion'] : null;
+  if (typeof rubricVersion !== 'string') {
+    return {
+      ok: false,
+      problems: ['evals/rubrics/rubric-v1.json declares no rubricVersion'],
+    };
+  }
+  const raw = await readDataset(resolve(io.root, datasetPath));
+  const inspection = inspectDataset(raw, checkers, {
+    contract: REVIEW_CONTRACT_VERSION,
+    rubric: rubricVersion,
+  });
+  if (inspection.problems.length > 0) {
+    return {
+      ok: false,
+      problems: inspection.problems.map(
+        (problem) => `${problem.path}: ${problem.message}`,
+      ),
+    };
+  }
+  const manifest = inspection.manifest;
+  if (manifest === null) {
+    return { ok: false, problems: [`${datasetPath} has no manifest`] };
+  }
+  return {
+    ok: true,
+    dataset: {
+      cases: inspection.cases.map((entry) => entry.document),
+      digest: datasetDigest(inspection),
+      datasetId: manifest.datasetId,
+    },
+  };
+}
+
+/** Read one plan document, or say why it is not a plan. */
+async function readPlan(
+  checkers: RunCheckers,
+  path: string,
+): Promise<
+  | { readonly ok: true; readonly plan: RunPlan }
+  | { readonly ok: false; readonly problems: readonly string[] }
+> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(path, 'utf8'));
+  } catch (error) {
+    return {
+      ok: false,
+      problems: [
+        error instanceof Error && 'code' in error && error.code === 'ENOENT'
+          ? `${path} does not exist`
+          : `${path} is not readable JSON`,
+      ],
+    };
+  }
+  const checked = checkers.plan(raw);
+  if (!checked.ok) {
+    return {
+      ok: false,
+      problems: checked.problems.map((problem) => `${path}: ${problem}`),
+    };
+  }
+  return { ok: true, plan: checked.document };
+}
+
+/**
+ * The case ids a plan names that its dataset does not publish.
+ *
+ * A plan may name its cases explicitly or let the split choose. Only the explicit form
+ * can be wrong, and a wrong id must be refused rather than silently dropped: a run that
+ * quietly skipped a case would report a smaller experiment than it was asked for.
+ */
+export function unknownCaseIds(
+  plan: RunPlan,
+  cases: readonly ReviewCase[],
+): readonly string[] {
+  if (plan.caseIds.length === 0) return [];
+  const published = new Set(cases.map((entry) => entry.caseId));
+  return plan.caseIds.filter((caseId) => !published.has(caseId));
+}
+
+/**
+ * Resolve the cases a plan selects from its split.
+ *
+ * The split is applied here, once: a plan that names `caseIds` keeps them, and a plan
+ * that names only a split gets the split's cases in manifest order. Resolving at run
+ * start is what freezes the selection, so a later commit that adds a case cannot
+ * enlarge a run already in progress.
+ */
+export function resolveCases(
+  plan: RunPlan,
+  cases: readonly ReviewCase[],
+): readonly ReviewCase[] {
+  if (plan.caseIds.length > 0)
+    return cases.filter((entry) => plan.caseIds.includes(entry.caseId));
+  if (plan.split === 'all') return cases;
+  return cases.filter((entry) => entry.split === plan.split);
+}
+
+/**
+ * `run --dry-run`: expand a plan and report what it would do.
+ *
+ * This is the offline half of the runner, and the only half `pnpm verify` can use. It
+ * builds every cell, states which pairings are unsupported, and prints the fixtures it
+ * found — without dispatching anything. A dry run that would dispatch is not a dry
+ * run, so no backend is ever constructed here.
+ */
+export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
+  const checkers = await compileRunCheckers();
+  const read = await readPlan(checkers, resolve(io.root, command.planPath));
+  if (!read.ok) {
+    for (const problem of read.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const plan = read.plan;
+  const problems = planProblems(plan);
+  if (problems.length > 0) {
+    for (const problem of problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  // The dataset is checked after the plan's own declarations, because a plan that
+  // cannot mean what it says is a problem no dataset can fix. Both refusals name what
+  // is wrong instead of reporting a generic failure.
+  const dataset = await loadDataset(io, plan.datasetPath);
+  if (!dataset.ok) {
+    for (const problem of dataset.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const unknown = unknownCaseIds(plan, dataset.dataset.cases);
+  if (unknown.length > 0) {
+    // A run that quietly skipped a case would report a smaller experiment than it was
+    // asked for, so an unpublished id is refused instead of dropped.
+    io.err(
+      `problem the plan names ${String(unknown.length)} case(s) this dataset does not publish: ${unknown.join(', ')}`,
+    );
+    return 1;
+  }
+  const resolvedPlan = withResolvedCases(
+    plan,
+    resolveCases(plan, dataset.dataset.cases),
+  );
+  const grid = cellGrid(resolvedPlan);
+  io.out(
+    `plan ${plan.datasetId} split ${plan.split}: ${String(resolvedPlan.caseIds.length)} cases`,
+  );
+  io.out(
+    `targets ${String(plan.targets.length)}, protocols ${plan.protocols.join('+')}, repeats ${String(plan.repeats)}`,
+  );
+  io.out(
+    `cells ${String(grid.cells.length)}: ${String(grid.supported)} supported, ${String(grid.unsupported)} unsupported`,
+  );
+  io.out(
+    `bounds concurrency ${String(plan.bounds.concurrency)}, timeoutMs ${String(plan.bounds.timeoutMs)}, maxAttempts ${String(plan.bounds.maxAttempts)}, maxInputTokens ${String(plan.bounds.maxInputTokens)}`,
+  );
+  io.out(`transport ${plan.transport}`);
+  if (plan.fixture !== null) {
+    const fixture = await readFixture(resolve(io.root, plan.fixture), checkers);
+    if (!fixture.ok) {
+      io.err(`problem ${fixture.message}`);
+      return 1;
+    }
+    const scripted = fixture.fixture.cells;
+    for (const cell of grid.cells) {
+      if (!cell.supported) continue;
+      const entry = scripted[cell.cellId];
+      if (entry === undefined) {
+        io.err(
+          `problem fixture has no entry for ${cell.cellId}; a cell without a script cannot be replayed`,
+        );
+        return 1;
+      }
+    }
+    io.out(
+      `fixture ${plan.fixture}: ${String(Object.keys(scripted).length)} scripted cells`,
+    );
+  }
+  if (plan.transport === 'live') {
+    // A dry run of a live plan names what it would need, and does not read it: an
+    // environment probe is not a credential check, and reporting a missing one as a
+    // plan error would make a dry run fail on a machine that is not the runner.
+    for (const target of plan.targets) {
+      if (target.credentialRef === null) continue;
+      io.out(
+        `live target ${target.targetId} resolves credential ${target.credentialRef} from the environment at dispatch`,
+      );
+    }
+  }
+  io.out(`planHash ${planDigest(resolvedPlan)}`);
+  for (const cell of grid.cells) {
+    if (cell.supported) continue;
+    io.out(`unsupported ${cell.cellId}: ${cell.unsupportedReason ?? ''}`);
+  }
+  return 0;
+}
+
+/** The plan with its cases resolved, which is what a run freezes and hashes. */
+function withResolvedCases(
+  plan: RunPlan,
+  cases: readonly ReviewCase[],
+): RunPlan {
+  return { ...plan, caseIds: cases.map((entry) => entry.caseId) };
+}
+
+/**
+ * `run`: create a run directory and dispatch its cells.
+ *
+ * The order is deliberate: the directory and its index exist before the first cell, so
+ * an interrupted run is still described by its own files. A live dispatch requires a
+ * credential, and a missing one refuses the whole run *before* any cell is written:
+ * starting a live run with no credential would produce a directory full of identical
+ * failures that look like provider outages.
+ */
+export async function executeRun(
+  io: RunIo,
+  command: RunCommand,
+): Promise<number> {
+  const checkers = await compileRunCheckers();
+  const read = await readPlan(checkers, resolve(io.root, command.planPath));
+  if (!read.ok) {
+    for (const problem of read.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const plan = read.plan;
+  const planIssues = planProblems(plan);
+  if (planIssues.length > 0) {
+    for (const problem of planIssues) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const dataset = await loadDataset(io, plan.datasetPath);
+  if (!dataset.ok) {
+    for (const problem of dataset.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const unknown = unknownCaseIds(plan, dataset.dataset.cases);
+  if (unknown.length > 0) {
+    io.err(
+      `problem the plan names ${String(unknown.length)} case(s) this dataset does not publish: ${unknown.join(', ')}`,
+    );
+    return 1;
+  }
+  const cases = resolveCases(plan, dataset.dataset.cases);
+  const resolvedPlan = withResolvedCases(plan, cases);
+  if (command.dryRun) {
+    return planRun(io, command);
+  }
+  const env = io.env ?? ((name: string) => process.env[name]);
+  if (resolvedPlan.transport === 'live') {
+    const missing = resolvedPlan.targets
+      .filter((target) => target.credentialRef !== null)
+      .map((target) => target.credentialRef ?? '')
+      .filter((name) => (env(name) ?? '').length === 0);
+    if (missing.length > 0) {
+      io.err(
+        `problem a live run needs ${[...new Set(missing)].join(', ')}; refusing to start without it`,
+      );
+      return 1;
+    }
+  }
+  let fixture: RunFixture | null = null;
+  if (resolvedPlan.fixture !== null) {
+    const loaded = await readFixture(
+      resolve(io.root, resolvedPlan.fixture),
+      checkers,
+    );
+    if (!loaded.ok) {
+      io.err(`problem ${loaded.message}`);
+      return 1;
+    }
+    fixture = loaded.fixture;
+  }
+  const directory = resolve(
+    io.root,
+    command.directory ??
+      defaultRunDirectory(resolvedPlan.datasetId, command.planPath),
+  );
+  const versions = versionsFor(resolvedPlan);
+  const now = (): number => Date.now();
+  const runId = runIdOf(resolvedPlan, planDigest(resolvedPlan));
+  if (command.resume) {
+    const existing = await readExisting(directory, resolvedPlan, checkers);
+    if (!existing.ok) {
+      for (const problem of existing.problems) io.err(`problem ${problem}`);
+      return 1;
+    }
+    const outcome = await resumeRun({
+      directory,
+      existing: existing.existing,
+      cases,
+      fixture: fixture ?? {
+        fixtureVersion: 'eval-offline-fixture-v1',
+        description: '',
+        cells: {},
+        notes: [],
+      },
+      versions,
+      checkers,
+      llm: null,
+      readCredential: env,
+      signal: command.signal,
+      now,
+    });
+    reportRun(io, directory, outcome.index.status, outcome.index.spent);
+    return 0;
+  }
+  // A run directory that already exists is not overwritten: a new run belongs in a new
+  // directory, and continuing one is `--resume`.
+  await mkdir(directory, { recursive: true });
+  const created = await createRun({
+    directory,
+    runId,
+    plan: resolvedPlan,
+    cases,
+    datasetDigest: dataset.dataset.digest,
+    versions,
+    now,
+  });
+  if (!created.ok) {
+    for (const problem of created.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const outcome = await resumeRun({
+    directory,
+    existing: { index: created.index, records: [] },
+    cases,
+    fixture: fixture ?? {
+      fixtureVersion: 'eval-offline-fixture-v1',
+      description: '',
+      cells: {},
+      notes: [],
+    },
+    versions,
+    checkers,
+    llm: null,
+    readCredential: env,
+    signal: command.signal,
+    now,
+  });
+  reportRun(io, directory, outcome.index.status, outcome.index.spent);
+  return outcome.index.status === 'complete' ? 0 : 1;
+}
+
+/** The default directory one run writes into, outside version control. */
+export function defaultRunDirectory(
+  datasetId: string,
+  planPath: string,
+): string {
+  const base = planPath.split('/').pop() ?? 'plan';
+  const name = base.replace(/\.json$/u, '');
+  return `.local/evals/runs/${datasetId}/${name}`;
+}
+
+/** A run's identifier, derived from the plan so two runs of one plan share it. */
+export function runIdOf(plan: RunPlan, hash: string): string {
+  const suffix = hash.replace('sha256:', '').slice(0, 12);
+  return `${plan.datasetId}-${suffix}`;
+}
+
+/** Print one run's summary. */
+function reportRun(
+  io: RunIo,
+  directory: string,
+  status: string,
+  spent: {
+    readonly cellsStarted: number;
+    readonly cellsCompleted: number;
+    readonly cellsPlanned: number;
+    readonly attempts: number;
+  },
+): void {
+  io.out(
+    `run ${directory}: ${status} — ${String(spent.cellsCompleted)}/${String(spent.cellsPlanned)} cells decided, ${String(spent.cellsStarted)} started, ${String(spent.attempts)} attempts`,
+  );
+}
+
+/**
+ * `resume --dry-run`: report which cells are missing, and touch nothing.
+ *
+ * This is the offline way to see a continuation. It reads the index and the records,
+ * and prints the cells that have none; it never constructs a backend, so it cannot
+ * spend anything by accident.
+ */
+export async function inspectResume(
+  io: RunIo,
+  command: RunCommand,
+): Promise<number> {
+  const checkers = await compileRunCheckers();
+  const read = await readPlan(checkers, resolve(io.root, command.planPath));
+  if (!read.ok) {
+    for (const problem of read.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const directory = resolve(
+    io.root,
+    command.directory ??
+      defaultRunDirectory(read.plan.datasetId, command.planPath),
+  );
+  const existing = await readExisting(directory, read.plan, checkers);
+  if (!existing.ok) {
+    for (const problem of existing.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const done = new Set(
+    existing.existing.records.map((record) => record.cellId),
+  );
+  const grid = cellGrid(existing.existing.index.plan);
+  const pending = grid.cells.filter((cell) => !done.has(cell.cellId));
+  io.out(
+    `run ${directory}: ${String(done.size)}/${String(grid.cells.length)} cells have a record, ${String(pending.length)} pending`,
+  );
+  for (const cell of pending) {
+    io.out(`pending ${cell.cellId}`);
+  }
+  io.out(`status ${existing.existing.index.status}`);
+  return 0;
+}
+
+/**
+ * `show`: read one finished run and print what it holds.
+ *
+ * This is the offline consumer path a report uses: it reads the written records through
+ * the published schemas and prints the per-cell outcome and usage coverage. It performs
+ * no requests, and it reads the same documents `readRun` exposes to #75.
+ */
+export async function showRun(io: RunIo, directory: string): Promise<number> {
+  const checkers = await compileRunCheckers();
+  const read = await readRun(resolve(io.root, directory), checkers);
+  if (!read.ok) {
+    for (const problem of read.problems) {
+      io.err(`problem ${problem.path}: ${problem.message}`);
+    }
+    return 1;
+  }
+  const { index, records, missing } = read.artifact;
+  io.out(`run ${index.runId} (${index.status}) plan ${index.planHash}`);
+  io.out(
+    `dataset ${index.dataset.datasetId} ${index.dataset.digest} — ${String(index.dataset.caseCount)} cases`,
+  );
+  io.out(
+    `versions contract ${index.versions.contract}, prompt ${index.versions.prompt}, usage ${index.versions.usageMapping}`,
+  );
+  for (const record of records) {
+    const outcome = record.outcome;
+    const verdict =
+      outcome === null
+        ? record.status
+        : outcome.status === 'scored'
+          ? `${outcome.status} ${String(outcome.risk)}/${String(outcome.authorization)} ${outcome.verdict}`
+          : outcome.status;
+    io.out(
+      `cell ${record.cellId}: ${record.status} ${verdict} attempts ${String(record.attempts.length)}`,
+    );
+    if (record.usage !== null) {
+      io.out(
+        `  usage ${record.usage.mappingVersion}: ${String(record.usage.attempts)} attempts, ${String(record.usage.withUsage)} with usage`,
+      );
+    }
+  }
+  for (const cell of missing) {
+    io.err(
+      `problem ${cell.record}: this run planned the cell but never wrote it`,
+    );
+  }
+  return missing.length === 0 ? 0 : 1;
+}
+
+/** The path a run directory keeps its records under, for a caller that needs it. */
+export function recordsDirectoryOf(directory: string): string {
+  return `${directory}/${RUN_FILES.records}`;
+}
+
+/** Where one cell's record lives, for a caller that reads a single cell. */
+export function recordOf(cellId: string): string {
+  return recordPathOf(cellId);
+}
+
+/** Write one plan document, so a caller can author a plan from a command. */
+export async function writePlan(path: string, plan: RunPlan): Promise<void> {
+  await writeJson(path, { ...plan, planVersion: RUN_PLAN_VERSION });
+}
