@@ -18,7 +18,7 @@ export type {
   ReviewRequest,
   ReviewResult,
 } from './service.js';
-export { review } from './service.js';
+export { review, reviewWith } from './service.js';
 
 export type { ReviewAttempt, ReviewerBackend } from './attempt.js';
 export { attemptIdOf, storedAttemptOf } from './attempt.js';
@@ -38,7 +38,13 @@ export {
   renderChatUser,
   renderDecisionRequest,
   renderDecisionState,
+  renderVariantChatRequest,
+  renderVariantChatSystem,
+  renderVariantDecisionRequest,
+  renderVariantDecisionState,
+  renderVariantQuestions,
 } from './prompt.js';
+export type { VariantDecisionRequest, VariantQuestions } from './prompt.js';
 export {
   buildQuestions,
   SCORE_CRITERIA_MAX,
@@ -53,10 +59,59 @@ export {
   REVIEW_PROMPT_VERSION,
   scaleText,
 } from './contract.js';
-export { renderMaterial } from './material.js';
+export { renderMaterial, submissionParts } from './material.js';
+export {
+  renderCompactMaterial,
+  renderVariantMaterial,
+} from './variant-material.js';
 
 export type { ParsedAnswer } from './signals.js';
 export { readChatAnswer, readDecisionAnswer } from './signals.js';
+
+export type { ReviewPackage } from './package.js';
+export {
+  PRODUCTION_PACKAGE,
+  probeOfAttempt,
+  probesOf,
+  variantPackage,
+} from './package.js';
+export type {
+  ProbeOption,
+  ProbeReading,
+  ProbeUnreadableReason,
+} from './probe.js';
+export {
+  CHAT_PROBE_ANSWER_FORMAT,
+  PROBE_MEMBER,
+  PROBE_OPTIONS,
+  probeDecisionQuestion,
+  readProbeAnswer,
+  RECOVERABILITY_PROBE_QUESTION,
+  REVIEW_PROBE_VERSION,
+} from './probe.js';
+export type {
+  HistoryVariant,
+  PromptVariant,
+  ReviewVariant,
+  ScaleVariant,
+  StructureVariant,
+  VariantAxes,
+} from './variant.js';
+export {
+  defineVariant,
+  isProductionVariant,
+  parseVariantId,
+  productionDiff,
+  PRODUCTION_VARIANT,
+  REVIEW_VARIANT_VERSION,
+  variantDiff,
+  variantIdFor,
+} from './variant.js';
+export {
+  compressQuestions,
+  renderLabelScaleText,
+  SCALE_GUARD,
+} from './scale.js';
 
 export {
   decisionAnswers,

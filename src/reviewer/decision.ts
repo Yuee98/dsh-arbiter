@@ -46,6 +46,13 @@ export interface DecisionTransportContext {
   readonly preResolvedCredential?: { readonly value: string } | undefined;
   readonly decision: ArbiterConfig['reviewer']['decision'];
   readonly signal: AbortSignal;
+  /**
+   * How to read one response body, or omitted for the production reader.
+   *
+   * Present for the same reason as the chat context's: an experiment may substitute a
+   * reader, and the production path keeps the identical call with no branch.
+   */
+  readonly readAnswer?: (body: unknown) => ParsedAnswer;
 }
 
 /** One review's decision outcome. */
@@ -197,6 +204,7 @@ function readResponse(options: {
   readonly text: string;
   readonly base: ReturnType<typeof attemptBase>;
   readonly secrets: readonly string[];
+  readonly readAnswer: (body: unknown) => ParsedAnswer;
 }): DecisionTransportResult {
   const { response, base, secrets } = options;
   const responseText = redact(options.text, secrets);
@@ -253,7 +261,7 @@ function readResponse(options: {
       secrets,
     });
   }
-  const answer = readDecisionAnswer(parsedBody);
+  const answer = options.readAnswer(parsedBody);
   if (!answer.ok) {
     return unreadableOutcome({
       base,
@@ -333,6 +341,7 @@ export async function runDecisionTransport(
       text,
       base: { ...base, durationMs: Date.now() - startedAt },
       secrets: credential === undefined ? [] : [credential],
+      readAnswer: ctx.readAnswer ?? readDecisionAnswer,
     });
   } catch (caught) {
     const raw = caught instanceof Error ? caught.message : String(caught);

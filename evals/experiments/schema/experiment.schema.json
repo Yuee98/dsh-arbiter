@@ -1,0 +1,334 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/experiment.schema.json",
+  "title": "Evals experiment definition",
+  "description": "One frozen candidate matrix. It names the candidates, the single-axis ladder between them, the cache workload and the ceilings a run must obey; it never names a model, a case answer or a verdict. Everything here is offline: writing, checking and dry-running a definition reads committed data and renders requests, and reaches no provider.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "experimentVersion",
+    "experimentId",
+    "description",
+    "dataset",
+    "protocols",
+    "repeats",
+    "probe",
+    "candidates",
+    "ladder",
+    "cache",
+    "bounds",
+    "budget",
+    "nonGoals",
+    "notes"
+  ],
+  "properties": {
+    "experimentVersion": {
+      "const": "rq14-experiment-v1"
+    },
+    "experimentId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notes": {
+      "description": "Facts a reader needs in order not to over-read this definition: what it does not verify, which readings are unavailable, and which protocol's wire acceptance is still unconfirmed. Required, because an experiment that hides its own limits is indistinguishable from one that has none.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetId", "datasetPath", "split"],
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "datasetPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "split": {
+          "type": "string",
+          "enum": ["dev", "calibration", "holdout", "all"]
+        },
+        "caseIds": {
+          "description": "An explicit selection. Omitted means the split decides, resolved once per candidate.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._~-]{0,179}$"
+          }
+        }
+      }
+    },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["chat", "decision"]
+      }
+    },
+    "repeats": {
+      "description": "Independent repeats of every compared cell. A repeat is a different attempt, never a stored answer read twice.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "probe": {
+      "description": "Candidate B's one extra question, fixed here so an experiment record can be compared with the code that renders it. The values are checked against `src/reviewer/probe.ts` and a mismatch is a validation problem, not a note.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "member",
+        "options",
+        "unknown",
+        "bandRule",
+        "withdrawnRule"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "member": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,31}$"
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,31}$"
+          }
+        },
+        "unknown": {
+          "description": "The one legal way to say the material does not establish the answer. It is an answer, not a missing value, and it is never encoded as null or as a band.",
+          "const": "unknown"
+        },
+        "bandRule": {
+          "description": "The fixed rule that the probe never changes either band. Checked against the design's own sentence.",
+          "type": "string",
+          "minLength": 1
+        },
+        "withdrawnRule": {
+          "description": "The fixed rule that `withdrawn` is read by the authorization scale and never applied as a gate by the experiment.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/definitions/candidate"
+      }
+    },
+    "ladder": {
+      "description": "The ablation ladder. Each step changes exactly one axis relative to the step it builds on, so a difference in results has one candidate explanation.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/ladderStep"
+      }
+    },
+    "cache": {
+      "description": "The cache workload: a cold request, then requests that keep a stable prefix and change only the action. What a provider caches is a measurement, so the layout is stated as a hypothesis and the reading is taken from the production usage mapping.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prefix",
+        "changing",
+        "baseCaseId",
+        "changedActionCaseIds",
+        "sequence",
+        "reading"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changing": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseCaseId": {
+          "description": "The case whose policy, environment, authorization and turn history every request in the workload shares. The cold request submits this case's own action; a changed-action slot submits its own case's action over this prefix.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._~-]{0,179}$"
+        },
+        "changedActionCaseIds": {
+          "description": "The cases whose actions the changed-action slots submit, one per slot repeat, in order. Listed rather than derived so that raising a slot's repeats adds real requests and requires real actions.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._~-]{0,179}$"
+          }
+        },
+        "sequence": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "repeats"],
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["cold", "stable-prefix", "changed-action"]
+              },
+              "repeats": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "reading": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "bounds": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/bounds"
+    },
+    "budget": {
+      "description": "The ceilings this experiment may spend. The per-cell input estimate is measured when the matrix is expanded, and a measured total above `maxInputTokensTotal` refuses the dry run rather than trimming a cell.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxRequests",
+        "maxInputTokensTotal",
+        "maxRepairRetries",
+        "reasoningEffort"
+      ],
+      "properties": {
+        "maxRequests": {
+          "description": "Every model request the experiment may make, repairs included.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxInputTokensTotal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxRepairRetries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoningEffort": {
+          "description": "Named only when the plan's models accept one. Null means the provider's own default, which is also unknown until a response reports reasoning tokens.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "nonGoals": {
+      "description": "Stated so a reader can check that no new hard rule arrived with the experiment. A candidate that needs one must go to the second decision window.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "definitions": {
+    "axes": {
+      "description": "The four variant axes. The variant id is derived from them, so two candidates cannot name the same package and one package cannot carry two ids.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "structure", "history", "scale"],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "enum": ["no-probe", "recovery-probe"]
+        },
+        "structure": {
+          "type": "string",
+          "enum": ["full", "compact", "compact-no-audit"]
+        },
+        "history": {
+          "type": "string",
+          "enum": ["current-turn", "none"]
+        },
+        "scale": {
+          "type": "string",
+          "enum": ["complete", "labels"]
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "label", "axes"],
+      "properties": {
+        "candidateId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,31}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "axes": {
+          "$ref": "#/definitions/axes"
+        }
+      }
+    },
+    "ladderStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stepId", "from", "changes", "axes"],
+      "properties": {
+        "stepId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "from": {
+          "description": "The candidate or step this one is compared against. The declared `changes` must equal the computed single-axis diff.",
+          "type": "string",
+          "minLength": 1
+        },
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["prompt", "structure", "history", "scale"]
+          }
+        },
+        "axes": {
+          "$ref": "#/definitions/axes"
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,8 @@
 /**
  * The evals command line's commands.
  *
- * Five offline data commands, four run commands and one report command:
+ * Five offline data commands, four run commands, one report command and three
+ * experiment commands:
  *
  *   check-all  validate every dataset in the repository, plus the rubric snapshot
  *   check      validate one dataset and report problems, without writing anything
@@ -13,6 +14,7 @@
  *   resume     report, or continue, the cells a run has not recorded yet
  *   show       read a finished run directory and print what it holds
  *   report     rebuild a run's three-layer report, offline, from its saved records
+ *   experiments  validate, dry-run and record the frozen experiment matrices
  *
  * `check` is the one CI runs. The data commands serve the annotation window: a person
  * exports a pack, decides the cases, and imports the result. Exporting never carries a
@@ -62,6 +64,14 @@ import {
 } from '../report/command.js';
 import type { ReportCommand } from '../report/command.js';
 import { isRunCommand, parseRunCommand, RUN_USAGE } from './run-commands.js';
+import {
+  EXPERIMENT_USAGE,
+  isExperimentCommand,
+  parseExperimentCommand,
+} from '../experiments/args.js';
+import type { ExperimentCommandLine } from '../experiments/args.js';
+import { checkExperiments, planExperiment } from '../experiments/commands.js';
+import { recordExperiment } from '../experiments/record.js';
 
 /** Where a command writes. Supplied so tests never capture real streams. */
 export interface CliIo {
@@ -84,8 +94,12 @@ export interface Command {
   readonly write: boolean;
 }
 
-/** The command line a caller ran, once a run or report command has been parsed. */
-export type ParsedCommand = Command | RunCommandLine | ReportCommand;
+/**
+ * The command line a caller ran, once one of the families that has its own parser has
+ * been read.
+ */
+export type ParsedCommand =
+  Command | RunCommandLine | ReportCommand | ExperimentCommandLine;
 
 /** The run commands' own command line shape, re-exported for callers. */
 import type { RunCommandLine } from './run-commands.js';
@@ -105,6 +119,8 @@ const USAGE = [
   RUN_USAGE,
   '',
   REPORT_USAGE,
+  '',
+  EXPERIMENT_USAGE,
 ].join('\n');
 
 interface Flags {
@@ -159,6 +175,11 @@ export function parseCommand(argv: readonly string[]): ParsedCommand | string {
     return parseReportCommand(
       [first, ...rest].filter((entry) => entry !== undefined),
     );
+  }
+  if (name === 'experiments') {
+    // Same reason again: `plan` must not accept a flag that records, and `record` must
+    // be told where it writes rather than inheriting a dataset command's output flag.
+    return parseExperimentsCommand([first, ...rest]);
   }
   const dataset = first;
   if (name === 'check-all') {
@@ -280,6 +301,12 @@ async function checkAll(io: CliIo): Promise<number> {
       `${directory}: ${String(inspection.cases.length)} cases, ${String(inspection.labels.gold.length)} gold labels, ${String(inspection.labels.excluded.length)} excluded`,
     );
   }
+  const experiments = await checkExperiments({
+    root: io.root,
+    out: io.out,
+    err: io.err,
+  });
+  if (experiments !== 0) failedRuns += 1;
   return failedRuns === 0 && rubric.problems.length === 0 ? 0 : 1;
 }
 
@@ -514,6 +541,9 @@ export async function runCli(
   if ('plan' in command) {
     return runCommand(io, command);
   }
+  if ('definition' in command) {
+    return runExperimentCommand(io, command);
+  }
   switch (command.name) {
     case 'check-all':
       return checkAll(io);
@@ -526,6 +556,42 @@ export async function runCli(
     case 'import':
       return importPack(io, command);
   }
+}
+
+/**
+ * Parse `experiments <subcommand> [argument] [flags]`.
+ *
+ * Kept as one reader for all three subcommands so the family's flags are checked in one
+ * place: `plan` cannot accept `--out`, and `record` cannot be invoked without a place to
+ * write. A subcommand this reader does not know is refused with the family's usage.
+ */
+function parseExperimentsCommand(
+  argv: readonly (string | undefined)[],
+): ExperimentCommandLine | string {
+  const [name, ...rest] = argv.filter((entry) => entry !== undefined);
+  if (name === undefined || !isExperimentCommand(name)) {
+    return `unknown experiment command ${name ?? ''}\n\n${EXPERIMENT_USAGE}`;
+  }
+  return parseExperimentCommand(name, rest);
+}
+
+/** Dispatch one experiment command. None of them reaches a provider. */
+async function runExperimentCommand(
+  io: CliIo,
+  command: ExperimentCommandLine,
+): Promise<number> {
+  const experimentIo = { root: io.root, out: io.out, err: io.err };
+  if (command.name === 'check-all') {
+    return checkExperiments(experimentIo);
+  }
+  if (command.name === 'record') {
+    return recordExperiment(
+      experimentIo,
+      command.definition ?? '',
+      command.out ?? '',
+    );
+  }
+  return planExperiment(experimentIo, command.definition ?? '');
 }
 
 /** Dispatch one run command with the caller's streams, environment and lifetime. */
