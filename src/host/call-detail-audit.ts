@@ -207,6 +207,7 @@ function attemptOf(model: StoredCall): CallDetailModelAttempt {
     durationMs: numberOf(model, 'durationMs') ?? 0,
     estimatedInputTokens: numberOf(model, 'estimatedInputTokens') ?? 0,
     usage: valueOf(model, 'usage'),
+    normalizedUsage: valueOf(model, 'normalizedUsage'),
   };
 }
 
@@ -374,7 +375,8 @@ function unreadableDetail(record: StoredCall): CallDetail {
       chain: null,
       reviewState: 'unknown',
       trace: [],
-      signals: null,
+      scores: null,
+      usage: null,
       evidence: [],
       materials: [],
       evidenceTruncated: false,
@@ -476,7 +478,8 @@ export function auditDetail(record: StoredCall): CallDetail {
       chain,
       reviewState: reviewStateOf(trace, chain, attempts.length),
       trace,
-      signals: valueOf(record, 'signals'),
+      scores: valueOf(record, 'scores'),
+      usage: valueOf(record, 'usage'),
       evidence: basis.evidence,
       materials: basis.materials,
       evidenceTruncated: basis.evidenceTruncated,

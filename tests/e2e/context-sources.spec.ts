@@ -674,10 +674,11 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
     const request = renderChatRequest(snapshot);
     check(
       'V8',
-      'the rendered request carries the source ladder and the facts block',
-      request.system.includes('## Authorization sources') &&
-        request.user.includes('MATERIALS') &&
-        request.user.includes('BUDGET'),
+      'the rendered request carries the contract, the material blocks and the source ladder',
+      request.system.includes('REVIEW_CONTRACT') &&
+        request.system.includes('PROJECT_RULES') &&
+        request.user.includes('POLICY_AND_GUIDANCE') &&
+        request.user.includes('MATERIAL_COMPLETENESS'),
     );
 
     // --- a long program: only the submission shrinks ---------------------

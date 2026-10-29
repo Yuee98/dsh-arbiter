@@ -223,19 +223,19 @@ function DecisionRules({
   );
 }
 
-/** What the review was given and signals derived: evidence, materials and signals. */
+/** What the review was given and what it produced: evidence, scores and usage. */
 function BasisCollapsibles({
   detail,
 }: {
   readonly detail: CallDetailView;
 }): ReactNode {
   const t = useArbiterTranslation();
-  const { evidence, materials, evidenceTruncated, signals, effect } =
+  const { evidence, materials, evidenceTruncated, scores, usage, effect } =
     detail.basis;
   const hasEvidence = evidence.length > 0 || materials.length > 0;
-  const hasSignals = signals !== null || effect !== null;
+  const hasResult = scores !== null || usage !== null || effect !== null;
 
-  if (!hasEvidence && !hasSignals) {
+  if (!hasEvidence && !hasResult) {
     const text =
       detail.basis.reviewState === 'reviewed'
         ? t('callDetail.evidenceLost')
@@ -269,12 +269,23 @@ function BasisCollapsibles({
             </Collapsible>
           </>
         ) : null}
-        {hasSignals ? (
+        {hasResult ? (
           <Collapsible summary={t('callDetail.signals')}>
             <div className="arb:flex arb:flex-col arb:gap-1.5">
-              {signals === null ? null : (
-                <section aria-label={t('callDetail.signals')}>
-                  <JsonBlock value={signals} />
+              {scores === null ? null : (
+                <section aria-label={t('callDetail.scores')}>
+                  <div className="arb:text-[12.5px]">
+                    {t('callDetail.scores')}
+                  </div>
+                  <JsonBlock value={scores} />
+                </section>
+              )}
+              {usage === null ? null : (
+                <section aria-label={t('callDetail.usage')}>
+                  <div className="arb:text-[12.5px]">
+                    {t('callDetail.usage')}
+                  </div>
+                  <JsonBlock value={usage} />
                 </section>
               )}
               {effect === null ? null : (

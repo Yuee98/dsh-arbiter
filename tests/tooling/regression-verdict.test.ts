@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   historicalVerdict,
   parseCases,
+  retiredVerdict,
   scopeVerdict,
 } from '../../scripts/regression-verdict.ts';
 import type { CaseObservation } from '../../scripts/regression-verdict.ts';
@@ -156,5 +157,83 @@ describe('results parsing', () => {
     expect(parseCases({ results: [{ id: 1, passes: true }] })).toBeNull();
     expect(parseCases({ results: [{ id: 'R1', passes: 'yes' }] })).toBeNull();
     expect(parseCases({ results: [null] })).toBeNull();
+  });
+});
+
+describe('retiring the historical run', () => {
+  /** The report the probe produces once every retired symbol is gone. */
+  const allAbsent = {
+    absent: [
+      'policy.decideReview',
+      'reviewer.signalsFromChat',
+      'reviewer.renderRequest',
+      'reviewer.runDecisionReviewer',
+      'reviewer.parseDecisionResponse',
+    ],
+    present: [],
+    unreadable: [],
+  };
+
+  it('retires the run only when every imported symbol is gone', () => {
+    const verdict = retiredVerdict(allAbsent);
+    expect(verdict.retired).toBe(true);
+    expect(verdict.ok).toBe(true);
+  });
+
+  it('keeps the run mandatory when any symbol is exported again', () => {
+    // The positive assertion this exemption exists for: if someone restores the old
+    // engine, the run must happen and must pass on its own merits.
+    for (const symbol of allAbsent.absent) {
+      const verdict = retiredVerdict({
+        ...allAbsent,
+        absent: allAbsent.absent.filter((entry) => entry !== symbol),
+        present: [symbol],
+      });
+      expect(verdict.retired).toBe(false);
+      expect(verdict.ok).toBe(false);
+      expect(verdict.problems.join(' ')).toContain(symbol);
+    }
+  });
+
+  it('keeps the run mandatory when only some symbols are gone', () => {
+    // A partially retired engine means the script still has something to import, so
+    // it can still run — and must.
+    const verdict = retiredVerdict({
+      absent: ['policy.decideReview'],
+      present: [
+        'reviewer.signalsFromChat',
+        'reviewer.renderRequest',
+        'reviewer.runDecisionReviewer',
+        'reviewer.parseDecisionResponse',
+      ],
+      unreadable: [],
+    });
+    expect(verdict.retired).toBe(false);
+    expect(verdict.ok).toBe(false);
+  });
+
+  it('keeps the run mandatory when the probe cannot read the build', () => {
+    // "Cannot inspect" is not "the symbols are gone": retiring here would accept a
+    // broken build as the documented end state.
+    const verdict = retiredVerdict({
+      absent: [],
+      present: [],
+      unreadable: ['policy (module not found)'],
+    });
+    expect(verdict.retired).toBe(false);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.problems.join(' ')).toContain('could not read');
+  });
+
+  it('keeps the run mandatory when the probe covered only part of the list', () => {
+    // A probe that silently skipped a symbol would retire a script that still has
+    // that symbol to import, so the report has to cover the whole contract.
+    const verdict = retiredVerdict({
+      absent: ['policy.decideReview'],
+      present: [],
+      unreadable: [],
+    });
+    expect(verdict.retired).toBe(false);
+    expect(verdict.problems.join(' ')).toContain('reported nothing for');
   });
 });

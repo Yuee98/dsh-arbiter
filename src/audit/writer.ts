@@ -1,6 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CallRecord } from './types.js';
 import { json, hash } from './rows.js';
+
+/**
+ * A JSON column value, or SQLite `NULL` for an absent one.
+ *
+ * `undefined` is not bindable; SQLite would reject the statement and drop the
+ * record. Both "absent" spellings therefore become one value.
+ */
+function nullableJson(value: unknown): string | null {
+  return value === undefined || value === null ? null : json(value);
+}
 import { RECORD_FORMAT } from './schema.js';
 import { saveTemplateSnapshot } from './metadata.js';
 function insertCall(db: DatabaseSync, record: CallRecord): void {
@@ -36,10 +46,13 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     record.sessionRecordState,
     // A current record writes the new shape only. A row with no score writes
     // `NULL`, which the reader reports as "no new-style score" rather than
-    // defaulting to a band nobody computed.
-    record.scores === null ? null : json(record.scores),
-    record.reviewStage,
-    record.usage === null ? null : json(record.usage),
+    // defaulting to a band nobody computed. A record built by a caller that does
+    // not know these fields passes `undefined`, which is not a bindable value and
+    // would abort the whole insert — so it is normalized to `NULL` here rather
+    // than trusting every caller to spell "absent" the same way.
+    nullableJson(record.scores),
+    record.reviewStage ?? null,
+    nullableJson(record.usage),
     json(record.decisionRules),
     record.executionStatus,
     RECORD_FORMAT,
@@ -139,8 +152,8 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
       // Both values are stored: the masked provider payload exactly as received,
       // so it can be re-normalized after the mapping version changes, and the
       // normalization done under the mapping this build uses.
-      json(attempt.usage),
-      json(attempt.normalizedUsage),
+      nullableJson(attempt.usage),
+      nullableJson(attempt.normalizedUsage),
     );
   }
 }

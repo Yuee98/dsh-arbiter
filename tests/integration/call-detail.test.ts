@@ -963,7 +963,11 @@ describe('old records and endings', () => {
     });
     const basis = fieldOf(detail, 'basis');
     expect(fieldOf(basis, 'chain')).toBeNull();
-    expect(fieldOf(basis, 'signals')).toBeNull();
+    // A v1 row carries none of the current review shape: no score pair, no usage
+    // summary, no strategy name. All three report as absent rather than as a
+    // defaulted band, a zeroed summary or a borrowed label.
+    expect(fieldOf(basis, 'scores')).toBeNull();
+    expect(fieldOf(basis, 'usage')).toBeNull();
     expect(fieldOf(basis, 'policyStrategy')).toBeNull();
     const raw = fieldOf(detail, 'raw');
     expect(fieldOf(raw, 'snapshot')).toBeNull();

@@ -173,7 +173,12 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
     startedAt: rowNumber(model['started_at']),
     durationMs: rowNumber(model['duration_ms']),
     estimatedInputTokens: rowNumber(model['estimated_input_tokens']),
+    // Both usage values are returned: the provider's masked payload so a reader can
+    // re-normalize it after the mapping version changes, and the normalization this
+    // build reads. A null is "the provider reported nothing", never a payload of
+    // zeros.
     usage: rowJson(model['usage']),
+    normalizedUsage: rowJson(model['normalized_usage']),
   };
 }
 

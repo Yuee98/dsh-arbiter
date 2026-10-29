@@ -115,7 +115,8 @@ function auditDetailBody(): DetailBody {
         reviewState: 'reviewed',
         conflicts: [],
         conflictsTruncated: false,
-        signals: null,
+        scores: null,
+        usage: null,
         evidence: [
           {
             ts: 1_700_000_000_000,
@@ -245,23 +246,37 @@ describe('shared call detail', () => {
     );
   });
 
-  test('shows the policy signals without presenting them as the verdict', async () => {
+  test('shows the scored pair and usage without presenting them as the verdict', async () => {
     const body = auditDetailBody();
-    body.detail.basis['signals'] = {
-      riskPoint: 9,
-      authPoint: 1,
-      riskClass: 'high',
+    body.detail.basis['scores'] = {
+      risk: 9,
+      authorization: 1,
+      requiredAuthorization: 10,
+      verdict: 'review-deny',
+    };
+    body.detail.basis['usage'] = {
+      attempts: 1,
+      withUsage: 1,
+      totals: {
+        inputTokens: { total: 900, reported: 1, missing: 0, complete: true },
+      },
     };
     mockDetail(body);
     const { user } = renderClient(<CallDetailPanel callId="call-1" />);
     await screen.findByRole('region', { name: '最终裁决' });
-    await user.click(screen.getByRole('button', { name: '信号与阈值' }));
+    await user.click(screen.getByRole('button', { name: '审查结果' }));
 
-    const signals = screen.getByRole('region', { name: '信号与阈值' });
-    expect(signals).toHaveTextContent('riskPoint');
-    // The verdict region stays the review's conclusion; signals are evidence.
+    // Both sections are named for what they hold: the score pair is what the
+    // reviewer concluded, the usage summary is what the review cost.
+    expect(screen.getByRole('region', { name: '两项评分' })).toHaveTextContent(
+      'requiredAuthorization',
+    );
+    expect(screen.getByRole('region', { name: '用量' })).toHaveTextContent(
+      'inputTokens',
+    );
+    // The verdict region stays the review's conclusion; the detail is evidence.
     expect(verdictRegion()).toHaveTextContent('审查拒绝');
-    expect(verdictRegion()).not.toHaveTextContent('riskPoint');
+    expect(verdictRegion()).not.toHaveTextContent('requiredAuthorization');
   });
 
   test('says a review happened but its material is gone, not that none ran', async () => {
