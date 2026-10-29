@@ -60,16 +60,34 @@ describe('chat reviewer output', () => {
     ).toBe(false);
   });
 
-  test('detects contradictions that require a repair', () => {
+  test('accepts risk/probe combinations the shared rubric permits', () => {
+    // These two were repair failures under the earlier contract, which required
+    // low risk to exclude destruction and high risk to include it. The rubric
+    // grades consequences: disposable data can be destroyed at negligible cost,
+    // and a critical objective can be lost without destroying data or reading
+    // credentials. Rejecting either reports a failure for a legal classification.
     const lowDestructive = parseChatText(
       '{"risk":2,"authorized":6,"secrets":false,"destructive":true,"egress":false,"bulk":false}',
     );
-    expect(lowDestructive.ok).toBe(false);
-    expect(lowDestructive.error).toContain('contradiction');
+    expect(lowDestructive.ok).toBe(true);
     const highClean = parseChatText(
       '{"risk":10,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
     );
-    expect(highClean.ok).toBe(false);
+    expect(highClean.ok).toBe(true);
+  });
+
+  test('rejects a score outside the public 1..10 scale', () => {
+    // The public scale starts at 1, where 1 means an effective prohibition. An
+    // answer of 0 names no band at all, so it is a failed read rather than a
+    // lowest score.
+    const zero = parseChatText(
+      '{"risk":0,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+    );
+    expect(zero.ok).toBe(false);
+    const eleven = parseChatText(
+      '{"risk":11,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+    );
+    expect(eleven.ok).toBe(false);
   });
 
   test('extraction finds the first balanced object', () => {
@@ -91,7 +109,17 @@ describe('decision reviewer output', () => {
       0,
     );
     expect(total).toBeCloseTo(1, 10);
-    expect(signals.riskScore).toBeCloseTo(3.8154, 4);
+    // The weighted band is a public-scale diagnostic: the native capture averages
+    // 3.8154 over levels 0..9, which is 4.8154 once the ten bands are numbered 1..10.
+    // It is derived from the distribution rather than read from the vendor's own
+    // `score` field, so the assertion is against the arithmetic, not the capture.
+    const captured = CAPTURED_CLOUDFLARE.result.answers.risk.probabilities;
+    const publicWeighted = Object.entries(captured).reduce(
+      (sum, [level, probability]) => sum + (Number(level) + 1) * probability,
+      0,
+    );
+    expect(publicWeighted).toBeCloseTo(4.8154, 3);
+    expect(signals.riskScore).toBeCloseTo(publicWeighted, 10);
     // The probes are the captured probabilities thresholded at one half. The
     // expected booleans are written out because the capture is a literal: the
     // comparison would be constant-folded, and a fold cannot drift when the
@@ -111,7 +139,15 @@ describe('decision reviewer output', () => {
     if (!parsed.ok) return;
     const signals = parsed.signals;
     const answers = CAPTURED_TYPESAFE.answers;
-    expect(signals.riskScore).toBeCloseTo(answers.risk.score, 4);
+    // Recompute the public weighted band from the capture's own probabilities
+    // rather than trusting the vendor's `score` field, which is diagnostic input
+    // the contract does not read.
+    const probabilities = answers.risk.probabilities;
+    const weighted = Object.entries(probabilities).reduce(
+      (sum, [level, probability]) => sum + (Number(level) + 1) * probability,
+      0,
+    );
+    expect(signals.riskScore).toBeCloseTo(weighted, 10);
     expect(
       [answers.secrets.noul, answers.destructive.noul].map(
         (value) => value >= 0.5,
@@ -466,6 +502,91 @@ describe('decision reviewer run', () => {
     );
     expect(result.ok).toBe(false);
     expect(result.ok ? null : result.error).toContain('503');
+  });
+});
+
+describe('credential redaction on a malformed answer', () => {
+  // #90/#91 require a credential the provider echoes to stay out of attempt
+  // records, returned errors and audit data. The score validator is a place that
+  // could reintroduce it: it reads provider-controlled keys and values, so its
+  // messages must name a rule class and never repeat what was submitted.
+  const SECRET = 'test-credential-xyz';
+
+  const answerWithSecret = (): string =>
+    JSON.stringify({
+      model: 'clef',
+      answers: {
+        // A complete ten-level key set so this exercises the *value* check rather
+        // than stopping at the key-set check: the secret sits in a value position.
+        risk: {
+          type: 'score',
+          probabilities: {
+            '0': SECRET,
+            '1': 0,
+            '2': 0,
+            '3': 0,
+            '4': 0,
+            '5': 0,
+            '6': 0,
+            '7': 0,
+            '8': 0,
+            '9': 0,
+          },
+          score: 1,
+        },
+        authorized: { type: 'score', probabilities: { 0: 1 }, score: 1 },
+        secrets: { type: 'noul', noul: 0.01 },
+        destructive: { type: 'noul', noul: 0.01 },
+        egress: { type: 'noul', noul: 0.01 },
+        bulk: { type: 'noul', noul: 0.01 },
+      },
+      usage: {},
+    });
+
+  const runWith = async (body: string) =>
+    runDecisionReviewer(
+      {
+        fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+        credentials: { resolve: () => Promise.resolve({ value: SECRET }) },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-leak',
+    );
+
+  test('a secret in a probability value reaches no returned field', async () => {
+    const result = await runWith(answerWithSecret());
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    // The failure is still classified, so the reason stays useful.
+    expect(result.ok ? '' : result.error).toContain('probability');
+  });
+
+  test('a secret in an object key reaches no returned field', async () => {
+    const body = JSON.stringify({
+      model: 'clef',
+      answers: {
+        risk: { type: 'score', probabilities: { [SECRET]: 1 }, score: 1 },
+        authorized: { type: 'score', probabilities: { 0: 1 }, score: 1 },
+        secrets: { type: 'noul', noul: 0.01 },
+        destructive: { type: 'noul', noul: 0.01 },
+        egress: { type: 'noul', noul: 0.01 },
+        bulk: { type: 'noul', noul: 0.01 },
+      },
+      usage: {},
+    });
+    const result = await runWith(body);
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 });
 
@@ -949,31 +1070,59 @@ describe('calibrated cross-protocol parity', () => {
   // spellings: the two protocols must reach one verdict for one set of facts.
   // Each pair below states the same authorization and risk situation twice, once
   // as chat point values and once as a decision distribution.
+  //
+  // Every distribution below is written out as the complete canonical ten levels,
+  // because that is what the contract requires of a real answer — a sparse object
+  // is rejected rather than read as a shorter distribution. `complete()` below is
+  // test scaffolding for that requirement, not a production repair path.
+  const complete = (
+    mass: Readonly<Record<string, number>>,
+  ): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (let level = 0; level <= 9; level += 1) {
+      out[String(level)] = mass[String(level)] ?? 0;
+    }
+    return out;
+  };
   const pairs = [
     {
       name: 'explicit authorization on a medium in-project write',
       chat: { risk: 5, authorized: 9 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '8': 0.85, '9': 0.15 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '8': 0.85, '9': 0.15 }) },
       },
       expected: 'review-allow',
     },
     {
+      // A2 on both sides: "no applicable permission" for this write. A1 is a
+      // different fact — an effective prohibition — and it denies instead, which
+      // the dedicated case below covers.
       name: 'no authorization on the same write',
-      chat: { risk: 5, authorized: 1 },
+      chat: { risk: 5, authorized: 2 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '1': 0.9, '3': 0.1 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '1': 0.9, '3': 0.1 }) },
       },
       expected: 'review-escalate',
+    },
+    {
+      // One prohibition, stated both ways: the same facts must refuse in both
+      // protocols, because an effective prohibition is not a weak authorization.
+      name: 'an effective prohibition on the same write',
+      chat: { risk: 5, authorized: 1 },
+      decision: {
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '0': 0.85, '9': 0.15 }) },
+      },
+      expected: 'review-deny',
     },
     {
       name: 'a goal-level hint on the same write',
       chat: { risk: 5, authorized: 6 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '5': 0.9, '6': 0.1 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '5': 0.9, '6': 0.1 }) },
       },
       expected: 'review-escalate',
     },

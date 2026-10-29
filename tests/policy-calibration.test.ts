@@ -21,10 +21,9 @@ import { describe, expect, test } from 'vitest';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { decideReview, reclassifySignals, strategyFor } from '../src/policy.js';
 import {
-  parseChatText,
-  parseDecisionResponse,
-  signalsFromChat,
-} from '../src/reviewer.js';
+  legacyChatSignals,
+  legacyDecisionSignals,
+} from './helpers/legacy-signals.js';
 import type { PolicyThresholds, ReviewSignals } from '../src/types.js';
 
 interface SampleCase {
@@ -265,23 +264,41 @@ type ReadCase =
   | { readonly ok: true; readonly signals: ReviewSignals }
   | { readonly ok: false; readonly error: string };
 
-/** Parse one case into engine input; a malformed answer stays a failure. */
+/**
+ * Read one recorded case with the *pre-RQ-01* adapter, on purpose.
+ *
+ * These answers were given to the old questions — eleven levels, old anchors, old
+ * risk/probe implications — so replaying them through the new reader would score
+ * something the model never said. `helpers/legacy-signals.ts` freezes the old
+ * reader for exactly this arithmetic check; product code does not use it, and the
+ * new contract has its own tests. See the module comment there.
+ */
 function readCase(entry: SampleCase): ReadCase {
   if (entry.signals.source === 'chat') {
-    const parsed = parseChatText(JSON.stringify(entry.signals.raw));
-    if (!parsed.ok) return { ok: false, error: parsed.error ?? 'rejected' };
-    if (parsed.raw === undefined) return { ok: false, error: 'rejected' };
-    return { ok: true, signals: signalsFromChat(parsed.raw, 0) };
+    const signals = legacyChatSignals(entry.signals.raw);
+    if (signals === null) {
+      return {
+        ok: false,
+        error:
+          entry.expectParseFailure ?? 'the old adapter rejected this answer',
+      };
+    }
+    return { ok: true, signals };
   }
   // `entry.signals.response` is the answers object; which envelope carries it
   // is the transport's business, so the case stays envelope-agnostic by using
   // the native root placement.
-  const parsed = parseDecisionResponse(
-    { answers: entry.signals.response },
+  const signals = legacyDecisionSignals(
+    entry.signals.response,
     DEFAULT_CONFIG.policy.normal,
   );
-  if (!parsed.ok) return { ok: false, error: parsed.error };
-  return { ok: true, signals: parsed.signals };
+  if (signals === null) {
+    return {
+      ok: false,
+      error: entry.expectParseFailure ?? 'the old adapter rejected this answer',
+    };
+  }
+  return { ok: true, signals };
 }
 
 describe('first-release policy calibration', () => {

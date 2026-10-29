@@ -179,11 +179,13 @@ describe('chat probe', () => {
   });
 
   test('an answer that classifies as deny still passes the protocol test', async () => {
-    // High risk and no authorization: the formal policy would deny this, but the
-    // connection test only asks whether the output contract was met.
+    // High risk under an effective prohibition: the formal policy would deny this,
+    // but the connection test only asks whether the output contract was met. The
+    // public authorization scale starts at 1, where 1 is a prohibition — an answer
+    // of 0 names no band and would fail the contract rather than classify as deny.
     const deny = JSON.stringify({
       risk: 9,
-      authorized: 0,
+      authorized: 1,
       secrets: true,
       destructive: true,
       egress: true,

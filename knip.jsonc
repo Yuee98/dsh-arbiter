@@ -4,6 +4,10 @@
     "src/index.ts",
     "src/client/index.tsx",
     "src/client/styles/tailwind.css",
+    // The shared review contract is a public module boundary: production consumes
+    // it after RQ-04's switch and the evals subproject imports it directly, so its
+    // surface is deliberately larger than today's in-tree callers.
+    "src/review-contract/index.ts",
     "scripts/repair-session.ts",
     "tests/e2e/**/*.spec.ts",
     // Loaded by the isolated host as a plugin module, not imported by a test.

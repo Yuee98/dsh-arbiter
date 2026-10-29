@@ -251,6 +251,11 @@ describe('module import boundaries', () => {
     ['src/rules/match.ts', 'react'],
     ['src/domain/value.ts', '@deepseek-ai/dsh-session'],
     ['src/shared/types.ts', '../client/api.js'],
+    // The shared review contract is called by both production and evals, so it has
+    // to stay free of the host, Node and React; see docs/development-baseline.md.
+    ['src/review-contract/normalize.ts', 'node:fs'],
+    ['src/review-contract/matrix.ts', 'react'],
+    ['src/review-contract/evaluate.ts', '../reviewer/prompt.js'],
   ])('rejects %s importing %s', (file, source) => {
     expect(forbiddenImport(file, source)).not.toBeNull();
   });
@@ -263,6 +268,8 @@ describe('module import boundaries', () => {
     ['src/rules/match.ts', 'picomatch'],
     ['src/policy.ts', './types.js'],
     ['src/index.ts', 'node:fs'],
+    // One contract module importing its own sibling is the normal case.
+    ['src/review-contract/evaluate.ts', './normalize.js'],
   ])('permits %s importing %s', (file, source) => {
     expect(forbiddenImport(file, source)).toBeNull();
   });

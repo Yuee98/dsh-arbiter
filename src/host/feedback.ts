@@ -61,6 +61,9 @@ export function modelReasonFor(decision: {
   readonly decisionRules: readonly string[];
 }): string {
   const reasons: Record<string, string> = {
+    // R0 is the A1 row of the shared matrix: an effective prohibition refuses the
+    // call outright, so it must not read as an ordinary weak-authorization block.
+    R0: 'the effective permission prohibits this action',
     R1: 'sensitive material would leave the machine',
     R2: 'critical risk of irreversible damage',
     R3: 'no sufficient authorization was found',
