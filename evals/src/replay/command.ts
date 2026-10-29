@@ -25,6 +25,7 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
+import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
 
 import { defaultSettings } from '../metrics/index.js';
 import type { ReportSettings } from '../metrics/types.js';
@@ -235,6 +236,33 @@ function settingsOf(root: string, variant: ReplayVariant): ReportSettings {
 }
 
 /**
+ * How the saved run differs from this build, in the terms that change what the
+ * derivation means.
+ *
+ * Three versions matter and they differ in kind. A contract drift is reinterpreted
+ * honestly: the same answer is read by today's N0, which is exactly what a replay
+ * measures. A prompt or input drift is not: the answers were produced by other
+ * instructions or from other material, so no re-reading can say what the current ones
+ * would produce, and the only honest statement is that another request is required.
+ */
+function driftOf(
+  read: Extract<SourceRead, { readonly ok: true }>,
+): readonly string[] {
+  const drift: string[] = [];
+  if (read.index.versions.prompt !== REVIEW_PROMPT_VERSION) {
+    drift.push(
+      `the run was produced by prompt ${read.index.versions.prompt}, this build ships ${REVIEW_PROMPT_VERSION}; a new prompt needs a new request and cannot be measured by replaying these answers`,
+    );
+  }
+  if (read.index.versions.contract !== REVIEW_CONTRACT_VERSION) {
+    drift.push(
+      `the run was produced under contract ${read.index.versions.contract}, this build runs ${REVIEW_CONTRACT_VERSION}; the derived bands are today's reading of the saved answers`,
+    );
+  }
+  return drift;
+}
+
+/**
  * `replay`: re-derive one run under each variant and write the derived runs.
  *
  * Every variant is derived before any is written, so a variant that fails to parse
@@ -261,6 +289,9 @@ export async function replayRun(
   io.out(
     `source ${read.index.runId} (${read.index.status}), ${String(read.records.size)} record(s), ${String(read.index.cells.length)} cell(s)`,
   );
+  // Version drift is reported on stderr as well as in the lineage, because the person
+  // reading the terminal is the one who has to decide whether a new request is needed.
+  for (const drift of driftOf(read)) io.err(`warning ${drift}`);
   const parent =
     command.output === null
       ? `${directory}-replay`
@@ -272,6 +303,7 @@ export async function replayRun(
       source: read,
       variant,
       runningContract: REVIEW_CONTRACT_VERSION,
+      runningPrompt: REVIEW_PROMPT_VERSION,
       derivedDirectory: target,
       variantsDocument: variants.document,
     });

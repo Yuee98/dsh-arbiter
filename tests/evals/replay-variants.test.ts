@@ -12,6 +12,7 @@
  * that it writes into a directory of its own.
  */
 
+import { symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -382,28 +383,128 @@ describe('the derived directory is a run, and a refusal leaves nothing behind', 
 });
 
 describe('the safety checks are their own unit', () => {
-  it('refuses a destination equal to, inside, or above the source', () => {
-    const source = '/repo/.local/evals/runs/a';
-    expect(destinationRefusal({ source, destination: source })).toContain(
-      'lies inside',
-    );
-    expect(
-      destinationRefusal({ source, destination: `${source}/nested` }),
-    ).toContain('lies inside');
-    expect(
-      destinationRefusal({ source, destination: '/repo/.local/evals/runs' }),
-    ).toContain('contains');
+  it('refuses a destination equal to, inside, or above the source', async () => {
+    await withArea(async (created) => {
+      const source = await created.dir('runs/a');
+      expect(
+        await destinationRefusal({ source, destination: source }),
+      ).toContain('resolves inside the run being replayed');
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(source, 'nested'),
+        }),
+      ).toContain('resolves inside the run being replayed');
+      expect(
+        await destinationRefusal({
+          source,
+          destination: await created.dir('runs'),
+        }),
+      ).toContain('resolves to a directory that contains');
+    });
   });
 
-  it('accepts a sibling, including one whose name only looks like the source', () => {
-    const source = '/repo/.local/evals/runs/a';
-    expect(
-      destinationRefusal({ source, destination: '/repo/.local/evals/runs/b' }),
-    ).toBeNull();
-    // `/runs/ab` must not be read as being inside `/runs/a`.
-    expect(
-      destinationRefusal({ source, destination: '/repo/.local/evals/runs/ab' }),
-    ).toBeNull();
+  it('accepts a sibling, including one whose name only looks like the source', async () => {
+    await withArea(async (created) => {
+      const source = await created.dir('runs/a');
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(created.path, 'runs/b'),
+        }),
+      ).toBeNull();
+      // `/runs/ab` must not be read as being inside `/runs/a`: the boundary test is a
+      // separator, not a prefix.
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(created.path, 'runs/ab'),
+        }),
+      ).toBeNull();
+    });
+  });
+
+  it('refuses a destination that reaches the source through a symlink', async () => {
+    // The bypass this closes: `resolve()` normalises spelling only, so a destination
+    // reached through a link looks unrelated while its writes land in the run. With
+    // --force that would overwrite the evidence, which no flag may authorise.
+    await withArea(async (created) => {
+      const source = await created.dir('run');
+      const outside = await created.dir('elsewhere');
+      const link = join(created.path, 'elsewhere-link');
+      await symlink(source, link, 'dir');
+      expect(await destinationRefusal({ source, destination: link })).toContain(
+        'resolves inside the run being replayed',
+      );
+      // A destination whose *parent* is a link resolves into the source too.
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(link, 'variant'),
+        }),
+      ).toContain('resolves inside');
+      // And the reverse direction, where the link sits above the source.
+      const outerLink = join(outside, 'up');
+      await symlink(created.path, outerLink, 'dir');
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(outside, 'up'),
+        }),
+      ).toContain('contains');
+    });
+  });
+
+  it('refuses a symlinked destination even when --force would replace files', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [decisionCellOf('read-named-source-file')]: decisionForCase(
+          { '4': 0.9, '5': 0.1 },
+          { '8': 0.9, '9': 0.1 },
+        ),
+      });
+      const before = await inventory(directory);
+      // The variant directory the replay will compute, pre-created as a link to the
+      // source. Without canonicalisation the overlap check passes and --force writes
+      // the derivation into the run being replayed.
+      const out = await created.dir('out');
+      await symlink(
+        directory,
+        join(out, 'text-strict-at-least-ask-available'),
+        'dir',
+      );
+      const result = await replay({
+        directory,
+        output: out,
+        force: true,
+      });
+      expect(result.code).toBe(1);
+      expect(result.err.join('\n')).toContain('resolves inside');
+      // The evidence is untouched, which is the property the refusal exists for.
+      expect(await inventory(directory)).toEqual(before);
+    });
+  });
+
+  it('compares ancestry with the platform separator, not a literal slash', async () => {
+    // On Windows a resolved path uses `\`, so a `/` boundary test never matches and a
+    // nested destination would look unrelated to the source it sits inside. The check
+    // is exercised here through the real implementation on the current platform; the
+    // Windows branch itself is covered by the CI job that runs there.
+    await withArea(async (created) => {
+      const source = await created.dir('run');
+      const nested = join(source, 'nested', 'deeper');
+      expect(
+        await destinationRefusal({ source, destination: nested }),
+      ).toContain('resolves inside the run being replayed');
+      // A sibling that shares the whole name except a trailing character is not inside,
+      // which is what the separator boundary exists to distinguish.
+      expect(
+        await destinationRefusal({
+          source,
+          destination: join(created.path, 'run2'),
+        }),
+      ).toBeNull();
+    });
   });
 
   it('names a variant directory by its own identity', () => {

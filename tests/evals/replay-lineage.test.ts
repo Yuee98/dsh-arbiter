@@ -28,6 +28,8 @@ import {
 import type { EvaluationReport } from '../../evals/src/metrics/types.js';
 import { REPLAY_FILES } from '../../evals/src/replay/write.js';
 
+import { replayRun } from '../../evals/src/replay/command.js';
+
 import { readDocument, schemas } from './helpers/documents.js';
 import { REPOSITORY_ROOT, withArea } from './helpers/report-run.js';
 import type { Area } from './helpers/report-run.js';
@@ -313,6 +315,92 @@ describe('the derivation is traceable to its source', () => {
       );
       expect(record === undefined ? null : textAt(record, 'digest')).toBe(
         await digestOf(join(directory, 'records', `${CELL}.json`)),
+      );
+    });
+  });
+
+  it('states that a changed prompt needs a new request rather than a replay', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      // A run produced by another prompt is still a valid input — the answers are
+      // there — but those answers are not evidence about what today's prompt would
+      // produce, and only a new request can be. Recording the old version alone would
+      // leave a reader to make that inference unaided.
+      const index = await readJson(join(directory, 'index.json'));
+      await created.write('run/index.json', {
+        ...index,
+        versions: {
+          ...objectAt(index, 'versions'),
+          prompt: 'review-prompt-v0',
+        },
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Reported where a person will see it, not only in a JSON document.
+      expect(err.join('\n')).toContain('prompt review-prompt-v0');
+      expect(err.join('\n')).toContain('cannot be measured by replaying');
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      // The source's own version is preserved as provenance...
+      expect(textAt(lineage, 'source.versions.prompt')).toBe(
+        'review-prompt-v0',
+      );
+      // ...and the note says what that means for the reader.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        'prompt 版本是 review-prompt-v0',
+      );
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '要测量新 prompt 必须重新发起请求',
+      );
+    });
+  });
+
+  it('records the dataset the run used, so a changed dataset is visible', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      await replay({ directory, output: join(created.path, 'derived') });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'source.dataset.datasetId')).toBe('core-v1');
+      expect(textAt(lineage, 'source.dataset.digest')).toMatch(/^sha256:/);
+      // A changed dataset cannot move a derived score — the answers are saved — and the
+      // note says so, so nobody reads the derivation as evidence about new material.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '数据集变化不会改变派生分数',
       );
     });
   });

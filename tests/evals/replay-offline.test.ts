@@ -165,7 +165,7 @@ describe('the source is never written', () => {
       });
       expect(result.code).toBe(1);
       expect(result.err.join('\n')).toContain(
-        'lies inside the run being replayed',
+        'resolves inside the run being replayed',
       );
       expect(await inventory(directory)).toEqual(before);
     });

@@ -25,8 +25,8 @@
  *     the derived directory is readable as a run, and only a read establishes that.
  */
 
-import { mkdir, stat, writeFile } from 'node:fs/promises';
-import { join, posix, resolve } from 'node:path';
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 import { reportForRun } from '../metrics/index.js';
 import type { ReportSettings } from '../metrics/types.js';
@@ -76,14 +76,50 @@ async function exists(path: string): Promise<boolean> {
 /**
  * Whether one path is the other, or lies beneath it.
  *
- * A separator boundary is what keeps `/runs/a` from protecting `/runs/ab`, and
- * resolution is what makes the comparison independent of how the caller spelled the
- * two paths.
+ * Two details carry this comparison, and getting either wrong opens the evidence to
+ * a write:
+ *
+ *   - the separator comes from `sep`, not from a literal `/`. On Windows a resolved
+ *     path uses `\`, so a `/` test never matches and a nested destination looks
+ *     unrelated. The boundary check is what keeps `/runs/a` from protecting
+ *     `/runs/ab`, so it has to be the platform's own separator.
+ *   - both sides are compared after canonicalisation, because `resolve()` only
+ *     normalises spelling. A destination that reaches the source through a symbolic
+ *     link — `out/<variant>` linked to the run, or a linked parent — is lexically
+ *     elsewhere and physically inside it.
  */
 function overlaps(inner: string, outer: string): boolean {
   const left = resolve(inner);
   const right = resolve(outer);
-  return left === right || left.startsWith(`${right}${posix.sep}`);
+  return left === right || left.startsWith(`${right}${sep}`);
+}
+
+/**
+ * The real location of a path whose leaf may not exist yet.
+ *
+ * `realpath` refuses a missing path, and a destination is normally missing before the
+ * first write. So the deepest existing ancestor is canonicalised and the components
+ * below it are re-appended: every link that exists is followed, and the part that does
+ * not exist yet cannot be a link. Without this the check would either have to fail
+ * open on every new destination or refuse the ordinary case.
+ */
+async function canonical(path: string): Promise<string> {
+  const tail: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      const real = await realpath(current);
+      return tail.length === 0 ? real : join(real, ...tail.reverse());
+    } catch {
+      const parent = dirname(current);
+      // At the filesystem root there is nothing left to canonicalise; the resolved
+      // path is the best available answer, and it is exact because every component
+      // above it was already tried.
+      if (parent === current) return resolve(path);
+      tail.push(basename(current));
+      current = parent;
+    }
+  }
 }
 
 /**
@@ -93,16 +129,23 @@ function overlaps(inner: string, outer: string): boolean {
  * run being replayed; writing above it would make the derived directory contain the
  * source, so a report of the derivation would describe the original's records too.
  * An ordinary sibling is what is allowed, and it is the normal case.
+ *
+ * This is the guard that makes "the source is never written" true rather than
+ * intended, so it compares real locations rather than spelled ones. It runs before
+ * every write and cannot be bypassed by `--force`: force decides whether an existing
+ * derivation may be replaced, never whether the evidence may be.
  */
-export function destinationRefusal(parts: {
+export async function destinationRefusal(parts: {
   readonly source: string;
   readonly destination: string;
-}): string | null {
-  if (overlaps(parts.destination, parts.source)) {
-    return `${parts.destination} lies inside the run being replayed (${parts.source}); a replay never writes into its own evidence`;
+}): Promise<string | null> {
+  const source = await canonical(parts.source);
+  const destination = await canonical(parts.destination);
+  if (overlaps(destination, source)) {
+    return `${parts.destination} resolves inside the run being replayed (${source}); a replay never writes into its own evidence`;
   }
-  if (overlaps(parts.source, parts.destination)) {
-    return `${parts.destination} contains the run being replayed (${parts.source}); a derived run must not be written over its source`;
+  if (overlaps(source, destination)) {
+    return `${parts.destination} resolves to a directory that contains the run being replayed (${source}); a derived run must not be written over its source`;
   }
   return null;
 }
@@ -166,7 +209,7 @@ export async function writeDerivation(parts: {
 }): Promise<
   { readonly ok: true; readonly written: DerivedWrite } | WriteRefusal
 > {
-  const conflict = destinationRefusal({
+  const conflict = await destinationRefusal({
     source: parts.sourceDirectory,
     destination: parts.directory,
   });
@@ -270,10 +313,16 @@ function writablePaths(
   ];
 }
 
-/** A path as the lineage prints it: relative to the directory it describes. */
+/**
+ * A path as the lineage prints it: relative to the directory it describes.
+ *
+ * `relative` rather than a string prefix, so the result is correct where the platform
+ * separator is not `/`. A lineage that printed an absolute path here would make two
+ * derivations of one variant differ just because they were written elsewhere.
+ */
 function relativeTo(directory: string, path: string): string {
-  const base = `${directory}/`;
-  return path.startsWith(base) ? path.slice(base.length) : path;
+  const relativePath = relative(directory, path);
+  return relativePath.startsWith('..') ? path : relativePath;
 }
 
 /** Where one variant's directory lives when the caller named a parent. */

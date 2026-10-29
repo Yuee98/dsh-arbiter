@@ -325,6 +325,33 @@ export async function digestOf(path: string): Promise<string> {
     .digest('hex')}`;
 }
 
+/**
+ * A chat run whose only cell ends in a genuine transport failure.
+ *
+ * The scripted `truncated` stream is what a dropped connection produces: text may
+ * arrive and the stream ends with no terminal finish, so the adapter records
+ * `failureKind: 'transport'` and no usage. A test that wanted a transport failure and
+ * scripted a successful answer would prove nothing about the failure path, which is
+ * why this helper exists rather than an inline fixture.
+ */
+export async function truncatedChatRun(directory: string): Promise<string> {
+  return runPlan({
+    directory,
+    plan: planOf({
+      // One case only, so the derived totals count the failure and nothing else: a
+      // second planned cell without a fixture would be a different disposition.
+      caseIds: [CASES[0] ?? ''],
+      protocols: ['chat'],
+      targets: [chatTarget()],
+    }),
+    fixture: fixtureOf({
+      [chatCellOf(CASES[0] ?? '')]: fixtureCell({
+        chat: [{ kind: 'truncated' }],
+      }),
+    }),
+  });
+}
+
 /** A chat answer body with two public integers. */
 export function chatText(risk: number, authorization: number): string {
   return JSON.stringify({ risk, authorization });

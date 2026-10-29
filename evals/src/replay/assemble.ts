@@ -118,6 +118,7 @@ function totalsOf(rows: readonly ReplayCellLineage[]): ReplayTotals {
 function notesOf(parts: {
   readonly source: ReplaySource;
   readonly runningContract: string;
+  readonly runningPrompt: string;
   readonly totals: ReplayTotals;
   readonly variant: ReplayVariant;
 }): readonly string[] {
@@ -128,6 +129,16 @@ function notesOf(parts: {
   if (parts.source.versions.contract !== parts.runningContract) {
     notes.push(
       `源运行记录的契约版本是 ${parts.source.versions.contract}，本次重算运行在 ${parts.runningContract} 下：派生结果描述的是「旧答案按当前规则读取」，不是原运行的回放一致性证明。`,
+    );
+  }
+  // The prompt is not replayed. Its version says which instructions produced the
+  // answers, and a replay can only re-read answers a prompt already produced — so a
+  // changed prompt is stated as requiring another request, not as a variation this
+  // derivation measured. Without this the lineage would record the drift and let a
+  // reader mistake the derivation for evidence about the new prompt.
+  if (parts.source.versions.prompt !== parts.runningPrompt) {
+    notes.push(
+      `源运行记录的 prompt 版本是 ${parts.source.versions.prompt}，当前生产是 ${parts.runningPrompt}：prompt 不属于回放的轴，派生结果描述的是「旧 prompt 的答案按当前规则读取」。要测量新 prompt 必须重新发起请求；本目录不能替代那次评测。`,
     );
   }
   if (parts.variant.answer === 'response-text') {
@@ -151,6 +162,9 @@ function notesOf(parts: {
   }
   notes.push(
     '参考标签没有因为这次派生而改变：`labels/` 只被读取，派生报告按原标签比较引擎答案。',
+  );
+  notes.push(
+    `源运行针对的数据集是 ${parts.source.dataset.datasetId}（${parts.source.dataset.digest}）。回放只重读保存的响应，所以数据集变化不会改变派生分数；但派生报告是拿当前数据集里的标签去比的，某例的输入 hash 与标签不再相符时由报告层现有的标签诊断列出并排除，不在这里修补。`,
   );
   return notes;
 }
@@ -215,6 +229,8 @@ export function deriveRun(parts: {
   readonly source: ReadableSource;
   readonly variant: ReplayVariant;
   readonly runningContract: string;
+  /** The prompt version this build ships, so a drift from the source can be stated. */
+  readonly runningPrompt: string;
   readonly derivedDirectory: string;
   /** The variants document's version, when the caller supplied one. */
   readonly variantsDocument: string | null;
@@ -307,6 +323,7 @@ export function deriveRun(parts: {
       notes: notesOf({
         source: parts.source.source,
         runningContract: parts.runningContract,
+        runningPrompt: parts.runningPrompt,
         totals,
         variant: parts.variant,
       }),

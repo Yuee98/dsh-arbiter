@@ -31,7 +31,7 @@ import {
   cellRecordOf,
   chatCellOf,
   chatRun,
-  chatText,
+  truncatedChatRun,
   decisionCellOf,
   decisionRun,
   listTextAt,
@@ -206,29 +206,59 @@ describe('a provider refusal stays a failure', () => {
     });
   });
 
-  it('keeps a transport failure a failure, with no invented usage', async () => {
+  it('keeps a transport failure a failure under every axis, with no invented usage', async () => {
     await withArea(async (created) => {
-      const directory = await chatRun(join(created.path, 'run'), [
-        {
-          cellId: chatCellOf(CASE),
-          text: chatText(1, 10),
-        },
-      ]);
+      // A stream that ends with no terminal finish, as a dropped connection does. The
+      // production adapter records `failureKind: 'transport'`, and the saved attempt
+      // carries no usage because the provider never reported any.
+      const directory = await truncatedChatRun(join(created.path, 'run'));
+      const stored = await cellRecordOf(directory, chatCellOf(CASE));
+      const failedAttempt = stored.attempts.find(
+        (attempt) => attempt.failureKind !== null,
+      );
+      expect(failedAttempt?.failureKind).toBe('transport');
+      expect(stored.outcome?.status).toBe('review-failure');
+
+      // Every axis changed at once: a replayer that read a score out of the stored text
+      // would derive a different outcome here.
       const result = await replay({
         directory,
         output: join(created.path, 'derived'),
+        thresholdRisk: 'at-least',
+        thresholdAuthorization: 'strict',
         mode: 'no-ask',
+        channel: 'unavailable',
       });
-      // This run's answer is a normal one, so the derivation happens; the assertion in
-      // this test is about the *other* shape, scripted below through the same path.
       expect(result.code).toBe(0);
-      const report = await reportOf(
-        join(created.path, 'derived/text-strict-at-least-no-ask-available'),
+      const derived = join(
+        created.path,
+        'derived/text-at-least-strict-no-ask-unavailable',
       );
-      // A chat answer reports no usage here, and the report says unknown rather than
-      // zero: the failure case and this one must both keep `null`.
+      const record = await cellRecordOf(derived, chatCellOf(CASE));
+      // The failure survives, and nothing was re-derived from it: the cell is carried
+      // through with its own verdict rather than compared as a new reading.
+      expect(record.outcome).toEqual(stored.outcome);
+      const lineage = await lineageOf(join(derived, REPLAY_FILES.lineage));
+      expect(lineage.cells[0]?.disposition).toBe('kept');
+      expect(lineage.cells[0]?.reason).toContain('transport');
+      expect(lineage.totals.reDerived).toBe(0);
+      expect(lineage.totals.kept).toBe(1);
+
+      const report = await reportOf(derived, {
+        mode: 'no-ask',
+        channel: 'unavailable',
+      });
+      expect(report.behaviour.overall.technical).toBe(1);
+      expect(report.behaviour.overall.judged).toBe(0);
+      // Unknown usage stays unknown: the transport reported no counts, so the figure is
+      // null rather than zero.
       expect(report.usage.run?.totals.inputTokens.total).toBeNull();
       expect(report.usage.run?.totals.outputTokens.total).toBeNull();
+      expect(report.usage.run?.withUsage).toBe(0);
+      expect(report.usage.attempts[0]?.tokens.inputTokens).toBeNull();
+      // And the settlement is a technical fallback, never a refusal the engine chose.
+      expect(report.settlement.overall.technical.fallbackDeny).toBe(1);
+      expect(report.settlement.overall.deny).toBe(0);
     });
   });
 });
