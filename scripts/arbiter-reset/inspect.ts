@@ -262,14 +262,21 @@ function tableNames(db: DatabaseSync): readonly string[] {
 /** Whether one table has a column, asked of the file itself. */
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
   const rows: readonly unknown[] = db
-    .prepare(`PRAGMA table_info("${table}")`)
+    .prepare(`PRAGMA table_info(${quoted(table)})`)
     .all();
   return rows.some((row) => fieldOf(row, 'name') === column);
 }
 
-/** A table name safe to interpolate as a quoted identifier. */
-function isPlainTableName(name: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
+/**
+ * A table name quoted for interpolation.
+ *
+ * Doubling an embedded `"` is SQLite's own escaping, so a table called
+ * `operator notes` — or one containing a quote — is counted like any other. The
+ * alternative, skipping names that are not plain identifiers, would leave real
+ * rows uncounted in a plan that then deleted the table holding them.
+ */
+function quoted(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
 }
 
 /** Rows per table, or `null` when any table could not be counted. */
@@ -279,17 +286,29 @@ function readRows(
 ): Readonly<Record<string, number>> | null {
   const records: Record<string, number> = {};
   for (const table of tables) {
-    if (!isPlainTableName(table)) return null;
-    const count = countOf(
-      db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get(),
-    );
+    let count: number | null;
+    try {
+      count = countOf(
+        db.prepare(`SELECT COUNT(*) AS count FROM ${quoted(table)}`).get(),
+      );
+    } catch {
+      count = null;
+    }
     if (count === null) return null;
     records[table] = count;
   }
   return records;
 }
 
-/** One count over `calls`, or `null` when it could not be read. */
+/**
+ * Rows in `calls` matching one predicate, or `null` when that cannot be read.
+ *
+ * `record_format_version` is **absent** in the structures this plugin shipped
+ * before the column existed. That absence is a fact about the rows, not a failed
+ * read: those rows declare no record format at all, so they are not current-format
+ * rows. Treating the missing column as an unreadable count made the tool refuse
+ * precisely the databases it exists to reset.
+ */
 function countCalls(
   db: DatabaseSync,
   tables: readonly string[],
@@ -297,6 +316,7 @@ function countCalls(
   parameters: readonly (string | number)[] = [],
 ): number | null {
   if (!tables.includes('calls')) return 0;
+  if (!hasColumn(db, 'calls', 'record_format_version')) return 0;
   try {
     return countOf(
       db
@@ -306,6 +326,23 @@ function countCalls(
   } catch {
     return null;
   }
+}
+
+/** Rows this build cannot interpret, treating a pre-format column as all of them. */
+function foreignCount(
+  db: DatabaseSync,
+  tables: readonly string[],
+): number | null {
+  if (!tables.includes('calls')) return 0;
+  if (!hasColumn(db, 'calls', 'record_format_version'))
+    // No format column: every row predates the format, so none of them is current.
+    return countOf(db.prepare('SELECT COUNT(*) AS count FROM calls').get());
+  return countCalls(
+    db,
+    tables,
+    'record_format_version IS NULL OR record_format_version <> ?',
+    [RECORD_FORMAT],
+  );
 }
 
 /** Rows per value of one `calls` column, or `null` when it cannot be attributed. */
@@ -319,7 +356,7 @@ function groupBy(
   try {
     const rows: readonly unknown[] = db
       .prepare(
-        `SELECT "${column}" AS value, COUNT(*) AS count FROM calls GROUP BY "${column}" ORDER BY count DESC`,
+        `SELECT ${quoted(column)} AS value, COUNT(*) AS count FROM calls GROUP BY ${quoted(column)} ORDER BY count DESC`,
       )
       .all();
     const counts: ValueCount[] = [];
@@ -407,12 +444,7 @@ function readStructureCopy(path: string): StructureRead {
         records: readRows(db, tables),
         profiles: groupBy(db, tables, 'profile'),
         workspaces: groupBy(db, tables, 'workspace'),
-        foreignRecords: countCalls(
-          db,
-          tables,
-          'record_format_version IS NULL OR record_format_version <> ?',
-          [RECORD_FORMAT],
-        ),
+        foreignRecords: foreignCount(db, tables),
         currentFormatRecords: countCalls(
           db,
           tables,

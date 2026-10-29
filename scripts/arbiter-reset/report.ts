@@ -81,10 +81,25 @@ function sessionLogLines(plan: ResetPlan): readonly string[] {
   ];
 }
 
+/**
+ * The top-level result of a run.
+ *
+ * "Nothing removed" and "removed some, then stopped" are different facts, and the
+ * report is the record the later operations task reconciles against. A partial
+ * run that printed "nothing removed" directly above "files removed: 1" would be
+ * contradictory evidence.
+ */
+function resultLabel(outcome: ResetOutcome): string {
+  if (outcome.removed.length === 0) return 'nothing removed';
+  return outcome.applied
+    ? 'removed every planned file'
+    : 'PARTIAL: stopped before finishing';
+}
+
 /** The outcome section of a real run. */
 function outcomeLines(outcome: ResetOutcome): readonly string[] {
   return [
-    `  result: ${outcome.applied ? 'removed' : 'nothing removed'}`,
+    `  result: ${resultLabel(outcome)}`,
     ...(outcome.reason === null ? [] : [`  reason: ${outcome.reason}`]),
     `  files removed: ${bytes(outcome.removed.length)}`,
     `  bytes removed: ${bytes(outcome.removedBytes)}`,

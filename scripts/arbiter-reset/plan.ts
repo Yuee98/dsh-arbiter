@@ -164,6 +164,11 @@ function deletionRefusal(probe: DatabaseProbe): string | null {
   const absent = OWNERSHIP_TABLES.filter((table) => !tables.includes(table));
   if (absent.length > 0)
     return `it is not an Arbiter audit database: the ${absent.join(', ')} table(s) are missing`;
+  // Every table has to be counted before the file is deleted: the plan claims an
+  // exact impact inventory, and a table whose size is unknown could be holding
+  // anything. An unreadable count is an unknown, not a zero.
+  if (probe.records === null)
+    return 'the row count of every table could not be read, so the impact inventory would be incomplete';
   // A `calls` table without `profile` is not "no other profile affected": it is
   // an attribution this tool cannot make, which blocks the allowlist check.
   if (probe.profiles === null)
@@ -326,7 +331,13 @@ function factsOfEntry(
  * empty scope; every other failure is a refusal.
  */
 function listDirectory(directory: string): Listing {
-  if (!existsSync(directory)) return { ok: true, entries: [] };
+  const presence = presenceOf(directory);
+  if (presence === 'absent') return { ok: true, entries: [] };
+  if (presence === 'unverifiable')
+    return {
+      ok: false,
+      problem: `${directory} exists but cannot be verified: it is a dangling symlink, so the scope is neither present nor absent`,
+    };
   let names: readonly string[];
   try {
     names = readdirSync(directory);
@@ -413,6 +424,33 @@ function probedTarget(
     probe,
     records: probe.records,
   };
+}
+
+/**
+ * Whether a path is absent, verifiable, or present but not verifiable.
+ *
+ * `existsSync` follows links, so a **dangling** symlink reports "absent" — the
+ * worst possible answer here: the operator is told the scope is empty by a run
+ * that was pointed at a link it could not follow. Only a genuine `ENOENT` is
+ * absence.
+ */
+function presenceOf(path: string): 'absent' | 'present' | 'unverifiable' {
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch (error) {
+    return errnoCodeOf(error) === 'ENOENT' ? 'absent' : 'unverifiable';
+  }
+  if (stats.isSymbolicLink())
+    return isDirectory(path) ? 'present' : 'unverifiable';
+  return 'present';
+}
+
+/** The `code` of a thrown file-system error, or `null` for anything else. */
+function errnoCodeOf(error: unknown): string | null {
+  if (error === null || typeof error !== 'object') return null;
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' ? code : null;
 }
 
 /** The size of a plain file, or `0` when it cannot be read. */
@@ -627,7 +665,12 @@ export function scopeRefusals(home: string): readonly string[] {
       'the current audit structure version could not be determined from this build; refusing to classify any database as old',
     ];
   const pluginDirectory = join(resolved, DATA_DIRECTORY);
-  if (!existsSync(pluginDirectory)) return [];
+  const presence = presenceOf(pluginDirectory);
+  if (presence === 'absent') return [];
+  if (presence === 'unverifiable')
+    return [
+      `${pluginDirectory} exists but cannot be verified: it is a dangling symlink, so the scope is neither present nor absent`,
+    ];
   if (!isDirectory(pluginDirectory))
     return [`${pluginDirectory} is not a directory`];
   let canonical: string;
@@ -706,44 +749,40 @@ function residueTarget(entry: Entry): ResetTarget {
     return plainTarget(entry, 'residue', 'refuse', refusal, 0, null);
   const probe = inspectDatabase(entry.path, CURRENT_SCHEMA_VERSION);
   const ownership = deletionRefusal(probe);
+  // The probe travels with the target so a readable residue contributes its real
+  // row counts to the dry-run tally and the execution record, exactly like a
+  // database or a backup. Reporting an available count as unknown would make the
+  // operation evidence wrong.
   if (ownership !== null)
-    return entryTarget(
-      entry,
-      'residue',
-      'refuse',
-      `a residue is deleted only when it is a readable Arbiter copy of a retired structure, and here ${
+    return probedTarget(entry, 'residue', probe, {
+      action: 'refuse',
+      reason: `a residue is deleted only when it is a readable Arbiter copy of a retired structure, and here ${
         ownership.startsWith('it') ? ownership : `this fails: ${ownership}`
       }`,
-    );
+    });
   if (probe.kind === 'current' || probe.kind === 'newer')
-    return entryTarget(
-      entry,
-      'residue',
-      'keep',
-      'it holds a database in the current or a newer structure, so it is not an abandoned partial copy',
-    );
+    return probedTarget(entry, 'residue', probe, {
+      action: 'keep',
+      reason:
+        'it holds a database in the current or a newer structure, so it is not an abandoned partial copy',
+    });
   if (probe.kind !== 'unsupported')
-    return entryTarget(
-      entry,
-      'residue',
-      'refuse',
-      `a residue is deleted only when it holds a retired structure, and this file is classified ${probe.kind}`,
-    );
+    return probedTarget(entry, 'residue', probe, {
+      action: 'refuse',
+      reason: `a residue is deleted only when it holds a retired structure, and this file is classified ${probe.kind}`,
+    });
   if ((probe.currentFormatRecords ?? 0) > 0)
-    return entryTarget(
-      entry,
-      'residue',
-      'refuse',
-      `it also holds ${String(
+    return probedTarget(entry, 'residue', probe, {
+      action: 'refuse',
+      reason: `it also holds ${String(
         probe.currentFormatRecords,
       )} row(s) written in the current record format`,
-    );
-  return entryTarget(
-    entry,
-    'residue',
-    'delete',
-    'partial migration backup left by the retired chain: a readable copy of a retired structure, holding no record this build can read',
-  );
+    });
+  return probedTarget(entry, 'residue', probe, {
+    action: 'delete',
+    reason:
+      'partial migration backup left by the retired chain: a readable copy of a retired structure, holding no record this build can read',
+  });
 }
 
 /** Build the plan for one data directory. */

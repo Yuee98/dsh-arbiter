@@ -40,7 +40,10 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import { applyPlan } from '../../scripts/arbiter-reset/apply.ts';
 import { buildPlan } from '../../scripts/arbiter-reset/plan.ts';
-import { renderPlan } from '../../scripts/arbiter-reset/report.ts';
+import {
+  renderOutcome,
+  renderPlan,
+} from '../../scripts/arbiter-reset/report.ts';
 import { main } from '../../scripts/arbiter-reset-test-data.ts';
 import { AuditStore, fingerprintOf } from '../../src/audit.js';
 import type { CallRecord } from '../../src/audit.js';
@@ -540,6 +543,29 @@ describe('apply', () => {
     expect(existsSync(parked)).toBe(true);
   });
 
+  test('reports the record count of a readable staging residue', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db.backup-v2.staging'));
+    // No main database: the residue is the only target, and its count must appear
+    // in the preview and in the execution record rather than "unreadable".
+    const plan = buildPlan(home);
+    const residue = plan.targets.find(
+      (target) => target.name === 'arbiter.db.backup-v2.staging',
+    );
+    expect(residue?.action).toBe('delete');
+    expect(residue?.records?.['calls']).toBe(1);
+    expect(plan.deleteRecords).toBe(1);
+
+    const preview = run(['--home', home]);
+    expect(preview.out).toContain('DELETE arbiter.db.backup-v2.staging');
+    expect(preview.out).toContain('1 row(s)');
+
+    const applied = run(['--home', home, '--apply', plan.planId]);
+    expect(applied.code).toBe(0);
+    expect(applied.out).toContain('records removed: 1');
+  });
+
   test('stops at a file that vanished mid-run and reports the partial result', async () => {
     const home = await makeHome();
     const directory = pluginDir(home);
@@ -558,6 +584,23 @@ describe('apply', () => {
     expect(outcome.removedBytes).toBeGreaterThan(0);
     expect(existsSync(join(directory, 'arbiter.db'))).toBe(false);
     expect(existsSync(join(directory, 'arbiter.db.backup-v2'))).toBe(false);
+
+    // The rendered report has to say the run was partial. "nothing removed"
+    // printed directly above "files removed: 1" is contradictory evidence for the
+    // later operations task that reconciles against it.
+    const rendered = renderOutcome(plan, outcome);
+    expect(rendered).toContain('result: PARTIAL');
+    expect(rendered).not.toContain('result: nothing removed');
+    expect(rendered).toContain('files removed: 1');
+  });
+
+  test('a run that removes nothing renders as nothing removed', async () => {
+    const home = await makeHome();
+    const plan = buildPlan(home);
+    const outcome = applyPlan(plan, plan.planId);
+    const rendered = renderOutcome(plan, outcome);
+    expect(rendered).toContain('result: nothing removed');
+    expect(rendered).not.toContain('PARTIAL');
   });
 });
 
@@ -733,6 +776,97 @@ describe('fail-closed inspection', () => {
     expect(applied.code).toBe(1);
     expect(existsSync(database)).toBe(true);
     expect(treeDigest(home)).toBe(before);
+  });
+});
+
+describe('historical structures', () => {
+  test('resets the authentic v1 structure that has no record_format_version column', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    mkdirSync(directory, { recursive: true });
+    // The structure this project actually shipped first: `signals` and
+    // `policy_strategy` instead of the format column. A missing column is a fact
+    // about those rows (they declare no format), not an unreadable count — the
+    // distinction decides whether the databases this tool exists for can be reset.
+    const db = new DatabaseSync(join(directory, 'arbiter.db'));
+    db.exec(`CREATE TABLE calls (
+        call_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, session_id TEXT NOT NULL,
+        session_kind TEXT NOT NULL, parent_session TEXT, profile TEXT, workspace TEXT,
+        tool TEXT NOT NULL, arguments TEXT NOT NULL, cwd TEXT NOT NULL,
+        fingerprint TEXT NOT NULL, config_revision TEXT NOT NULL,
+        config_snapshot_id TEXT NOT NULL, approval_mode TEXT NOT NULL,
+        execution_mode TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL,
+        trace TEXT NOT NULL, effect TEXT NOT NULL, session_record_state TEXT NOT NULL,
+        signals TEXT, policy_strategy TEXT, decision_rules TEXT NOT NULL,
+        execution_status TEXT NOT NULL);
+      CREATE TABLE stages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, call_id TEXT NOT NULL, seq INTEGER NOT NULL,
+        stage TEXT NOT NULL, result TEXT NOT NULL, ts INTEGER NOT NULL);
+      CREATE TABLE model_calls (
+        id TEXT PRIMARY KEY, call_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+        backend TEXT NOT NULL, protocol TEXT NOT NULL, request TEXT NOT NULL,
+        started_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+        estimated_input_tokens INTEGER NOT NULL);
+      CREATE TABLE config_snapshots (
+        snapshot_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+        content TEXT NOT NULL, format_version INTEGER NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO calls VALUES ('v1-a', 1600000000000, 's', 'main', NULL, 'gate',
+        '/tmp', 'bash', '{"command":"ls"}', '/tmp', 'fp', 'rev', 'cfg', 'ask',
+        'trusted', 'review-allow', 'old', '[]', '', 'written', '{"riskClass":"low"}',
+        NULL, '[]', 'pending');
+      PRAGMA user_version = 1;`);
+    db.close();
+
+    const plan = buildPlan(home);
+    expect(plan.targets[0]?.action).toBe('delete');
+    expect(plan.targets[0]?.reason).toContain(
+      'old Arbiter audit data (schema 1',
+    );
+    // The rows are counted and reported, not guessed at.
+    expect(plan.deleteRecords).toBe(1);
+    expect(plan.targets[0]?.probe?.currentFormatRecords).toBe(0);
+    expect(plan.targets[0]?.probe?.foreignRecords).toBe(1);
+
+    const applied = run(['--home', home, '--apply', plan.planId]);
+    expect(applied.code).toBe(0);
+    expect(applied.out).toContain('records removed: 1');
+    expect(existsSync(join(directory, 'arbiter.db'))).toBe(false);
+  });
+
+  test('counts a table whose name needs quoting instead of deleting it unread', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    // A table with a space in its name. Skipping it would leave real rows
+    // uncounted inside a file the plan then deletes, so the inventory would be
+    // wrong in exactly the way the dry-run exists to prevent.
+    const db = new DatabaseSync(join(directory, 'arbiter.db'));
+    db.exec(
+      'CREATE TABLE "operator notes" (id INTEGER PRIMARY KEY, body TEXT)',
+    );
+    db.prepare('INSERT INTO "operator notes" (body) VALUES (?)').run('kept?');
+    db.close();
+
+    const plan = buildPlan(home);
+    expect(plan.targets[0]?.action).toBe('delete');
+    expect(plan.targets[0]?.records?.['operator notes']).toBe(1);
+    expect(plan.deleteRecords).toBe(2);
+
+    const applied = run(['--home', home, '--apply', plan.planId]);
+    expect(applied.code).toBe(0);
+    expect(applied.out).toContain('records removed: 2');
+  });
+
+  test('refuses a dangling plugin-directory symlink instead of reporting an empty scope', async () => {
+    const home = await makeHome();
+    // `existsSync` follows links and reports false for a dangling one, which used
+    // to read as "the directory is absent" and exit 0 on a scope nothing verified.
+    symlinkSync(join(home, 'does-not-exist'), pluginDir(home));
+
+    const { code, out } = run(['--home', home]);
+    expect(code).toBe(1);
+    expect(out).toContain('dangling symlink');
+    expect(out).toContain('plan id: (blocked)');
   });
 });
 
