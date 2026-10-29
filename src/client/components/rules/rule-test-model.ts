@@ -579,8 +579,13 @@ function ruleDecision(
   if (winnerId !== null)
     return matchedIds.length > 1 ? 'tier-match' : 'effective';
   if (path.kind === 'rule') {
-    // A decisive verdict exists, so any other match lost on priority.
-    return matchedIds.length > 0 ? 'shadowed' : 'none';
+    // A decisive verdict exists, so any other match lost on priority. A tier with
+    // no match can still hold an undetermined rule: the decisive rule is what
+    // ended the call, but that tier was never shown to be a non-match, and the
+    // panel's own undetermined list names it. Reporting it as "no match this time"
+    // would contradict both the evaluator and that list.
+    if (matchedIds.length > 0) return 'shadowed';
+    return unknownIds.length > 0 ? 'unknown' : 'none';
   }
   if (matchedIds.length > 0) {
     return verdict === 'allow' ? allowNotApplied(path) : 'none';
