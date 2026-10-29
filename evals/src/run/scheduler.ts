@@ -38,7 +38,7 @@ import type { ReviewCase } from '../data/types.js';
 import { runCell, timedOutRecord } from './execute.js';
 import type { CellDeps } from './execute.js';
 import { caseMaterial } from './material.js';
-import { attemptCeilingOf } from './plan.js';
+import { attemptCeilingOf, inputCeilingOf } from './plan.js';
 import type { PlannedCell } from './plan.js';
 import type {
   CellRecord,
@@ -298,7 +298,14 @@ export async function dispatch(
       });
       const reserved = budget.reserve({
         ceiling,
-        estimatedInputTokens: material.material.estimatedInputTokens,
+        // The bound covers what may be sent, and a repair sends more than the first attempt:
+        // production appends a correction message before each retry. Charging only the first
+        // request would let a cell near the ceiling exceed it on its second call.
+        estimatedInputTokens: inputCeilingOf({
+          estimatedInputTokens: material.material.estimatedInputTokens,
+          attemptCeiling: ceiling,
+          protocol: cell.protocol,
+        }),
         inputCap: options.plan.bounds.maxInputTokens,
       });
       if (!reserved.ok && reservationMayFree(state, options)) {
