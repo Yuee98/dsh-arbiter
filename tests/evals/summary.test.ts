@@ -29,6 +29,8 @@ import {
 } from './fixtures/documents.js';
 
 const checkers = await compileCheckers();
+/** The versions the repository implements, as the CLI supplies them. */
+const CURRENT = { contract: 'review-contract-v1', rubric: 'review-rubric-v1' };
 const hash = inputHashOf(input());
 
 /** One in-memory dataset, already parsed; the inspection is what is under test. */
@@ -45,7 +47,9 @@ function rawDataset(overrides: Partial<RawDataset> = {}): RawDataset {
 
 describe('dataset summary', () => {
   it('counts cases, families, labels and opinions', () => {
-    const summary = summarizeDataset(inspectDataset(rawDataset(), checkers));
+    const summary = summarizeDataset(
+      inspectDataset(rawDataset(), checkers, CURRENT),
+    );
     expect(summary.totals).toEqual({
       cases: 1,
       families: 1,
@@ -68,6 +72,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.gold).toBe(0);
@@ -89,6 +94,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.exclusions['not-approved']).toBe(1);
@@ -116,6 +122,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.pending).toBe(1);
@@ -124,7 +131,9 @@ describe('dataset summary', () => {
   });
 
   it('counts a model that agrees with the reference', () => {
-    const summary = summarizeDataset(inspectDataset(rawDataset(), checkers));
+    const summary = summarizeDataset(
+      inspectDataset(rawDataset(), checkers, CURRENT),
+    );
     expect(summary.agreement).toEqual([
       { provider: 'test', id: 'reviewer', compared: 1, agreed: 1 },
     ]);
@@ -146,6 +155,7 @@ describe('dataset summary', () => {
         ],
       }),
       checkers,
+      CURRENT,
     );
     const summary = summarizeDataset(inspection);
     expect(summary.agreement).toEqual([
@@ -179,6 +189,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.agreement).toEqual([
@@ -208,6 +219,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.totals.reviews).toBe(1);
@@ -229,6 +241,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(summary.agreement).toEqual([]);
@@ -236,13 +249,19 @@ describe('dataset summary', () => {
   });
 
   it('is stable across two runs over the same data', () => {
-    const one = summarizeDataset(inspectDataset(rawDataset(), checkers));
-    const other = summarizeDataset(inspectDataset(rawDataset(), checkers));
+    const one = summarizeDataset(
+      inspectDataset(rawDataset(), checkers, CURRENT),
+    );
+    const other = summarizeDataset(
+      inspectDataset(rawDataset(), checkers, CURRENT),
+    );
     expect(one).toEqual(other);
   });
 
   it('changes its digest when a decision changes', () => {
-    const before = datasetDigest(inspectDataset(rawDataset(), checkers));
+    const before = datasetDigest(
+      inspectDataset(rawDataset(), checkers, CURRENT),
+    );
     const after = datasetDigest(
       inspectDataset(
         rawDataset({
@@ -256,6 +275,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(after).not.toBe(before);
@@ -263,7 +283,7 @@ describe('dataset summary', () => {
   });
 
   it('keeps the digest unchanged when only file order changes', () => {
-    const one = datasetDigest(inspectDataset(rawDataset(), checkers));
+    const one = datasetDigest(inspectDataset(rawDataset(), checkers, CURRENT));
     const two = datasetDigest(
       inspectDataset(
         rawDataset({
@@ -277,6 +297,7 @@ describe('dataset summary', () => {
           ],
         }),
         checkers,
+        CURRENT,
       ),
     );
     expect(two).toBe(one);

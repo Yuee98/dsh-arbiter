@@ -27,6 +27,7 @@ import {
   widenedTarget,
 } from './fixtures/documents.js';
 import { withDataset } from './helpers/dataset.js';
+import { summarizeDataset } from '../../evals/src/annotation/summary.js';
 
 const checkers = await compileCheckers();
 const hash = inputHashOf(input());
@@ -151,6 +152,9 @@ describe('manifest schema', () => {
   });
 });
 
+/** The versions the repository implements, as the CLI supplies them. */
+const CURRENT = { contract: 'review-contract-v1', rubric: 'review-rubric-v1' };
+
 describe('dataset inspection', () => {
   it('accepts a coherent dataset', async () => {
     await withDataset(async (dataset) => {
@@ -161,6 +165,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems).toEqual([]);
       expect(inspection.labels.gold).toHaveLength(1);
@@ -175,6 +180,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -196,6 +202,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -216,6 +223,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.labels.gold).toEqual([]);
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
@@ -237,6 +245,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -256,6 +265,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -275,6 +285,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems).toHaveLength(1);
       expect(inspection.problems[0]?.path).toBe('cases/case-b.json');
@@ -296,6 +307,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -321,6 +333,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -350,6 +363,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -374,6 +388,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -403,6 +418,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toEqual(
         expect.arrayContaining([
@@ -427,6 +443,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems).toEqual([]);
       expect(inspection.findings.map((finding) => finding.message)).toEqual([
@@ -437,12 +454,74 @@ describe('dataset inspection', () => {
     });
   });
 
+  it('reports a manifest whose contract or rubric is no longer current', async () => {
+    // Both the manifest and its labels could agree on an obsolete version and agree
+    // with nothing in the repository; comparing the declaration with the running
+    // code is what stops every label being reported as gold under dead semantics.
+    for (const versions of [
+      { ...VERSIONS, contract: 'review-contract-v0' },
+      { ...VERSIONS, rubric: 'review-rubric-v0' },
+    ]) {
+      await withDataset(async (dataset) => {
+        await dataset.write(
+          'manifest.json',
+          manifest(['case-a'], { versions }),
+        );
+        await dataset.write('cases/case-a.json', reviewCase());
+        await dataset.write(
+          'labels/case-a.json',
+          reviewLabel(hash, { versions }),
+        );
+        const inspection = inspectDataset(
+          await readDataset(dataset.path),
+          checkers,
+          CURRENT,
+        );
+        expect(inspection.problems.map((problem) => problem.path)).toContain(
+          'manifest.json',
+        );
+        expect(inspection.problems.map((problem) => problem.message)).toEqual(
+          expect.arrayContaining([expect.stringContaining('needs review')]),
+        );
+      });
+    }
+  });
+
+  it('records a label whose material could not be scored as no-score, not a failure', async () => {
+    await withDataset(async (dataset) => {
+      await dataset.write('manifest.json', manifest(['case-a']));
+      await dataset.write('cases/case-a.json', reviewCase());
+      await dataset.write(
+        'labels/case-a.json',
+        reviewLabel(hash, {
+          target: approvedTarget({
+            allowed: { risk: null, authorization: [9] },
+            behaviourReference: 'insufficient-material',
+          }),
+        }),
+      );
+      const inspection = inspectDataset(
+        await readDataset(dataset.path),
+        checkers,
+        CURRENT,
+      );
+      // A null field is a recorded judgement that no score was possible, so it is
+      // excluded from gold but is not a broken binding to be fixed.
+      expect(inspection.labels.gold).toEqual([]);
+      expect(inspection.labels.excluded[0]?.reasons).toEqual(['no-score']);
+      expect(inspection.problems).toEqual([]);
+      const summary = summarizeDataset(inspection);
+      expect(summary.exclusions['no-score']).toBe(1);
+    });
+  });
+
   it('requires a manifest', async () => {
     await withDataset(async (dataset) => {
       await dataset.write('cases/case-a.json', reviewCase());
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(inspection.problems.map((problem) => problem.message)).toContain(
         'a dataset needs a manifest.json matching manifest.schema.json',
@@ -468,6 +547,7 @@ describe('dataset inspection', () => {
       const inspection = inspectDataset(
         await readDataset(dataset.path),
         checkers,
+        CURRENT,
       );
       expect(
         inspection.problems.some(

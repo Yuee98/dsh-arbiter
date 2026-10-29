@@ -48,7 +48,7 @@ evals/datasets/<dataset>/
 
 **只有 `status: approved` 且 hash 匹配、版本匹配的标签计入金标。** 其余按 `case-missing`／`input-changed`／`version-drift`／`not-approved`／`indeterminate` 分别计数并公开。失效标签是 `check` 的错误而不是警告：仓库里的数据若声称一个没人做过的裁决，`pnpm check:evals` 必须拦住。
 
-版本三项都要匹配：`contract`（核对运行中的 `REVIEW_CONTRACT_VERSION`）、`rubric`（核对 `evals/rubrics/rubric-v1.json`）、`policy`。任一项变化都要复核标签。
+版本三项都要匹配，且**分两层**：标签与 manifest 比，manifest 再与仓库实现比。只做第一层不够——manifest 与标签可以一起停在旧版本，彼此一致却与仓库里的语义无关。因此 `check` 同时核对 manifest 的 `contract` 是否为运行中的 `REVIEW_CONTRACT_VERSION`、`rubric` 是否为已提交快照的版本；`policy` 由生产任务拥有，这里不比对。任一项变化都要复核标签。
 
 ### 允许集合不是笛卡尔积
 
@@ -61,7 +61,7 @@ evals/datasets/<dataset>/
 
 `behaviourReference` 记录这次审查应到达的**阶段**（`allow`／`deny`／`escalate`／`insufficient-material`／`review-failure`），必须能由某个合法配对在本仓库的共享矩阵下达到。记录 `escalate` 而配对实际到达 `deny` 和 `allow`，说明文档内部矛盾，`check` 会报错而不是挑一个。
 
-未作答的字段（模型只答了风险）保持 `null`；「材料不足无法判定」用 `allowed.risk: null` 表示，与「空集合」区分开。schema 拒绝 0 分，因为 0 不在 1–10 公共刻度上，用 0 顶替缺失会把缺答伪装成最低分。
+未作答的字段（模型只答了风险）保持 `null`；「材料不足无法判定」用 `allowed.risk: null` 表示，与「空集合」区分开，排除原因是 `no-score`（照常保留与公开，不作为待修问题）。schema 拒绝 0 分，因为 0 不在 1–10 公共刻度上，用 0 顶替缺失会把缺答伪装成最低分。
 
 授权集合不允许把 A1 与其他档混在一起。A1 是「存在适用禁止」，不是正向刻度的最低档：它在本仓库的矩阵下**任何风险都拒绝**，而 A2 及以上在其他风险下可能放行。把 1 和 9 写进同一个集合不是「A1 或 A9」的区间，而是两个相反结论——工具报错，而不是挑一个。
 
@@ -73,7 +73,9 @@ evals/datasets/<dataset>/
 
 ### 导出：不含答案
 
-`export` 按**白名单**构造文档，而不是复制数据集再删字段。导出包包含：每例的 `input`（标注者要读的材料）、rubric 快照（脱离仓库也能评分）、以及一个**空白** target。不包含：任何分数、允许集合、`allowedPairs`、模型意见、模型身份、provenance、既有裁决。
+`export` 按**白名单**构造文档，而不是复制数据集再删字段。导出包包含：每例的 `input`（标注者要读的材料）、rubric 快照（脱离仓库也能评分）、导出时的版本三元组、以及一个**空白** target。不包含：任何分数、允许集合、`allowedPairs`、模型意见、模型身份、provenance、既有裁决。
+
+导出只要求 manifest、cases 和 rubric 可用。已提交的标签或意见有问题时只列提示、不阻断导出 —— 陈旧标签正是重新导出要修的问题，如果导出也拒绝，`import` 提示的"重新导出并重新裁决"就变成必须先手工改仓库才能执行。`check` 仍然拒绝，因为公开数据集不能声称一个没人做过的裁决。
 
 导出后还会跑一次结构审计：只要某例的 target 不空、或 entry 多了本格式未发布的键，`export` 就退出非零且不写文件。这样「导出的包不含答案」是执行时保证，而不是文档承诺。
 
@@ -84,8 +86,9 @@ rubric 快照 `evals/rubrics/rubric-v1.json` 是评分档位的数据副本，�
 `import` 接受填好的包并**拒绝**而不是修补。会拒绝的情形：
 
 - 包不是本数据集的（`datasetId` 不符）、或按旧 rubric 版本／旧 rubric 文档摘要填写；
+- 包内记录的 `versions`（contract／rubric／policy）与当前 manifest 不一致 —— 裁决是在旧语义下做的，用今天的版本号入库等于声称一次没发生过的复核；
 - 某例的 `input` 与仓库中的 case 已经不同 hash —— 那条裁决是针对另一份材料做的，不能被静默重绑到新输入；
-- 已裁决的条目没有写 `decidedBy`、或没有合法配对、或 `behaviourReference` 与配对不一致。
+- 已裁决的条目没有写 `decidedBy`、或没有合法配对、或 `behaviourReference` 与配对不一致、或枚举的配对落在允许集合之外。
 
 仍是 `pending` 的条目不转换、不猜测，只列出来。不带 `--write` 时一切只校验不落盘。回填成功后每例写一个 `labels/<caseId>.json`。
 

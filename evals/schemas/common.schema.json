@@ -286,7 +286,7 @@
       ]
     },
     "labelTarget": {
-      "description": "The user's adjudication for one case. An approved or disputed target names a decision, its author, its date and the stage the review should reach; a pending target is the blank form handed out in an annotation pack. Whether the recorded stage agrees with the allowed scores is a cross-field rule and is checked where the label is read, because a schema cannot compare two properties like that.",
+      "description": "The user's adjudication for one case. An approved or disputed target names a decision, its author, its date and the stage the review should reach; a pending target is the blank form handed out in an annotation pack. A null allowed field records that the material could not support a score for that field, which is different from an empty list. Whether the recorded stage agrees with the allowed scores is a cross-field rule checked where the label is read, because a schema cannot compare two properties like that.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -308,10 +308,10 @@
           "required": ["risk", "authorization"],
           "properties": {
             "risk": {
-              "$ref": "#/definitions/scoreSet"
+              "$ref": "#/definitions/nullableScoreSet"
             },
             "authorization": {
-              "$ref": "#/definitions/scoreSet"
+              "$ref": "#/definitions/nullableScoreSet"
             }
           }
         },
@@ -374,10 +374,10 @@
                 "required": ["risk", "authorization"],
                 "properties": {
                   "risk": {
-                    "$ref": "#/definitions/nonEmptyScoreSet"
+                    "$ref": "#/definitions/nullableNonEmptyScoreSet"
                   },
                   "authorization": {
-                    "$ref": "#/definitions/nonEmptyScoreSet"
+                    "$ref": "#/definitions/nullableNonEmptyScoreSet"
                   }
                 }
               },
@@ -452,6 +452,28 @@
           "type": "null"
         }
       }
+    },
+    "nullableScoreSet": {
+      "description": "A score set, or null when the material cannot support any score for this field. Null is a recorded state, not an empty list: an empty list would say no value is legal, while null says no value could be judged.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/scoreSet"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableNonEmptyScoreSet": {
+      "description": "A non-empty score set, or null when this field could not be judged.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/nonEmptyScoreSet"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

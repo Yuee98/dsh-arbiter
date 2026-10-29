@@ -20,8 +20,10 @@
 import {
   inputHashOf,
   isIndeterminate,
+  legalPairs,
   mixesProhibition,
   unreachedBehaviour,
+  versionsMatch,
 } from '../data/eligibility.js';
 import type { Sourced } from '../data/read.js';
 import type {
@@ -32,7 +34,26 @@ import type {
   ReviewCase,
   ReviewLabel,
   RubricSnapshot,
+  ScorePair,
 } from '../data/types.js';
+
+/**
+ * The enumerated pairs that sit outside one of the two allowed sets.
+ *
+ * `legalPairs` trusts an explicit `allowedPairs` list, which is right for reading a
+ * decision but not for accepting one: a list is just numbers until it is compared
+ * with the sets it claims to enumerate. Returning them lets the caller report which
+ * pairs are wrong instead of only that something is.
+ */
+function pairsOutsideSets(label: ReviewLabel): readonly ScorePair[] {
+  const pairs = legalPairs(label) ?? [];
+  const risk = label.target.allowed.risk ?? [];
+  const authorization = label.target.allowed.authorization ?? [];
+  return pairs.filter(
+    ([failure, permission]) =>
+      !risk.includes(failure) || !authorization.includes(permission),
+  );
+}
 
 /** One problem that stops an import. */
 export interface ImportProblem {
@@ -49,17 +70,18 @@ export interface ImportResult {
   readonly pending: readonly string[];
 }
 
-/** The versions a label records, taken from the manifest and the pack. */
+/**
+ * The versions a label records, taken from the pack rather than the manifest.
+ *
+ * The pack is what the annotator saw. Stamping the manifest's current versions onto
+ * a decision made under older ones would claim a review that never happened, so the
+ * export-time triple is used and any difference from the manifest is a refusal.
+ */
 function versionsOf(
   manifest: DatasetManifest,
-  rubric: RubricSnapshot,
   pack: AnnotationDocument,
 ): LabelVersions | null {
-  if (pack.rubric.rubricVersion !== rubric.rubricVersion) return null;
-  return {
-    ...manifest.versions,
-    rubric: rubric.rubricVersion,
-  };
+  return versionsMatch(pack.versions, manifest.versions) ? pack.versions : null;
 }
 
 /** Check that the fill belongs to this dataset and this rubric. */
@@ -86,6 +108,18 @@ function documentProblems(
       caseId: null,
       message: `the fill quotes rubric document ${pack.rubric.source.sha256}, the committed snapshot records ${rubric.source.sha256}`,
     });
+  }
+  for (const [name, recorded, current] of [
+    ['contract', pack.versions.contract, manifest.versions.contract],
+    ['rubric', pack.versions.rubric, manifest.versions.rubric],
+    ['policy', pack.versions.policy, manifest.versions.policy],
+  ] as const) {
+    if (recorded !== current) {
+      problems.push({
+        caseId: null,
+        message: `the fill was exported under ${name} ${recorded}, this dataset now declares ${current}; re-export the pack and decide the case again`,
+      });
+    }
   }
   return problems;
 }
@@ -156,7 +190,7 @@ export function importFill(options: {
     return { problems: documentProblemList, labels: [], pending: [] };
   }
   const problems: ImportProblem[] = [];
-  const versions = versionsOf(manifest, rubric, pack);
+  const versions = versionsOf(manifest, pack);
   const caseById = new Map(
     cases.map((entry) => [entry.document.caseId, entry.document] as const),
   );
@@ -207,6 +241,21 @@ export function importFill(options: {
       problems.push({
         caseId: entry.caseId,
         message: `the recorded behaviour ${String(entry.target.behaviourReference)} is not the stage the legal pairs reach`,
+      });
+      continue;
+    }
+    const outside = pairsOutsideSets(label);
+    if (outside.length > 0) {
+      // The dataset check rejects these through pairProblems, so accepting them here
+      // would write a label the very next `check` refuses.
+      problems.push({
+        caseId: entry.caseId,
+        message: `allowed pair ${outside
+          .map(
+            ([risk, authorization]) =>
+              `${String(risk)}/${String(authorization)}`,
+          )
+          .join(', ')} falls outside the allowed sets`,
       });
       continue;
     }

@@ -35,6 +35,7 @@ export type ExclusionReason =
   | 'input-changed'
   | 'version-drift'
   | 'not-approved'
+  | 'no-score'
   | 'indeterminate';
 
 /** One label and why it does or does not count. */
@@ -88,10 +89,30 @@ export function productSize(allowed: AllowedScores): number {
   return (allowed.risk?.length ?? 0) * (allowed.authorization?.length ?? 0);
 }
 
-/** Whether an approved label states a usable decision at all. */
+/**
+ * Whether an approved label names no evaluable decision at all.
+ *
+ * This is different from "the material could not be scored": a label that records
+ * `null` for a field is a deliberate statement that no score was possible, and it is
+ * kept and reported. This function is only about labels that claim a decision while
+ * naming none — no stage, or a widened set with no pairs — which is a drafting
+ * mistake rather than an adjudication.
+ */
 export function isIndeterminate(label: ReviewLabel): boolean {
   if (label.target.behaviourReference === null) return true;
+  const { allowed } = label.target;
+  // A null field is the documented way to say "this could not be scored", so it is
+  // not an indeterminate label; it is reported by its own reason instead.
+  if (allowed.risk === null || allowed.authorization === null) return false;
   return legalPairs(label) === null;
+}
+
+/** Whether one of the label's score fields records that it could not be judged. */
+export function hasUnscoredField(label: ReviewLabel): boolean {
+  return (
+    label.target.allowed.risk === null ||
+    label.target.allowed.authorization === null
+  );
 }
 
 /**
@@ -150,6 +171,7 @@ export function exclusionReasons(
   if (label.target.status !== 'approved') reasons.push('not-approved');
   else if (isIndeterminate(label) || unreachedBehaviour(label))
     reasons.push('indeterminate');
+  else if (hasUnscoredField(label)) reasons.push('no-score');
   return reasons;
 }
 

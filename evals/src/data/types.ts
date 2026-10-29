@@ -224,6 +224,14 @@ export interface AnnotationDocument {
   readonly packVersion: string;
   readonly datasetId: string;
   readonly exportedAt: string;
+  /**
+   * The versions in force when the pack was exported.
+   *
+   * A decision is made under the contract, rubric and policy that were current at
+   * the time. Carrying them in the document is what lets an import refuse a fill
+   * made under other semantics instead of stamping it with today's versions.
+   */
+  readonly versions: LabelVersions;
   readonly annotatedBy?: string;
   readonly rubric: {
     readonly rubricVersion: string;

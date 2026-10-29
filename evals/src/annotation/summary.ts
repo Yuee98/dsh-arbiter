@@ -190,6 +190,7 @@ export function summarizeDataset(
     'input-changed': 0,
     'version-drift': 0,
     'not-approved': 0,
+    'no-score': 0,
     indeterminate: 0,
   };
   for (const assessment of excluded) {

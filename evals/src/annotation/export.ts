@@ -66,6 +66,12 @@ export function buildAnnotationPack(options: {
     packVersion: ANNOTATION_PACK_VERSION,
     datasetId: options.manifest.datasetId,
     exportedAt: options.exportedAt,
+    // The pack records the versions its decisions will be made under, so an import
+    // can tell that the semantics moved rather than adopting the new ones.
+    versions: {
+      ...options.manifest.versions,
+      rubric: options.rubric.rubricVersion,
+    },
     rubric: {
       rubricVersion: options.rubric.rubricVersion,
       source: options.rubric.source,

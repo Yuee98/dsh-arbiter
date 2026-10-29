@@ -15,6 +15,7 @@
 import { assessLabels } from './eligibility.js';
 import type { GoldStatus, LabelAssessment } from './eligibility.js';
 import {
+  hasUnscoredField,
   inputHashOf,
   isIndeterminate,
   legalPairs,
@@ -36,6 +37,40 @@ import type {
 export interface Finding {
   readonly path: string;
   readonly message: string;
+}
+
+/**
+ * Which part of a dataset a finding is about.
+ *
+ * The distinction matters because the commands need different subsets. Exporting a
+ * blank pack only needs valid cases, a manifest and a rubric; a stale label is
+ * exactly the thing a re-export is supposed to fix, so refusing to export over one
+ * would leave the documented recovery unreachable. `check` still refuses, because a
+ * dataset claiming an adjudication nobody made must not pass.
+ */
+export type FindingOrigin = 'manifest' | 'case' | 'label' | 'reviews';
+
+/** The part of a dataset one finding is about, by the file it names. */
+export function findingOrigin(finding: Finding): FindingOrigin {
+  if (finding.path.startsWith('labels/') || finding.path.startsWith('label'))
+    return 'label';
+  if (finding.path.startsWith('reviews/')) return 'reviews';
+  if (finding.path.startsWith('cases/')) return 'case';
+  return 'manifest';
+}
+
+/**
+ * The versions in force, as the running code and the committed snapshot name them.
+ *
+ * A dataset's manifest declares the versions its labels were made under, and nothing
+ * else in this module compares that declaration with what the code actually
+ * implements. Without this input two obsolete values would agree with each other
+ * while disagreeing with the repository, and every label in the dataset would be
+ * reported as gold under scoring semantics nothing here implements.
+ */
+export interface CurrentVersions {
+  readonly contract: string;
+  readonly rubric: string;
 }
 
 /** Everything a dataset check produced. */
@@ -199,6 +234,10 @@ function labelCoherence(label: ReviewLabel, path: string): readonly Finding[] {
   }
   const pairs = legalPairs(label);
   if (pairs === null) {
+    // A null field records that the material could not support a score, which is a
+    // complete adjudication; only a label that claims a decision while naming no
+    // pair is a drafting mistake.
+    if (hasUnscoredField(label)) return problems;
     problems.push({
       path,
       message:
@@ -314,6 +353,36 @@ function opinionProblems(
 }
 
 /**
+ * Compare the manifest's declared versions with the ones the repository implements.
+ *
+ * Labels are checked against the manifest, which makes the manifest the anchor for
+ * every decision in the dataset. If the manifest itself names a contract or a rubric
+ * that is no longer current, the agreement between manifest and labels proves
+ * nothing: both would describe semantics that are not the ones in this checkout. The
+ * policy version is deliberately not compared here, because the reviewer policy
+ * belongs to the production task that owns it rather than to this contract.
+ */
+function manifestVersions(
+  manifest: DatasetManifest,
+  current: CurrentVersions,
+): readonly Finding[] {
+  const problems: Finding[] = [];
+  if (manifest.versions.contract !== current.contract) {
+    problems.push({
+      path: 'manifest.json',
+      message: `manifest declares contract ${manifest.versions.contract}, the running contract is ${current.contract}; every label in this dataset needs review`,
+    });
+  }
+  if (manifest.versions.rubric !== current.rubric) {
+    problems.push({
+      path: 'manifest.json',
+      message: `manifest declares rubric ${manifest.versions.rubric}, the committed snapshot is ${current.rubric}; every label in this dataset needs review`,
+    });
+  }
+  return problems;
+}
+
+/**
  * Turn a binding that no longer holds into a problem.
  *
  * A label whose case is gone, whose input moved, or which was made under a version
@@ -326,8 +395,10 @@ function opinionProblems(
 function staleLabels(status: GoldStatus): readonly Finding[] {
   const problems: Finding[] = [];
   for (const assessment of status.excluded) {
+    // `no-score` says the material could not be judged, which is a legitimate
+    // adjudication rather than a broken binding, so it is reported as a note.
     const stale = assessment.reasons.filter(
-      (reason) => reason !== 'not-approved',
+      (reason) => reason !== 'not-approved' && reason !== 'no-score',
     );
     if (stale.length === 0) continue;
     problems.push({
@@ -391,6 +462,7 @@ function disagreements(
 export function inspectDataset(
   raw: RawDataset,
   checkers: Checkers,
+  current: CurrentVersions,
 ): DatasetInspection {
   const problems: Finding[] = raw.problems.map((problem) => ({
     path: problem.path,
@@ -431,6 +503,10 @@ export function inspectDataset(
     problems.push(...labelCoherence(entry.document, entry.path));
   }
   problems.push(...reviewCoherence(reviews, cases, labels));
+
+  if (manifest !== null) {
+    problems.push(...manifestVersions(manifest, current));
+  }
 
   const labelStatus = assessLabels(cases, labels, manifest);
   problems.push(...staleLabels(labelStatus));

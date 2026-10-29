@@ -54,13 +54,21 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
-async function parseJson(path: string): Promise<unknown> {
+/**
+ * Parse one file.
+ *
+ * `display` is the dataset-relative path the message names, so an error points at
+ * `cases/case-a.json` rather than at a temporary absolute path that means nothing to
+ * the person editing the file.
+ */
+async function parseJson(path: string, display: string): Promise<unknown> {
   let text: string;
   try {
     text = await readFile(path, 'utf8');
   } catch (error) {
-    if (isMissing(error))
-      throw new Error(`${path} does not exist`, { cause: error });
+    if (isMissing(error)) {
+      throw new Error(`${display} does not exist`, { cause: error });
+    }
     throw error;
   }
   try {
@@ -69,7 +77,7 @@ async function parseJson(path: string): Promise<unknown> {
     // The parser's own message names the offset, which is what lets an editor that
     // wrote a trailing comma be found; keep it and add the file in front.
     const cause = error instanceof Error ? error.message : String(error);
-    throw new SyntaxError(`${path}: ${cause}`, { cause: error });
+    throw new SyntaxError(`${display}: ${cause}`, { cause: error });
   }
 }
 
@@ -103,7 +111,7 @@ async function readCollection(
     try {
       items.push({
         path,
-        document: await parseJson(join(dataset, directory, name)),
+        document: await parseJson(join(dataset, directory, name), path),
       });
     } catch (error) {
       problems.push({
@@ -128,7 +136,10 @@ export async function readDataset(dataset: string): Promise<RawDataset> {
   try {
     manifest = {
       path: 'manifest.json',
-      document: await parseJson(join(dataset, 'manifest.json')),
+      document: await parseJson(
+        join(dataset, 'manifest.json'),
+        'manifest.json',
+      ),
     };
   } catch (error) {
     problems.push({

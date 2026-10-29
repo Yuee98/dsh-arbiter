@@ -185,6 +185,10 @@ describe('exporting a pack', () => {
     expect(pack().exportedAt).toBe('2026-10-29');
   });
 
+  it('records the versions the decisions will be made under', () => {
+    expect(pack().versions).toEqual(VERSIONS);
+  });
+
   it('recognises only a truly empty target as blank', () => {
     expect(isBlankTarget(blankTarget())).toBe(true);
     expect(isBlankTarget(approvedTarget())).toBe(false);
@@ -317,6 +321,56 @@ describe('importing a fill', () => {
       },
     ]);
     expect(result.labels).toEqual([]);
+  });
+
+  it('refuses a fill exported under an older contract or policy', () => {
+    for (const override of [
+      { contract: 'review-contract-v0' },
+      { policy: 'arbiter-policy-v1' },
+    ]) {
+      const stale: AnnotationDocument = {
+        ...filled(),
+        versions: { ...pack().versions, ...override },
+      };
+      const result = importFill({
+        pack: stale,
+        manifest: manifest(['case-a']),
+        rubric: snapshot,
+        cases,
+      });
+      // The decision was made under semantics that no longer apply; adopting the
+      // current versions would claim a review that never happened.
+      expect(result.labels).toEqual([]);
+      expect(result.problems).toHaveLength(1);
+      expect(result.problems[0]?.caseId).toBeNull();
+      expect(result.problems[0]?.message).toContain('re-export the pack');
+    }
+  });
+
+  it('refuses an enumerated pair that falls outside the allowed sets', () => {
+    const contradictory = withTargets(
+      pack(),
+      approvedTarget({
+        allowed: { risk: [1], authorization: [2] },
+        allowedPairs: [[7, 9]],
+        behaviourReference: 'escalate',
+      }),
+    );
+    const result = importFill({
+      pack: contradictory,
+      manifest: manifest(['case-a']),
+      rubric: snapshot,
+      cases,
+    });
+    // A list of numbers is not a decision until it is compared with the sets it
+    // claims to enumerate, so the pair is reported together with where it sits.
+    expect(result.labels).toEqual([]);
+    expect(result.problems).toEqual([
+      {
+        caseId: 'case-a',
+        message: 'allowed pair 7/9 falls outside the allowed sets',
+      },
+    ]);
   });
 
   it('refuses a fill made against another rubric version', () => {

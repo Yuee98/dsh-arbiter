@@ -194,7 +194,32 @@ describe('export and import', () => {
     });
   });
 
-  it('refuses to export from a dataset that does not check out', async () => {
+  it('exports a fresh blank pack while committed labels are stale', async () => {
+    await withDataset(async (dataset) => {
+      await seed(dataset);
+      // The documented recovery from a stale label is to re-export and decide the
+      // case again, so export must not be blocked by the very problem it fixes.
+      await dataset.write(
+        'cases/case-a.json',
+        reviewCase({ input: input({ hint: 'changed after labelling' }) }),
+      );
+      const pack = join(dataset.path, 'pack.json');
+      const { io, out, err } = recorder(REPOSITORY_ROOT);
+      expect(await runCli(['export', dataset.path, '--out', pack], io)).toBe(0);
+      expect(out[0]).toContain('wrote 1 blank entries');
+      expect(err).toEqual([
+        expect.stringContaining(
+          'note labels/case-a.json: this label cannot count (input-changed)',
+        ),
+      ]);
+      // check still refuses: a dataset claiming an adjudication nobody made must
+      // not pass, even though the pack can be regenerated from it.
+      const checking = recorder(REPOSITORY_ROOT);
+      expect(await runCli(['check', dataset.path], checking.io)).toBe(1);
+    });
+  });
+
+  it('refuses to export from a dataset whose cases or manifest are unsound', async () => {
     await withDataset(async (dataset) => {
       await dataset.write('cases/case-a.json', reviewCase());
       const { io, err } = recorder(REPOSITORY_ROOT);
@@ -204,9 +229,11 @@ describe('export and import', () => {
           io,
         ),
       ).toBe(1);
-      expect(err).toContain(
+      // Both are reported: the missing file, and then that a dataset needs one.
+      expect(err).toEqual([
+        'problem manifest.json: manifest.json does not exist',
         'problem manifest.json: a dataset needs a manifest.json matching manifest.schema.json',
-      );
+      ]);
     });
   });
 

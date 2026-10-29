@@ -5,7 +5,14 @@
   "description": "The document an annotator edits. It is exported with blank targets and imported with filled ones, and the two states are checked separately: a blank target is what keeps an exported pack from anchoring the annotator, and a filled one has to name a decision. It carries its own copy of each case input so an import can prove the decision was made against the material the dataset still holds.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["packVersion", "datasetId", "exportedAt", "rubric", "entries"],
+  "required": [
+    "packVersion",
+    "datasetId",
+    "exportedAt",
+    "versions",
+    "rubric",
+    "entries"
+  ],
   "properties": {
     "packVersion": {
       "const": "evals-annotation-pack-v1"
@@ -72,6 +79,10 @@
     },
     "annotatedBy": {
       "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+    },
+    "versions": {
+      "description": "The versions in force when the pack was exported. A fill made under other versions is refused rather than stamped with whatever is current at import time, because a decision made under one contract or policy is not a decision under another.",
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
     }
   },
   "definitions": {

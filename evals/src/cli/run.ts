@@ -18,6 +18,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
+import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 import {
   auditPack,
   buildAnnotationPack,
@@ -26,7 +27,7 @@ import {
 import { importFill } from '../annotation/import.js';
 import { datasetDigest, summarizeDataset } from '../annotation/summary.js';
 import type { DatasetSummary } from '../annotation/summary.js';
-import { inspectDataset } from '../data/inspect.js';
+import { findingOrigin, inspectDataset } from '../data/inspect.js';
 import type { DatasetInspection, Finding } from '../data/inspect.js';
 import { readDataset } from '../data/read.js';
 import { checkSnapshot } from '../data/rubric.js';
@@ -229,7 +230,17 @@ async function load(root: string, dataset: string): Promise<Loaded> {
   const { rubric, snapshot } = await loadRubric(root);
   const checkers = await compileCheckers();
   const raw = await readDataset(resolve(root, dataset));
-  return { inspection: inspectDataset(raw, checkers), rubric, snapshot };
+  return {
+    // The running contract and the committed snapshot are the only authorities on
+    // what the versions mean, so the dataset check is given them rather than
+    // trusting the manifest's own declaration of its versions.
+    inspection: inspectDataset(raw, checkers, {
+      contract: REVIEW_CONTRACT_VERSION,
+      rubric: snapshot.rubricVersion,
+    }),
+    rubric,
+    snapshot,
+  };
 }
 
 /** Whether a load found anything that must stop it. */
@@ -299,12 +310,41 @@ async function summary(io: CliIo, command: Command): Promise<number> {
   return 0;
 }
 
-/** `export`: write a blank pack, refusing if it would carry anything but blanks. */
+/**
+ * `export`: write a blank pack, refusing if it would carry anything but blanks.
+ *
+ * Only the parts a pack is built from have to be sound: the manifest, its cases and
+ * the rubric. Problems in committed labels and reviews are reported but do not block,
+ * because a stale label is exactly what a re-export exists to fix — import tells the
+ * user to re-export and decide the case again, and refusing here would leave that
+ * recovery unreachable without hand-editing the repository.
+ */
 async function exportPack(io: CliIo, command: Command): Promise<number> {
   const loaded = await load(io.root, command.dataset ?? '');
   const manifest = loaded.inspection.manifest;
-  if (failed(loaded) || manifest === null) {
-    report(loaded, io);
+  const blocking = [
+    ...loaded.inspection.problems.filter(
+      (problem) =>
+        findingOrigin(problem) === 'manifest' ||
+        findingOrigin(problem) === 'case',
+    ),
+    ...loaded.rubric.problems.map((message) => ({
+      path: 'rubric',
+      message,
+    })),
+  ];
+  for (const problem of loaded.inspection.problems) {
+    const blockingProblem = blocking.some(
+      (entry) =>
+        entry.path === problem.path && entry.message === problem.message,
+    );
+    io.err(`${blockingProblem ? 'problem' : 'note'} ${line(problem)}`);
+  }
+  for (const problem of loaded.rubric.problems) io.err(`problem ${problem}`);
+  if (blocking.length > 0 || manifest === null) {
+    if (manifest === null && blocking.length === 0) {
+      io.err('problem manifest.json: a pack needs a manifest');
+    }
     return 1;
   }
   const document = buildAnnotationPack({
