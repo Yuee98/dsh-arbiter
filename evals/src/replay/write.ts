@@ -25,7 +25,15 @@
  *     the derived directory is readable as a run, and only a read establishes that.
  */
 
-import { mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 import { reportForRun } from '../metrics/index.js';
@@ -41,6 +49,14 @@ import { compileRunCheckers } from '../run/schemas.js';
 
 import type { Derivation } from './assemble.js';
 import { pathOfDerivedRecord } from './assemble.js';
+
+/**
+ * The prefix of a staging directory.
+ *
+ * A dot-prefixed name keeps it out of the way of anyone listing the parent, and the
+ * suffix `mkdtemp` adds makes it unique, so two concurrent replays cannot collide.
+ */
+const STAGING_PREFIX = '.replay-staging-';
 
 /** Documents a derived directory carries beside the run's own. */
 export const REPLAY_FILES = {
@@ -192,13 +208,49 @@ async function documentProblems(derivation: Derivation): Promise<string[]> {
 }
 
 /**
+ * A fresh directory no pre-existing entry can occupy.
+ *
+ * `mkdtemp` creates the leaf and guarantees nobody else chose it, so every descendant
+ * below it is one this process creates. That is the whole reason a staging directory is
+ * used rather than writing the destination directly: a destination can already contain
+ * a `records/` directory that is a symbolic link into the run being replayed, and a
+ * write through it would corrupt the evidence whatever the top-level check said. A
+ * directory that did not exist a moment ago cannot contain such a link.
+ */
+async function stagingDirectory(parent: string): Promise<string> {
+  await mkdir(parent, { recursive: true });
+  return mkdtemp(join(parent, STAGING_PREFIX));
+}
+
+/**
+ * Move a finished staging directory into place.
+ *
+ * A destination that already exists is replaced only when the caller asked for it, and
+ * the removal is `rm`, which unlinks symbolic links rather than following them: the one
+ * operation that must never happen here is a write through a link that points at the
+ * evidence. `rename` then publishes the whole derivation at once, so a reader never
+ * observes a partially written directory.
+ */
+async function publish(parts: {
+  readonly staging: string;
+  readonly destination: string;
+}): Promise<void> {
+  await mkdir(dirname(parts.destination), { recursive: true });
+  await rename(parts.staging, parts.destination);
+}
+
+/**
  * Write one derivation, its lineage and its report.
  *
- * The order is the order a reader needs: the run documents first, so the report can
- * be built by reading them, and the lineage last, because it names the report files
- * the derivation produced. A failure at any point before the lineage leaves a
- * directory with no lineage — which is precisely a directory a reader must not
- * mistake for a finished derivation, and it is what `--force` exists to replace.
+ * The derivation is built inside a staging directory and published with one rename.
+ * That ordering is what makes the "the source is never written" claim hold for every
+ * path a write can reach, not only for the top-level directory: the files this function
+ * writes are only ever written below a directory it just created, so no pre-existing
+ * symbolic link can redirect one of them into the run being replayed.
+ *
+ * The order inside the staging directory is the order a reader needs: the run documents
+ * first, so the report can be built by reading them, and the lineage last, because it
+ * names the report files the derivation produced.
  */
 export async function writeDerivation(parts: {
   readonly derivation: Derivation;
@@ -233,6 +285,65 @@ export async function writeDerivation(parts: {
   }
   const problems = await documentProblems(parts.derivation);
   if (problems.length > 0) return { ok: false, problems };
+  const staging = await stagingDirectory(dirname(parts.directory));
+  // The staging directory itself could land inside the source when the caller named a
+  // parent that is a link into it; the check runs on the real location of the directory
+  // that is about to receive the writes.
+  const staged = await destinationRefusal({
+    source: parts.sourceDirectory,
+    destination: staging,
+  });
+  if (staged !== null) {
+    await rm(staging, { recursive: true, force: true });
+    return { ok: false, problems: [staged] };
+  }
+  try {
+    const written = await fill({
+      derivation: parts.derivation,
+      directory: staging,
+      settings: parts.settings,
+      force: true,
+    });
+    if (!written.ok) {
+      await rm(staging, { recursive: true, force: true });
+      return written;
+    }
+    // A destination that already exists is replaced only on an explicit `--force`, and
+    // the replacement removes the old tree instead of writing into it: `rm` unlinks a
+    // symbolic link rather than following it, which is the one operation that must never
+    // happen next to the evidence.
+    if (await exists(parts.directory)) {
+      if (!parts.force) {
+        await rm(staging, { recursive: true, force: true });
+        return {
+          ok: false,
+          problems: [
+            `${parts.directory} already exists; a derivation is evidence, so it is not overwritten without --force`,
+          ],
+        };
+      }
+      await rm(parts.directory, { recursive: true, force: true });
+    }
+    await publish({ staging, destination: parts.directory });
+    return {
+      ok: true,
+      written: { ...written.written, directory: parts.directory },
+    };
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Write the derivation's documents into a directory that is already this process's. */
+async function fill(parts: {
+  readonly derivation: Derivation;
+  readonly directory: string;
+  readonly settings: ReportSettings;
+  readonly force: boolean;
+}): Promise<
+  { readonly ok: true; readonly written: DerivedWrite } | WriteRefusal
+> {
   await mkdir(join(parts.directory, RUN_FILES.records), { recursive: true });
   await writeJson(
     join(parts.directory, RUN_FILES.plan),

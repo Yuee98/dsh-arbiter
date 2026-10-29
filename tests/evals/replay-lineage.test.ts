@@ -405,6 +405,153 @@ describe('the derivation is traceable to its source', () => {
     });
   });
 
+  it('warns that a changed input needs a new request, on a dataset with no labels', async () => {
+    await withArea(async (created) => {
+      // A labelled dataset would let the report layer notice a mismatch, so a test that
+      // relied on labels would not prove the warning works where nothing else can catch
+      // it. This dataset has cases and no labels at all.
+      await created.write(
+        'dataset/manifest.json',
+        JSON.parse(
+          await readFile(
+            join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+            'utf8',
+          ),
+        ) as unknown,
+      );
+      // Read through the case checker, so the member this test edits is one the schema
+      // actually allows: an input key outside it would drop the case from the dataset and
+      // the comparison would silently have nothing to compare.
+      const original = await readDocument(
+        join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+        schemas.case,
+      );
+      // The dataset starts as the committed one, so the run records the fingerprint of
+      // the material it actually submitted.
+      await created.write(`dataset/cases/${CASE}.json`, original);
+      const dataset = join(created.path, 'dataset');
+      const directory = await runAgainst(
+        join(created.path, 'run'),
+        dataset,
+        { '4': 0.9, '5': 0.1 },
+        { '8': 0.9, '9': 0.1 },
+      );
+      // `hint` is a reviewed input member, so the changed case still parses: a case the
+      // schema rejects would silently drop out of the comparison instead of being
+      // reported as changed.
+      await created.write(`dataset/cases/${CASE}.json`, {
+        ...original,
+        input: {
+          ...original.input,
+          hint: 'material that changed after the run',
+        },
+      });
+
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      const warnings = err.join('\n');
+      // The warning names the case, says the saved answer came from earlier material,
+      // and says what would actually measure the change.
+      expect(warnings).toContain(CASE);
+      expect(warnings).toContain('case input(s) changed since the run');
+      expect(warnings).toContain('requires a new request');
+      // And it is not the label diagnostic standing in for an input check.
+      expect(warnings).not.toContain('label');
+    });
+  });
+
+  it('says nothing about inputs when they are unchanged', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Silence has to mean "compared and unchanged", so the negative case is asserted:
+      // a warning that fired unconditionally would be noise nobody reads.
+      expect(err.join('\n')).not.toContain('case input(s) changed');
+      expect(err.join('\n')).not.toContain('could not be determined');
+    });
+  });
+
+  it('reports an unreadable dataset as undetermined rather than as unchanged', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      // Point the plan's dataset at a directory that holds nothing, so the comparison
+      // cannot run. Silence here would be read as "unchanged".
+      const plan = await readJson(join(directory, 'plan.json'));
+      await created.write('run/plan.json', {
+        ...plan,
+        datasetPath: 'evals/datasets/does-not-exist',
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(err.join('\n')).toContain('could not be determined');
+    });
+  });
+
   it('records the contract it re-derived under, and flags a source from another era', async () => {
     await withArea(async (created) => {
       const directory = await decisionRun(join(created.path, 'run'), {

@@ -12,7 +12,7 @@
  * that it writes into a directory of its own.
  */
 
-import { symlink } from 'node:fs/promises';
+import { symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -482,6 +482,84 @@ describe('the safety checks are their own unit', () => {
       expect(result.err.join('\n')).toContain('resolves inside');
       // The evidence is untouched, which is the property the refusal exists for.
       expect(await inventory(directory)).toEqual(before);
+    });
+  });
+
+  it('refuses a descendant entry that is a link into the source', async () => {
+    // The top-level destination is a legitimate sibling, so a check that stopped there
+    // would pass. The bypass lives one level down: a `records/` directory that is a link
+    // into the run, through which the derived records would overwrite the evidence.
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [decisionCellOf('read-named-source-file')]: decisionForCase(
+          { '4': 0.9, '5': 0.1 },
+          { '8': 0.9, '9': 0.1 },
+        ),
+      });
+      const before = await inventory(directory);
+      const out = await created.dir('out');
+      const target = join(out, 'text-strict-at-least-ask-available');
+      await created.dir('out/text-strict-at-least-ask-available');
+      await symlink(join(directory, 'records'), join(target, 'records'), 'dir');
+      // Whatever the exit code, the invariant that matters is the evidence: no write may
+      // reach it. The staging directory makes that true by construction, which is why
+      // this asserts the run rather than the refusal.
+      await replay({ directory, output: out, force: true });
+      expect(await inventory(directory)).toEqual(before);
+    });
+  });
+
+  it('does not write a fixture through a link onto the source index', async () => {
+    // This one needed no `--force` at all: the existing-file check did not cover
+    // `fixture.json`, so a link placed there was followed and replaced the source index.
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [decisionCellOf('read-named-source-file')]: decisionForCase(
+          { '4': 0.9, '5': 0.1 },
+          { '8': 0.9, '9': 0.1 },
+        ),
+      });
+      // A source fixture, so the derived fixture is actually written.
+      await writeFile(
+        join(directory, 'fixture.json'),
+        `${JSON.stringify({ documentVersion: 'eval-run-fixture-v1' })}\n`,
+      );
+      const before = await inventory(directory);
+      const out = await created.dir('out');
+      const target = join(out, 'text-strict-at-least-ask-available');
+      await created.dir('out/text-strict-at-least-ask-available');
+      await symlink(
+        join(directory, 'index.json'),
+        join(target, 'fixture.json'),
+      );
+      const result = await replay({ directory, output: out });
+      expect(await inventory(directory)).toEqual(before);
+      // The failure is reported rather than silently skipped.
+      expect(result.code).toBe(1);
+      expect(result.err.join('\n')).toContain('already exists');
+    });
+  });
+
+  it('publishes nothing when the derivation fails, leaving no staging debris', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [decisionCellOf('read-named-source-file')]: decisionForCase(
+          { '4': 0.9, '5': 0.1 },
+          { '8': 0.9, '9': 0.1 },
+        ),
+      });
+      const out = await created.dir('out');
+      // A document the published schema rejects must abort before publication, so the
+      // destination never becomes a half-written derivation.
+      await replay({ directory, output: out });
+      const first = await inventory(out);
+      const second = await replay({ directory, output: out });
+      expect(second.code).toBe(1);
+      expect(await inventory(out)).toEqual(first);
+      // No staging directory is left behind on either the success or the refusal path.
+      expect(
+        first.filter((entry) => entry.path.includes('.replay-staging')),
+      ).toEqual([]);
     });
   });
 

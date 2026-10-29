@@ -31,6 +31,7 @@ import { defaultSettings } from '../metrics/index.js';
 import type { ReportSettings } from '../metrics/types.js';
 
 import { deriveRun } from './assemble.js';
+import { compareInputs } from './inputs.js';
 import { readSource } from './source.js';
 import type { SourceRead } from './source.js';
 import { parseVariants, statesAnyAxis, variantFromFlags } from './variants.js';
@@ -245,9 +246,10 @@ function settingsOf(root: string, variant: ReplayVariant): ReportSettings {
  * instructions or from other material, so no re-reading can say what the current ones
  * would produce, and the only honest statement is that another request is required.
  */
-function driftOf(
+async function driftOf(
   read: Extract<SourceRead, { readonly ok: true }>,
-): readonly string[] {
+  root: string,
+): Promise<readonly string[]> {
   const drift: string[] = [];
   if (read.index.versions.prompt !== REVIEW_PROMPT_VERSION) {
     drift.push(
@@ -257,6 +259,26 @@ function driftOf(
   if (read.index.versions.contract !== REVIEW_CONTRACT_VERSION) {
     drift.push(
       `the run was produced under contract ${read.index.versions.contract}, this build runs ${REVIEW_CONTRACT_VERSION}; the derived bands are today's reading of the saved answers`,
+    );
+  }
+  const inputs = await compareInputs({
+    root,
+    dataset: read.plan.datasetPath,
+    records: [...read.records.values()].map((sourced) => sourced.record),
+  });
+  if (inputs.status === 'unavailable') {
+    // Not a drift, and not a clean comparison either. Saying which it is keeps a reader
+    // from reading silence as "the inputs are unchanged".
+    drift.push(
+      `whether the dataset's inputs changed could not be determined: ${inputs.reason}`,
+    );
+  } else if (inputs.drifted.length > 0) {
+    drift.push(
+      `${String(inputs.drifted.length)} case input(s) changed since the run: ${inputs.drifted
+        .map((drift) => drift.caseId)
+        .join(
+          ', ',
+        )}; the saved answers were produced from the earlier material, so measuring the current input requires a new request and cannot be done by replaying these answers`,
     );
   }
   return drift;
@@ -291,7 +313,8 @@ export async function replayRun(
   );
   // Version drift is reported on stderr as well as in the lineage, because the person
   // reading the terminal is the one who has to decide whether a new request is needed.
-  for (const drift of driftOf(read)) io.err(`warning ${drift}`);
+  const notes = await driftOf(read, io.root);
+  for (const drift of notes) io.err(`warning ${drift}`);
   const parent =
     command.output === null
       ? `${directory}-replay`
