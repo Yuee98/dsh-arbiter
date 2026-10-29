@@ -196,7 +196,24 @@ export function conditionViews(result: RuleResult): readonly ConditionView[] {
  * Both are what the evaluator produced — the panel never recomputes priority.
  */
 export interface CoverageView {
+  /**
+   * Matches a higher-priority rule actually beat.
+   *
+   * An `allow` that matched but is not the reported rule is *not* automatically
+   * shadowed: `allow` coverage accumulates across rules, so a second allow can be
+   * what makes the call coverable at all. Removing it would turn the answer into
+   * `review(default)`, which is the opposite of "did not take effect".
+   */
   readonly shadowed: readonly RuleMatchDetail[];
+  /**
+   * Other `allow` matches beside the credited one.
+   *
+   * Neither "shadowed" nor "contributed" is established for these: the evaluator
+   * does not publish which rule supplied which part of the coverage. The panel
+   * therefore reports that they matched at the same priority and states the
+   * accumulation rule, instead of claiming either effect on the result.
+   */
+  readonly additionalAllows: readonly RuleMatchDetail[];
   readonly unknown: readonly string[];
   readonly reviewReason: ReviewReason | null;
   readonly allowMatched: boolean;
@@ -204,8 +221,15 @@ export interface CoverageView {
 
 export function coverageView(result: RuleTestResultView): CoverageView {
   const path = finalPath(result);
+  const secondary = result.matches.filter((match) => !match.effective);
+  // Coverage accumulates only when an `allow` is what decided the call. Under a
+  // deny or a forced path another matched allow really was outranked.
+  const allowDecided = path.kind === 'rule' && path.verdict === 'allow';
+  const isAlsoMatchedAllow = (match: RuleMatchDetail): boolean =>
+    allowDecided && match.verdict === 'allow';
   return {
-    shadowed: result.matches.filter((match) => !match.effective),
+    shadowed: secondary.filter((match) => !isAlsoMatchedAllow(match)),
+    additionalAllows: secondary.filter(isAlsoMatchedAllow),
     unknown: result.rules
       .filter((entry) => entry.outcome === 'unknown')
       .map((entry) => entry.id),
@@ -248,6 +272,11 @@ export type PriorityDecision =
   | 'shadowed'
   /** Matched, but the call still went to review because its coverage was insufficient. */
   | 'insufficient-coverage'
+  /**
+   * Matched, but a higher-priority rule could not be determined, so the allow
+   * was withheld. This is not the same as the allow itself being unknown.
+   */
+  | 'withheld-by-unknown'
   /** Could not be determined, so it never became a match or a non-match. */
   | 'unknown'
   /** Took no part in this answer. */
@@ -320,6 +349,14 @@ export interface CoverageDetail {
   readonly otherTargets: readonly ('file_redirect' | 'variable_assignment')[];
   /** False when the tester has no per-command evidence at all. */
   readonly hasEvidence: boolean;
+  /**
+   * True when the evaluator read this call's structure without failing.
+   *
+   * Independent of {@link structural}: a successful parse can publish redirects
+   * and assignments only, and a *failed* parse publishes nothing at all. Only the
+   * former may be described as "parsed".
+   */
+  readonly parsed: boolean;
 }
 
 /**
@@ -342,8 +379,15 @@ function allowNamedTexts(result: RuleTestResultView): ReadonlySet<string> {
       if (condition.target !== 'command') continue;
       // `witnessValues` is authoritative for an `all` conjunction: a condition
       // that matched a node no sibling matched does not cover it.
-      for (const text of condition.witnessValues ?? []) named.add(text);
-      if (condition.witnessValues !== undefined) continue;
+      const witnesses = condition.witnessValues;
+      if (witnesses !== undefined) {
+        for (const text of witnesses) named.add(text);
+        continue;
+      }
+      // One condition can match several commands (`echo a; echo b` against
+      // `echo .*`). Every text it matched counts, not just the first.
+      for (const value of condition.matchedValues ?? [])
+        if (typeof value === 'string') named.add(value);
       if (condition.matchedValue !== undefined)
         named.add(condition.matchedValue);
     }
@@ -374,6 +418,10 @@ export function coverageDetail(result: RuleTestResultView): CoverageDetail {
   }));
   const hasEvidence =
     result.normalization !== null && result.normalization !== undefined;
+  // A successful parse can publish redirects and assignments only, which is
+  // structure without a command. A *failed* parse publishes nothing and must not
+  // be described as a successful read, so the two are recorded separately.
+  const parsed = result.parse.status === 'ok';
   return {
     nodes,
     total: nodes.length,
@@ -382,6 +430,7 @@ export function coverageDetail(result: RuleTestResultView): CoverageDetail {
     structural: nodes.length > 0,
     otherTargets: otherStructuralTargets(result),
     hasEvidence,
+    parsed,
   };
 }
 
@@ -451,14 +500,16 @@ function fallbackLevel(path: FinalPath): PriorityLevel {
 /** Why a matched `allow` still sent the call to review. */
 function allowNotApplied(
   path: FinalPath,
-): 'insufficient-coverage' | 'unknown' | 'shadowed' | 'none' {
+): 'insufficient-coverage' | 'withheld-by-unknown' | 'shadowed' | 'none' {
   if (path.kind === 'rule') return 'shadowed';
   switch (path.reason) {
     case 'partial-allow':
     case 'incomplete':
       return 'insufficient-coverage';
+    // The allow itself matched; an undetermined higher-priority rule is what
+    // kept it from deciding, so this is not the allow's own outcome.
     case 'unresolved':
-      return 'unknown';
+      return 'withheld-by-unknown';
     case 'no-match':
       return 'none';
   }
@@ -489,13 +540,13 @@ function ruleLevel(
     winnerId,
     otherIds: matchedIds.filter((id) => id !== winnerId),
     unknownIds,
+    // The marker says where the selected rule sits, not how it turned out:
+    // dropping it on a non-match would hide the tier exactly when the reader is
+    // asking why their rule did not apply.
     focused:
       focusedRuleId !== null &&
       result.rules.some(
-        (entry) =>
-          entry.id === focusedRuleId &&
-          entry.verdict === verdict &&
-          entry.outcome !== 'no-match',
+        (entry) => entry.id === focusedRuleId && entry.verdict === verdict,
       ),
   };
 }

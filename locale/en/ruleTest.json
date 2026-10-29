@@ -124,5 +124,10 @@
   "priorityUnknown": "Could not be determined ({ids}): neither a match nor a non-match.",
   "coverageUnresolved": "A higher-priority rule could not be determined, so the call went to the default review; that is not the same as no match.",
   "coverageNoEvidence": "There is no per-command structural evidence (for example this tool is not a supported shell dialect); the final evaluation path is authoritative.",
-  "coveragePartialOther": "The matching allow named only some commands, and {targets} need separate coverage, so the call went to the default review."
+  "coveragePartialOther": "This call also carries {targets}; a command match does not cover those, and they need coverage of their own, so the command matches alone cannot establish whole-call coverage and the call went to the default review.",
+  "priorityWithheldByUnknown": "Matched ({ids}), but a higher-priority rule could not be determined, so the allow was not applied this time.",
+  "coverageNoCommands": "This call parsed successfully but has no commands to list (for example only a redirect or an assignment); the final path is authoritative.",
+  "coveragePartialNoCommand": "This call has no command to name individually, so whole-call coverage cannot be confirmed from commands, and it goes to the default review.",
+  "additionalAllowsTitle": "Other allow matches at the same priority",
+  "additionalAllowEntry": "{id} ({verdict}) also matched; allow coverage accumulates across rules, and this result does not say which part each one covered"
 }

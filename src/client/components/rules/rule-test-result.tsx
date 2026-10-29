@@ -263,6 +263,7 @@ export function RuleTestDetails(props: {
         <CoverageBlock result={props.result} />
         <ShadowList
           shadowed={coverage.shadowed}
+          additionalAllows={coverage.additionalAllows}
           unknown={coverage.unknown}
           allowMatched={coverage.allowMatched}
         />
@@ -432,6 +433,10 @@ function ShadowList(props: {
     readonly id: string;
     readonly verdict: RuleVerdict;
   }[];
+  readonly additionalAllows: readonly {
+    readonly id: string;
+    readonly verdict: RuleVerdict;
+  }[];
   readonly unknown: readonly string[];
   readonly allowMatched: boolean;
 }): ReactNode {
@@ -454,6 +459,24 @@ function ShadowList(props: {
             </li>
           ))}
         </ul>
+      )}
+      {props.additionalAllows.length === 0 ? null : (
+        <>
+          {/* These matched too, but the answer does not say which part of the
+              coverage each one supplied. `allow` coverage accumulates across
+              rules, so neither "outranked" nor "credited" is a fact here. */}
+          <strong>{t('ruleTest.additionalAllowsTitle')}</strong>
+          <ul className="arb:m-0 arb:pl-4.5">
+            {props.additionalAllows.map((match) => (
+              <li key={`c-${match.id}-${match.verdict}`}>
+                {t('ruleTest.additionalAllowEntry', {
+                  id: match.id,
+                  verdict: verdictLabel(match.verdict, t),
+                })}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <strong>{t('ruleTest.unknownTitle')}</strong>
       <span className="arb:text-xs arb:text-secondary">

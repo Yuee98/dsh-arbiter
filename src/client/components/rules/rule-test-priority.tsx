@@ -95,6 +95,14 @@ function priorityDecisionText(level: PriorityLevel, t: Translate): string {
       });
     case 'insufficient-coverage':
       return t('ruleTest.priorityInsufficientCoverage');
+    case 'withheld-by-unknown':
+      // The allow did match; an undetermined higher-priority rule kept it from
+      // deciding. Calling it "unknown" would deny a result it did reach.
+      return t('ruleTest.priorityWithheldByUnknown', {
+        ids: [level.winnerId ?? '', ...level.otherIds]
+          .filter((id) => id.length > 0)
+          .join(', '),
+      });
     case 'unknown':
       return t('ruleTest.priorityUnknown', {
         ids: level.unknownIds.join(', '),
@@ -116,7 +124,13 @@ export function CoverageBlock(props: {
       className="arb:flex arb:flex-col arb:gap-0.5 arb:rounded-md arb:border arb:border-border-default arb:p-2 arb:text-xs"
     >
       <strong>{t('ruleTest.coverageTitle')}</strong>
-      {detail.structural ? (
+      {!detail.hasEvidence ? (
+        // No normalization at all: the reader published no per-command evidence,
+        // so nothing here may be read as "this is not a shell call".
+        <span className="arb:text-secondary">
+          {t('ruleTest.coverageNoEvidence')}
+        </span>
+      ) : detail.structural ? (
         <>
           <span className="arb:text-secondary">
             {t('ruleTest.coverageNodes', {
@@ -141,8 +155,14 @@ export function CoverageBlock(props: {
           </ul>
         </>
       ) : (
+        // Evidence exists but lists no command. Only a parse that actually
+        // succeeded may be described as "parsed with nothing to list"; a failed
+        // parse goes back to the no-evidence sentence rather than claiming a
+        // successful read it did not perform.
         <span className="arb:text-secondary">
-          {t('ruleTest.coverageNoStructure')}
+          {detail.parsed
+            ? t('ruleTest.coverageNoCommands')
+            : t('ruleTest.coverageNoEvidence')}
         </span>
       )}
       <span
@@ -184,10 +204,15 @@ function coverageConclusion(detail: CoverageDetail, t: Translate): string {
  *
  * Unnamed commands are only one possible cause. A redirect or an assignment is a
  * separate structural target that a command match never authorizes, so the
- * sentence names that instead of implying a missing command.
+ * sentence names that instead of implying a missing command. It does not claim
+ * those targets are the uncovered ones: the answer does not say which node a
+ * matched allow covered, so only their presence and the coverage rule are stated.
  */
 function coveragePartialText(detail: CoverageDetail, t: Translate): string {
   const unnamed = detail.total - detail.namedCount;
+  // When other structural targets are present, the panel must not claim they are
+  // the uncovered ones: it cannot see which node a matched allow covered. Naming
+  // them as separate coverage targets is the strongest true statement available.
   if (detail.otherTargets.length > 0)
     return t('ruleTest.coveragePartialOther', {
       targets: detail.otherTargets
@@ -200,5 +225,9 @@ function coveragePartialText(detail: CoverageDetail, t: Translate): string {
         )
         .join(', '),
     });
+  // Nothing was published to name, so "{unnamed} commands" would report a count
+  // of zero rather than an absent list. The evaluator still said the coverage was
+  // partial, so the sentence states that instead of inventing a command count.
+  if (detail.total === 0) return t('ruleTest.coveragePartialNoCommand');
   return t('ruleTest.coveragePartial', { unnamed });
 }
