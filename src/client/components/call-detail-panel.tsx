@@ -12,6 +12,7 @@ import { useRef, type ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetail } from './call-detail.js';
 import { Button, Notice, Section } from './controls.js';
+import type { RuleCallSource } from './rules/rule-from-call-model.js';
 import {
   Dialog,
   DialogContent,
@@ -43,10 +44,12 @@ function AbsentState({
   state,
   onRetry,
   fallback,
+  onCreateRule,
 }: {
   readonly state: CallDetailState;
   readonly onRetry: () => void;
   readonly fallback: CallDetailFallback | undefined;
+  readonly onCreateRule: ((source: RuleCallSource) => void) | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   switch (state.kind) {
@@ -57,7 +60,12 @@ function AbsentState({
         </p>
       );
     case 'ready':
-      return <CallDetail detail={state.detail} />;
+      return (
+        <CallDetail
+          detail={state.detail}
+          {...(onCreateRule === undefined ? {} : { onCreateRule })}
+        />
+      );
     case 'record-unavailable':
       return (
         <div
@@ -123,6 +131,8 @@ export function CallDetailPanel(props: {
    * decision record still explains its verdict; the log list omits them.
    */
   readonly fallback?: CallDetailFallback;
+  /** Where a rule draft from this call goes, when the caller has a rules surface. */
+  readonly onCreateRule?: ((source: RuleCallSource) => void) | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   const { state, reload } = useCallDetail(props.callId);
@@ -163,7 +173,12 @@ export function CallDetailPanel(props: {
             {t('callDetail.dialogDescription')}
           </DialogDescription>
         </DialogHeader>
-        <AbsentState state={state} onRetry={reload} fallback={props.fallback} />
+        <AbsentState
+          state={state}
+          onRetry={reload}
+          fallback={props.fallback}
+          onCreateRule={props.onCreateRule}
+        />
       </DialogContent>
     </Dialog>
   );

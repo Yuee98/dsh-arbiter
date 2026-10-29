@@ -120,15 +120,28 @@ describe('rule test sample building', () => {
     expect(built.problem.kind).toBe('json-syntax');
   });
 
-  test('a non-object argument document is a shape problem', () => {
-    for (const text of ['[]', 'null', '"text"', '3']) {
+  test('any JSON value is a usable argument document', () => {
+    // The gate hands `arguments` through as `unknown`, so an array, a string or a
+    // number is a real recorded input; refusing it here would make a recorded
+    // call unreplayable in the tester that has to answer for it.
+    for (const [text, expected] of [
+      ['[]', []],
+      ['[1, "two"]', [1, 'two']],
+      ['null', null],
+      ['"text"', 'text'],
+      ['3', 3],
+      ['{"a":1}', { a: 1 }],
+    ] as const) {
       const built = buildSample({
         tool: 'deploy',
         identity: 'main',
         mode: 'arguments',
         text,
       });
-      expect(built).toEqual({ ok: false, problem: { kind: 'json-shape' } });
+      expect(built).toEqual({
+        ok: true,
+        sample: { tool: 'deploy', args: expected, input: text },
+      });
     }
   });
 

@@ -469,6 +469,17 @@ export function addRule(draft: Draft): DraftRule {
   return rule;
 }
 
+/**
+ * Append a rule that was built elsewhere, e.g. from one recorded call.
+ *
+ * The id is already assigned by the builder, so this only places it and declares
+ * the format its structure requires.
+ */
+export function adoptRule(draft: Draft, rule: DraftRule): void {
+  draft.rules.push(rule);
+  draft.format = CANONICAL_FORMAT;
+}
+
 /** Insert a copy right after its source, disabled, with a fresh id. */
 export function addDuplicate(draft: Draft, source: DraftRule): DraftRule {
   const copy = duplicateRule(source, draft.rules);

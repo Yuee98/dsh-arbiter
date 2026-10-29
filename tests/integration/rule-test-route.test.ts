@@ -479,6 +479,38 @@ describe('rule test route with the shared evaluator', () => {
     expect(result?.rule?.id).toBe('allow-cat');
   });
 
+  test('an explicit null argument document is evaluated as null, not as {}', async () => {
+    const harness = await startHost();
+    // `$` selects the document itself, so an exact null condition matches a null
+    // argument document and does not match an empty object. The tester must
+    // therefore submit the null it was shown instead of an omitted field.
+    const nullRoot = {
+      id: 'null-root',
+      conditions: [
+        { target: 'argument', path: '$', kind: 'exact', pattern: null },
+      ],
+      verdict: 'deny',
+    };
+    const asNull = await post(harness.routes, {
+      samples: [{ tool: 'example', args: null }],
+      rules: [nullRoot],
+    });
+    expect(asNull.answer.results[0]?.path).toBe('deny');
+
+    const asObject = await post(harness.routes, {
+      samples: [{ tool: 'example', args: {} }],
+      rules: [nullRoot],
+    });
+    expect(asObject.answer.results[0]?.path).toBe('review(default)');
+
+    // An omitted argument still falls back to the empty object.
+    const omitted = await post(harness.routes, {
+      samples: [{ tool: 'example' }],
+      rules: [nullRoot],
+    });
+    expect(omitted.answer.results[0]?.path).toBe('review(default)');
+  });
+
   test('an invalid draft is reported with the condition that owns it', async () => {
     const harness = await startHost();
     const { status, answer } = await post(harness.routes, {

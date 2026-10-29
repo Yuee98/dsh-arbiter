@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { RuleCallSource } from '../components/rules/rule-from-call-model.js';
 import { CallDetailPanel } from '../components/call-detail-panel.js';
 import { Button, Notice, Section } from '../components/controls.js';
 import { LogFilters } from '../components/log-filters.js';
@@ -18,7 +19,17 @@ import { useLogPages } from '../log-pages.js';
  * cannot drift. The panel never reads a call's prompt or response to render the
  * list.
  */
-export function LogsPanel(): ReactNode {
+export function LogsPanel({
+  onCreateRule,
+}: {
+  /**
+   * Where a rule draft built from one call goes.
+   *
+   * The log list owns no rules surface, so the page supplies this. Omitting it
+   * leaves the detail exactly as it was, without an action that cannot finish.
+   */
+  readonly onCreateRule?: ((source: RuleCallSource) => void) | undefined;
+} = {}): ReactNode {
   const t = useArbiterTranslation();
   const pages = useLogPages();
   const [openCallId, setOpenCallId] = useState<string | null>(null);
@@ -74,6 +85,13 @@ export function LogsPanel(): ReactNode {
         <CallDetailPanel
           callId={openCallId}
           openerRef={callDetailOpenerRef}
+          onCreateRule={(source) => {
+            // The rule surface is another tab, and the detail is a modal: the
+            // request closes this dialog so the tab it switches to is reachable,
+            // and the draft dialog opens on a page the user can actually see.
+            setOpenCallId(null);
+            onCreateRule?.(source);
+          }}
           onClose={() => {
             setOpenCallId(null);
           }}

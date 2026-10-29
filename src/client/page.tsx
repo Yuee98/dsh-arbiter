@@ -17,6 +17,8 @@ import type {
   PendingExactTypeMap,
 } from './components/rules/draft.js';
 import { ArbiterPortalProvider } from './components/ui/portal-context.js';
+import type { RuleCallSource } from './components/rules/rule-from-call-model.js';
+import { useRulesPanelCall } from './components/rules/rule-from-call-state.js';
 import { saveResponse, validationResponse } from './decoders/state.js';
 import { useCoexistenceFeed } from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
@@ -182,6 +184,25 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     warnings: [],
     sourceWarnings: [],
   });
+  /**
+   * The rule-draft call state, owned by the page rather than the rules panel.
+   *
+   * A tab switch unmounts the panel, and a rule built from a call must keep its
+   * recorded call across that — otherwise going to look at the log and coming
+   * back would silently retarget the later test at a default sample. The page's
+   * transient state survives tab navigation and still resets on a reload, so
+   * this is not persisted provenance.
+   */
+  const ruleCalls = useRulesPanelCall();
+  const createRuleFromCall = useCallback(
+    (source: RuleCallSource): void => {
+      // The open detail asked for a draft: open the same dialog its own import
+      // would, and switch to the tab that shows it.
+      ruleCalls.pickSource(source);
+      setTab('rules');
+    },
+    [ruleCalls],
+  );
   const generation = useRef(0);
   const validationRevision = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
@@ -352,6 +373,8 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
           validation={validation}
           pendingExactTypes={pendingExactTypes}
           onDraft={onDraft}
+          ruleCalls={ruleCalls}
+          onCreateRule={createRuleFromCall}
           onPendingTypeChange={handlePendingTypeChange}
           onRemoveCondition={handleRemoveCondition}
           onDeleteRule={handleDeleteRule}
@@ -397,6 +420,8 @@ function PageTabBody(props: {
   ) => void;
   readonly onRemoveCondition: (ruleId: string, conditionIndex: number) => void;
   readonly onDeleteRule: (ruleId: string) => void;
+  readonly onCreateRule: (source: RuleCallSource) => void;
+  readonly ruleCalls: ReturnType<typeof useRulesPanelCall>;
 }): ReactNode {
   const {
     tab,
@@ -409,6 +434,8 @@ function PageTabBody(props: {
     onPendingTypeChange,
     onRemoveCondition,
     onDeleteRule,
+    onCreateRule,
+    ruleCalls,
   } = props;
 
   if (tab === 'status') {
@@ -431,6 +458,7 @@ function PageTabBody(props: {
         onPendingTypeChange={onPendingTypeChange}
         onRemoveCondition={onRemoveCondition}
         onDeleteRule={onDeleteRule}
+        calls={ruleCalls}
       />
     );
   }
@@ -441,7 +469,7 @@ function PageTabBody(props: {
     return <AdvancedPanel draft={draft} onDraft={onDraft} />;
   }
   if (tab === 'logs') {
-    return <LogsPanel />;
+    return <LogsPanel onCreateRule={onCreateRule} />;
   }
   return <AboutPanel state={state} />;
 }

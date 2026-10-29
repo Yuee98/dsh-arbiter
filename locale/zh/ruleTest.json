@@ -104,7 +104,6 @@
   "toolRequired": "请先填写工具名。",
   "commandRequired": "请填写命令文本。",
   "jsonSyntax": "参数 JSON 格式错误：{message}",
-  "jsonShape": "参数必须是一个 JSON 对象。",
   "invalidRules": "草稿中有规则未通过校验，整份规则无法测试：",
   "locateIssue": "定位到 {path}",
   "issuesOutdated": "草稿已改变，原来的错误位置不再对应同一条条件；请重新运行测试。",
@@ -129,5 +128,8 @@
   "coverageNoCommands": "本次调用解析成功，但没有可逐条列出的命令（例如只有重定向或赋值）；结论以最终路径为准。",
   "coveragePartialNoCommand": "本次没有可逐条命名的命令，无法从命令确认整次调用已被覆盖，因此进入默认审查。",
   "additionalAllowsTitle": "同一优先级的其他 allow 命中",
-  "additionalAllowEntry": "{id}（{verdict}）也命中；allow 的覆盖跨规则累计，本次未分别说明各自覆盖了哪一部分"
+  "additionalAllowEntry": "{id}（{verdict}）也命中；allow 的覆盖跨规则累计，本次未分别说明各自覆盖了哪一部分",
+  "sourceCall": "本次测试使用调用记录 {call} 的原始输入。",
+  "sourceCallEdited": "输入已改动，下面测试的不再是调用记录 {call} 的原样输入。",
+  "sourceNoInput": "这条调用记录没有可带入的输入。"
 }

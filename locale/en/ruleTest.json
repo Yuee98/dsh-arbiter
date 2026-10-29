@@ -104,7 +104,6 @@
   "toolRequired": "Enter a tool name first.",
   "commandRequired": "Enter the command text.",
   "jsonSyntax": "Invalid arguments JSON: {message}",
-  "jsonShape": "The arguments must be a JSON object.",
   "invalidRules": "Some rules in the draft failed validation, so the whole rule set cannot be tested:",
   "locateIssue": "Go to {path}",
   "issuesOutdated": "The draft changed, so the original error positions no longer match the same condition; run the test again.",
@@ -129,5 +128,8 @@
   "coverageNoCommands": "This call parsed successfully but has no commands to list (for example only a redirect or an assignment); the final path is authoritative.",
   "coveragePartialNoCommand": "This call has no command to name individually, so whole-call coverage cannot be confirmed from commands, and it goes to the default review.",
   "additionalAllowsTitle": "Other allow matches at the same priority",
-  "additionalAllowEntry": "{id} ({verdict}) also matched; allow coverage accumulates across rules, and this result does not say which part each one covered"
+  "additionalAllowEntry": "{id} ({verdict}) also matched; allow coverage accumulates across rules, and this result does not say which part each one covered",
+  "sourceCall": "This test uses the recorded input of call {call}.",
+  "sourceCallEdited": "The inputs were edited, so this no longer tests the recorded input of call {call}.",
+  "sourceNoInput": "This call record has no input to import."
 }

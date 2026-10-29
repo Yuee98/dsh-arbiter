@@ -140,5 +140,8 @@
   "conjunction": "Conjunction evidence (as decided then)",
   "conjunctionWitness": "{target}: node satisfying all of them — {text}",
   "conjunctionNoWitness": "This record carries no conjunction node to show.",
-  "dialogDescription": "Inspect the tool call verdict, decision basis, and raw audit materials."
+  "dialogDescription": "Inspect the tool call verdict, decision basis, and raw audit materials.",
+  "createRuleOpen": "Create a rule from this call",
+  "createRuleHint": "Hands this call's recorded tool and arguments to a rule draft, pinning only the fields you choose; the draft still needs save-and-apply to take effect.",
+  "createRuleUnavailable": "This record stored no input for the call, so no rule draft can be created from it."
 }

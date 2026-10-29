@@ -14,6 +14,7 @@
  * source — only the evidence does.
  */
 
+import { Wand2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import { CallDetailBasis } from './call-detail-basis.js';
@@ -23,7 +24,9 @@ import {
   verdictLabel,
 } from './call-detail-labels.js';
 import { CallDetailRaw } from './call-detail-raw.js';
-import { JsonBlock, Notice, Section } from './controls.js';
+import { Button, JsonBlock, Notice, Section } from './controls.js';
+import { callSourceOfDetail } from './rules/rule-from-call-model.js';
+import type { RuleCallSource } from './rules/rule-from-call-model.js';
 import { formatTime } from '../view-helpers.js';
 import type { CallDetailView } from '../view-types.js';
 
@@ -234,6 +237,41 @@ function UnreadableRecord({
 }
 
 /**
+ * The entry that turns this call into a rule draft.
+ *
+ * It appears only when the record carries the input a draft needs. A record
+ * without one says so instead of offering an action that would build a rule from
+ * an invented empty object, and the button never saves anything by itself: it
+ * opens the draft dialog, and the draft still goes through save-and-apply.
+ */
+function CreateRuleFromCall(props: {
+  readonly detail: CallDetailView;
+  readonly onCreateRule: (source: RuleCallSource) => void;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const source = callSourceOfDetail(props.detail);
+  if (source === null)
+    return <Notice kind="info" text={t('callDetail.createRuleUnavailable')} />;
+  return (
+    <div className="arb:flex arb:flex-col arb:gap-1">
+      <div data-call-detail-create-rule={source.callId}>
+        <Button
+          onClick={() => {
+            props.onCreateRule(source);
+          }}
+        >
+          <Wand2 className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
+          <span>{t('callDetail.createRuleOpen')}</span>
+        </Button>
+      </div>
+      <p className="arb:m-0 arb:text-xs arb:text-secondary">
+        {t('callDetail.createRuleHint')}
+      </p>
+    </div>
+  );
+}
+
+/**
  * The shared detail for one decoded record.
  *
  * It takes a decoded detail rather than a call id so a caller that already holds
@@ -242,8 +280,16 @@ function UnreadableRecord({
  */
 export function CallDetail({
   detail,
+  onCreateRule,
 }: {
   readonly detail: CallDetailView;
+  /**
+   * Where a rule draft from this call goes.
+   *
+   * A caller without a rules surface omits it; the detail then renders exactly
+   * the same layers, without an action it cannot complete.
+   */
+  readonly onCreateRule?: ((source: RuleCallSource) => void) | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   return (
@@ -259,6 +305,9 @@ export function CallDetail({
           <>
             <Overview detail={detail} />
             <MissingNotices detail={detail} />
+            {onCreateRule === undefined ? null : (
+              <CreateRuleFromCall detail={detail} onCreateRule={onCreateRule} />
+            )}
             <CallDetailBasis detail={detail} />
             <CallDetailRaw detail={detail} />
           </>

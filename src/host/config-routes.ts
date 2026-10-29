@@ -195,6 +195,11 @@ interface TestSample {
  * a bare string keeps the legacy one-line form the CLI and the first prototype
  * used. The two forms share one evaluator, so the caller cannot pick a weaker
  * matcher by choosing a different shape.
+ *
+ * An explicitly supplied `args: null` is a value, not an omission: `null` and
+ * `{}` evaluate differently (`$` selects null itself but nothing from an empty
+ * object), so folding the first into the second would evaluate a different call
+ * from the one the tester showed. Only a genuinely absent argument falls back.
  */
 function asTestSample(value: unknown, fallbackCwd: string): TestSample | null {
   if (typeof value === 'string')
@@ -204,7 +209,7 @@ function asTestSample(value: unknown, fallbackCwd: string): TestSample | null {
       cwd: fallbackCwd,
     };
   if (!isRecord(value) || typeof value['tool'] !== 'string') return null;
-  const args = value['args'] ?? value['arguments'] ?? {};
+  const args = suppliedArguments(value);
   const input =
     typeof value['input'] === 'string'
       ? value['input']
@@ -215,6 +220,13 @@ function asTestSample(value: unknown, fallbackCwd: string): TestSample | null {
     input,
     cwd: typeof value['cwd'] === 'string' ? value['cwd'] : fallbackCwd,
   };
+}
+
+/** The submitted arguments, distinguishing an explicit `null` from absence. */
+function suppliedArguments(value: Record<string, unknown>): unknown {
+  if (Object.hasOwn(value, 'args')) return value['args'];
+  if (Object.hasOwn(value, 'arguments')) return value['arguments'];
+  return {};
 }
 
 /** The legacy line grammar, reused rather than re-parsed here. */

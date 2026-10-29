@@ -13,6 +13,78 @@ import { renderClient } from '../helpers/render-client.js';
 const server = setupApiMock();
 
 /**
+ * One stored call as the shared detail route answers it.
+ *
+ * The importer reads the same route the call detail renders, so its fixture has
+ * to be that route's output: the arguments live under the raw layer, and the
+ * identity and directory under the overview.
+ */
+function detailResponse(
+  callId: string,
+  args: unknown,
+  sessionKind = 'subagent',
+) {
+  return {
+    ok: true,
+    detail: {
+      callId,
+      source: 'audit',
+      recordFormatVersion: 2,
+      unreadable: false,
+      unreadableReason: null,
+      overview: {
+        tool: 'deploy',
+        ts: 1_700_000_000_000,
+        sessionId: 'session-1',
+        sessionKind,
+        parentSession: null,
+        workspace: '/srv/deploy',
+        cwd: '/srv/deploy',
+        profile: 'default',
+        approvalMode: 'normal',
+        executionMode: 'guarded',
+        verdict: 'allow',
+        verdictReason: 'matched',
+        configRevision: 'rev-1',
+        fingerprint: 'deploy:1',
+        execution: { status: 'succeeded', startedAt: 1, finishedAt: 2 },
+        cancelled: false,
+      },
+      basis: {
+        rule: null,
+        decisionRules: [],
+        conflicts: [],
+        conflictsTruncated: false,
+        policyStrategy: null,
+        chain: null,
+        reviewState: 'none',
+        trace: [],
+        signals: null,
+        evidence: [],
+        materials: [],
+        evidenceTruncated: false,
+        snapshotMissing: [],
+        historyStatus: null,
+        effect: null,
+      },
+      raw: {
+        arguments: args,
+        argumentsSchema: null,
+        snapshot: null,
+        config: null,
+        configFormatVersion: null,
+        snapshotFormatVersion: null,
+        modelAttempts: [],
+        templates: [],
+        sessionRecordState: 'written',
+      },
+      missing: [],
+      missingUnknown: 0,
+    },
+  };
+}
+
+/**
  * The focused rule allows a deploy whose every selected environment is `test`.
  *
  * Paired with a force-ask on any deploy below: force-ask outranks allow, so this
@@ -643,17 +715,11 @@ describe('rule test panel', () => {
           health: { state: 'ok', lastError: null, dropped: 0, pending: 0 },
         }),
       ),
+      // The route publishes the shared call detail, which is what the importer
+      // decodes; a bare stored row here would let the importer read a shape the
+      // host never answers.
       http.get('*/api/arbiter/log', () =>
-        HttpResponse.json({
-          ok: true,
-          record: {
-            callId: 'call-77',
-            tool: 'deploy',
-            sessionKind: 'subagent',
-            arguments: argumentsValue,
-            cwd: '/srv/deploy',
-          },
-        }),
+        HttpResponse.json(detailResponse('call-77', argumentsValue)),
       ),
       http.post('*/api/arbiter/test', async ({ request }) => {
         const body: unknown = await request.json();

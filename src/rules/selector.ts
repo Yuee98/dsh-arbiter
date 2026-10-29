@@ -60,10 +60,21 @@ function toDocument(value: unknown): JsonValue | undefined {
     });
   }
   if (typeof value === 'object') {
+    // Every own member must survive the copy. `__proto__` is a legal JSON member
+    // name, and plain assignment would run the inherited setter instead of
+    // storing the member — a selector for it would then silently find nothing,
+    // and a rule describing the call would fail to match that very call.
+    // Defining the property writes the member regardless of its name.
     const copy: Record<string, JsonValue> = {};
     for (const [key, item] of Object.entries(value)) {
       const converted = toDocument(item);
-      if (converted !== undefined) copy[key] = converted;
+      if (converted === undefined) continue;
+      Object.defineProperty(copy, key, {
+        value: converted,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return copy;
   }

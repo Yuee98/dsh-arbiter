@@ -2,14 +2,21 @@ import { FlaskConical, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Button, Section } from '../components/controls.js';
-import { addRule, nextRuleId } from '../components/rules/draft.js';
+import { addRule, adoptRule, nextRuleId } from '../components/rules/draft.js';
 import type {
   PendingExactType,
   PendingExactTypeMap,
 } from '../components/rules/draft.js';
+import { RuleFromCallDialog } from '../components/rules/rule-from-call.js';
+import {
+  importedSampleOf,
+  ruleCallSource,
+} from '../components/rules/rule-from-call-model.js';
+import type { useRulesPanelCall } from '../components/rules/rule-from-call-state.js';
 import { focusConditionField } from '../components/rules/rule-issue-locate.js';
 import type { LocateRequest } from '../components/rules/rule-issue-locate.js';
 import { RuleList } from '../components/rules/rule-list.js';
+import { RuleTestImport } from '../components/rules/rule-test-import.js';
 import { RuleTest } from '../components/rules/rule-test.js';
 import { useArbiterTranslation } from '../i18n-provider.js';
 import type { DraftRule, RulesPanelProps } from '../view-types.js';
@@ -23,6 +30,14 @@ export interface ExtendedRulesPanelProps extends RulesPanelProps {
   ) => void;
   readonly onRemoveCondition?: (ruleId: string, conditionIndex: number) => void;
   readonly onDeleteRule?: (ruleId: string) => void;
+  /**
+   * The call-draft state, owned by the page.
+   *
+   * It lives above this panel because a tab switch unmounts the panel, and a rule
+   * built from a call has to keep its recorded call across that navigation. This
+   * component therefore reads and dispatches only; it never owns the association.
+   */
+  readonly calls: ReturnType<typeof useRulesPanelCall>;
 }
 
 export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
@@ -36,14 +51,15 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
     onDeleteRule,
   } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [focusedId, setFocusedId] = useState<string | null>(null);
-  const [focusRequest, setFocusRequest] = useState(0);
   const ruleTestOpenerRef = useRef<HTMLElement | null>(null);
   const [locateRequest, setLocateRequest] = useState<LocateRequest>({
     ruleId: null,
     conditionIndex: null,
     nonce: 0,
   });
+  const calls = props.calls;
+  const { state: callState } = calls;
+  const pending = callState.source;
 
   useEffect(() => {
     if (
@@ -55,7 +71,15 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
   }, [draft.rules, selectedId]);
 
   const focusedRule: DraftRule | null =
-    draft.rules.find((rule) => rule.id === focusedId) ?? null;
+    draft.rules.find((rule) => rule.id === callState.focusedId) ?? null;
+
+  // A created rule's draft can be discarded without saving, and its id can be
+  // reused by the next create. Dropping the seeds of rules that no longer exist
+  // keeps a fresh rule from being tested against a call it was never built from.
+  const pruneSeeds = calls.pruneSeeds;
+  useEffect(() => {
+    pruneSeeds(draft.rules.map((rule) => rule.id));
+  }, [draft.rules, pruneSeeds]);
 
   useEffect(() => {
     if (locateRequest.nonce === 0) return;
@@ -68,7 +92,7 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
   return (
     <>
       <Section title={t('rules.title')} description={t('rules.description')}>
-        <div className="arb:flex arb:items-center arb:gap-2">
+        <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-2">
           <Button
             onClick={() => {
               const id = nextRuleId(draft.rules);
@@ -81,11 +105,24 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
             <Plus className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
             <span>{t('rules.add')}</span>
           </Button>
+          <RuleTestImport
+            disabled={false}
+            triggerLabelKey="rules.fromCallTrigger"
+            onImport={(callId, imported) => {
+              calls.pickSource(
+                ruleCallSource(
+                  callId,
+                  imported.sample.tool,
+                  imported.sample.args,
+                  { identity: imported.identity, cwd: imported.cwd },
+                ),
+              );
+            }}
+          />
           <Button
             onClick={(event) => {
               ruleTestOpenerRef.current = event.currentTarget;
-              setFocusedId(null);
-              setFocusRequest((current) => current + 1);
+              calls.focusNone();
             }}
           >
             <FlaskConical className="arb:h-3.5 arb:w-3.5" aria-hidden="true" />
@@ -104,8 +141,7 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
           onDraft={onDraft}
           onTest={(id, opener) => {
             ruleTestOpenerRef.current = opener ?? null;
-            setFocusedId(id);
-            setFocusRequest((current) => current + 1);
+            calls.focusRule(id);
           }}
           onPendingTypeChange={onPendingTypeChange}
           onRemoveCondition={onRemoveCondition}
@@ -116,15 +152,38 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
         </p>
       </Section>
 
+      {pending === null ? null : (
+        <RuleFromCallDialog
+          source={pending}
+          draft={draft}
+          onCreate={(rule, test) => {
+            onDraft((next) => {
+              adoptRule(next, rule);
+            });
+            setSelectedId(rule.id);
+            calls.created(
+              rule.id,
+              {
+                callId: pending.callId,
+                imported: importedSampleOf(pending),
+              },
+              test,
+            );
+          }}
+          onClose={calls.cancelSource}
+        />
+      )}
+
       <RuleTest
         draft={draft}
         focusedRule={focusedRule}
-        focusRequest={focusRequest}
+        focusRequest={callState.focusRequest}
         openerRef={ruleTestOpenerRef}
         renderTrigger={false}
-        onClearFocus={() => {
-          setFocusedId(null);
-        }}
+        {...(callState.activeSeed === null
+          ? {}
+          : { sampleSeed: callState.activeSeed })}
+        onClearFocus={calls.clearFocus}
         onLocateIssue={(target) => {
           if (target.ruleId === null) return;
           setSelectedId(target.ruleId);
