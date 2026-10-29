@@ -528,6 +528,14 @@ export class CallSettlement {
     reason: string,
     extras: AuditExtras,
   ): PreToolDecision {
+    // A cancellation is checked here, before anything is claimed or written.
+    // `human()` checks it because it is about to open a question; the direct
+    // fallback path reaches this method straight from preparation, so without this
+    // check a call cancelled while the working directory or the snapshot was being
+    // resolved would settle as a denial — the agent would read "the review refused
+    // you", a false prior verdict would be recorded, and the session's denial
+    // breaker would count a call nobody refused.
+    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
     // Claim first: a competing path may already own this call's ending, and the
     // trace must show one terminal stage, not two. A fallback decided now is
     // governed by the configuration now, so its stage carries the live identity.

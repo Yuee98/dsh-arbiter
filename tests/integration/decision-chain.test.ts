@@ -259,6 +259,40 @@ function readableCancellation(
   return decoded !== null;
 }
 
+/** The persisted trace, or null when no row was written for this call. */
+async function traceOrNull(callId: string): Promise<readonly string[] | null> {
+  const store = new AuditStore(
+    join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+    {
+      enabled: true,
+      retentionDays: 30,
+      retentionBytes: 1_073_741_824,
+      maxQueue: 500,
+    },
+  );
+  try {
+    // Give the writer the same window the other assertions allow, so "no row" means
+    // none was written rather than none yet.
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const row: unknown = store.getCall(callId);
+      if (row !== null && typeof row === 'object') {
+        const trace: unknown = Reflect.get(row, 'trace');
+        if (Array.isArray(trace)) {
+          return trace.flatMap((stage: unknown) => {
+            if (stage === null || typeof stage !== 'object') return [];
+            const result: unknown = Reflect.get(stage, 'result');
+            return typeof result === 'string' ? [result] : [];
+          });
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return null;
+  } finally {
+    store.close();
+  }
+}
+
 /** The stored call row, once the audit store has written it. */
 async function storedCall(callId: string): Promise<{
   readonly result: string;
@@ -369,6 +403,108 @@ describe('mode equivalence on the real gate', () => {
     } finally {
       normalHarness.dispose();
       strictHarness.dispose();
+    }
+  });
+
+  test('a call cancelled while preparation is pending is not settled as a denial', async () => {
+    // The direct fallback path used to skip the abort check that `human()` performs,
+    // so a cancellation arriving while the working directory was being resolved
+    // became a `fallback-deny`: the agent saw a denial, the record stored a false
+    // prior verdict, and the session's denial breaker counted a call nobody refused.
+    const session = makeSession('m-prepare-cancel');
+    const controller = new AbortController();
+    let releaseDirectory: (() => void) | undefined;
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 7, authorization: 2 }),
+      modes: { main: 'no-ask', subagent: 'no-ask' },
+      // Hold the gate inside preparation, where the cancellation can arrive.
+      workingDirectory: {
+        ensure: () =>
+          new Promise<string>((resolve) => {
+            releaseDirectory = () => {
+              resolve(process.cwd());
+            };
+          }),
+      },
+    });
+    try {
+      const pending = harness.gate(
+        call(session, 'm-prepare', controller.signal),
+        allowNext,
+      );
+      for (
+        let attempt = 0;
+        attempt < 100 && releaseDirectory === undefined;
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // The call is cancelled while preparation is still pending…
+      controller.abort();
+      releaseDirectory?.();
+      const decision = await pending;
+      // …so the ending is a cancellation, never a denial the agent would read as
+      // "the review refused you".
+      expect(decision.kind).toBe('cancel');
+      expect(await storedTrace('m-prepare')).not.toContain('fallback-deny');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  test('a fallback denial is not written when the call was cancelled', async () => {
+    // The direct fallback path reaches `fallback()` straight from preparation, so it
+    // needs the same cancellation check `human()` performs. Without it, a call
+    // cancelled while the working directory was being resolved still settled as a
+    // denial: the agent read "the review refused you", a false prior verdict was
+    // stored, and the session's denial breaker counted a call nobody refused.
+    const session = makeSession('m-force-cancel');
+    const harness = createHarness({
+      sessions: [session],
+      llm: chatAnswer({ risk: 2, authorization: 9 }),
+      modes: { main: 'no-ask', subagent: 'no-ask' },
+      approval: {
+        config: { policy: 'never' },
+        request: () => Promise.resolve('unavailable'),
+      },
+    });
+    try {
+      // `force-ask` under `no-ask` is the shortest route to a fallback denial.
+      harness.apply({
+        rules: [
+          {
+            id: 'must-ask',
+            match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
+            verdict: 'force-ask',
+          },
+        ],
+      });
+      const controller = new AbortController();
+      const pending = harness.gate(
+        call(session, 'm-force-cancel', controller.signal),
+        allowNext,
+      );
+      // Cancel while preparation is pending, so the rule path is entered afterwards.
+      controller.abort();
+      const decision = await pending;
+      // The host gets a cancellation, and nothing about it reads as a refusal.
+      expect(decision.kind).toBe('cancel');
+      // No denial was recorded, so no prior verdict and no breaker increment.
+      expect(await traceOrNull('m-force-cancel')).toBeNull();
+      // The same call without a cancellation still denies, so this proves the
+      // cancellation is what changed the outcome rather than the rule.
+      const control = await harness.gate(
+        call(session, 'm-force-control'),
+        allowNext,
+      );
+      expect(control.kind).toBe('deny');
+      expect(await storedTrace('m-force-control')).toEqual([
+        'force-ask',
+        'fallback-deny',
+      ]);
+    } finally {
+      harness.dispose();
     }
   });
 
