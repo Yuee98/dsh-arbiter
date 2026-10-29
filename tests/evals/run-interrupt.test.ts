@@ -12,6 +12,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -44,28 +45,58 @@ async function allCaseIds(): Promise<readonly string[]> {
   return inspection.cases.map((entry) => entry.document.caseId);
 }
 
+/**
+ * Wait until a run directory has published its index.
+ *
+ * The index is written before the first cell, so its presence means dispatch has started.
+ * Polling for it is what makes the test independent of machine speed.
+ */
+async function waitForIndex(directory: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const present = await readFile(join(directory, 'index.json'), 'utf8').then(
+      () => true,
+      () => false,
+    );
+    if (present) return;
+    if (Date.now() > deadline) {
+      throw new Error('the run never published its index');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe('an interrupted run', () => {
   it('stops dispatch, records the cells it never started and says so', async () => {
     const cases = await allCaseIds();
     expect(cases.length).toBeGreaterThan(20);
     await withArea(async (area) => {
-      // One worker, so the run is still working when the interrupt lands.
+      // Enough repeats that the grid cannot be walked in the moment between the index
+      // being written and the signal arriving, and one worker so the run is sequential.
+      const repeats = 12;
       const plan = {
-        ...planOf({ split: 'all', caseIds: [...cases] }),
+        ...planOf({ split: 'all', caseIds: [...cases], repeats }),
         fixture: 'fixture.json',
       };
       await area.write('plan.json', {
         ...plan,
-        bounds: { ...plan.bounds, concurrency: 1, maxAttempts: 200 },
+        bounds: { ...plan.bounds, concurrency: 1, maxAttempts: 10_000 },
       });
       await area.write(
         'fixture.json',
         fixtureOf(
           Object.fromEntries(
-            cases.map((caseId) => [
-              cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
-              fixtureCell({ chat: [chatAnswer(2, 10)] }),
-            ]),
+            cases.flatMap((caseId) =>
+              Array.from({ length: repeats }, (_, index) => [
+                cellIdOf({
+                  caseId,
+                  targetId: 'chat-a',
+                  protocol: 'chat',
+                  repeat: index + 1,
+                }),
+                fixtureCell({ chat: [chatAnswer(2, 10)] }),
+              ]),
+            ),
           ),
         ),
       );
@@ -88,9 +119,11 @@ describe('an interrupted run', () => {
       const closed = new Promise<number | null>((resolve) => {
         child.on('close', resolve);
       });
-      // Long enough for the entry point to install its handler, short enough that the
-      // grid is still being walked.
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      // Wait for the run to have published its index, which happens before the first
+      // cell. Signalling then is deterministic: dispatch has started, and the grid is far
+      // too large to finish in the moment it takes to send the signal. A fixed sleep would
+      // instead race a fast machine and pass or fail on timing.
+      await waitForIndex(join(area.path, 'run'));
       child.kill('SIGINT');
       const code = await closed;
 
@@ -105,7 +138,7 @@ describe('an interrupted run', () => {
       expect(read.artifact.index.status).toBe('cancelled');
       // The whole plan is still stated: the cells that never started are recorded, not
       // dropped, so the directory describes an experiment rather than a fragment of one.
-      expect(read.artifact.index.cells).toHaveLength(cases.length);
+      expect(read.artifact.index.cells).toHaveLength(cases.length * repeats);
       expect(
         read.artifact.index.cells.filter((cell) => cell.status === 'not-run')
           .length,
