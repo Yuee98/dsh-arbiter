@@ -155,6 +155,31 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
 }
 
 /**
+ * The credential a target authenticates a decision call with.
+ *
+ * A target can name a credential in two places: `credentialRef` on the target, and
+ * `apiKeyRef` inside its decision section. The preflight and the dispatch have to read the
+ * same one, or a plan that passed the preflight can fail every cell at the transport — or,
+ * worse, authenticate with a variable the plan never named. So the rule lives here once:
+ * the two must agree, and a disagreement is a plan problem rather than a runtime surprise.
+ */
+export function credentialRefOf(
+  target: RunTarget,
+):
+  | { readonly ok: true; readonly ref: string }
+  | { readonly ok: false; readonly message: string } {
+  const outer = target.credentialRef;
+  const inner = target.decision?.apiKeyRef ?? null;
+  if (outer !== null && inner !== null && outer !== inner) {
+    return {
+      ok: false,
+      message: `target ${target.targetId} names two different credentials (${outer} on the target, ${inner} in its decision section); they must agree`,
+    };
+  }
+  return { ok: true, ref: outer ?? inner ?? '' };
+}
+
+/**
  * Whether one target offers one protocol, and why not.
  *
  * The reason is written from the plan alone so it is identical on a first run and

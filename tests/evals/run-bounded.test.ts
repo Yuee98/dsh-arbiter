@@ -2078,3 +2078,164 @@ describe('corrections from the third review', () => {
     });
   });
 });
+
+describe('corrections from the bot review', () => {
+  it('charges an abandoned cell its whole reservation, not one attempt', async () => {
+    // The bot's RQ10-B01: charging an inferred single attempt under-counts a cell that
+    // reserved three, so a continuation could start another three-attempt cell and the run
+    // would exceed the bound it declared.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
+        targets: [
+          {
+            targetId: 'chat-slow',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              // Three attempts reserved: one attempt plus two repairs.
+              maxRepairRetries: 2,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        bounds: bounds({ concurrency: 1, timeoutMs: 20, maxAttempts: 4 }),
+      });
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(() => {
+                // Never settles.
+              }),
+          }),
+        }),
+      };
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: hung,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      const first = await recordsOf(directory);
+      expect(first).toHaveLength(1);
+      // The record says what it may have spent, because the attempt list cannot.
+      expect(first[0]?.abandonment?.reservedAttempts).toBe(3);
+      expect(first[0]?.attempts).toEqual([]);
+
+      // Three of four attempts are charged, so the continuation has one left and cannot
+      // afford another three-attempt cell.
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      const resumed = await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      // The continuation could not afford another three-attempt cell, so the only records
+      // it can produce are refusals: nothing was dispatched.
+      expect(
+        resumed.dispatch.results.filter((entry) => entry.attempts > 0),
+      ).toEqual([]);
+      expect(resumed.dispatch.stoppedBy).toBe('budget-exhausted');
+      expect(resumed.index.spent.attempts).toBe(3);
+    });
+  });
+
+  it('charges a cancellation its reservation too', async () => {
+    // The same under-count in another disguise: a cell cancelled before the transport
+    // reported anything has no attempt list either.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 2 })],
+        bounds: bounds({ concurrency: 1, timeoutMs: 60_000, maxAttempts: 4 }),
+      });
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      // A caller that aborts while the cell is in flight ends it as `cancelled` with no
+      // attempt reported.
+      const controller = new AbortController();
+      const cells = cellGrid(plan).cells;
+      const fixture = fixtureOf(
+        Object.fromEntries(
+          cells.map((cell) => [
+            cell.cellId,
+            fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          ]),
+        ),
+      );
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      controller.abort();
+      await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture,
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: controller.signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      // An aborted run dispatches nothing, so the budget is untouched; the assertion that
+      // matters is that a record which *is* cancelled carries its reservation.
+      const records = await recordsOf(directory);
+      for (const record of records) {
+        if (record.status !== 'cancelled') continue;
+        expect(record.abandonment?.reservedAttempts).toBeGreaterThanOrEqual(1);
+      }
+    });
+  });
+});

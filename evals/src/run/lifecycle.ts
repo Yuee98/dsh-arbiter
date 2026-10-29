@@ -408,23 +408,29 @@ export async function resumeRun(options: {
  * The attempts a set of records already paid for.
  *
  * A cell abandoned while its request was outstanding reports zero attempts, because the
- * transport never returned one — but its request was sent and may be billed, and the run
- * deliberately kept that reservation in memory rather than freeing the slot. A
- * continuation cannot see that reservation, so the record has to carry it: its note says
- * the request went out, and the attempt it may have cost is charged here. Without this,
- * a resumed run would start new work with a budget that behaves as if the abandoned
- * request had never happened.
+ * transport never returned one — but its request may have used its whole reservation, and
+ * the run kept that reservation rather than freeing the slot. A continuation cannot see
+ * the in-memory reservation, so the record carries it in `abandonment` and the full figure
+ * is charged here. Charging an inferred single attempt instead would let a cell that
+ * reserved three start another three-attempt cell, and the run's declared bound would be
+ * exceeded rather than held.
  */
 function attemptsIn(records: readonly CellRecord[]): number {
   return records.reduce((sum, record) => sum + attemptsOfCell(record), 0);
 }
 
-/** What one record spent, counting an abandoned request as one attempt. */
+/**
+ * What one record spent against the run's budget.
+ *
+ * A settled cell reports its attempts, so that is the figure. An abandoned cell reports
+ * nothing — the transport never returned — and guessing one attempt would under-count a
+ * call that could have sent its whole reservation. So the reservation is what gets
+ * charged, for both timeout and cancellation: what the run knows is that it may have spent
+ * that much, and a budget that assumes less is not a bound.
+ */
 function attemptsOfCell(record: CellRecord): number {
   if (record.attempts.length > 0) return record.attempts.length;
-  // An abandoned request is one attempt that was sent and not reported. A timeout record
-  // with no note is a different case: the transport answered that it had given up.
-  return record.status === 'timeout' && record.notes.length > 0 ? 1 : 0;
+  return record.abandonment?.reservedAttempts ?? 0;
 }
 
 /** The fixture entries, keyed by cell id for the scheduler. */
@@ -474,9 +480,12 @@ export function spendOf(
   let output: number | null = null;
   let started = 0;
   for (const record of records) {
-    attempts += record.attempts.length;
+    // The same figure the budget charges, so the index's total and a continuation's
+    // allowance cannot disagree: an abandoned cell contributes what it reserved rather than
+    // the zero its attempt list shows.
+    attempts += attemptsOfCell(record);
     estimatedInputTokens += record.material?.estimatedInputTokens ?? 0;
-    if (record.attempts.length > 0) started += 1;
+    if (record.attempts.length > 0 || record.abandonment !== null) started += 1;
     for (const attempt of record.attempts) {
       const value = attempt.normalizedUsage?.tokens.outputTokens ?? null;
       if (value === null) continue;

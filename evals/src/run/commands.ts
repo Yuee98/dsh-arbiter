@@ -35,7 +35,12 @@ import {
   writeJson,
 } from './artifact.js';
 import { createRun, readExisting, resumeRun } from './lifecycle.js';
-import { cellGrid, effectivePlan, planProblems } from './plan.js';
+import {
+  cellGrid,
+  credentialRefOf,
+  effectivePlan,
+  planProblems,
+} from './plan.js';
 import { compileRunCheckers } from './schemas.js';
 import type { RunCheckers } from './schemas.js';
 import type { RunFixture, RunLlmLike, RunPlan, RunVersions } from './types.js';
@@ -326,9 +331,16 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     // environment probe is not a credential check, and reporting a missing one as a
     // plan error would make a dry run fail on a machine that is not the runner.
     for (const target of plan.targets) {
-      if (target.credentialRef === null) continue;
+      // The same rule dispatch uses, so a dry run reports the credential a real run would
+      // read rather than the one the target happens to name first.
+      const resolved = credentialRefOf(target);
+      if (!resolved.ok) {
+        io.err(`problem ${resolved.message}`);
+        return 1;
+      }
+      if (resolved.ref.length === 0) continue;
       io.out(
-        `live target ${target.targetId} resolves credential ${target.credentialRef} from the environment at dispatch`,
+        `live target ${target.targetId} resolves credential ${resolved.ref} from the environment at dispatch`,
       );
     }
   }
@@ -565,11 +577,19 @@ export function liveProblems(
     }
   }
   if (decisionTargets.length > 0) {
-    const missing = decisionTargets
-      .map((target) => target.credentialRef ?? target.decision?.apiKeyRef ?? '')
-      .filter((name) => (env(name) ?? '').length === 0);
-    for (const name of new Set(missing)) {
-      problems.push(`a live run needs ${name}; refusing to start without it`);
+    for (const target of decisionTargets) {
+      const resolved = credentialRefOf(target);
+      if (!resolved.ok) {
+        problems.push(resolved.message);
+        continue;
+      }
+      // The preflight and the dispatch resolve the same value, so passing here means the
+      // transport will find the same variable rather than a sibling that was never set.
+      if ((env(resolved.ref) ?? '').length === 0) {
+        problems.push(
+          `a live run needs ${resolved.ref}; refusing to start without it`,
+        );
+      }
     }
   }
   return problems;

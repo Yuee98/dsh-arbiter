@@ -308,6 +308,7 @@ export async function dispatch(
         material,
         options,
         now,
+        reservedAttempts: ceiling,
       });
       if (abandoned) {
         // The stop is published *before* the await, not after it. A worker that stopped
@@ -317,11 +318,11 @@ export async function dispatch(
         state.stopped = 'in-flight-timeout';
         // The abandoned call may have sent more attempts than its record could report, so
         // its whole reservation stays consumed rather than being returned.
-        await settle(settledCell);
+        await settle(charged(settledCell, ceiling));
         return;
       }
       budget.release({ reserved: ceiling, used: settledCell.attempts });
-      await settle(settledCell);
+      await settle(charged(settledCell, ceiling));
     }
   };
 
@@ -413,6 +414,8 @@ async function runUnderTimeout(parts: {
   readonly material: Prepared['material'];
   readonly options: DispatchOptions;
   readonly now: () => number;
+  /** The reservation this cell holds, recorded if the call is abandoned. */
+  readonly reservedAttempts: number;
 }): Promise<{ readonly result: DispatchResult; readonly abandoned: boolean }> {
   const timeout = AbortSignal.timeout(parts.options.plan.bounds.timeoutMs);
   const composed = AbortSignal.any([parts.options.signal, timeout]);
@@ -455,20 +458,24 @@ async function runUnderTimeout(parts: {
     // The call is abandoned rather than awaited: waiting on a transport that ignores its
     // signal is exactly the failure this bound exists to prevent.
     call.catch(() => undefined);
+    const status = parts.options.signal.aborted ? 'cancelled' : 'timeout';
     const record = timedOutRecord({
       cellId: parts.cell.cellId,
       deps,
       material: parts.material,
       startedAt,
+      status,
       reason: parts.options.signal.aborted
         ? 'the run was cancelled while this cell was in flight'
         : 'the cell exceeded its own timeout',
+      // The reservation, not an observed count: the transport reported nothing, so this is
+      // what the call may have spent and what a continuation must charge.
+      reservedAttempts: parts.reservedAttempts,
     });
-    const status = parts.options.signal.aborted ? 'cancelled' : 'timeout';
     return {
       result: {
         cellId: parts.cell.cellId,
-        record: { ...record, status },
+        record,
         status,
         attempts: 0,
         stopReason: record.stopReason,
@@ -488,6 +495,39 @@ async function runUnderTimeout(parts: {
       stopReason: bounded.settled.record.stopReason,
     },
     abandoned: false,
+  };
+}
+
+/**
+ * A settled cell with its reservation recorded, when it ended without a report.
+ *
+ * A cell can settle as `cancelled` or `timeout` with no attempt list for two different
+ * reasons: the outer bound abandoned it, or a cancellation reached it before the transport
+ * returned anything. The second case has no `abandonment` because it never went through the
+ * timeout branch, so it would be charged nothing on a continuation — which is the same
+ * under-count in a different disguise. Both are given the reservation here, so the record
+ * always says what the cell may have spent.
+ */
+function charged(
+  result: DispatchResult,
+  reservedAttempts: number,
+): DispatchResult {
+  const record = result.record;
+  if (record === null || record.abandonment !== null) return result;
+  if (record.attempts.length > 0) return result;
+  if (record.status !== 'cancelled' && record.status !== 'timeout')
+    return result;
+  return {
+    ...result,
+    record: {
+      ...record,
+      abandonment: {
+        reservedAttempts: Math.max(1, reservedAttempts),
+        reason:
+          record.stopReason ??
+          'the cell ended before the transport reported an attempt',
+      },
+    },
   };
 }
 

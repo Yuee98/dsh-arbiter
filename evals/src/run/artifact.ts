@@ -17,7 +17,7 @@
  * option.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { ReviewOutcome } from '../../../src/review-contract/types.js';
@@ -99,13 +99,36 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(text) as unknown;
 }
 
-/** Write one JSON document, creating its directory. */
+/**
+ * Write one JSON document, creating its directory.
+ *
+ * Written beside the target and renamed into place, because a half-written document is
+ * worse than an absent one. This matters most for `index.json`, which every pass rewrites:
+ * an interrupt during a plain write would truncate the previous index and leave
+ * `readExisting` with nothing to recover, so a run interrupted once could not be continued
+ * at all. A rename is atomic within a directory, so a reader sees either the old document
+ * or the new one and never a mixture.
+ *
+ * The temporary name is distinct per call so two writers cannot collide on it, and it is
+ * cleaned up on failure rather than left as debris beside the real documents.
+ */
 export async function writeJson(
   path: string,
   document: unknown,
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+  const temporary = `${path}.${String(process.pid)}.${String(Date.now())}.tmp`;
+  try {
+    await writeFile(
+      temporary,
+      `${JSON.stringify(document, null, 2)}\n`,
+      'utf8',
+    );
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** The plan's canonical digest. A continuation compares it before adding anything. */

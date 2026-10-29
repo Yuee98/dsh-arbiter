@@ -23,7 +23,8 @@
     "cost",
     "timing",
     "versions",
-    "notes"
+    "notes",
+    "abandonment"
   ],
   "properties": {
     "documentVersion": {
@@ -280,6 +281,24 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "abandonment": {
+      "description": "Present exactly when the runner ended this cell without the transport reporting an outcome: an outer timeout, or a cancellation while a request was outstanding. A dispatched cell that settled normally has no such member, so a reader can tell \"the provider answered\" from \"we stopped waiting\".",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["reservedAttempts", "reason"],
+      "properties": {
+        "reservedAttempts": {
+          "description": "How many attempts the run reserved for this cell before dispatching it. The transport may have sent up to this many and reported none, so this is the number a continuation must charge rather than the zero the attempt list shows.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "description": "Why the cell was abandoned, in the artifact's own words.",
+          "type": "string",
+          "minLength": 1
+        }
       }
     }
   },

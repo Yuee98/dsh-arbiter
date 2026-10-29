@@ -33,6 +33,7 @@ import {
 } from '../../../src/reviewer/offline.js';
 import type { LlmLike } from '../../../src/reviewer/llm.js';
 
+import { credentialRefOf } from './plan.js';
 import type {
   FixtureCell,
   FixtureResponse,
@@ -193,17 +194,26 @@ function liveDecision(
       message: `target ${target.targetId} has no decision config`,
     };
   }
-  if (config.apiKeyRef.length === 0) {
+  // One resolution rule, shared with the preflight. A target may name a credential on the
+  // target or in its decision section, and the two must agree: reading a different variable
+  // than the one the preflight checked would either fail every cell after a clean preflight,
+  // or authenticate with a credential the plan did not name.
+  const consistency = credentialRefOf(target);
+  if (!consistency.ok) {
+    return { ok: false, message: consistency.message };
+  }
+  const ref = consistency.ref;
+  if (ref.length === 0) {
     return {
       ok: false,
       message: `target ${target.targetId} names no credential reference`,
     };
   }
-  const value = read(config.apiKeyRef);
+  const value = read(ref);
   if (value === undefined || value.length === 0) {
     return {
       ok: false,
-      message: `credential "${config.apiKeyRef}" is not set`,
+      message: `credential "${ref}" is not set`,
     };
   }
   return {
@@ -217,7 +227,7 @@ function liveDecision(
         decision: {
           url: config.url,
           model: config.model,
-          apiKeyRef: config.apiKeyRef,
+          apiKeyRef: ref,
           timeoutMs: config.timeoutMs,
           costTier: config.costTier,
         },

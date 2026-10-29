@@ -1088,3 +1088,124 @@ describe('the exit code follows the run status', () => {
     });
   });
 });
+
+describe('corrections from the bot review', () => {
+  it('refuses a plan whose two credential references disagree', async () => {
+    // The bot's RQ10-B02: the preflight read the target's credential while dispatch read the
+    // decision section's, so a plan could pass preflight and then fail every cell — or
+    // authenticate with a variable the plan never named.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        protocols: ['decision'],
+        targets: [
+          {
+            targetId: 'decision-conflict',
+            provider: 'decision',
+            model: 'clef',
+            modelVersion: null,
+            chat: null,
+            decision: {
+              url: 'https://api.example/v1/systemone',
+              model: 'clef',
+              // Dispatch would have read this one.
+              apiKeyRef: 'INNER_KEY',
+              timeoutMs: 5_000,
+              costTier: 'paid',
+            },
+            // The preflight checked this one.
+            credentialRef: 'OUTER_KEY',
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      const { io, err } = recorder(area.path, {
+        INNER_KEY: 'inner',
+        OUTER_KEY: 'outer',
+      });
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('names two different credentials');
+      // Nothing was created, so a conflict cannot leave a half-started run behind.
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('resolves one credential when the two references agree', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        protocols: ['decision'],
+        targets: [
+          {
+            targetId: 'decision-agreed',
+            provider: 'decision',
+            model: 'clef',
+            modelVersion: null,
+            chat: null,
+            decision: {
+              url: 'https://api.example/v1/systemone',
+              model: 'clef',
+              apiKeyRef: 'SAME_KEY',
+              timeoutMs: 5_000,
+              costTier: 'paid',
+            },
+            credentialRef: 'SAME_KEY',
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      // The credential is absent, so the refusal names the agreed reference rather than
+      // either of two candidates.
+      const { io, err } = recorder(area.path, {});
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('a live run needs SAME_KEY');
+    });
+  });
+
+  it('names the decision credential when only the section carries one', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        protocols: ['decision'],
+        targets: [
+          {
+            targetId: 'decision-inner-only',
+            provider: 'decision',
+            model: 'clef',
+            modelVersion: null,
+            chat: null,
+            decision: {
+              url: 'https://api.example/v1/systemone',
+              model: 'clef',
+              apiKeyRef: 'SECTION_KEY',
+              timeoutMs: 5_000,
+              costTier: 'paid',
+            },
+            credentialRef: null,
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      // Only the section names a credential, so that is the one preflight must check and
+      // dispatch must read.
+      const { io, err } = recorder(area.path, {});
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('a live run needs SECTION_KEY');
+    });
+  });
+});

@@ -36,6 +36,7 @@ import type { BackendContext } from './backends.js';
 import type { CaseMaterial } from './material.js';
 import { CELL_RECORD_VERSION } from './types.js';
 import type {
+  CellAbandonment,
   CellCost,
   CellRecord,
   CellStatus,
@@ -351,6 +352,8 @@ function recordOf(parts: {
   readonly stopReason: string | null;
   readonly outcome: CellRecord['outcome'];
   readonly attempts: readonly RunAttempt[];
+  /** Set only by an abandonment, which is the one case with a reservation to record. */
+  readonly abandonment?: CellAbandonment;
 }): CellRecord {
   const { deps } = parts;
   return {
@@ -361,6 +364,7 @@ function recordOf(parts: {
     case: caseOf(deps.caseEntry),
     execution: executionOf(deps.repeat, deps.transport),
     entryPoint: ENTRY_POINT,
+    abandonment: parts.abandonment ?? null,
     target: targetRecordOf(
       deps.target,
       deps.protocol,
@@ -409,6 +413,9 @@ export function timedOutRecord(parts: {
   readonly material: CaseMaterial;
   readonly startedAt: number;
   readonly reason: string;
+  readonly status: 'timeout' | 'cancelled';
+  /** The attempts the run reserved, which the abandoned call may have spent. */
+  readonly reservedAttempts: number;
 }): CellRecord {
   return {
     ...recordOf({
@@ -416,10 +423,14 @@ export function timedOutRecord(parts: {
       deps: parts.deps,
       material: parts.material,
       startedAt: parts.startedAt,
-      status: 'timeout',
+      status: parts.status,
       stopReason: parts.reason,
       outcome: null,
       attempts: [],
+      abandonment: {
+        reservedAttempts: Math.max(1, parts.reservedAttempts),
+        reason: parts.reason,
+      },
     }),
     notes: [
       "the transport did not return before the run's own bound, so no attempt was reported; the request may have been sent and may have been billed",
@@ -454,6 +465,7 @@ export function unsupportedRecord(parts: {
     case: caseOf(parts.caseEntry),
     execution: executionOf(parts.repeat, parts.transport),
     entryPoint: ENTRY_POINT,
+    abandonment: null,
     target: targetRecordOf(parts.target, parts.protocol, [], 'unknown'),
     material: null,
     status: 'unsupported',

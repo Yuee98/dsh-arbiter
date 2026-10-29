@@ -15,7 +15,7 @@
  *   - cost is a status, never a number, because a zero would read as a free call.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,7 @@ import {
   recordPathOf,
   RUN_FILES,
   scoredOutcome,
+  writeJson,
   usageAttemptsOf,
 } from '../../evals/src/run/artifact.js';
 import { compileRunCheckers } from '../../evals/src/run/schemas.js';
@@ -597,6 +598,7 @@ function minimalRecord() {
       materialChain: 'case-input',
       detail: 'd',
     },
+    abandonment: null,
     target: {
       targetId: 't',
       provider: 'p',
@@ -818,5 +820,81 @@ describe('a dispatched failure is a gap when its record is gone', () => {
     expect(RECORDLESS_STATUSES.has('unresolvable')).toBe(true);
     expect(RECORDLESS_STATUSES.has('failed')).toBe(false);
     expect(RECORDLESS_STATUSES.has('reviewed')).toBe(false);
+  });
+});
+
+describe('a document write is atomic', () => {
+  it('replaces a document without ever exposing a truncated one', async () => {
+    // The bot's RQ10-B03: `writeFile` truncates the target before writing, so an interrupt
+    // mid-rewrite leaves an unreadable index and a continuation has nothing to recover.
+    // Writing beside the target and renaming means a reader sees the old document or the
+    // new one, never a mixture. The document is large enough that a plain write cannot
+    // complete inside one read.
+    await withArea(async (area) => {
+      const path = join(area.path, 'index.json');
+      const body = (generation: number): Record<string, unknown> => ({
+        generation,
+        padding: String(generation).repeat(400_000),
+      });
+      await writeJson(path, body(1));
+
+      let sawBroken = false;
+      let reads = 0;
+      const writes = (async (): Promise<void> => {
+        for (let index = 2; index < 12; index += 1) {
+          await writeJson(path, body(index));
+        }
+      })();
+      // Read while the writes run: a truncating write exposes an empty or partial file.
+      while (reads < 400) {
+        reads += 1;
+        const text = await readFile(path, 'utf8').catch(() => '');
+        if (text.length === 0) {
+          sawBroken = true;
+          continue;
+        }
+        const parsed: unknown = (() => {
+          try {
+            return JSON.parse(text) as unknown;
+          } catch {
+            return null;
+          }
+        })();
+        if (parsed === null) sawBroken = true;
+      }
+      await writes;
+      expect(sawBroken).toBe(false);
+      // And the file holds one of the documents, never a concatenation of two.
+      const finalText = await readFile(path, 'utf8');
+      expect(JSON.parse(finalText)).toMatchObject({ generation: 11 });
+    });
+  });
+
+  it('leaves no temporary document behind', async () => {
+    await withArea(async (area) => {
+      const path = join(area.path, 'index.json');
+      await writeJson(path, { generation: 1 });
+      await writeJson(path, { generation: 2 });
+      const files = await readdir(area.path);
+      // The rename target is the only file: a leftover .tmp beside the real document would
+      // be debris a reader has to know to ignore.
+      expect(files).toEqual(['index.json']);
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
+        generation: 2,
+      });
+    });
+  });
+
+  it('refuses a document that cannot be serialized, without touching the target', async () => {
+    await withArea(async (area) => {
+      const path = join(area.path, 'index.json');
+      await writeJson(path, { generation: 1 });
+      const circular: Record<string, unknown> = {};
+      circular['self'] = circular;
+      await expect(writeJson(path, circular)).rejects.toThrow();
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
+        generation: 1,
+      });
+    });
   });
 });

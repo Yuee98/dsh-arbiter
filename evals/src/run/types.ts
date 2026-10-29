@@ -297,6 +297,22 @@ export interface CellCost {
 }
 
 /** One cell's immutable record. */
+/**
+ * Why a cell was ended while its request was outstanding.
+ *
+ * A timeout or a cancellation can leave a request outstanding: the transport may have sent
+ * up to its reservation and reported no attempt at all. The reservation is therefore part
+ * of the evidence, because it is the only figure a later pass can charge against the run's
+ * budget. An empty attempt list beside this member means "we stopped waiting", not
+ * "nothing was sent".
+ */
+export interface CellAbandonment {
+  /** The attempts the run reserved before dispatching, which it may have spent. */
+  readonly reservedAttempts: number;
+  /** Why it was abandoned, in the artifact's own words. */
+  readonly reason: string;
+}
+
 export interface CellRecord {
   readonly documentVersion: typeof CELL_RECORD_VERSION;
   readonly runId: string;
@@ -312,6 +328,16 @@ export interface CellRecord {
   readonly execution: CellExecution;
   readonly entryPoint: CellEntryPoint;
   readonly target: CellTargetRecord;
+  /**
+   * Present exactly when this cell was ended without the transport reporting an outcome.
+   *
+   * A timeout or a cancellation can leave a request outstanding: the transport may have
+   * sent up to the reservation and returned no attempt list. The record therefore carries
+   * the reservation itself, because that is the only figure a later pass can charge
+   * against the run's budget — the attempt list is empty for real reasons, not because
+   * nothing was sent.
+   */
+  readonly abandonment: CellAbandonment | null;
   /**
    * What the reviewer was given, including the fingerprints above.
    *
