@@ -355,6 +355,17 @@ export async function resumeRun(options: {
         `refusing to continue a run under different versions — ${drift.join('; ')}`,
       );
     }
+    // An abandoned request may still be outstanding: the runner stopped waiting, but the
+    // provider may be working and billing. Starting new requests beside it would put more
+    // calls in flight than the plan's concurrency allows, and no budget arithmetic can make
+    // that true. Continuing is therefore refused while that evidence exists — a bound on
+    // requests, not only on attempts.
+    const outstanding = outstandingAbandonments(options.existing.records);
+    if (outstanding.length > 0) {
+      throw new Error(
+        `refusing to continue a run whose requests may still be outstanding — ${outstanding.join(', ')}; the previous pass stopped waiting for these calls, so start a new run or confirm they have ended`,
+      );
+    }
   }
   const completed = new Set(
     options.existing.records.map((record) => record.cellId),
@@ -417,6 +428,21 @@ export async function resumeRun(options: {
  */
 function attemptsIn(records: readonly CellRecord[]): number {
   return records.reduce((sum, record) => sum + attemptsOfCell(record), 0);
+}
+
+/**
+ * The cells a run abandoned while their request may still be outstanding.
+ *
+ * A recorded abandonment means the runner stopped waiting, not that the provider did. Until
+ * that is resolved, a continuation cannot promise the plan's concurrency, so these cells are
+ * named rather than silently counted as finished.
+ */
+function outstandingAbandonments(
+  records: readonly CellRecord[],
+): readonly string[] {
+  return records
+    .filter((record) => record.abandonment !== null)
+    .map((record) => record.cellId);
 }
 
 /**

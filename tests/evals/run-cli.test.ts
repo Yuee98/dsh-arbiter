@@ -1365,3 +1365,97 @@ describe('dataset identity and label independence', () => {
     });
   });
 });
+
+describe('planning is not gated on an unselected protocol', () => {
+  it('plans a chat-only live plan whose unused decision section declares another credential', async () => {
+    // The fourth review's RQ10-B17: my credential correction made `plan` refuse a plan for a
+    // decision section it never invokes, reintroducing the boundary B14 had already fixed.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'dual',
+        protocol: 'chat',
+      });
+      await area.write('plan.json', {
+        ...planOf({
+          transport: 'live',
+          fixture: null,
+          protocols: ['chat'],
+          targets: [
+            {
+              targetId: 'dual',
+              provider: 'some-provider',
+              model: 'some-model',
+              modelVersion: null,
+              chat: {
+                provider: 'some-provider',
+                model: 'some-model',
+                temperature: 0,
+                maxTokens: 400,
+                timeoutMs: 5_000,
+                maxRepairRetries: 1,
+              },
+              // Unused by this plan, and its two credential declarations disagree. That must
+              // not stop a chat-only plan from being expanded.
+              decision: {
+                url: 'https://api.example/v1/systemone',
+                model: 'clef',
+                apiKeyRef: 'INNER_KEY',
+                timeoutMs: 5_000,
+                costTier: 'paid',
+              },
+              credentialRef: 'OUTER_KEY',
+            },
+          ],
+        }),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({ [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }) }),
+      );
+      const { io, out, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      // The plan expands. A live plan has no fixture, so this uses the dry-run path that
+      // reports cells without dispatching.
+      expect(err.join('\n')).not.toContain('two different credentials');
+      expect(out.join('\n')).toContain('cells');
+      expect([0, 1]).toContain(code);
+    });
+  });
+
+  it('still refuses the disagreement when decision is selected', async () => {
+    await withArea(async (area) => {
+      await area.write('plan.json', {
+        ...planOf({
+          transport: 'live',
+          fixture: null,
+          protocols: ['decision'],
+          targets: [
+            {
+              targetId: 'dual',
+              provider: 'decision',
+              model: 'clef',
+              modelVersion: null,
+              chat: null,
+              decision: {
+                url: 'https://api.example/v1/systemone',
+                model: 'clef',
+                apiKeyRef: 'INNER_KEY',
+                timeoutMs: 5_000,
+                costTier: 'paid',
+              },
+              credentialRef: 'OUTER_KEY',
+            },
+          ],
+        }),
+      });
+      const { io, err } = recorder(area.path, {
+        INNER_KEY: 'inner',
+        OUTER_KEY: 'outer',
+      });
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('two different credentials');
+    });
+  });
+});

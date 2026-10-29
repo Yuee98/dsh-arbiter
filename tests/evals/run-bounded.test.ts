@@ -1747,25 +1747,29 @@ describe('corrections from the second review', () => {
       expect(first[0]?.attempts).toEqual([]);
       expect(first[0]?.notes.length ?? 0).toBeGreaterThan(0);
 
-      // A continuation sees one abandoned request, so nothing of the budget remains.
+      // A continuation cannot start while that request may be outstanding. That is a
+      // stronger refusal than the budget alone: no arithmetic can make two live requests
+      // respect a concurrency of one.
       const read = await readExisting(directory, plan, checkers);
       if (!read.ok) throw new Error(read.problems.join('; '));
-      const resumed = await resumeRun({
-        directory,
-        existing: read.existing,
-        cases,
-        fixture: fixtureOf({}),
-        versions,
-        checkers,
-        llm: null,
-        readCredential: () => undefined,
-        signal: new AbortController().signal,
-        continuation: true,
-        now: () => 2_000,
-      });
-      // The abandoned request counted, so the second cell could not be reserved and the
-      // run stopped instead of spending a fresh allowance.
-      expect(resumed.dispatch.stoppedBy).toBe('budget-exhausted');
+      await expect(
+        resumeRun({
+          directory,
+          existing: read.existing,
+          cases,
+          fixture: fixtureOf({}),
+          versions,
+          checkers,
+          llm: null,
+          readCredential: () => undefined,
+          signal: new AbortController().signal,
+          continuation: true,
+          now: () => 2_000,
+        }),
+      ).rejects.toThrow(/may still be outstanding/u);
+      // And the budget figure is still recorded, because a report must be able to say what
+      // the abandoned call may have spent.
+      expect(read.existing.records[0]?.abandonment?.reservedAttempts).toBe(1);
     });
   });
 
@@ -1922,24 +1926,26 @@ describe('corrections from the third review', () => {
         continuation: false,
         now: () => 1_000,
       });
-      // Three attempts were reserved for this cell (one plus two repairs). The continuation
-      // may only spend the fourth, so it can start nothing.
+      // Three attempts were reserved (one plus two repairs), and the run cannot continue
+      // while that request may be outstanding.
       const read = await readExisting(directory, plan, checkers);
       if (!read.ok) throw new Error(read.problems.join('; '));
-      const resumed = await resumeRun({
-        directory,
-        existing: read.existing,
-        cases,
-        fixture: fixtureOf({}),
-        versions,
-        checkers,
-        llm: null,
-        readCredential: () => undefined,
-        signal: new AbortController().signal,
-        continuation: true,
-        now: () => 2_000,
-      });
-      expect(resumed.dispatch.results).toEqual([]);
+      expect(read.existing.records[0]?.abandonment?.reservedAttempts).toBe(3);
+      await expect(
+        resumeRun({
+          directory,
+          existing: read.existing,
+          cases,
+          fixture: fixtureOf({}),
+          versions,
+          checkers,
+          llm: null,
+          readCredential: () => undefined,
+          signal: new AbortController().signal,
+          continuation: true,
+          now: () => 2_000,
+        }),
+      ).rejects.toThrow(/may still be outstanding/u);
     });
   });
 
@@ -2154,42 +2160,60 @@ describe('corrections from the bot review', () => {
       expect(first[0]?.abandonment?.reservedAttempts).toBe(3);
       expect(first[0]?.attempts).toEqual([]);
 
-      // Three of four attempts are charged, so the continuation has one left and cannot
-      // afford another three-attempt cell.
+      // Three of four attempts are charged in the artifact, and the run cannot continue
+      // while that request may be outstanding.
       const read = await readExisting(directory, plan, checkers);
       if (!read.ok) throw new Error(read.problems.join('; '));
-      const resumed = await resumeRun({
-        directory,
-        existing: read.existing,
-        cases,
-        fixture: fixtureOf({}),
-        versions,
-        checkers,
-        llm: null,
-        readCredential: () => undefined,
-        signal: new AbortController().signal,
-        continuation: true,
-        now: () => 2_000,
-      });
-      // The continuation could not afford another three-attempt cell, so the only records
-      // it can produce are refusals: nothing was dispatched.
-      expect(
-        resumed.dispatch.results.filter((entry) => entry.attempts > 0),
-      ).toEqual([]);
-      expect(resumed.dispatch.stoppedBy).toBe('budget-exhausted');
-      expect(resumed.index.spent.attempts).toBe(3);
+      expect(read.existing.index.spent.attempts).toBe(3);
+      await expect(
+        resumeRun({
+          directory,
+          existing: read.existing,
+          cases,
+          fixture: fixtureOf({}),
+          versions,
+          checkers,
+          llm: null,
+          readCredential: () => undefined,
+          signal: new AbortController().signal,
+          continuation: true,
+          now: () => 2_000,
+        }),
+      ).rejects.toThrow(/may still be outstanding/u);
     });
   });
 
-  it('charges a cancellation its reservation too', async () => {
-    // The same under-count in another disguise: a cell cancelled before the transport
-    // reported anything has no attempt list either.
+  it('records and charges an in-flight cancellation', async () => {
+    // Aborted *after* dispatch, so the cell is genuinely in flight. A transport that reports
+    // the abort produces one real attempt; one that never returns produces none and needs the
+    // reservation. This covers the first case, which is what production's own streams do, and
+    // asserts the record is not empty — the previous version of this test aborted before the
+    // call, dispatched nothing, and ran its assertions over an empty record set.
     await withArea(async (area) => {
       const directory = join(area.path, 'run');
       const plan = planOf({
+        transport: 'live',
+        fixture: null,
         caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
-        targets: [chatTarget('chat-a', { maxRepairRetries: 2 })],
-        bounds: bounds({ concurrency: 1, timeoutMs: 60_000, maxAttempts: 4 }),
+        targets: [
+          {
+            targetId: 'chat-hang',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              maxRepairRetries: 2,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        bounds: bounds({ concurrency: 1, timeoutMs: 60_000, maxAttempts: 8 }),
       });
       const created = await createRun({
         directory,
@@ -2201,41 +2225,148 @@ describe('corrections from the bot review', () => {
         now: () => 0,
       });
       if (!created.ok) throw new Error(created.problems.join('; '));
-      // A caller that aborts while the cell is in flight ends it as `cancelled` with no
-      // attempt reported.
       const controller = new AbortController();
-      const cells = cellGrid(plan).cells;
-      const fixture = fixtureOf(
-        Object.fromEntries(
-          cells.map((cell) => [
-            cell.cellId,
-            fixtureCell({ chat: [chatAnswer(2, 10)] }),
-          ]),
-        ),
-      );
-      const read = await readExisting(directory, plan, checkers);
-      if (!read.ok) throw new Error(read.problems.join('; '));
-      controller.abort();
+      // The transport yields nothing until the caller's signal aborts, then reports the
+      // abort the way production does: the stream ends with an error rather than a finish.
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(
+                (_resolve, reject) => {
+                  setTimeout(() => {
+                    controller.abort();
+                  }, 20);
+                  controller.signal.addEventListener('abort', () => {
+                    reject(new Error('the caller aborted the request'));
+                  });
+                },
+              ),
+          }),
+        }),
+      };
       await resumeRun({
         directory,
-        existing: read.existing,
+        existing: { index: created.index, records: [] },
         cases,
-        fixture,
+        fixture: fixtureOf({}),
         versions,
         checkers,
-        llm: null,
+        llm: hung,
         readCredential: () => undefined,
         signal: controller.signal,
         continuation: false,
         now: () => 1_000,
       });
-      // An aborted run dispatches nothing, so the budget is untouched; the assertion that
-      // matters is that a record which *is* cancelled carries its reservation.
       const records = await recordsOf(directory);
-      for (const record of records) {
-        if (record.status !== 'cancelled') continue;
-        expect(record.abandonment?.reservedAttempts).toBeGreaterThanOrEqual(1);
-      }
+      // A record exists, so the assertions below are not vacuous — the point the review
+      // made about the previous version of this test.
+      expect(records).toHaveLength(1);
+      const record = records[0];
+      expect(record?.status).toBe('cancelled');
+      // A transport that reports the abort produces one attempt, which is the honest
+      // record: the request was sent and the caller stopped it. That attempt is what the
+      // budget charges, and no `abandonment` member is needed because nothing is unknown.
+      expect(record?.attempts).toHaveLength(1);
+      expect(record?.attempts[0]?.error).toContain('aborted');
+      expect(record?.abandonment).toBeNull();
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      expect(read.existing.index.spent.attempts).toBe(1);
+    });
+  }, 30_000);
+});
+
+describe('corrections from the fourth review', () => {
+  it('refuses to continue while a request may still be outstanding', async () => {
+    // The remaining half of RQ10-B03: reservation accounting bounds attempts, but nothing
+    // bounded *simultaneous requests*. A concurrency of one cannot be honoured by starting a
+    // second call beside one the runner stopped waiting for, so continuation is refused
+    // while that evidence exists.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        targets: [
+          {
+            targetId: 'chat-hang',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              maxRepairRetries: 0,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        // Two cells, two attempts of budget, concurrency one. The first cell is abandoned
+        // with its request still outstanding; without the guard the second cell would start
+        // while it may still be live.
+        bounds: bounds({ concurrency: 1, timeoutMs: 20, maxAttempts: 2 }),
+      });
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(() => {
+                // Never settles: the outer bound has to be what ends it.
+              }),
+          }),
+        }),
+      };
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: hung,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      expect(read.existing.records[0]?.abandonment).not.toBeNull();
+      // A second attempt is still available, so budget alone would allow the next cell. The
+      // guard is what stops it, and it names the cell so an operator knows what to resolve.
+      await expect(
+        resumeRun({
+          directory,
+          existing: read.existing,
+          cases,
+          fixture: fixtureOf({}),
+          versions,
+          checkers,
+          llm: null,
+          readCredential: () => undefined,
+          signal: new AbortController().signal,
+          continuation: true,
+          now: () => 2_000,
+        }),
+      ).rejects.toThrow(/requests may still be outstanding/u);
+      // Nothing new was written: the refusal happens before dispatch.
+      expect(await recordsOf(directory)).toHaveLength(1);
     });
   });
 });

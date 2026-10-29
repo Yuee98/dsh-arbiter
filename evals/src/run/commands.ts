@@ -378,18 +378,31 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     // A dry run of a live plan names what it would need, and does not read it: an
     // environment probe is not a credential check, and reporting a missing one as a
     // plan error would make a dry run fail on a machine that is not the runner.
+    // Only a selected protocol can make a credential matter. A dual-configured target whose
+    // unused decision section declares a second reference is not a problem for a chat-only
+    // plan, and refusing it would gate the plan on a section it never invokes — the same
+    // boundary the execution preflight already respects.
+    const selected = plan.protocols;
     for (const target of plan.targets) {
-      // The same rule dispatch uses, so a dry run reports the credential a real run would
-      // read rather than the one the target happens to name first.
-      const resolved = credentialRefOf(target);
-      if (!resolved.ok) {
-        io.err(`problem ${resolved.message}`);
-        return 1;
+      if (selected.includes('decision') && target.decision !== null) {
+        const resolved = credentialRefOf(target);
+        if (!resolved.ok) {
+          io.err(`problem ${resolved.message}`);
+          return 1;
+        }
+        if (resolved.ref.length === 0) continue;
+        io.out(
+          `live target ${target.targetId} resolves decision credential ${resolved.ref} from the environment at dispatch`,
+        );
+        continue;
       }
-      if (resolved.ref.length === 0) continue;
-      io.out(
-        `live target ${target.targetId} resolves credential ${resolved.ref} from the environment at dispatch`,
-      );
+      if (selected.includes('chat') && target.chat !== null) {
+        // A chat cell needs a route and a service, not a credential reference; naming one
+        // here would assert a requirement the transport does not have.
+        io.out(
+          `live target ${target.targetId} routes chat through ${target.chat.provider}/${target.chat.model} at dispatch`,
+        );
+      }
     }
   }
   io.out(`planHash ${planDigest(resolvedPlan)}`);

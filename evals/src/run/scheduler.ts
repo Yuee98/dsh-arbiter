@@ -501,12 +501,14 @@ async function runUnderTimeout(parts: {
 /**
  * A settled cell with its reservation recorded, when it ended without a report.
  *
- * A cell can settle as `cancelled` or `timeout` with no attempt list for two different
- * reasons: the outer bound abandoned it, or a cancellation reached it before the transport
- * returned anything. The second case has no `abandonment` because it never went through the
- * timeout branch, so it would be charged nothing on a continuation — which is the same
- * under-count in a different disguise. Both are given the reservation here, so the record
- * always says what the cell may have spent.
+ * A `cancelled` or `timeout` result can carry no attempt list because the outer bound
+ * abandoned the call, or because the transport reported nothing before the run stopped. The
+ * timeout branch already records the reservation; the second case never reaches it, so it
+ * would be charged nothing on a report — the same under-count in a different disguise. Both
+ * are given the reservation here, so a record always says what the cell may have spent.
+ *
+ * A transport that *does* report the abort produces a real attempt, and that attempt is what
+ * gets charged: nothing is unknown, so no reservation is added beside it.
  */
 function charged(
   result: DispatchResult,
