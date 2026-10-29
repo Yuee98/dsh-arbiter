@@ -15,6 +15,7 @@
 import type { ArbiterConfig, EvidenceItem } from '../types.js';
 import type { SessionLike, SessionsLike } from './types.js';
 import type { SessionLog } from './log.js';
+import type { EvidenceSelection } from './evidence.js';
 import {
   compacted,
   humanEvidence,
@@ -27,10 +28,7 @@ export interface EvidenceState {
   readonly sessionEvidence: readonly EvidenceItem[];
   readonly parentEvidence: readonly EvidenceItem[];
   readonly relay: readonly EvidenceItem[];
-  readonly merged: {
-    readonly evidence: EvidenceItem[];
-    readonly truncated: boolean;
-  };
+  readonly merged: EvidenceSelection;
   readonly parentAuthorizationPresent: boolean | null;
   readonly parentReadable: boolean;
   readonly parentLive: boolean;
@@ -68,7 +66,7 @@ function mergeSelection(
   parentHuman: readonly EvidenceItem[],
   relay: readonly EvidenceItem[],
   contextConfig: ArbiterConfig['context'],
-): { readonly evidence: EvidenceItem[]; readonly truncated: boolean } {
+): EvidenceSelection {
   return mergeEvidence(sessionHuman, parentHuman, relay, {
     maxItems: contextConfig.evidenceMaxItems,
     parentHumanItems: contextConfig.parentHumanItems,

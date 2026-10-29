@@ -246,6 +246,7 @@ function describeMaterial(
   const { evidence, log, window } = options;
   return {
     truncatedHumanEvidence: evidence.truncatedHumanEvidence,
+    protectedEvidenceDropped: evidence.merged.protectedDropped.length > 0,
     historyTruncated: options.truncated,
     sessionReadable: log.readable,
     sessionError: log.error,
@@ -265,7 +266,7 @@ function describeMaterial(
     evidenceCount: evidence.merged.evidence.length,
     earlierTurnCalls: window.earlierTurnCalls,
     windowGap: options.identity.gap,
-    toolCallCount: window.calls.length,
+    hasToolCalls: window.logCallCount > 0,
   };
 }
 

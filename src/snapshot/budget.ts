@@ -26,6 +26,7 @@ import {
 } from '../reviewer.js';
 import type {
   ActionTruncation,
+  EvidenceItem,
   ReviewSnapshot,
   SnapshotMaterial,
 } from '../types.js';
@@ -242,6 +243,55 @@ function trimAction(state: BudgetState): boolean {
   return true;
 }
 
+/**
+ * The two authorization originals the budget must not discard.
+ *
+ * The same pair `mergeEvidence` reserves: this session's newest human statement
+ * and the newest direct-parent original. They are identified here rather than by
+ * source kind, because an *older* parent message is not protected and must stay
+ * eligible for trimming.
+ */
+function protectedEvidence(
+  evidence: readonly EvidenceItem[],
+): Set<EvidenceItem> {
+  const protectedItems = new Set<EvidenceItem>();
+  const newestSession = evidence.find(
+    (item) => item.source.kind === 'session-human',
+  );
+  if (newestSession !== undefined) protectedItems.add(newestSession);
+  const newestParent = evidence.find(
+    (item) => item.source.kind === 'parent-human',
+  );
+  if (newestParent !== undefined) protectedItems.add(newestParent);
+  return protectedItems;
+}
+
+/**
+ * Trim one evidence item, keeping the protected originals.
+ *
+ * The budget drops by position and the evidence array is ordered by time, so the
+ * last item is not necessarily the least important: a parent message is often
+ * newer than the session restriction it conflicts with. Trimming by position
+ * alone could discard the withdrawal and keep the approval it reverses, which
+ * AC3 says must not be delayed by trimming.
+ *
+ * When only protected originals remain, nothing further can be trimmed: cutting
+ * one would remove required material, so the loop stops here and the request is
+ * reported as still over budget rather than as a misleadingly complete subset.
+ */
+function trimEvidence(state: BudgetState): boolean {
+  if (state.evidence.length <= 1) return false;
+  const protectedItems = protectedEvidence(state.evidence);
+  const index = state.evidence.findLastIndex(
+    (item) => !protectedItems.has(item),
+  );
+  if (index < 0) return false;
+  state.evidence = state.evidence.filter((_item, at) => at !== index);
+  state.evidenceTruncated = true;
+  state.truncatedSegments.add('EVIDENCE');
+  return true;
+}
+
 function trimCheckpoints(state: BudgetState): boolean {
   if (state.checkpoints.length === 0) return false;
   state.checkpoints = state.checkpoints.slice(0, -1);
@@ -271,12 +321,12 @@ function truncateNext(state: BudgetState): boolean {
     state.truncatedSegments.add('PRIOR_VERDICTS');
     return true;
   }
-  if (state.evidence.length > 1) {
-    state.evidence = state.evidence.slice(0, -1);
-    state.evidenceTruncated = true;
-    state.truncatedSegments.add('EVIDENCE');
-    return true;
-  }
+  // Evidence is a branch, not a stop condition: when only protected originals
+  // remain there is nothing here left to trim, and the later branches (guidance,
+  // facts, the action) must still get their turn. Returning `false` would end the
+  // whole loop and report a request as unfittable while removable material
+  // remained.
+  if (trimEvidence(state)) return true;
   if (state.projectRules !== null) {
     state.projectRules = null;
     state.materials = prunedProjectRulesMaterial(state.materials);

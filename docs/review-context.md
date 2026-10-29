@@ -8,7 +8,9 @@
 
 实现状态（2026-10-21）：ReviewSnapshot、EVIDENCE／CONTEXT／PRIOR_VERDICTS、项目规则读取、token 预算与截断已实现；快照随每次调用保存，供审计和详情复用。实现与剩余验证见[首轮实施报告](implementation-report.md)。
 
-实现状态（2026-10-29，RQ-02／#66）：材料构建器按职责拆为 `snapshot/log.ts`（单次有界读取与 turn 归属）、`window.ts`（当前 turn 工具窗口、旧到新、排除待审调用）、`evidence.ts`＋`assemble.ts`（跨 turn 人类证据与父会话链）、`guidance.ts`（两个指引来源）与 `completeness.ts`（M0 分类与 review contract 映射）。工具历史只取宿主命名的当前 turn，宿主 `turn/end`／`session/end-seed` 后不再沿用旧 turn 号；跨 turn 人类许可／限制继续保留并各自标注 `turn`；`completeness` 只把 `unreadable` 计为阻断，`insufficient` 在无模型请求的情况下由 `gate` 记为 `review-escalate`。证据合并保留本会话最新人类陈述与父会话保底位，因此容量裁剪不会先丢掉新撤回。
+实现状态（2026-10-29，RQ-02／#66）：原始人类消息按宿主自身的 `source.kind === 'user'` 识别，既有带 `rpcId` 的 `user-rpc`，也有 ACP 提示桥创建的不带 `rpcId` 的 `{ kind: 'user' }`；只要求 `rpcId` 会把真实指令（包括撤回）丢掉，并把可读会话误报成"无人类证据"。人类证据的保位对——本会话最新人类陈述与最新的直接父会话原文——在初始容量选择和后续 token 裁剪中都不被丢弃；当合法容量装不下这两条时，按关键原文缺失报告，而不是悄悄评一个被反转过的子集。未归属到 turn 的工具调用按它写在哪个 `turn/start` 括号内归属；宿主最新 turn 已 `turn/end` 时不再被当作当前 turn，此时窗口为空并报告归因缺口。
+
+材料构建器按职责拆为 `snapshot/log.ts`（单次有界读取与 turn 归属）、`window.ts`（当前 turn 工具窗口、旧到新、排除待审调用）、`evidence.ts`＋`assemble.ts`（跨 turn 人类证据与父会话链）、`guidance.ts`（两个指引来源）与 `completeness.ts`（M0 分类与 review contract 映射）。工具历史只取宿主命名的当前 turn，宿主 `turn/end`／`session/end-seed` 后不再沿用旧 turn 号；跨 turn 人类许可／限制继续保留并各自标注 `turn`；`completeness` 只把 `unreadable` 计为阻断，`insufficient` 在无模型请求的情况下由 `gate` 记为 `review-escalate`。证据合并保留本会话最新人类陈述与父会话保底位，因此容量裁剪不会先丢掉新撤回。
 
 实现状态（2026-10-25，CONTEXT／#11）：证据按来源分层选取并带 `sourcePriority`，ask 的前台答复与 timed `user-question-reply` 连同问题一起进入证据，`PROJECT_RULES` 开关不读取文件时以 `materials` 记录“已关闭”而非“缺失”，父会话不可读时 `parent_authorization_present` 为 `null`；当前动作只在可选材料都裁掉后按预算截断，并记录 `action.truncated` 与 `missing` 输入事实。`truncationFeedback()` 提供不含因果断言的补充提示，供 DECISION 组合最终 reason。
 

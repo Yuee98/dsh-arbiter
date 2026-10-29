@@ -61,6 +61,15 @@ export interface CompletenessInput {
   readonly trimmed: MaterialTrims;
   /** Whether the truncated evidence included this session's or the parent's words. */
   readonly truncatedHumanEvidence: boolean;
+  /**
+   * Protected evidence the configured capacity could not carry.
+   *
+   * Protected items are this session's newest human statement and the newest
+   * parent original — the instructions a review must not score without. When a
+   * legal capacity cannot hold them, the review is missing a required original
+   * rather than a redundant one, so this blocks like an unreadable source does.
+   */
+  readonly protectedEvidenceDropped: boolean;
   readonly historyTruncated: boolean;
   readonly sessionReadable: boolean;
   readonly sessionError: string | null;
@@ -82,8 +91,8 @@ export interface CompletenessInput {
   readonly earlierTurnCalls: number;
   /** Why the tool window could not be attributed to one turn, or `null`. */
   readonly windowGap: string | null;
-  /** Calls the window selected; a gap about attribution needs some to matter. */
-  readonly toolCallCount: number;
+  /** Whether the log held any call to attribute in the first place. */
+  readonly hasToolCalls: boolean;
 }
 
 /** The segments the input budget can trim, as the trimmer reports them. */
@@ -141,7 +150,16 @@ function sessionItems(input: CompletenessInput): MaterialGapItem[] {
       ),
     );
   }
-  if (input.truncatedHumanEvidence) {
+  if (input.protectedEvidenceDropped) {
+    out.push(
+      item(
+        'session-human',
+        'unreadable',
+        "the configured evidence capacity cannot carry both this session's newest human statement and the newest direct-parent original, so a required authorization original is unavailable",
+        true,
+      ),
+    );
+  } else if (input.truncatedHumanEvidence) {
     out.push(
       item(
         'session-human',
@@ -280,7 +298,7 @@ function historyItems(input: CompletenessInput): MaterialGapItem[] {
       ),
     );
   }
-  if (input.windowGap !== null && input.toolCallCount > 0) {
+  if (input.windowGap !== null && input.hasToolCalls) {
     out.push(item('tool-window', 'unreadable', input.windowGap, false));
   }
   if (input.trimmed.toolArguments) {

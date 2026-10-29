@@ -131,6 +131,35 @@ export interface TurnIdentity {
 }
 
 /**
+ * Where the newest still-open `turn/start` sits, or `-1` when none is open.
+ *
+ * A turn is opened by `turn/start` and closed by `turn/end`, so any `turn/end`
+ * after the newest `turn/start` means nothing is open.
+ */
+function openBracket(log: SessionLog): number {
+  for (let cursor = log.own.length - 1; cursor >= 0; cursor -= 1) {
+    const event = log.own[cursor];
+    if (event === undefined) return -1;
+    if (event.type === 'turn/end') return -1;
+    if (event.type === 'turn/start') return cursor;
+  }
+  return -1;
+}
+
+/**
+ * Whether the log's last turn is still open.
+ *
+ * A turn is opened by `turn/start` and closed by `turn/end`, so the newest open
+ * turn is the one in progress. Walking backward is not enough on its own: the
+ * closing event also carries its turn number, so reading the newest non-null
+ * mark would return a turn the host has already finished.
+ */
+function openTurnOf(log: SessionLog): number | null {
+  const bracket = openBracket(log);
+  return bracket < 0 ? null : (log.turnOf[bracket] ?? null);
+}
+
+/**
  * Resolve the pending action's turn.
  *
  * Three sources, in decreasing authority:
@@ -139,11 +168,13 @@ export interface TurnIdentity {
  *      recorded it — its `turn` field is the host's answer, not a deduction;
  *   2. the turn the host announced with `turn/start` and has not closed, which
  *      is what the gate sees before this call's own event exists;
- *   3. nothing. The log named no turn, so the window cannot be attributed and
- *      the snapshot says so instead of presenting all history as current.
+ *   3. the newest turn whose `turn/start` bracket is still open in the log.
  *
- * A locally derived number is never used: recovery, retry and a timed answer all
- * keep the host's own turn, and a counter of our own would make each look new.
+ * A closed turn is never a candidate. If the log's newest bracket is closed and
+ * no turn was announced, the attribution is unknown, and the snapshot says so
+ * instead of presenting a finished turn's calls as current. A locally derived
+ * number is never used either: recovery, retry and a timed answer all keep the
+ * host's own turn, and a counter of our own would make each look new.
  */
 export function currentTurnOf(
   log: SessionLog,
@@ -161,17 +192,18 @@ export function currentTurnOf(
     if (mark !== null) return { turn: mark, gap: null };
   }
   if (announced !== null) return { turn: announced, gap: null };
-  for (let cursor = log.turnOf.length - 1; cursor >= 0; cursor -= 1) {
-    const mark = log.turnOf[cursor];
-    if (mark !== null && mark !== undefined) {
-      // The newest turn the log names is the one in progress: a turn is closed
-      // by `turn/end`, so an open newest turn is this call's turn.
-      return { turn: mark, gap: null };
-    }
-  }
+  const open = openTurnOf(log);
+  if (open !== null) return { turn: open, gap: null };
+  // Distinguish the two unknown cases, because only one of them is expected: a
+  // log with no turn identity at all is a host that never wrote one, while a log
+  // whose newest bracket is closed means this call arrived outside a turn. Both
+  // leave attribution unknown; neither may borrow a finished turn's calls.
+  const namedAny = log.turnOf.some((mark) => mark !== null);
   return {
     turn: null,
-    gap: 'the session log named no turn, so the tool history could not be limited to the current turn',
+    gap: namedAny
+      ? 'the newest host turn is already closed, so no open turn could be attributed to this call and its tool history was not limited to one turn'
+      : 'the session log named no turn, so the tool history could not be limited to the current turn',
   };
 }
 
@@ -182,6 +214,14 @@ export interface ToolWindow {
   readonly earlierTurnCalls: number;
   /** Calls the capacity window dropped; the loss is truncation, not a gap. */
   readonly dropped: number;
+  /**
+   * Calls the log actually contains, excluding the pending one.
+   *
+   * An attribution gap is only a loss when something had to be attributed: a
+   * session with no tool history has nothing to limit, so reporting the gap
+   * would spend input budget describing a limitation that changed nothing.
+   */
+  readonly logCallCount: number;
   /** Whether the window lost any of this turn's calls to capacity. */
   readonly truncated: boolean;
   readonly turn: number | null;
@@ -208,24 +248,39 @@ export function toolWindow(
     (call) => call.callId !== options.currentCallId,
   );
   if (identity.turn === null) {
-    const limit = Math.max(0, options.maxItems);
-    const selected = limit === 0 ? [] : all.slice(-limit);
+    // Attribution failed, so no call can be shown as this turn's history. A
+    // finished turn's calls presented as current material would state a fact the
+    // log cannot support, and the gap already reports that the limitation exists.
+    // An *open* bracket still lets a call written inside it count: that placement
+    // is recorded evidence even though the turn number is not.
+    const inside =
+      openBracket(log) < 0
+        ? []
+        : all.filter((call) => call.index > openBracket(log));
     return {
-      calls: selected.map((call) => entryOf(call, options.argumentMaxChars)),
-      earlierTurnCalls: 0,
-      dropped: all.length - selected.length,
-      truncated: all.length > selected.length,
+      calls: inside.map((call) => entryOf(call, options.argumentMaxChars)),
+      earlierTurnCalls: all.length - inside.length,
+      dropped: 0,
+      truncated: false,
+      logCallCount: all.length,
       turn: null,
     };
   }
+  // The current turn's own bracket, so an unattributed call is placed by where it
+  // was written rather than by assuming it belongs. A call between this turn's
+  // `turn/start` and its `turn/end` is part of the turn; one written before the
+  // open bracket is an older turn's call however its event was labelled.
+  const openAt = log.own.findLastIndex((event) => event.type === 'turn/start');
   const current: CallRecord[] = [];
   let earlierTurnCalls = 0;
   for (const call of all) {
     const mark = log.turnOf[call.index] ?? null;
     if (mark === null) {
-      // An unattributed call written inside the current turn still belongs to
-      // it; dropping it would hide a step the pending action follows.
-      current.push(call);
+      // An unattributed call inside this turn's bracket still belongs to it;
+      // dropping it would hide a step the pending action follows. Outside the
+      // bracket it is not this turn's material, so it counts as an earlier call.
+      if (call.index > openAt) current.push(call);
+      else earlierTurnCalls += 1;
       continue;
     }
     if (mark === identity.turn) current.push(call);
@@ -239,5 +294,6 @@ export function toolWindow(
     dropped: current.length - selected.length,
     truncated: current.length > selected.length,
     turn: identity.turn,
+    logCallCount: all.length,
   };
 }

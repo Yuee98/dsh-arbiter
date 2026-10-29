@@ -334,6 +334,24 @@ function precedingQuestion(
 }
 
 /**
+ * Whether this source is the host's own original human input.
+ *
+ * The host has two human source shapes and both are genuine human input: a
+ * `user-rpc` message carries `rpcId`, while the ACP prompt bridge creates a
+ * plain `{ kind: 'user' }` message with no `rpcId`. Requiring `rpcId` would drop
+ * real human instructions — including withdrawals — and would then report the
+ * session as having no human evidence at all.
+ *
+ * What still separates human input from everything else is the host's own
+ * classification, not a field guess: agent relays, tool output, compaction
+ * summaries and every other source kind are excluded, so this cannot be spoofed
+ * by text that merely claims to be the user.
+ */
+function isHumanSource(source: Record<string, unknown>): boolean {
+  return source['kind'] === 'user';
+}
+
+/**
  * Original human messages plus real ask answers, oldest first.
  *
  * Turn attribution travels with every item so a consumer can tell a same-turn
@@ -354,8 +372,7 @@ export function humanEvidence(
     if (!isRecord(source)) return;
     // A question reply is rendered from its structured answer below, so its raw
     // JSON is not also copied in as a second item.
-    if (source['kind'] !== 'user') return;
-    if (typeof source['rpcId'] !== 'string') return;
+    if (!isHumanSource(source)) return;
     const text = messageText(event.data['content']);
     if (text.trim().length === 0) return;
     const turn = log.turnOf[index] ?? null;
@@ -470,50 +487,66 @@ export interface EvidenceLimits {
  * first inside each layer. The selected set is then ordered by time for display;
  * that display order never overrides the source priority.
  *
- * Two items survive every capacity cut regardless of layer: the newest human
- * statement of this session and the newest parent original. Inside one layer the
- * newer instruction wins on the point in conflict, so the withdrawal that would
- * reverse an earlier approval must never be the item dropped. Both are still
- * ordinary evidence — the reservation changes what is seen, never what it means.
+ * Two items are *protected*: the newest human statement of this session and the
+ * newest parent original. Inside one layer the newer instruction wins on the
+ * point in conflict, so the withdrawal that reverses an earlier approval must
+ * never be the item dropped — and neither must the parent original the child's
+ * own chatter would crowd out first.
+ *
+ * Protection can exceed capacity. `evidenceMaxItems = 1` is a legal
+ * configuration, and with two protected items one of them cannot be carried.
+ * Dropping the protected item silently would let the review score a misleading
+ * subset, so the conflict is reported through `protectedDropped` and the caller
+ * turns it into a blocking gap: a legally configured capacity that cannot
+ * represent the required originals is a critical loss, not an ordinary cut.
  */
+export interface EvidenceSelection {
+  readonly evidence: EvidenceItem[];
+  readonly truncated: boolean;
+  /**
+   * Protected items this capacity could not carry.
+   *
+   * Non-empty only when protected items outnumber the available slots. It is
+   * separate from `truncated` because an ordinary capacity cut is not a
+   * material failure while losing a protected original is.
+   */
+  readonly protectedDropped: readonly EvidenceItem[];
+}
+
 export function mergeEvidence(
   sessionHuman: readonly EvidenceItem[],
   parentHuman: readonly EvidenceItem[],
   relay: readonly EvidenceItem[],
   limits: EvidenceLimits,
-): { readonly evidence: EvidenceItem[]; readonly truncated: boolean } {
+): EvidenceSelection {
   const maxItems = Math.max(1, limits.maxItems);
   // `slice(-0)` is `slice(0)`; a configured zero must mean zero, not "all".
   const parentLimit = Math.max(0, limits.parentHumanItems);
   const parentRecent = parentLimit === 0 ? [] : parentHuman.slice(-parentLimit);
-  // The newest parent original is what a child's own chatter would crowd out
-  // first, so it is reserved rather than merely ranked.
-  const floor = Math.min(
-    Math.max(0, limits.parentFloor),
-    parentRecent.length,
-    maxItems,
-  );
-  const reserved = floor > 0 ? parentRecent.slice(-floor) : [];
-  const reservedItems = new Set<EvidenceItem>(reserved);
-  const newestSessionHuman = newestFirst(sessionHuman)[0];
-  const withNewestHuman =
-    newestSessionHuman === undefined || reservedItems.has(newestSessionHuman)
-      ? reserved
-      : [...reserved, newestSessionHuman];
-  for (const item of withNewestHuman) reservedItems.add(item);
+  const newestSession = newestFirst(sessionHuman)[0];
+  // The floor is what a child's own chatter would crowd out first, so it is
+  // reserved rather than merely ranked. It never consumes this session's own
+  // protected slot: both protected originals compete for capacity, and the
+  // conflict is reported rather than resolved by silently preferring one.
+  const floor = Math.max(0, limits.parentFloor);
+  const reserved = floor === 0 ? [] : parentRecent.slice(-floor);
+  // This session's own newest statement ranks first: conflict priority puts it
+  // above the parent's, and a withdrawal it carries is exactly what AC3 says a
+  // capacity cut must not delay. The parent originals follow.
+  const protectedItems = [
+    ...(newestSession === undefined ? [] : [newestSession]),
+    ...reserved,
+  ];
+  const carried = protectedItems.slice(0, maxItems);
+  const protectedDropped = protectedItems.slice(maxItems);
+  const carriedSet = new Set(carried);
   const rest = [
     ...newestFirst(sessionHuman),
-    ...newestFirst(parentRecent.filter((item) => !reservedItems.has(item))),
+    ...newestFirst(parentRecent),
     ...newestFirst(relay),
-  ].filter((item) => !reservedItems.has(item));
-  const slots = Math.max(
-    0,
-    maxItems - Math.min(withNewestHuman.length, maxItems),
-  );
-  const selected = [
-    ...withNewestHuman.slice(0, maxItems),
-    ...rest.slice(0, slots),
-  ];
+  ].filter((item) => !carriedSet.has(item));
+  const slots = Math.max(0, maxItems - carried.length);
+  const selected = [...carried, ...rest.slice(0, slots)];
   selected.sort((left, right) => right.ts - left.ts);
   // Compare against the whole population, not only the pre-sliced candidates:
   // `parentHumanItems` itself can hide parent originals, and that loss must be
@@ -524,5 +557,6 @@ export function mergeEvidence(
     truncated:
       selected.length < considered ||
       selected.some((item) => item.truncated === true),
+    protectedDropped,
   };
 }
