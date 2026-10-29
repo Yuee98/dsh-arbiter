@@ -192,6 +192,57 @@ describe('a saved document survives the round trip', () => {
 });
 
 /**
+ * A copy written by a build that still knew the retired formats.
+ *
+ * That build wrote a current-format wrapper around already-normalized rules while
+ * also recording the retired declaration the *source document* had. The wrapper is
+ * readable here, so its rules and connective come back. What must not come back is
+ * the retired declaration: the copy's `sourceFormat` is ignored rather than
+ * replayed, because replaying it would describe a running configuration as one this
+ * build refuses to load.
+ */
+describe('a copy left by a build with the retired formats', () => {
+  const RULE = {
+    id: 'kept-normalized',
+    conditions: [{ target: 'command', kind: 'exact', pattern: 'echo hi' }],
+    verdict: 'deny',
+  };
+
+  test('its rules recover but its retired declaration does not come back', async () => {
+    const harness = await createHarness({
+      format: 'arbiter-config-v3',
+      rules: [RULE],
+    });
+    const directory = join(harness.home, 'arbiter', 'last-good');
+    const [entry] = await readdir(directory);
+    if (entry === undefined) throw new Error('no recovery copy was written');
+    const path = join(directory, entry);
+    const record: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (record === null || typeof record !== 'object')
+      throw new TypeError('the copy must be an object');
+    // The shape the previous build left on disk: a current-format wrapper, a
+    // canonical payload, and a retired `sourceFormat` recording what the profile
+    // document had declared.
+    Reflect.set(record, 'sourceFormatExplicit', true);
+    Reflect.set(record, 'sourceFormat', 'arbiter-config-v2');
+    await writeFile(path, JSON.stringify(record), 'utf8');
+
+    const host = await coldStart(harness.home);
+    const recovered = host.runtime.config;
+    expect(recovered.rules[0]?.id).toBe('kept-normalized');
+    // The copy is read as what it is — a current-format payload — rather than as
+    // the retired document it once described.
+    expect(recovered.format).toBe('arbiter-config-v3');
+    expect(host.runtime.configFormat).toBe('arbiter-config-v3');
+    // The load error describes this build's *document* (the invalid declaration in
+    // the profile), not the retired declaration recorded by the old copy.
+    expect(host.runtime.invalidConfigError).toContain('arbiter-config-v9');
+    expect(host.runtime.invalidConfigError).not.toContain('arbiter-config-v2');
+    expect(JSON.stringify(recovered)).not.toContain('arbiter-config-v2');
+  });
+});
+
+/**
  * The rule connective across the recovery boundary.
  *
  * Recovery is where a wider reading could come back silently, so a broken copy is
