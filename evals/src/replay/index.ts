@@ -21,6 +21,7 @@
 
 export type {
   AnswerCandidate,
+  InputStanding,
   OutcomeFacts,
   ReplayCellLineage,
   ReplayDisposition,
@@ -48,6 +49,9 @@ export {
   variantDigest,
   variantFromFlags,
 } from './variants.js';
+
+export type { InputComparison, InputDrift, UnverifiedInput } from './inputs.js';
+export { compareInputs } from './inputs.js';
 
 export type { SourceRead, SourcedRecord } from './source.js';
 export { readSource } from './source.js';

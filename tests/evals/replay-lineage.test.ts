@@ -477,6 +477,154 @@ describe('the derivation is traceable to its source', () => {
       expect(warnings).toContain('requires a new request');
       // And it is not the label diagnostic standing in for an input check.
       expect(warnings).not.toContain('label');
+
+      // The warning has to be *persisted*: the derived lineage is what a later reader
+      // consults, and a diagnostic that lived only on a terminal is gone once it closes.
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'inputs.status')).toBe('compared');
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(true);
+      const drifted = objectsAt(lineage, 'inputs.drifted');
+      expect(drifted).toHaveLength(1);
+      expect(textAt(drifted[0] ?? {}, 'caseId')).toBe(CASE);
+      expect(textAt(drifted[0] ?? {}, 'recorded')).toMatch(/^sha256:/);
+      expect(textAt(drifted[0] ?? {}, 'current')).toMatch(/^sha256:/);
+      // The two fingerprints differ, which is what makes the case drift.
+      expect(textAt(drifted[0] ?? {}, 'current')).not.toBe(
+        textAt(drifted[0] ?? {}, 'recorded'),
+      );
+      // And the note names the case rather than describing the possibility.
+      const notes = listTextAt(lineage, 'notes').join('\n');
+      expect(notes).toContain(CASE);
+      expect(notes).toContain('要测量必须重新发起请求');
+    });
+  });
+
+  it('records a clean comparison only when every recorded case was compared', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      await replay({ directory, output: join(created.path, 'derived') });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'inputs.status')).toBe('compared');
+      expect(at(lineage, 'inputs.drifted')).toEqual([]);
+      expect(at(lineage, 'inputs.unverified')).toEqual([]);
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(false);
+      // The note says the comparison covered every case, not merely that it found no
+      // drift.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '当前输入 hash 与保存时一致',
+      );
+    });
+  });
+
+  it('reports a partially unreadable dataset as unverified, not as unchanged', async () => {
+    await withArea(async (created) => {
+      // Two cases run; afterwards one of them becomes unreadable. The readable one is
+      // unchanged, so a comparison that only looked at what it could read would report a
+      // clean result and silently drop the other.
+      await created.write(
+        'dataset/manifest.json',
+        JSON.parse(
+          await readFile(
+            join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+            'utf8',
+          ),
+        ) as unknown,
+      );
+      // Both cards are read through the case checker, so what gets copied into the test
+      // dataset is a document the real loader accepts; a case it rejected would drop out
+      // of the comparison instead of being reported.
+      const first = await readDocument(
+        join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+        schemas.case,
+      );
+      const secondCase = 'read-repo-index-with-cache';
+      const second = await readDocument(
+        join(
+          REPOSITORY_ROOT,
+          `evals/datasets/core-v1/cases/${secondCase}.json`,
+        ),
+        schemas.case,
+      );
+      await created.write(`dataset/cases/${CASE}.json`, first);
+      await created.write(`dataset/cases/${secondCase}.json`, second);
+      const dataset = join(created.path, 'dataset');
+      const directory = join(created.path, 'run');
+      const firstCell = decisionCellOf(CASE);
+      const secondCell = decisionCellOf(secondCase);
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: [CASE, secondCase],
+          datasetPath: dataset,
+          protocols: ['decision'],
+          targets: [decisionTarget()],
+        }),
+        fixture: fixtureOf({
+          [firstCell]: fixtureCell({
+            decision: [decisionForCase({ '4': 0.9 }, { '8': 0.9 })],
+          }),
+          [secondCell]: fixtureCell({
+            decision: [decisionForCase({ '4': 0.9 }, { '8': 0.9 })],
+          }),
+        }),
+      });
+      // Corrupt one case on disk, leaving the other valid and unchanged.
+      await created.write(`dataset/cases/${secondCase}.json`, {
+        caseId: secondCase,
+        familyId: 'not-a-declared-family',
+      });
+
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(err.join('\n')).toContain('could not be verified');
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      // The readable case was compared and did not drift; the unreadable one is listed as
+      // unverified rather than dropped or counted as clean.
+      expect(at(lineage, 'inputs.drifted')).toEqual([]);
+      const unverified = objectsAt(lineage, 'inputs.unverified');
+      expect(unverified).toHaveLength(1);
+      expect(textAt(unverified[0] ?? {}, 'caseId')).toBe(secondCase);
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(true);
     });
   });
 

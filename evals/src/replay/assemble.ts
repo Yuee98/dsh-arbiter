@@ -37,6 +37,7 @@ import { replayCell } from './derive.js';
 import type { CellReplay } from './derive.js';
 import type { SourceRead } from './source.js';
 import type {
+  InputStanding,
   ReplayCellLineage,
   ReplayLineage,
   ReplaySource,
@@ -121,6 +122,7 @@ function notesOf(parts: {
   readonly runningPrompt: string;
   readonly totals: ReplayTotals;
   readonly variant: ReplayVariant;
+  readonly inputs: InputStanding;
 }): readonly string[] {
   const notes: string[] = [
     '这次派生只读源运行目录：没有发出任何请求，没有解析凭据，没有改写源记录；派生产物写在另一个目录。',
@@ -163,10 +165,47 @@ function notesOf(parts: {
   notes.push(
     '参考标签没有因为这次派生而改变：`labels/` 只被读取，派生报告按原标签比较引擎答案。',
   );
-  notes.push(
-    `源运行针对的数据集是 ${parts.source.dataset.datasetId}（${parts.source.dataset.digest}）。回放只重读保存的响应，所以数据集变化不会改变派生分数；但某例的输入若已改变，保存的答案就不再是关于当前材料的证据，CLI 与 lineage 会点名该例并要求重新请求。派生报告用的是当前数据集里的标签，输入 hash 与标签不再相符的案例由报告层现有标签诊断列出并排除，不在这里修补。`,
-  );
+  notes.push(inputNote(parts.inputs, parts.source.dataset));
   return notes;
+}
+
+/**
+ * What the lineage says about the material the answers were produced from.
+ *
+ * This is the note a later reader needs most, because it is the only part of the
+ * derivation that cannot be recovered from the files: whether the saved answers still
+ * speak about the dataset as it is. It names the affected cases, so "which evidence is
+ * stale" is answerable without re-running the comparison.
+ */
+function inputNote(
+  standing: InputStanding,
+  dataset: ReplaySource['dataset'],
+): string {
+  const provenance = `源运行针对的数据集是 ${dataset.datasetId}（${dataset.digest}）。回放只重读保存的响应，所以数据集变化不会改变派生分数。`;
+  if (standing.status === 'undetermined') {
+    return `${provenance}本次无法判定当前数据集的输入是否仍与保存时一致（${standing.reason}）：这是「未验证」，不是「未变化」。要测量当前材料必须重新发起请求。`;
+  }
+  if (standing.drifted.length === 0 && standing.unverified.length === 0) {
+    return `${provenance}已逐例比对：本次运行涉及的每个案例，当前输入 hash 与保存时一致，保存的答案仍是关于当前材料的证据。`;
+  }
+  const parts: string[] = [provenance];
+  if (standing.drifted.length > 0) {
+    parts.push(
+      `以下案例的输入在运行之后改变（${standing.drifted
+        .map((entry) => `${entry.caseId}: ${entry.recorded} → ${entry.current}`)
+        .join(
+          '；',
+        )}）：保存的答案产生于旧材料，不能再用来评价当前输入，要测量必须重新发起请求。`,
+    );
+  }
+  if (standing.unverified.length > 0) {
+    parts.push(
+      `以下案例的当前输入无法确认（${standing.unverified
+        .map((entry) => `${entry.caseId}: ${entry.reason}`)
+        .join('；')}）：它们既不算变化也不算一致，属于未验证。`,
+    );
+  }
+  return parts.join('');
 }
 
 /** The versions a derived run records. */
@@ -231,6 +270,8 @@ export function deriveRun(parts: {
   readonly runningContract: string;
   /** The prompt version this build ships, so a drift from the source can be stated. */
   readonly runningPrompt: string;
+  /** How the saved evidence stands against the dataset, as the command found it. */
+  readonly inputs: InputStanding;
   readonly derivedDirectory: string;
   /** The variants document's version, when the caller supplied one. */
   readonly variantsDocument: string | null;
@@ -320,12 +361,14 @@ export function deriveRun(parts: {
       },
       totals,
       cells: replays.map((entry) => entry.lineage),
+      inputs: parts.inputs,
       notes: notesOf({
         source: parts.source.source,
         runningContract: parts.runningContract,
         runningPrompt: parts.runningPrompt,
         totals,
         variant: parts.variant,
+        inputs: parts.inputs,
       }),
     },
   };

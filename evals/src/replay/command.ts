@@ -32,12 +32,13 @@ import type { ReportSettings } from '../metrics/types.js';
 
 import { deriveRun } from './assemble.js';
 import { compareInputs } from './inputs.js';
+import type { InputComparison } from './inputs.js';
 import { readSource } from './source.js';
 import type { SourceRead } from './source.js';
 import { parseVariants, statesAnyAxis, variantFromFlags } from './variants.js';
 import type { FlagsVariant } from './variants.js';
 import { variantDirectoryOf, writeDerivation } from './write.js';
-import type { ReplayVariant } from './types.js';
+import type { InputStanding, ReplayVariant } from './types.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReplayIo {
@@ -246,10 +247,27 @@ function settingsOf(root: string, variant: ReplayVariant): ReportSettings {
  * instructions or from other material, so no re-reading can say what the current ones
  * would produce, and the only honest statement is that another request is required.
  */
-async function driftOf(
+function standingOf(inputs: InputComparison): InputStanding {
+  if (inputs.status === 'unavailable') {
+    return {
+      status: 'undetermined',
+      reason: inputs.reason,
+      reRequestRequired: true,
+    };
+  }
+  return {
+    status: 'compared',
+    drifted: inputs.drifted,
+    unverified: inputs.unverified,
+    reRequestRequired:
+      inputs.drifted.length > 0 || inputs.unverified.length > 0,
+  };
+}
+
+function driftOf(
   read: Extract<SourceRead, { readonly ok: true }>,
-  root: string,
-): Promise<readonly string[]> {
+  comparison: InputComparison,
+): readonly string[] {
   const drift: string[] = [];
   if (read.index.versions.prompt !== REVIEW_PROMPT_VERSION) {
     drift.push(
@@ -261,25 +279,34 @@ async function driftOf(
       `the run was produced under contract ${read.index.versions.contract}, this build runs ${REVIEW_CONTRACT_VERSION}; the derived bands are today's reading of the saved answers`,
     );
   }
-  const inputs = await compareInputs({
-    root,
-    dataset: read.plan.datasetPath,
-    records: [...read.records.values()].map((sourced) => sourced.record),
-  });
+  const inputs = comparison;
   if (inputs.status === 'unavailable') {
     // Not a drift, and not a clean comparison either. Saying which it is keeps a reader
     // from reading silence as "the inputs are unchanged".
     drift.push(
       `whether the dataset's inputs changed could not be determined: ${inputs.reason}`,
     );
-  } else if (inputs.drifted.length > 0) {
-    drift.push(
-      `${String(inputs.drifted.length)} case input(s) changed since the run: ${inputs.drifted
-        .map((drift) => drift.caseId)
-        .join(
-          ', ',
-        )}; the saved answers were produced from the earlier material, so measuring the current input requires a new request and cannot be done by replaying these answers`,
-    );
+  } else {
+    if (inputs.drifted.length > 0) {
+      drift.push(
+        `${String(inputs.drifted.length)} case input(s) changed since the run: ${inputs.drifted
+          .map((drift) => drift.caseId)
+          .join(
+            ', ',
+          )}; the saved answers were produced from the earlier material, so measuring the current input requires a new request and cannot be done by replaying these answers`,
+      );
+    }
+    if (inputs.unverified.length > 0) {
+      // Kept apart from drift: "not established" is not "changed", and a reader who
+      // conflated them would either chase a change that did not happen or miss one.
+      drift.push(
+        `${String(inputs.unverified.length)} case input(s) could not be verified: ${inputs.unverified
+          .map((entry) => entry.caseId)
+          .join(
+            ', ',
+          )}; their current material is unknown, so the saved answers were not shown to match it`,
+      );
+    }
   }
   return drift;
 }
@@ -313,7 +340,12 @@ export async function replayRun(
   );
   // Version drift is reported on stderr as well as in the lineage, because the person
   // reading the terminal is the one who has to decide whether a new request is needed.
-  const notes = await driftOf(read, io.root);
+  const inputs = await compareInputs({
+    root: io.root,
+    dataset: read.plan.datasetPath,
+    records: [...read.records.values()].map((sourced) => sourced.record),
+  });
+  const notes = driftOf(read, inputs);
   for (const drift of notes) io.err(`warning ${drift}`);
   const parent =
     command.output === null
@@ -327,6 +359,7 @@ export async function replayRun(
       variant,
       runningContract: REVIEW_CONTRACT_VERSION,
       runningPrompt: REVIEW_PROMPT_VERSION,
+      inputs: standingOf(inputs),
       derivedDirectory: target,
       variantsDocument: variants.document,
     });

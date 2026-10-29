@@ -176,6 +176,36 @@ export interface ReplayCellLineage {
   readonly changed: boolean;
 }
 
+/**
+ * The comparison of a run's recorded inputs against the dataset as it is now.
+ *
+ * Three states, and the third is the one that keeps the record honest: a comparison
+ * that could not run, or that could not cover every recorded case, must not be stored as
+ * "nothing changed".
+ */
+export type InputStanding =
+  | {
+      readonly status: 'compared';
+      /** Cases whose current input differs from the one the run recorded. */
+      readonly drifted: readonly {
+        readonly caseId: string;
+        readonly recorded: string;
+        readonly current: string;
+      }[];
+      /** Recorded cases whose current input could not be established. */
+      readonly unverified: readonly {
+        readonly caseId: string;
+        readonly reason: string;
+      }[];
+      /** True when some recorded evidence cannot speak about the current material. */
+      readonly reRequestRequired: boolean;
+    }
+  | {
+      readonly status: 'undetermined';
+      readonly reason: string;
+      readonly reRequestRequired: boolean;
+    };
+
 /** One run directory, as the replay read it. */
 export interface ReplaySource {
   /** The directory as the caller named it: relative to the root when inside it. */
@@ -239,5 +269,13 @@ export interface ReplayLineage {
   };
   readonly totals: ReplayTotals;
   readonly cells: readonly ReplayCellLineage[];
+  /**
+   * How the saved evidence stands against the dataset as it is now.
+   *
+   * Persisted rather than only printed, because the derived lineage is what a later
+   * reader consults. A warning that lived only on a terminal is gone the moment the
+   * terminal closes, and the derivation then looks complete.
+   */
+  readonly inputs: InputStanding;
   readonly notes: readonly string[];
 }
