@@ -284,6 +284,14 @@ export async function resumeRun(options: {
   readonly readCredential: Parameters<typeof dispatch>[0]['readCredential'];
   readonly signal: AbortSignal;
   readonly onProgress?: (result: CellRecord) => void | Promise<void>;
+  /**
+   * Whether this pass continues an earlier one.
+   *
+   * A first pass and a continuation run the same code, but they are different events: the
+   * `resumed` log exists to record when someone came back to a run, and logging the
+   * original pass there would make two identical entries that hide the actual retry.
+   */
+  readonly continuation: boolean;
   readonly now?: () => number;
 }): Promise<ResumeOutcome> {
   const now = options.now ?? (() => Date.now());
@@ -325,6 +333,7 @@ export async function resumeRun(options: {
     outcome,
     now,
     planned: grid.cells.length,
+    continuation: options.continuation,
   });
   await writeJson(join(options.directory, RUN_FILES.index), index);
   return { index, dispatch: outcome, ran: pending.length };
@@ -359,7 +368,15 @@ export async function writeRecord(
   await writeJson(path, record);
 }
 
-/** Recompute one run's spend from the records on disk. */
+/**
+ * Recompute one run's spend from the records on disk.
+ *
+ * `cellsCompleted` counts every cell that has a record, not only the ones that scored.
+ * A recorded failure is a result: it entered the denominator, it cost what its attempts
+ * cost, and leaving it out would let a run look more successful by failing less visibly.
+ * `cellsStarted` is the narrower number — the cells that actually reached a transport —
+ * so a reader can still tell a decided-before-dispatch cell from a billed one.
+ */
 export function spendOf(
   records: readonly CellRecord[],
   planned: number,
@@ -367,13 +384,11 @@ export function spendOf(
   let attempts = 0;
   let estimatedInputTokens = 0;
   let output: number | null = null;
-  let completed = 0;
   let started = 0;
   for (const record of records) {
     attempts += record.attempts.length;
     estimatedInputTokens += record.material?.estimatedInputTokens ?? 0;
     if (record.attempts.length > 0) started += 1;
-    if (record.status === 'reviewed') completed += 1;
     for (const attempt of record.attempts) {
       const value = attempt.normalizedUsage?.tokens.outputTokens ?? null;
       if (value === null) continue;
@@ -382,7 +397,7 @@ export function spendOf(
   }
   return {
     cellsStarted: started,
-    cellsCompleted: completed,
+    cellsCompleted: records.length,
     cellsPlanned: planned,
     attempts,
     estimatedInputTokens,
@@ -410,6 +425,8 @@ export function indexFrom(parts: {
   readonly outcome: DispatchOutcome | null;
   readonly now: () => number;
   readonly planned: number;
+  /** Whether this pass continued an earlier one, which is what the log records. */
+  readonly continuation: boolean;
 }): RunIndex {
   const byCell = new Map(
     parts.records.map((record) => [record.cellId, record] as const),
@@ -446,7 +463,7 @@ export function indexFrom(parts: {
   });
   const spent = spendOf(parts.records, parts.planned);
   const resumed =
-    parts.outcome === null
+    parts.outcome === null || !parts.continuation
       ? parts.existing.resumed
       : [
           ...parts.existing.resumed,

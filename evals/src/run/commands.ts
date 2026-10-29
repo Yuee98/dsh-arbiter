@@ -411,10 +411,12 @@ export async function executeRun(
       llm: null,
       readCredential: env,
       signal: command.signal,
+      // Only this branch continues an existing run; the first pass below is a new one.
+      continuation: true,
       now,
     });
     reportRun(io, directory, outcome.index.status, outcome.index.spent);
-    return 0;
+    return outcome.index.status === 'complete' ? 0 : 1;
   }
   // A run directory that already exists is not overwritten: a new run belongs in a new
   // directory, and continuing one is `--resume`.
@@ -447,6 +449,7 @@ export async function executeRun(
     llm: null,
     readCredential: env,
     signal: command.signal,
+    continuation: false,
     now,
   });
   reportRun(io, directory, outcome.index.status, outcome.index.spent);

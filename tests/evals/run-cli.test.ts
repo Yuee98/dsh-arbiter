@@ -8,7 +8,7 @@
  * files, because a mocked command would leave exactly that boundary untested.
  */
 
-import { readdir, rm } from 'node:fs/promises';
+import { readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import { parseRunCommand } from '../../evals/src/cli/run-commands.js';
 import { RUN_FILES } from '../../evals/src/run/artifact.js';
 import { defaultRunDirectory, runIdOf } from '../../evals/src/run/commands.js';
 import {
+  bounds,
   cellIdOf,
   chatAnswer,
   fixtureCell,
@@ -82,6 +83,52 @@ async function seedPlan(
     fixture: join(area.path, 'fixture.json'),
   });
   await area.write('fixture.json', fixtureOf(cells));
+}
+
+/**
+ * Read a run index the way the runner wrote it.
+ *
+ * The two fields the assertions need are read through a guard rather than asserted into a
+ * type: a test that asserted them would keep passing if the writer stopped producing
+ * them, which is the opposite of what a test of a written document should do.
+ */
+async function readIndex(path: string): Promise<{
+  readonly spent: {
+    readonly attempts: number;
+    readonly cellsCompleted: number;
+    readonly cellsStarted: number;
+  };
+  readonly resumed: readonly unknown[];
+  readonly status: string;
+}> {
+  const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new TypeError(`${path} is not a run index`);
+  }
+  const spent: unknown = Reflect.get(parsed, 'spent');
+  const resumed: unknown = Reflect.get(parsed, 'resumed');
+  const status: unknown = Reflect.get(parsed, 'status');
+  if (spent === null || typeof spent !== 'object') {
+    throw new TypeError(`${path} has no spent totals`);
+  }
+  const attempts: unknown = Reflect.get(spent, 'attempts');
+  const cellsCompleted: unknown = Reflect.get(spent, 'cellsCompleted');
+  const cellsStarted: unknown = Reflect.get(spent, 'cellsStarted');
+  if (
+    typeof attempts !== 'number' ||
+    typeof cellsCompleted !== 'number' ||
+    typeof cellsStarted !== 'number'
+  ) {
+    throw new TypeError(`${path} has no numeric spent totals`);
+  }
+  if (!Array.isArray(resumed) || typeof status !== 'string') {
+    throw new TypeError(`${path} has no resumed log or status`);
+  }
+  return {
+    spent: { attempts, cellsCompleted, cellsStarted },
+    resumed,
+    status,
+  };
 }
 
 /** The absolute path of a document inside one temporary area. */
@@ -384,6 +431,137 @@ describe('run', () => {
       expect(resumed.out.join('\n')).toContain(
         '2/2 cells have a record, 0 pending',
       );
+    });
+  });
+
+  it('continues a cancelled run in place, leaving the finished record untouched', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
+      });
+      const cells = [
+        cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+        cellIdOf({
+          caseId: 'read-repo-index-with-cache',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+      ];
+      await area.write('plan.json', {
+        ...plan,
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+      );
+      // A first pass the operator cancelled: an already-aborted lifetime dispatches
+      // nothing, which leaves every cell with no record.
+      const controller = new AbortController();
+      controller.abort();
+      const interrupted = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        { ...recorder(area.path).io, signal: controller.signal },
+      );
+      expect(interrupted).toBe(1);
+      await expect(
+        readdir(join(area.path, 'run', RUN_FILES.records)),
+      ).resolves.toEqual([]);
+
+      // The operator continues: the same plan, the same fixture, no new head.
+      const second = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        recorder(area.path).io,
+      );
+      expect(second).toBe(0);
+      const files = await readdir(join(area.path, 'run', RUN_FILES.records));
+      expect(files).toHaveLength(2);
+      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      // Two cells, two attempts, counted once each: the cancelled pass spent nothing and
+      // the continuation did not double-count anything.
+      expect(index.spent.attempts).toBe(2);
+      expect(index.spent.cellsCompleted).toBe(2);
+      expect(index.resumed).toHaveLength(1);
+    });
+  });
+
+  it('does not re-run a cell that already has a record, even a failed one', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
+      });
+      const cells = [
+        cellIdOf({
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+        cellIdOf({
+          caseId: 'read-repo-index-with-cache',
+          targetId: 'chat-a',
+          protocol: 'chat',
+        }),
+      ];
+      // Only the first cell has a script: the second fails, and its failure is recorded.
+      await area.write('plan.json', {
+        ...plan,
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const failedPath = join(
+        area.path,
+        'run',
+        RUN_FILES.records,
+        `${cells[1] ?? ''}.json`,
+      );
+      const before = await readFile(failedPath, 'utf8');
+
+      // Scripting it now and continuing must not replace the evidence: a recorded failure
+      // is a fact the run already paid for, and re-running it is what another repeat is
+      // for.
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+      );
+      const resumed = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        resumed.io,
+      );
+      // The exit code follows the run's status: this directory is complete, so continuing
+      // it is a successful no-op.
+      expect(code).toBe(0);
+      expect(await readFile(failedPath, 'utf8')).toBe(before);
+      // Both cells are decided: one was reviewed and one failed, and a recorded failure is
+      // a result the run already paid for. Nothing was pending, so nothing was sent.
+      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      expect(index.spent.cellsCompleted).toBe(2);
+      expect(index.spent.cellsStarted).toBe(1);
+      expect(index.status).toBe('complete');
+      // Nothing was pending, so the continuation spent nothing at all.
+      expect(index.spent.attempts).toBe(1);
+      expect(resumed.out.join('\n')).toContain('2/2 cells decided');
     });
   });
 

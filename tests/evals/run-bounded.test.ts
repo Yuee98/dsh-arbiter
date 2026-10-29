@@ -152,6 +152,7 @@ async function runPlanIn(parts: {
     llm: null,
     readCredential: () => undefined,
     signal: parts.signal ?? new AbortController().signal,
+    continuation: false,
     now: () => 1_000,
   });
   return {
@@ -746,6 +747,7 @@ describe('bounds', () => {
         llm: hung,
         readCredential: () => undefined,
         signal: new AbortController().signal,
+        continuation: false,
         now: () => 1_000,
       });
       const record = (await recordsOf(directory))[0];
@@ -837,6 +839,7 @@ describe('continuation', () => {
         llm: null,
         readCredential: () => undefined,
         signal: new AbortController().signal,
+        continuation: true,
         now: () => 1_000,
         onProgress: (record) => {
           // Stop the run after the first record by throwing out of the callback, which
@@ -864,6 +867,7 @@ describe('continuation', () => {
         llm: null,
         readCredential: () => undefined,
         signal: new AbortController().signal,
+        continuation: true,
         now: () => 2_000,
       });
       const final = await recordsOf(directory);
