@@ -177,22 +177,48 @@ function executionOf(
   return { origin: repeat === 1 ? 'original' : 'repeat', repeat, transport };
 }
 
+/**
+ * The target a cell actually used, in its own protocol's terms.
+ *
+ * The plan's `target` is one model offered through one or more protocols, and each
+ * protocol carries its own configuration: a chat section names a provider and a model, a
+ * decision section names an endpoint and a tier. Reading `target.model` and the decision
+ * tier for a chat cell (or the reverse) would attribute a request to semantics the call
+ * never used, so the record takes the section matching the protocol that ran.
+ */
 function targetRecordOf(
   target: RunTarget,
   protocol: RunProtocol,
   attempts: readonly ReviewAttempt[],
   costTier: CellTargetRecord['costTier'],
 ): CellTargetRecord {
+  const configured =
+    protocol === 'chat'
+      ? { provider: target.chat?.provider, model: target.chat?.model }
+      : { provider: target.provider, model: target.decision?.model };
   return {
     targetId: target.targetId,
-    provider: target.provider,
-    configuredModel: target.model,
+    provider: configured.provider ?? target.provider,
+    configuredModel: configured.model ?? target.model,
     modelVersion: target.modelVersion,
     protocol,
     protocolName: protocolNameOf(attempts),
     responseModel: responseModelOf(attempts),
     costTier,
   };
+}
+
+/** The cost tier the protocol that ran actually has. */
+function tierOf(
+  target: RunTarget,
+  protocol: RunProtocol,
+): CellTargetRecord['costTier'] {
+  // Only a decision endpoint has a tier at all; a chat call is billed by the host's own
+  // route, so its tier is unknown rather than borrowed from a decision section that this
+  // cell never touched.
+  return protocol === 'decision'
+    ? (target.decision?.costTier ?? 'unknown')
+    : 'unknown';
 }
 
 /**
@@ -339,7 +365,7 @@ function recordOf(parts: {
       deps.target,
       deps.protocol,
       parts.attempts,
-      deps.target.decision?.costTier ?? 'unknown',
+      tierOf(deps.target, deps.protocol),
     ),
     material: parts.material.material,
     status: parts.status,

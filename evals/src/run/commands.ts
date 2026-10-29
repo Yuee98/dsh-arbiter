@@ -14,7 +14,7 @@
  */
 
 import { mkdir, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
@@ -35,10 +35,10 @@ import {
   writeJson,
 } from './artifact.js';
 import { createRun, readExisting, resumeRun } from './lifecycle.js';
-import { cellGrid, planProblems } from './plan.js';
+import { cellGrid, effectivePlan, planProblems } from './plan.js';
 import { compileRunCheckers } from './schemas.js';
 import type { RunCheckers } from './schemas.js';
-import type { RunFixture, RunPlan, RunVersions } from './types.js';
+import type { RunFixture, RunLlmLike, RunPlan, RunVersions } from './types.js';
 import { RUNNER_IMPLEMENTATION_VERSION, RUN_PLAN_VERSION } from './types.js';
 
 /** Where one command writes its human-readable output. */
@@ -48,6 +48,14 @@ export interface RunIo {
   readonly err: (line: string) => void;
   /** Reads one environment variable; abstracted so a test needs no real credential. */
   readonly env?: (name: string) => string | undefined;
+  /**
+   * The host LLM service, when the caller has one.
+   *
+   * The CLI has none, so a live chat plan is refused before it writes anything. A caller
+   * that does hold the service — an in-process run — passes it here and the same code
+   * path becomes usable instead of silently failing every cell at the transport.
+   */
+  readonly llm?: RunLlmLike;
 }
 
 /** What `run` was asked to do. */
@@ -188,9 +196,10 @@ export function unknownCaseIds(
   plan: RunPlan,
   cases: readonly ReviewCase[],
 ): readonly string[] {
-  if (plan.caseIds.length === 0) return [];
+  const named = plan.caseIds ?? [];
+  if (named.length === 0) return [];
   const published = new Set(cases.map((entry) => entry.caseId));
-  return plan.caseIds.filter((caseId) => !published.has(caseId));
+  return named.filter((caseId) => !published.has(caseId));
 }
 
 /**
@@ -205,10 +214,25 @@ export function resolveCases(
   plan: RunPlan,
   cases: readonly ReviewCase[],
 ): readonly ReviewCase[] {
-  if (plan.caseIds.length > 0)
-    return cases.filter((entry) => plan.caseIds.includes(entry.caseId));
+  const named = plan.caseIds ?? [];
+  if (named.length > 0) {
+    return cases.filter((entry) => named.includes(entry.caseId));
+  }
   if (plan.split === 'all') return cases;
   return cases.filter((entry) => entry.split === plan.split);
+}
+
+/**
+/**
+ * Where a plan's fixture lives.
+ *
+ * The published schema says the path is relative to the plan document, so that is what
+ * this does: a plan and its fixture can be moved together and keep working. Resolving
+ * against the repository root instead would reject a portable plan that the schema
+ * accepts, and would make the contract the schema publishes untrue.
+ */
+function fixturePathOf(planPath: string, fixture: string): string {
+  return isAbsolute(fixture) ? fixture : resolve(dirname(planPath), fixture);
 }
 
 /**
@@ -227,7 +251,8 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     return 1;
   }
   const plan = read.plan;
-  const problems = planProblems(plan);
+  // The selection is judged after the split is resolved, so the earlier pass skips it.
+  const problems = planProblems(plan, { selectionKnown: false });
   if (problems.length > 0) {
     for (const problem of problems) io.err(`problem ${problem}`);
     return 1;
@@ -249,13 +274,18 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     );
     return 1;
   }
-  const resolvedPlan = withResolvedCases(
-    plan,
-    resolveCases(plan, dataset.dataset.cases),
-  );
+  const resolvedCases = resolveCases(plan, dataset.dataset.cases);
+  const selectionProblems = planProblems(plan, {
+    resolvedCases: resolvedCases.length,
+  });
+  if (selectionProblems.length > 0) {
+    for (const problem of selectionProblems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const resolvedPlan = withResolvedCases(plan, resolvedCases);
   const grid = cellGrid(resolvedPlan);
   io.out(
-    `plan ${plan.datasetId} split ${plan.split}: ${String(resolvedPlan.caseIds.length)} cases`,
+    `plan ${plan.datasetId} split ${plan.split}: ${String(resolvedPlan.caseIds?.length ?? 0)} cases`,
   );
   io.out(
     `targets ${String(plan.targets.length)}, protocols ${plan.protocols.join('+')}, repeats ${String(plan.repeats)}`,
@@ -268,7 +298,10 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
   );
   io.out(`transport ${plan.transport}`);
   if (plan.fixture !== null) {
-    const fixture = await readFixture(resolve(io.root, plan.fixture), checkers);
+    const fixture = await readFixture(
+      fixturePathOf(resolve(io.root, command.planPath), plan.fixture),
+      checkers,
+    );
     if (!fixture.ok) {
       io.err(`problem ${fixture.message}`);
       return 1;
@@ -312,7 +345,10 @@ function withResolvedCases(
   plan: RunPlan,
   cases: readonly ReviewCase[],
 ): RunPlan {
-  return { ...plan, caseIds: cases.map((entry) => entry.caseId) };
+  return effectivePlan(
+    plan,
+    cases.map((entry) => entry.caseId),
+  );
 }
 
 /**
@@ -335,7 +371,7 @@ export async function executeRun(
     return 1;
   }
   const plan = read.plan;
-  const planIssues = planProblems(plan);
+  const planIssues = planProblems(plan, { selectionKnown: false });
   if (planIssues.length > 0) {
     for (const problem of planIssues) io.err(`problem ${problem}`);
     return 1;
@@ -353,27 +389,30 @@ export async function executeRun(
     return 1;
   }
   const cases = resolveCases(plan, dataset.dataset.cases);
+  const selectionProblems = planProblems(plan, { resolvedCases: cases.length });
+  if (selectionProblems.length > 0) {
+    for (const problem of selectionProblems) io.err(`problem ${problem}`);
+    return 1;
+  }
   const resolvedPlan = withResolvedCases(plan, cases);
   if (command.dryRun) {
     return planRun(io, command);
   }
   const env = io.env ?? ((name: string) => process.env[name]);
   if (resolvedPlan.transport === 'live') {
-    const missing = resolvedPlan.targets
-      .filter((target) => target.credentialRef !== null)
-      .map((target) => target.credentialRef ?? '')
-      .filter((name) => (env(name) ?? '').length === 0);
-    if (missing.length > 0) {
-      io.err(
-        `problem a live run needs ${[...new Set(missing)].join(', ')}; refusing to start without it`,
-      );
+    // A live cell needs a route it can actually take. Both reasons are checked before the
+    // directory is created, because a run that starts and then fails every cell produces
+    // a directory full of identical failures that look like provider outages.
+    const unroutable = liveProblems(resolvedPlan, io.llm ?? null, env);
+    if (unroutable.length > 0) {
+      for (const problem of unroutable) io.err(`problem ${problem}`);
       return 1;
     }
   }
   let fixture: RunFixture | null = null;
   if (resolvedPlan.fixture !== null) {
     const loaded = await readFixture(
-      resolve(io.root, resolvedPlan.fixture),
+      fixturePathOf(resolve(io.root, command.planPath), resolvedPlan.fixture),
       checkers,
     );
     if (!loaded.ok) {
@@ -391,7 +430,12 @@ export async function executeRun(
   const now = (): number => Date.now();
   const runId = runIdOf(resolvedPlan, planDigest(resolvedPlan));
   if (command.resume) {
-    const existing = await readExisting(directory, resolvedPlan, checkers);
+    const existing = await readExisting(
+      directory,
+      resolvedPlan,
+      checkers,
+      dataset.dataset.digest,
+    );
     if (!existing.ok) {
       for (const problem of existing.problems) io.err(`problem ${problem}`);
       return 1;
@@ -408,7 +452,7 @@ export async function executeRun(
       },
       versions,
       checkers,
-      llm: null,
+      llm: io.llm ?? null,
       readCredential: env,
       signal: command.signal,
       // Only this branch continues an existing run; the first pass below is a new one.
@@ -418,9 +462,18 @@ export async function executeRun(
     reportRun(io, directory, outcome.index.status, outcome.index.spent);
     return outcome.index.status === 'complete' ? 0 : 1;
   }
-  // A run directory that already exists is not overwritten: a new run belongs in a new
-  // directory, and continuing one is `--resume`.
+  // An occupied destination is refused before either document is published. Continuing
+  // an experiment is `--resume`, which checks the plan hash; a second `run` into the same
+  // directory would replace the frozen plan and index while leaving the old records in
+  // place, producing a directory that describes two experiments at once.
   await mkdir(directory, { recursive: true });
+  const occupied = await occupiedRun(directory);
+  if (occupied !== null) {
+    io.err(
+      `problem ${directory} already holds ${occupied}; refusing to overwrite it. Use --resume to continue that run, or --dir to name a new one`,
+    );
+    return 1;
+  }
   const created = await createRun({
     directory,
     runId,
@@ -446,7 +499,7 @@ export async function executeRun(
     },
     versions,
     checkers,
-    llm: null,
+    llm: io.llm ?? null,
     readCredential: env,
     signal: command.signal,
     continuation: false,
@@ -454,6 +507,67 @@ export async function executeRun(
   });
   reportRun(io, directory, outcome.index.status, outcome.index.spent);
   return outcome.index.status === 'complete' ? 0 : 1;
+}
+
+/**
+ * Whether a directory already holds a run, and which document proves it.
+ *
+ * Both documents are checked rather than only the index: a directory someone emptied by
+ * hand is a fresh destination, while one holding either file is somebody's run.
+ */
+async function occupiedRun(directory: string): Promise<string | null> {
+  for (const name of [RUN_FILES.index, RUN_FILES.plan]) {
+    const present = await readFile(resolve(directory, name), 'utf8').then(
+      () => true,
+      () => false,
+    );
+    if (present) return name;
+  }
+  return null;
+}
+
+/**
+ * Why a live plan cannot dispatch, before anything is written.
+ *
+ * A chat cell needs an LLM service to stream through; this command has none, so a live
+ * chat target is refused here with the reason rather than at the transport, where it
+ * would surface as one failed cell per scripted call. A decision cell needs its
+ * credential. `provider: "session"` is refused for the same reason production refuses it:
+ * there is no host session in a headless run.
+ */
+export function liveProblems(
+  plan: RunPlan,
+  llm: RunLlmLike | null,
+  env: (name: string) => string | undefined,
+): readonly string[] {
+  const problems: string[] = [];
+  const chats = plan.protocols.includes('chat');
+  const decisions = plan.protocols.includes('decision');
+  const chatTargets = plan.targets.filter((target) => target.chat !== null);
+  const decisionTargets = plan.targets.filter(
+    (target) => target.decision !== null,
+  );
+  if (chats && chatTargets.length > 0 && llm === null) {
+    problems.push(
+      'a live chat cell needs the host LLM service, which this command does not have; run a chat plan offline, or reach a chat model through a decision endpoint',
+    );
+  }
+  for (const target of chatTargets) {
+    if (target.chat?.provider === 'session') {
+      problems.push(
+        `target ${target.targetId} asks for provider "session", which no headless run has`,
+      );
+    }
+  }
+  if (decisions && decisionTargets.length > 0) {
+    const missing = decisionTargets
+      .map((target) => target.credentialRef ?? target.decision?.apiKeyRef ?? '')
+      .filter((name) => (env(name) ?? '').length === 0);
+    for (const name of new Set(missing)) {
+      problems.push(`a live run needs ${name}; refusing to start without it`);
+    }
+  }
+  return problems;
 }
 
 /** The default directory one run writes into, outside version control. */

@@ -69,7 +69,7 @@ export function planCases(
   cases: readonly ReviewCase[],
 ): readonly ReviewCase[] {
   const byId = new Map(cases.map((entry) => [entry.caseId, entry] as const));
-  return plan.caseIds.flatMap((caseId) => {
+  return (plan.caseIds ?? []).flatMap((caseId) => {
     const entry = byId.get(caseId);
     return entry === undefined ? [] : [entry];
   });
@@ -87,7 +87,7 @@ export async function createRun(
   options: CreateRunOptions,
 ): Promise<CreateResult> {
   const problems = [...planProblems(options.plan)];
-  const missing = options.plan.caseIds.filter(
+  const missing = (options.plan.caseIds ?? []).filter(
     (caseId) => !options.cases.some((entry) => entry.caseId === caseId),
   );
   if (missing.length > 0) {
@@ -108,8 +108,8 @@ export async function createRun(
     dataset: {
       datasetId: options.plan.datasetId,
       digest: options.datasetDigest,
-      caseCount: options.plan.caseIds.length,
-      caseIds: options.plan.caseIds,
+      caseCount: (options.plan.caseIds ?? []).length,
+      caseIds: options.plan.caseIds ?? [],
     },
     versions: options.versions,
     transport: options.plan.transport,
@@ -215,6 +215,7 @@ export async function readExisting(
   directory: string,
   plan: RunPlan,
   checkers: RunCheckers,
+  datasetDigest?: string,
 ): Promise<ResumeRead> {
   let indexRaw: unknown;
   try {
@@ -247,6 +248,17 @@ export async function readExisting(
       problems: [
         `the plan does not match the run it would continue: recorded ${index.planHash}, supplied ${expected}`,
         `recorded plan: ${canonicalJson(index.plan)}`,
+      ],
+    };
+  }
+  if (datasetDigest !== undefined && index.dataset.digest !== datasetDigest) {
+    // The run was frozen against a dataset revision. Continuing it against a different
+    // one would mix cases from two selections under one plan hash, and a report could not
+    // tell which revision a cell's input belonged to.
+    return {
+      ok: false,
+      problems: [
+        `the dataset revision moved since this run was frozen: recorded ${index.dataset.digest}, now ${datasetDigest}`,
       ],
     };
   }
@@ -313,6 +325,10 @@ export async function resumeRun(options: {
     llm: options.llm,
     readCredential: options.readCredential,
     signal: options.signal,
+    // The continuation inherits the run's remaining allowance, not a fresh one: without
+    // this, each pass could spend the full maximum and the cumulative total would exceed
+    // the bound the frozen plan declared.
+    alreadySpentAttempts: attemptsIn(options.existing.records),
     now,
     onSettled: async (result) => {
       if (result.record !== null) {
@@ -337,6 +353,11 @@ export async function resumeRun(options: {
   });
   await writeJson(join(options.directory, RUN_FILES.index), index);
   return { index, dispatch: outcome, ran: pending.length };
+}
+
+/** The attempts a set of records already paid for. */
+function attemptsIn(records: readonly CellRecord[]): number {
+  return records.reduce((sum, record) => sum + record.attempts.length, 0);
 }
 
 /** The fixture entries, keyed by cell id for the scheduler. */

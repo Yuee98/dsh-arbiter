@@ -172,22 +172,39 @@ export function usageAttemptsOf(record: CellRecord): readonly {
 }
 
 /**
- * The cell statuses that must have a record file.
+ * The cell statuses a dispatch produced, so a record must exist.
  *
- * These are the statuses a *dispatched* cell can settle at, and a dispatched cell always
- * produces a record: the runner writes one even when the request failed, so the attempts
- * it made are kept. A status outside this set is a decision reached without an attempt —
- * a plan-level refusal, an exhausted budget, a cell the run never reached — and having
- * no record is exactly right for it.
+ * A dispatched cell always writes a record, whatever it settled at: the runner keeps the
+ * attempts a failure made, so `failed` belongs here beside `reviewed`, `timeout` and
+ * `cancelled`. Leaving `failed` out let a persisted failure disappear from a report's
+ * evidence population without the reader saying so.
  *
- * Stating the rule this way rather than as a list of statuses allowed to be absent is
- * what makes a missing record an error: a cell that says it ran and has no evidence is a
- * gap, not a settled decision.
+ * A status outside this set is a decision reached *before* dispatch — a plan-level
+ * refusal, an exhausted budget, a cell the run never reached — and having no record is
+ * exactly right for it. Stating the rule as "these must have a record" rather than
+ * "these may lack one" is what keeps a dispatched failure from being read as a settled
+ * non-event.
  */
 const NEEDS_RECORD: ReadonlySet<CellState['status']> = new Set([
   'reviewed',
   'cancelled',
   'timeout',
+  'failed',
+]);
+
+/**
+ * The cell statuses that are a decision reached before any request.
+ *
+ * These have no record by construction, and `unresolvable` is the status a pre-dispatch
+ * refusal takes precisely so it cannot be confused with `failed`. The pair of sets is
+ * exhaustive over the settled statuses, which is what lets a reader decide whether a
+ * missing record is a gap or the expected shape of that status.
+ */
+export const RECORDLESS_STATUSES: ReadonlySet<CellState['status']> = new Set([
+  'unsupported',
+  'budget-exhausted',
+  'unresolvable',
+  'not-run',
 ]);
 
 /** One run directory, as a consumer sees it. */

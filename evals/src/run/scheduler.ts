@@ -73,11 +73,26 @@ export interface DispatchOptions {
   readonly signal: AbortSignal;
   /** Called as each cell settles, so a caller can persist progress incrementally. */
   readonly onSettled?: (result: DispatchResult) => void | Promise<void>;
+  /**
+   * Attempts this run already made before this pass.
+   *
+   * A continuation must respect the run's original ceiling, so its remaining allowance is
+   * the plan maximum minus what the records prove was already spent.
+   */
+  readonly alreadySpentAttempts?: number;
   readonly now?: () => number;
 }
 
 /** Why a run stopped dispatching. */
-export type StopReason = 'cancelled' | 'budget-exhausted';
+/**
+ * Why dispatch stopped before the grid was walked.
+ *
+ * `in-flight-timeout` is its own reason rather than a timeout status: one cell's own bound
+ * expired while its request was still outstanding, so the runner stopped taking work it
+ * could not account for. No status is reused for it, because "a cell timed out" and "the
+ * run stopped because a call was abandoned" are different facts about the artifact.
+ */
+export type StopReason = 'cancelled' | 'budget-exhausted' | 'in-flight-timeout';
 
 /** The whole run's dispatch outcome. */
 export interface DispatchOutcome {
@@ -127,13 +142,22 @@ export function pendingCells(
  * Kept as one object rather than as closure variables so the reservation and release
  * rules live together: a reservation taken before an `await` and released after one is
  * the only thing that keeps two workers from spending the same last attempt.
+ *
+ * `alreadySpent` is not an optimisation. A continuation dispatches a *subset* of the
+ * plan's cells, so a budget that starts from the plan maximum would hand every
+ * continuation a fresh allowance and let the cumulative attempts exceed the bound the
+ * plan declared. The spent count therefore comes from the records on disk, which is the
+ * same source the index's totals are recomputed from.
  */
 class Budget {
   private remainingAttempts: number;
   private readonly maxInputTokens: number;
 
-  constructor(plan: RunPlan) {
-    this.remainingAttempts = plan.bounds.maxAttempts;
+  constructor(plan: RunPlan, alreadySpent: number) {
+    this.remainingAttempts = Math.max(
+      0,
+      plan.bounds.maxAttempts - alreadySpent,
+    );
     this.maxInputTokens = plan.bounds.maxInputTokens;
   }
 
@@ -141,6 +165,7 @@ class Budget {
   reserve(parts: {
     readonly ceiling: number;
     readonly estimatedInputTokens: number;
+    readonly inputCap: number;
   }): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
     if (parts.ceiling > this.remainingAttempts) {
       return {
@@ -148,10 +173,10 @@ class Budget {
         reason: `the run's attempt budget cannot cover this cell: it needs up to ${String(parts.ceiling)} attempt(s) and ${String(this.remainingAttempts)} remain`,
       };
     }
-    if (parts.estimatedInputTokens > this.maxInputTokens) {
+    if (parts.estimatedInputTokens > parts.inputCap) {
       return {
         ok: false,
-        reason: `this case renders to ${String(parts.estimatedInputTokens)} estimated input tokens, above the run's ${String(this.maxInputTokens)} bound`,
+        reason: `this case renders to ${String(parts.estimatedInputTokens)} estimated input tokens, above this protocol's ${String(parts.inputCap)} bound`,
       };
     }
     this.remainingAttempts -= parts.ceiling;
@@ -175,14 +200,12 @@ export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchOutcome> {
   const now = options.now ?? (() => Date.now());
-  const budget = new Budget(options.plan);
+  const budget = new Budget(options.plan, options.alreadySpentAttempts ?? 0);
   const results: DispatchResult[] = [];
-  const accounted = new Map<string, DispatchResult>();
   const state = { cursor: 0, stopped: null as StopReason | null };
 
   const settle = async (result: DispatchResult): Promise<void> => {
     results.push(result);
-    accounted.set(result.cellId, result);
     await options.onSettled?.(result);
   };
 
@@ -233,10 +256,13 @@ export async function dispatch(
       }
       const prepared = prepare(cell, options);
       if ('reason' in prepared) {
+        // Nothing was sent, so there is no record and no attempt. Calling this `failed`
+        // would put it in the population of dispatched failures whose evidence a reader
+        // expects to find, which is not what happened.
         await settle({
           cellId: cell.cellId,
           record: null,
-          status: 'failed',
+          status: 'unresolvable',
           attempts: 0,
           stopReason: prepared.reason,
         });
@@ -259,6 +285,7 @@ export async function dispatch(
       const reserved = budget.reserve({
         ceiling,
         estimatedInputTokens: material.material.estimatedInputTokens,
+        inputCap: options.plan.bounds.maxInputTokens,
       });
       if (!reserved.ok) {
         // The budget, not this cell, is what ran out: stopping dispatch is the
@@ -274,7 +301,7 @@ export async function dispatch(
         await abandonRest('the run stopped after its budget was exhausted');
         return;
       }
-      const settledCell = await runUnderTimeout({
+      const { result: settledCell, abandoned } = await runUnderTimeout({
         cell,
         caseEntry,
         target,
@@ -282,6 +309,15 @@ export async function dispatch(
         options,
         now,
       });
+      if (abandoned) {
+        // The reservation stays consumed and the worker does not take another cell: the
+        // request it gave up on may still be in flight, so starting another would exceed
+        // the concurrency the plan declared. Dispatch stops, and the remaining cells are
+        // recorded as never started rather than as budget-exhausted.
+        await settle(settledCell);
+        state.stopped = 'in-flight-timeout';
+        return;
+      }
       budget.release({ reserved: ceiling, used: settledCell.attempts });
       await settle(settledCell);
     }
@@ -296,11 +332,7 @@ export async function dispatch(
   // A run that was cancelled before its workers drained leaves cells unclaimed. They
   // never ran, and the artifact says so instead of reporting a short grid as whole.
   if (state.cursor < options.cells.length) {
-    await abandonRest(
-      state.stopped === 'budget-exhausted'
-        ? 'the run stopped after its budget was exhausted'
-        : 'the run was cancelled before this cell started',
-    );
+    await abandonRest(stopExplanation(state.stopped));
   }
 
   const estimatedInputTokens = results.reduce(
@@ -379,7 +411,7 @@ async function runUnderTimeout(parts: {
   readonly material: Prepared['material'];
   readonly options: DispatchOptions;
   readonly now: () => number;
-}): Promise<DispatchResult> {
+}): Promise<{ readonly result: DispatchResult; readonly abandoned: boolean }> {
   const timeout = AbortSignal.timeout(parts.options.plan.bounds.timeoutMs);
   const composed = AbortSignal.any([parts.options.signal, timeout]);
   const deps = {
@@ -432,18 +464,40 @@ async function runUnderTimeout(parts: {
     });
     const status = parts.options.signal.aborted ? 'cancelled' : 'timeout';
     return {
-      cellId: parts.cell.cellId,
-      record: { ...record, status },
-      status,
-      attempts: 0,
-      stopReason: record.stopReason,
+      result: {
+        cellId: parts.cell.cellId,
+        record: { ...record, status },
+        status,
+        attempts: 0,
+        stopReason: record.stopReason,
+      },
+      // The abandoned call may still be running — and may still be billed — so it counts
+      // as in flight. Treating it as finished would free its slot and could put more live
+      // requests on the wire than the plan's concurrency allows.
+      abandoned: true,
     };
   }
   return {
-    cellId: parts.cell.cellId,
-    record: bounded.settled.record,
-    status: bounded.settled.record.status,
-    attempts: bounded.settled.record.attempts.length,
-    stopReason: bounded.settled.record.stopReason,
+    result: {
+      cellId: parts.cell.cellId,
+      record: bounded.settled.record,
+      status: bounded.settled.record.status,
+      attempts: bounded.settled.record.attempts.length,
+      stopReason: bounded.settled.record.stopReason,
+    },
+    abandoned: false,
   };
+}
+
+/** Why the cells after a stop never started, in the artifact's own words. */
+function stopExplanation(reason: StopReason | null): string {
+  switch (reason) {
+    case 'budget-exhausted':
+      return 'the run stopped after its budget was exhausted';
+    case 'in-flight-timeout':
+      return 'the run stopped because a cell was abandoned while its request was outstanding, so no further request was started';
+    case 'cancelled':
+    case null:
+      return 'the run was cancelled before this cell started';
+  }
 }

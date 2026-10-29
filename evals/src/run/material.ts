@@ -303,7 +303,12 @@ export function caseMaterial(
     material: {
       inputHash: digestOf(input),
       promptFingerprint,
-      estimatedInputTokens: snapshot.budget.estimatedInputTokens,
+      // The renderer's own estimate for *this* protocol's payload, not the snapshot's
+      // figure. The snapshot records the larger of the two payloads so that one material
+      // can be bounded for either backend, but a chat cell submits only the chat request:
+      // charging it the decision payload's size would refuse a cell the run means to send
+      // and let the wrong protocol decide the bound.
+      estimatedInputTokens: request.estimatedInputTokens,
       maxInputTokens: snapshot.budget.maxInputTokens,
       truncatedSegments: snapshot.budget.truncatedSegments,
       completenessStatus: snapshot.completeness.status,

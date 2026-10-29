@@ -67,12 +67,32 @@ const MAX_CONCURRENCY = 32;
  * exactly the grid cell the artifact must record as unsupported, and refusing the plan
  * would remove the only way to state it.
  */
-export function planProblems(plan: RunPlan): readonly string[] {
+export function planProblems(
+  plan: RunPlan,
+  options: {
+    readonly resolvedCases?: number;
+    /**
+     * Whether the case selection has been resolved yet.
+     *
+     * A plan may omit `caseIds` and let the split choose, so the selection cannot be
+     * judged before the dataset is read. Passing false defers that one check instead of
+     * reporting a problem the plan does not have.
+     */
+    readonly selectionKnown?: boolean;
+  } = {},
+): readonly string[] {
   const problems: string[] = [];
   if (plan.repeats < 1) problems.push('repeats must be at least 1');
   if (plan.protocols.length === 0) problems.push('the plan names no protocol');
   if (plan.targets.length === 0) problems.push('the plan names no target');
-  if (plan.caseIds.length === 0) problems.push('the plan selects no case');
+  // The authored document may omit `caseIds` and let the split choose, which the
+  // published schema allows. So the plan is only wrong when *neither* an explicit list nor
+  // a resolved one selected anything: checking the raw list would refuse a document the
+  // schema accepts, and the two would then disagree about what a valid plan is.
+  if (options.selectionKnown !== false) {
+    const selected = options.resolvedCases ?? (plan.caseIds ?? []).length;
+    if (selected === 0) problems.push('the plan selects no case');
+  }
   const bounds = plan.bounds;
   if (bounds.concurrency < 1 || bounds.concurrency > MAX_CONCURRENCY) {
     problems.push(
@@ -106,6 +126,32 @@ export function planProblems(plan: RunPlan): readonly string[] {
     problems.push('a live plan must not carry a fixture');
   }
   return problems;
+}
+
+/**
+ * The plan a run actually executes.
+ *
+ * The authored document and the resolved plan differ in exactly one way: `caseIds` may be
+ * omitted there and is always present here. Everything that hashes, expands or compares a
+ * plan uses this value, so the integrity check and the frozen selection cannot disagree —
+ * a mismatch that would have made a legitimate continuation look like a drifted plan.
+ */
+export function effectivePlan(
+  plan: RunPlan,
+  caseIds: readonly string[],
+): RunPlan {
+  const named = plan.caseIds ?? [];
+  return named.length > 0 && sameIds(named, caseIds)
+    ? { ...plan, caseIds: named }
+    : { ...plan, caseIds: [...caseIds] };
+}
+
+/** Whether two id lists are identical, in order. */
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((id, index) => id === right[index])
+  );
 }
 
 /**
@@ -160,7 +206,7 @@ function supportOf(
  */
 export function cellGrid(plan: RunPlan): CellGrid {
   const cells: PlannedCell[] = [];
-  for (const caseId of plan.caseIds) {
+  for (const caseId of plan.caseIds ?? []) {
     for (const target of plan.targets) {
       for (const protocol of plan.protocols) {
         const support = supportOf(target, protocol);

@@ -14,6 +14,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { parseCommand, runCli } from '../../evals/src/cli/run.js';
+import { inspectDataset } from '../../evals/src/data/inspect.js';
+import { readDataset } from '../../evals/src/data/read.js';
+import { compileCheckers } from '../../evals/src/data/schemas.js';
+import { REVIEW_CONTRACT_VERSION } from '../../src/review-contract/index.js';
 import type { CliIo } from '../../evals/src/cli/run.js';
 import { parseRunCommand } from '../../evals/src/cli/run-commands.js';
 import { RUN_FILES } from '../../evals/src/run/artifact.js';
@@ -704,5 +708,241 @@ describe('where a run writes', () => {
     const plan = planOf();
     const hash = 'sha256:0123456789abcdef0123456789abcdef';
     expect(runIdOf(plan, hash)).toBe('core-v1-0123456789ab');
+  });
+});
+
+describe('corrections from review', () => {
+  it('refuses an occupied run directory instead of replacing its plan', async () => {
+    // RQ10-B02: `run` into an existing directory replaced plan.json and index.json while
+    // leaving the old records, producing a directory describing two experiments.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      const first = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      expect(first).toBe(0);
+      const planBefore = await readFile(
+        join(area.path, 'run', RUN_FILES.plan),
+        'utf8',
+      );
+      const indexBefore = await readFile(
+        join(area.path, 'run', RUN_FILES.index),
+        'utf8',
+      );
+
+      // A second new run into the same directory, with a different plan.
+      await area.write('beside.json', {
+        ...planOf({ repeats: 2 }),
+        fixture: at(area, 'fixture.json'),
+      });
+      const second = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'beside.json'), '--dir', at(area, 'run')],
+        second.io,
+      );
+      expect(code).toBe(1);
+      expect(second.err.join('\n')).toContain('refusing to overwrite it');
+      // Nothing was replaced: the first experiment is intact byte for byte.
+      expect(
+        await readFile(join(area.path, 'run', RUN_FILES.plan), 'utf8'),
+      ).toBe(planBefore);
+      expect(
+        await readFile(join(area.path, 'run', RUN_FILES.index), 'utf8'),
+      ).toBe(indexBefore);
+    });
+  });
+
+  it('refuses a continuation whose dataset revision moved', async () => {
+    // RQ10-B06: continuing against a different dataset revision would mix two selections
+    // under one plan hash, and a report could not tell which revision an input belonged to.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // Forge a different frozen digest, which is what a moved dataset looks like.
+      const raw: unknown = JSON.parse(
+        await readFile(join(area.path, 'run', RUN_FILES.index), 'utf8'),
+      );
+      if (raw === null || typeof raw !== 'object') {
+        throw new TypeError('the index is not an object');
+      }
+      const frozen: unknown = Reflect.get(raw, 'dataset');
+      if (frozen === null || typeof frozen !== 'object') {
+        throw new TypeError('the index has no dataset block');
+      }
+      Reflect.set(frozen, 'digest', `sha256:${'0'.repeat(64)}`);
+      await area.write(`run/${RUN_FILES.index}`, raw);
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('dataset revision moved');
+    });
+  });
+
+  it('accepts an authored plan that omits caseIds and hashes the resolved one', async () => {
+    // RQ10-B07: the schema lets a plan omit caseIds and let the split choose. Refusing it
+    // made the schema and the linter disagree about what a valid plan is.
+    await withArea(async (area) => {
+      const plan: Record<string, unknown> = {
+        ...planOf({ caseIds: [] }),
+        fixture: at(area, 'fixture.json'),
+      };
+      delete plan['caseIds'];
+      await area.write('plan.json', plan);
+      // Every dev cell the split selects, scripted. The split decides, so the test cannot
+      // assume one case.
+      // The split is resolved by the same inspector a run uses, so the test asserts
+      // against the selection the command will make rather than re-deriving it.
+      const raw = await readDataset(
+        join(REPOSITORY_ROOT, 'evals/datasets/core-v1'),
+      );
+      const dataCheckers = await compileCheckers();
+      const devCases = inspectDataset(raw, dataCheckers, {
+        contract: REVIEW_CONTRACT_VERSION,
+        rubric: 'review-rubric-v1',
+      })
+        .cases.map((entry) => entry.document)
+        .filter((entry) => entry.split === 'dev')
+        .map((entry) => entry.caseId);
+      expect(devCases.length).toBeGreaterThan(1);
+      await area.write(
+        'fixture.json',
+        fixtureOf(
+          Object.fromEntries(
+            devCases.map((caseId) => [
+              cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+              fixtureCell({ chat: [chatAnswer(2, 10)] }),
+            ]),
+          ),
+        ),
+      );
+      const { io, out, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(err.join('\n')).toBe('');
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain('cases');
+      // The published hash is over the resolved selection, which is what a run freezes.
+      expect(out.join('\n')).toContain('planHash sha256:');
+    });
+  });
+
+  it('resolves a relative fixture against the plan document', async () => {
+    // RQ10-B10: the schema says the fixture path is relative to the plan, so a plan and its
+    // fixture can move together.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      // The plan sits in a subdirectory and names its fixture beside itself.
+      await area.write('plans/plan.json', planOf({ fixture: 'fixture.json' }));
+      await area.write(
+        'plans/fixture.json',
+        fixtureOf({ [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }) }),
+      );
+      const { io, out, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plans/plan.json')], io);
+      expect(err.join('\n')).toBe('');
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain('fixture');
+    });
+  });
+
+  it('says why a live chat plan cannot run and writes nothing', async () => {
+    // RQ10-B05: the CLI holds no LLM service, so a live chat cell would fail every attempt
+    // at the transport instead of failing once, before the directory exists.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        targets: [
+          {
+            targetId: 'chat-live',
+            provider: 'some-provider',
+            model: 'some-model',
+            modelVersion: null,
+            chat: {
+              provider: 'some-provider',
+              model: 'some-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 1,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('needs the host LLM service');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('refuses a live plan that asks for the session route', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        targets: [
+          {
+            targetId: 'chat-session',
+            provider: 'session',
+            // A session route names no model of its own; the host supplies it, which is
+            // exactly why a headless run cannot take this route.
+            model: 'session-default',
+            modelVersion: null,
+            chat: {
+              provider: 'session',
+              model: 'session-default',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 1,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      // Refused before anything is written, and the reason is the route, not the directory.
+      expect(err.join('\n')).toContain('live chat cell needs');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
   });
 });

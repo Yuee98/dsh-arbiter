@@ -22,6 +22,7 @@
 
 import type { ReviewOutcome } from '../../../src/review-contract/types.js';
 import type { ReviewAttempt } from '../../../src/reviewer/attempt.js';
+import type { review } from '../../../src/reviewer/service.js';
 import type {
   UsageAggregate,
   UsageNormalized,
@@ -63,6 +64,20 @@ export const RUNNER_IMPLEMENTATION_VERSION = 'eval-runner-v1';
 
 /** The two protocols a review can run through. */
 export type RunProtocol = 'chat' | 'decision';
+
+/**
+ * The LLM service a live chat cell streams through.
+ *
+ * Named structurally, as the production transport's own `llm` member, so the artifact
+ * contract does not restate the production interface: a caller that has the host service
+ * passes it, and one that does not passes nothing and is refused before dispatch.
+ */
+export type RunLlmLike = NonNullable<
+  Extract<
+    NonNullable<Parameters<typeof review>[0]['backend']>,
+    { readonly kind: 'chat' }
+  >['transport']['llm']
+>;
 
 /** Which half of a target's configuration a protocol uses. */
 export type RunTransportName = 'offline' | 'live';
@@ -119,7 +134,14 @@ export interface RunPlan {
   readonly datasetId: string;
   readonly datasetPath: string;
   readonly split: 'dev' | 'calibration' | 'holdout' | 'all';
-  readonly caseIds: readonly string[];
+  /**
+   * The cases the authored plan names, when it names them.
+   *
+   * Absent means "let the split decide", which the published schema allows. A run resolves
+   * it before hashing, so the frozen plan always carries the list; reading the authored
+   * field as always present would crash on a legitimate document.
+   */
+  readonly caseIds?: readonly string[];
   readonly transport: RunTransportName;
   readonly protocols: readonly RunProtocol[];
   readonly targets: readonly RunTarget[];
@@ -232,7 +254,16 @@ export interface CellTargetRecord {
   readonly costTier: 'free' | 'paid' | 'unknown';
 }
 
-/** What the reviewer produced, or why it produced nothing. */
+/**
+ * What the reviewer produced, or why it produced nothing.
+ *
+ * The two families are different facts and the artifact states which one it is:
+ * `reviewed`, `timeout` and `cancelled` are *dispatched* cells, so a record exists and
+ * its attempts are known. `unsupported`, `budget-exhausted` and `unresolvable` are
+ * decided *before* a request, so there is no record and no attempt to report — and
+ * `failed` is the one status that can come from either side, which is why a dispatch
+ * failure always writes a record and a pre-dispatch refusal never claims `failed`.
+ */
 export type CellStatus =
   /** The production service returned an outcome, whatever that outcome was. */
   | 'reviewed'
@@ -244,7 +275,9 @@ export type CellStatus =
   | 'timeout'
   /** A ceiling stopped dispatch before this cell started. */
   | 'budget-exhausted'
-  /** The cell could not be attempted at all. */
+  /** The cell cannot be resolved against the plan or its dataset; nothing was sent. */
+  | 'unresolvable'
+  /** A dispatched cell produced no review result; its record holds what it attempted. */
   | 'failed';
 
 /**
@@ -342,9 +375,21 @@ export interface CellState {
   readonly stopReason: string | null;
 }
 
-/** Why a run stopped short of its plan. */
+/**
+ * Why a run stopped short of its plan.
+ *
+ * `in-flight-timeout` is separate from `cancelled` and from a cell's own `timeout`
+ * status: a cell timed out while its request was still outstanding, so the run stopped
+ * rather than starting work whose concurrency it could no longer bound. A report that
+ * folded it into `cancelled` would suggest an operator stopped the run, which is false.
+ */
 export type RunStatus =
-  'running' | 'complete' | 'cancelled' | 'budget-exhausted' | 'failed';
+  | 'running'
+  | 'complete'
+  | 'cancelled'
+  | 'budget-exhausted'
+  | 'in-flight-timeout'
+  | 'failed';
 
 /** The run's mutable document. */
 export interface RunIndex {

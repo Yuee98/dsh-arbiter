@@ -38,7 +38,14 @@
     "status": {
       "description": "complete means every planned cell reached a record; any other value says why the run stopped early, and the cells that never ran say it too.",
       "type": "string",
-      "enum": ["running", "complete", "cancelled", "budget-exhausted", "failed"]
+      "enum": [
+        "running",
+        "complete",
+        "cancelled",
+        "budget-exhausted",
+        "in-flight-timeout",
+        "failed"
+      ]
     },
     "plan": {
       "description": "The resolved plan. Its caseIds are the list this run froze, not the split expression that produced them.",
@@ -235,6 +242,7 @@
             "cancelled",
             "timeout",
             "budget-exhausted",
+            "unresolvable",
             "failed",
             "not-run"
           ]

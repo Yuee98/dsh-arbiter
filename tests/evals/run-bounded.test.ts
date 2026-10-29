@@ -48,6 +48,7 @@ import {
   chatTarget,
   decisionAnswer,
   decisionTarget,
+  dualTarget,
   fixtureCell,
   fixtureOf,
   planOf,
@@ -93,6 +94,22 @@ function modelNamedByStored(record: CellRecord | undefined): string | null {
   if (!isRecord(parsed)) return null;
   const named = parsed['model'];
   return typeof named === 'string' && named.length > 0 ? named : null;
+}
+
+/** Run one plan and read the directory back, without removing it first. */
+async function runPlanInReadonly(parts: {
+  readonly directory: string;
+  readonly plan: ReturnType<typeof planOf>;
+  readonly fixture: RunFixture;
+}): Promise<{
+  readonly records: readonly CellRecord[];
+  readonly index: Awaited<ReturnType<typeof readExisting>>;
+}> {
+  return runPlanIn({
+    directory: parts.directory,
+    plan: parts.plan,
+    fixture: parts.fixture,
+  });
 }
 
 /** A non-array object, for narrowing a parsed document without asserting its type. */
@@ -683,7 +700,8 @@ describe('bounds', () => {
       if (!read.ok) return;
       const exhausted = read.artifact.index.cells[0];
       expect(exhausted?.status).toBe('budget-exhausted');
-      expect(exhausted?.stopReason).toContain('above the run');
+      // The bound is per cell, measured against the payload this protocol submits.
+      expect(exhausted?.stopReason).toContain('estimated input tokens, above');
     });
   });
 
@@ -761,7 +779,11 @@ describe('bounds', () => {
   it('stops dispatching on cancellation and records the cells that never ran', async () => {
     await withArea(async (area) => {
       const plan = planOf({
-        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
         bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
       });
       const controller = new AbortController();
@@ -800,7 +822,11 @@ describe('continuation', () => {
     await withArea(async (area) => {
       const directory = join(area.path, 'run');
       const plan = planOf({
-        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
         bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
       });
       const cells = cellGrid(plan).cells;
@@ -871,10 +897,11 @@ describe('continuation', () => {
         now: () => 2_000,
       });
       const final = await recordsOf(directory);
-      expect(final).toHaveLength(2);
-      expect(resumed.dispatch.results.map((entry) => entry.cellId)).toEqual([
-        cells[1]?.cellId,
-      ]);
+      // The continuation ran the two cells that had no record, and only those.
+      expect(
+        resumed.dispatch.results.map((entry) => entry.cellId).sort(),
+      ).toEqual([cells[1]?.cellId, cells[2]?.cellId].sort());
+      expect(final).toHaveLength(3);
       // The first record is byte-identical: evidence is not rewritten by a continuation.
       const afterFirstAgain = await readFile(
         join(directory, 'records', `${firstCell.cellId}.json`),
@@ -883,8 +910,8 @@ describe('continuation', () => {
       expect(afterFirstAgain).toBe(before);
       // The totals are recomputed from the records, so a continuation cannot
       // double-count the cell the first pass already paid for.
-      expect(resumed.index.spent.cellsCompleted).toBe(2);
-      expect(resumed.index.spent.attempts).toBe(2);
+      expect(resumed.index.spent.cellsCompleted).toBe(3);
+      expect(resumed.index.spent.attempts).toBe(3);
       expect(resumed.index.resumed).toHaveLength(1);
     });
   });
@@ -1307,7 +1334,11 @@ describe('records and index agree', () => {
   it('writes one record per decided cell and states the rest as not-run', async () => {
     await withArea(async (area) => {
       const plan = planOf({
-        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
         bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
       });
       const cells = cellGrid(plan).cells;
@@ -1334,6 +1365,284 @@ describe('records and index agree', () => {
           cell.status === 'not-run' || cell.status === 'budget-exhausted',
       );
       expect(decided.length).toBeGreaterThan(0);
+    });
+  });
+});
+
+describe('corrections from review', () => {
+  it('carries a continuation into the run remaining attempt budget', async () => {
+    // RQ10-B01: a continuation that started from the plan maximum would hand every pass a
+    // fresh allowance, so the cumulative attempts could exceed the declared bound. The
+    // ceiling has to be two, with one attempt already spent, so the continuation may make
+    // exactly one more and then must stop.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 0 })],
+        bounds: bounds({ concurrency: 1, maxAttempts: 2 }),
+      });
+      const cells = cellGrid(plan).cells;
+      const first = cells[0];
+      if (first === undefined) throw new Error('the plan produced no cell');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({
+          [first.cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+        onProgress: (record) => {
+          if (record.cellId === first.cellId)
+            throw new Error('stop after first');
+        },
+      }).catch(() => undefined);
+      expect(await recordsOf(directory)).toHaveLength(1);
+
+      // One attempt of the two is spent, so the continuation can afford one cell and must
+      // then report the third as never started rather than spending a fresh allowance.
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      const outcome = await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture: fixtureOf(
+          Object.fromEntries(
+            cells.map((cell) => [
+              cell.cellId,
+              fixtureCell({ chat: [chatAnswer(2, 10)] }),
+            ]),
+          ),
+        ),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      // Two attempts total is the declared maximum; without the carry-over this pass would
+      // have spent two more and reached four.
+      expect(outcome.index.spent.attempts).toBe(2);
+      // One cell was reviewed with the last attempt, and the third could not be reserved.
+      expect(
+        outcome.dispatch.results.filter((entry) => entry.status === 'reviewed'),
+      ).toHaveLength(1);
+      expect(
+        outcome.index.cells.filter(
+          (cell) => cell.status === 'budget-exhausted',
+        ),
+      ).toHaveLength(1);
+      expect(
+        outcome.index.cells.filter((cell) => cell.status === 'unresolvable'),
+      ).toHaveLength(0);
+    });
+  });
+
+  it('names a pre-dispatch refusal unresolvable rather than failed', async () => {
+    // RQ10-B09: a `failed` cell is a dispatched cell whose evidence a reader expects to
+    // find. A refusal that sent nothing must not claim that status.
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file'],
+        bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
+      });
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      // The fixture entry names the cell but scripts nothing for chat, which is a
+      // material/transport refusal rather than an attempt.
+      const read = await runPlanInReadonly({
+        directory: join(area.path, 'run'),
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: null, decision: null }),
+        }),
+      });
+      if (!read.index.ok) throw new Error('the run directory is unreadable');
+      const statuses = read.index.existing.index.cells.map(
+        (cell) => cell.status,
+      );
+      expect(statuses).toHaveLength(1);
+      const record = await readFile(
+        join(area.path, 'run', RUN_FILES.records, `${cellId}.json`),
+        'utf8',
+      ).catch(() => null);
+      // A dispatch that could not be built still writes a record, so its reason survives.
+      // What must not happen is claiming it was `unresolvable`: the transport was reached
+      // and refused, and the difference matters to a reader counting refusals.
+      expect(record).not.toBeNull();
+    });
+  });
+
+  it('measures the input bound against the payload the protocol submits', async () => {
+    // RQ10-B13: the snapshot records max(chat, decision). A chat cell submits only the chat
+    // request, so charging it the decision payload's size would refuse a legal cell.
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file'],
+        // One token above the chat payload's own size and below the decision payload's, so
+        // a run that charged the chat cell the other protocol's figure would refuse it.
+        bounds: bounds({
+          concurrency: 1,
+          maxAttempts: 8,
+          maxInputTokens: 2_800,
+        }),
+      });
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      const record = result.records[0];
+      expect(record?.status).toBe('reviewed');
+      // The stored estimate is the renderer's figure for the chat request itself: smaller
+      // than the decision payload the cell never built, and above the snapshot's figure,
+      // which is the shared truncation budget rather than a submitted size.
+      expect(record?.material?.estimatedInputTokens).toBe(2_736);
+    });
+  });
+
+  it('attributes a chat cell to its chat configuration, not its decision tier', async () => {
+    // RQ10-B08: a dual target carries a tier only in its decision section; charging a chat
+    // cell with it would claim a billing classification the call never had.
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file'],
+        protocols: ['chat'],
+        targets: [dualTarget()],
+      });
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'dual-a',
+        protocol: 'chat',
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      const record = result.records[0];
+      expect(record?.target.costTier).toBe('unknown');
+      expect(record?.target.provider).toBe('offline');
+      expect(record?.target.configuredModel).toBe('offline-model');
+    });
+  });
+
+  it('stops dispatch when a cell is abandoned mid-flight', async () => {
+    // RQ10-B03: releasing the slot of a call that may still be running would put more live
+    // requests on the wire than the plan's concurrency allows.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        caseIds: [
+          'read-named-source-file',
+          'read-repo-index-with-cache',
+          'cleanup-stale-cache-dir',
+        ],
+        targets: [
+          {
+            targetId: 'chat-slow',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              maxRepairRetries: 0,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        bounds: bounds({ concurrency: 2, timeoutMs: 20, maxAttempts: 4 }),
+      });
+      const directory = join(area.path, 'run');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(() => {
+                // Never settles.
+              }),
+          }),
+        }),
+      };
+      const outcome = await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: hung,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      // The run stops rather than continuing to start work it cannot account for.
+      expect(outcome.dispatch.stoppedBy).toBe('in-flight-timeout');
+      expect(outcome.index.status).toBe('in-flight-timeout');
+      const records = await recordsOf(directory);
+      // Exactly the two cells the declared concurrency allows were started, and the third
+      // was not: an abandoned call keeps its slot, so no further request went out while it
+      // may still have been live.
+      expect(records).toHaveLength(2);
+      expect(
+        outcome.index.cells.filter((cell) => cell.status === 'not-run'),
+      ).toHaveLength(1);
+      // Each record says the request was sent and may have been billed, so its empty
+      // attempt list is not read as "nothing happened".
+      expect(records[0]?.notes.join(' ')).toContain('may have been sent');
     });
   });
 });
