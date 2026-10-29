@@ -1,24 +1,28 @@
-import {
-  applyProbeOverrides,
-  decideReview,
-  reclassifySignals,
-} from '../policy.js';
-import {
-  runChatReviewer,
-  runDecisionReviewer,
-  type LlmLike,
-} from '../reviewer.js';
-import { modeForSession } from '../config.js';
+import { settleRule, settleOutcome, stageOf } from '../policy.js';
+import type {
+  ApprovalChannel,
+  SettlementInstruction,
+} from '../review-contract/matrix.js';
+import { REVIEW_CONTRACT_VERSION } from '../review-contract/index.js';
+import type { ReviewOutcome } from '../review-contract/types.js';
+import { askPolicyForSession } from '../config.js';
 import { stageView, type StageView } from './stage.js';
-import { decisionFeedback, modelReasonFor } from './feedback.js';
+import { decisionFeedback } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
-import type { HistoryStatus } from '../types.js';
+import type { HistoryStatus, ReviewScores } from '../types.js';
 import { buildCallSnapshot } from './call-snapshot.js';
+import {
+  earlyReview,
+  preRequestExit,
+  reasonOf,
+  reviewExtras,
+  runReview,
+  type Reviewed,
+} from './gate-review.js';
 import type { AgentLike, BuiltSnapshot } from '../snapshot.js';
 import type {
   AdmissionScopeReason,
   CommandRule,
-  PolicyThresholds,
   PreToolDecision,
   PriorVerdictItem,
 } from '../types.js';
@@ -45,11 +49,8 @@ interface PreparedCall extends CallContext {
   readonly historyStatus: HistoryStatus;
   /** The configuration this evaluation actually used, captured after the wait. */
   readonly view: StageView;
-  readonly thresholds: PolicyThresholds;
   readonly extras: AuditExtras;
 }
-
-type ModelResult = Awaited<ReturnType<typeof runChatReviewer>>;
 
 /** The trace field for a resolved historical rule name, or nothing. */
 function ruleNameStage(name: string | null): { readonly ruleName?: string } {
@@ -82,6 +83,26 @@ function auditEffect(
   return {
     ...(facts === null ? {} : { ...facts }),
     ...(normalization === null ? {} : { normalization }),
+  };
+}
+
+/**
+ * The stored score pair for one scored outcome.
+ *
+ * Only a `scored` outcome produces one. A material gap and a reviewer failure reach
+ * a stage without a score, and recording a pair for them would state a number the
+ * review never reached.
+ */
+function scoresOf(outcome: ReviewOutcome): ReviewScores | null {
+  if (outcome.status !== 'scored') return null;
+  return {
+    contractVersion: REVIEW_CONTRACT_VERSION,
+    source: outcome.source,
+    risk: outcome.risk,
+    authorization: outcome.authorization,
+    requiredAuthorization: outcome.requiredAuthorization,
+    verdict: outcome.verdict,
+    audit: outcome.audit,
   };
 }
 
@@ -190,9 +211,9 @@ export class CallGate {
    * Answer a call that admission does not cover.
    *
    * Almost every reason means "not this plugin's to decide", so the call is
-   * handed back. The exception is a guarded session the host would not
-   * confine: approving it would execute outside the workspace under a boundary
-   * this plugin widened, so it is refused instead.
+   * handed back. The exception is a guarded session the host would not confine:
+   * approving it would execute outside the workspace under a boundary this
+   * plugin widened, so it is refused instead.
    */
   private skippedCall(
     exec: ToolExecutionLike,
@@ -288,7 +309,7 @@ export class CallGate {
     const { runtime } = this.host;
     return {
       ...call,
-      mode: modeForSession(runtime.config, call.sessionKind),
+      mode: askPolicyForSession(runtime.config, call.sessionKind),
     };
   }
 
@@ -328,7 +349,7 @@ export class CallGate {
       runtime.configSnapshotId,
       sessionKind,
     );
-    const { mode, strategy, thresholds } = view;
+    const { mode } = view;
     // Entries and the facts about them are read together, so an in-flight call
     // cannot pair one observation's window with another's completeness claim.
     const history = this.history.windowFor(session.id ?? 'unknown');
@@ -361,7 +382,6 @@ export class CallGate {
       historyStatus: history.status,
       evaluation,
       evaluatedRules,
-      thresholds,
       trace: [
         {
           stage: 'rule',
@@ -390,10 +410,11 @@ export class CallGate {
         // status). Both travel in the existing `effect` payload, so no schema
         // migration is needed and old rows stay readable.
         effect: auditEffect(evaluation),
-        signals: null,
+        scores: null,
+        reviewStage: null,
+        usage: null,
         snapshot: null,
         reviewReason: null,
-        strategy,
         decisionRules: [],
         modelAttempts: [],
         ruleId: path.kind === 'rule' ? path.ruleId : null,
@@ -429,111 +450,138 @@ export class CallGate {
       : rule.comment;
   }
 
+  /**
+   * Apply the matched rule's deterministic verdict.
+   *
+   * The four verdicts keep their fixed precedence (`deny > force-ask >
+   * force-review > allow`), which the matcher already resolved, so this maps the
+   * winner to one settlement. `force-ask` under `no-ask`, or with no reachable
+   * channel, becomes a fallback denial: a model review is not a substitute for the
+   * person the rule requires, so it cannot be turned into a review or an allow.
+   */
   private async applyRule(call: PreparedCall): Promise<PreToolDecision | null> {
     const path = call.evaluation.path;
     if (path.kind !== 'rule') return null;
-    if (path.verdict === 'force-ask') {
-      return this.settlement.human(
-        call,
-        'force-ask requires a human decision for this call.',
-        call.extras,
-      );
+    const settled = settleRule({
+      verdict: path.verdict,
+      ask: call.mode,
+      channel: this.channelFor(call),
+    });
+    switch (settled.kind) {
+      case 'review':
+        return null;
+      case 'allow':
+        this.settlement.finalize(
+          call,
+          'allow',
+          'Arbiter: a complete allow rule covered this call.',
+          call.extras,
+        );
+        return { kind: 'allow' };
+      case 'deny': {
+        const reason = decisionFeedback({
+          result: 'deny',
+          ruleId: path.ruleId,
+          decisionRules: [],
+          reviewReason: null,
+          snapshot: null,
+        });
+        this.settlement.finalize(call, 'deny', reason, call.extras);
+        return deny(reason);
+      }
+      case 'ask-human':
+        return this.settlement.human(call, settled.reason, call.extras);
+      case 'fallback-deny':
+        // A rule demanded a person and none could be asked. The record names the
+        // rule, so the chain shows which deterministic verdict required it.
+        return this.settlement.fallbackDeny(
+          call,
+          settled.reason,
+          call.extras,
+          path.ruleId,
+        );
     }
-    if (path.verdict === 'deny') {
-      const reason = decisionFeedback({
-        result: 'deny',
-        ruleId: path.ruleId,
-        decisionRules: [],
-        reviewReason: null,
-        snapshot: null,
-      });
-      this.settlement.finalize(call, 'deny', reason, call.extras);
-      return deny(reason);
-    }
-    if (path.verdict === 'allow') {
-      this.settlement.finalize(
-        call,
-        'allow',
-        'Arbiter: a complete allow rule covered this call.',
-        call.extras,
-      );
-      return { kind: 'allow' };
-    }
-    return null;
   }
 
+  /**
+   * The approval channel this call could reach, if any.
+   *
+   * The answer is computed once per decision and reused by both the rule path and
+   * the review path, so the two cannot disagree about whether a person exists. It
+   * is also what the settlement records as the escalation's own reason when it
+   * falls back.
+   */
+  private channelFor(call: CallContext): ApprovalChannel {
+    const verdict = this.settlement.channel(call);
+    return verdict.available
+      ? { status: 'available' }
+      : {
+          status: 'unavailable',
+          reason: verdict.unavailableText ?? 'no approval channel',
+        };
+  }
+
+  private noteStage(
+    call: PreparedCall,
+    result: string,
+    reason: string,
+    decisionRules: readonly string[] = [],
+  ): void {
+    call.trace.push({
+      stage: 'review',
+      result,
+      reason,
+      ...(decisionRules.length === 0 ? {} : { decisionRules }),
+      configRevision: this.host.runtime.effectiveRevision,
+      configSnapshotId: this.host.runtime.configSnapshotId,
+      at: Date.now(),
+    });
+  }
+
+  /**
+   * Run the review and settle what it produced.
+   *
+   * The pre-request exits (breaker, unbuildable snapshot, over-budget request,
+   * insufficient material) are decided by `preRequestExit` so this method stays
+   * linear: it either has a usable review to run or a final outcome to settle, and
+   * the stage is recorded exactly once, by the path that produced it.
+   */
   private async review(call: PreparedCall): Promise<PreToolDecision> {
-    if (this.history.breakerOpen(call.session.id ?? 'unknown')) {
-      call.trace.push({
-        stage: 'review',
-        result: 'error-escalate',
-        reason: 'circuit_open',
-        configRevision: this.host.runtime.effectiveRevision,
-        configSnapshotId: this.host.runtime.configSnapshotId,
-        at: Date.now(),
-      });
-      return this.settlement.human(
-        this.humanCall(call),
-        'Review circuit breaker is open for this session.',
-        {
-          ...call.extras,
-          reviewReason: 'the review circuit breaker is open for this session',
-        },
-      );
+    const breakerOpen = this.history.breakerOpen(call.session.id ?? 'unknown');
+    let bundle: BuiltSnapshot | null = null;
+    let prepareError: string | null = null;
+    if (!breakerOpen) {
+      try {
+        bundle = (await buildCallSnapshot(this.host, call)).bundle;
+      } catch (error) {
+        prepareError = error instanceof Error ? error.message : String(error);
+      }
     }
-    let snapshot: { bundle: BuiltSnapshot; llm: LlmLike };
-    try {
-      snapshot = await buildCallSnapshot(this.host, call);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      call.trace.push({
-        stage: 'review',
-        result: 'error-escalate',
-        reason: `snapshot_error: ${message}`,
-        configRevision: this.host.runtime.effectiveRevision,
-        configSnapshotId: this.host.runtime.configSnapshotId,
-        at: Date.now(),
-      });
-      return this.settlement.human(this.humanCall(call), message, {
-        ...call.extras,
-        reviewReason: `the review could not be prepared: ${message}`,
-      });
-    }
-    if (
-      snapshot.bundle.snapshot.budget.truncatedSegments.includes('OVER_BUDGET')
-    ) {
-      // A legal truncation is a normal review; a request that cannot be
-      // assembled within the declared budget is a request-preparation failure,
-      // not a decision. Recording it as error-escalate keeps the chain honest.
-      const message =
-        'the review request cannot be assembled within the configured input budget';
-      call.trace.push({
-        stage: 'review',
-        result: 'error-escalate',
-        reason: 'input_budget_exceeded',
-        configRevision: this.host.runtime.effectiveRevision,
-        configSnapshotId: this.host.runtime.configSnapshotId,
-        at: Date.now(),
-      });
-      return this.settlement.human(this.humanCall(call), message, {
-        ...call.extras,
-        snapshot: snapshot.bundle.snapshot,
-        reviewReason: message,
-      });
-    }
-    // Material the host could not supply makes any score unusable, so it is
-    // settled before the model is asked: spending the call would only produce a
-    // number that has to be discarded.
-    if (snapshot.bundle.snapshot.completeness.status === 'insufficient') {
-      return this.settlement.insufficientMaterial(
+    const early = preRequestExit(this.host, {
+      breakerOpen,
+      bundle,
+      prepareError,
+    });
+    if (early !== null) {
+      this.noteStage(call, early.stage, early.code);
+      return await this.settleReviewed(
         call,
-        snapshot.bundle.snapshot,
+        earlyReview(early.outcome, early.snapshot),
       );
     }
+    // `preRequestExit` proved both of these exist for a proceeding review.
+    if (bundle === null || this.host.services.llm === undefined)
+      throw new Error('a review that proceeds must have a bundle and an llm');
     this.noteReview(call.session.id ?? 'unknown');
-    const result = await this.requestModel(call, snapshot.bundle, snapshot.llm);
+    const result = await runReview(
+      this.host,
+      call,
+      this.host.services.llm,
+      bundle,
+    );
     if (isAborted(call.exec.signal)) return { kind: 'cancel' };
-    return this.settleModel(call, snapshot.bundle, result);
+    this.noteStage(call, stageOf(result.outcome), reasonOf(result.outcome));
+    return await this.settleReviewed(call, result);
   }
 
   private noteReview(sessionId: string): void {
@@ -551,145 +599,73 @@ export class CallGate {
     }
   }
 
-  private async requestModel(
+  /**
+   * Settle one review outcome.
+   *
+   * The stage is recorded before the settlement runs: an escalation that becomes
+   * a fallback denial was still an escalation, and the chain has to say so. The
+   * matrix alone decides allow/deny; only where an escalation goes depends on the
+   * ask policy and the channel.
+   */
+  private async settleReviewed(
     call: PreparedCall,
-    bundle: BuiltSnapshot,
-    llm: LlmLike,
-  ): Promise<ModelResult> {
-    const { lifecycle, services } = this.host;
-    const thresholds = call.thresholds;
-    // A NEW request uses the configuration effective at dispatch, not the one
-    // captured before the snapshot was assembled; the response is then parsed by
-    // this same frozen protocol even if the configuration changes again while
-    // the request is out.
-    const reviewer = this.host.runtime.config.reviewer;
-    if (reviewer.type === 'chat') {
-      lifecycle('review/start', {
-        callId: call.exec.callId,
-        sessionId: call.session.id ?? 'unknown',
-      });
-      const result = await runChatReviewer(
-        {
-          llm,
-          session: call.session,
-          chat: reviewer.chat,
-          thresholds,
-          signal: call.exec.signal,
-        },
-        bundle.snapshot,
-        bundle,
-        call.exec.callId,
-      );
-      lifecycle(result.ok ? 'review/settled' : 'review/failed', {
-        callId: call.exec.callId,
-        sessionId: call.session.id ?? 'unknown',
-      });
-      return result;
-    }
-    return runDecisionReviewer(
-      {
-        fetch: globalThis.fetch,
-        credentials: services.credentials,
-        decision: reviewer.decision,
-        thresholds,
-        signal: call.exec.signal,
-      },
-      bundle.snapshot,
-      { user: bundle.user, estimatedInputTokens: bundle.estimatedInputTokens },
-      call.exec.callId,
-    );
-  }
-
-  private async settleModel(
-    call: PreparedCall,
-    bundle: BuiltSnapshot,
-    result: ModelResult,
+    reviewed: Reviewed,
   ): Promise<PreToolDecision> {
     const { runtime } = this.host;
     // The response keeps the protocol that produced it (it was parsed before it
     // reached here), while the decision itself uses the configuration effective
-    // when it forms. Capture that as one view so the mode, thresholds and the
-    // revision written to the trace cannot disagree.
+    // when it forms. Capture that as one view so the mode and the revision
+    // written to the trace cannot disagree.
     const view = stageView(
       runtime.config,
       runtime.effectiveRevision,
       runtime.configSnapshotId,
       call.sessionKind,
     );
-    const current = { ...call, mode: view.mode };
-    const strategy = view.strategy;
-    const thresholds = view.thresholds;
-    const extras = {
-      ...call.extras,
-      snapshot: bundle.snapshot,
-      strategy,
-      modelAttempts: result.attempts,
+    const current: CallContext = { ...call, mode: view.mode };
+    const extras: AuditExtras = {
+      ...reviewExtras(call.extras, reviewed),
+      scores: scoresOf(reviewed.outcome),
+      reviewStage: stageOf(reviewed.outcome),
     };
-    if (!result.ok) {
-      call.trace.push({
-        stage: 'review',
-        result: 'error-escalate',
-        reason: result.error,
-        configRevision: runtime.effectiveRevision,
-        configSnapshotId: runtime.configSnapshotId,
-        at: Date.now(),
-      });
-      return this.settlement.human(
-        this.humanCall(current),
-        `review failed: ${result.error}`,
-        // The failure *is* the reason: without it the agent sees only the
-        // channel outcome and cannot tell a broken reviewer from a decision.
-        { ...extras, reviewReason: `the review failed: ${result.error}` },
-      );
-    }
-    const signals = reclassifySignals(
-      applyProbeOverrides(
-        result.signals,
-        call.evaluation.facts,
-        runtime.config.policy.probeMode,
-      ),
-      thresholds,
+    const instruction: SettlementInstruction = settleOutcome(
+      reviewed.outcome,
+      view.mode,
+      this.channelFor(current),
     );
-    const policy = decideReview(signals, strategy, thresholds);
-    call.trace.push({
-      stage: 'review',
-      result: policy.verdict,
-      reason: policy.reason,
-      decisionRules: policy.decisionRules,
-      configRevision: runtime.effectiveRevision,
-      configSnapshotId: runtime.configSnapshotId,
-      at: Date.now(),
-    });
-    const reviewedExtras = {
-      ...extras,
-      signals,
-      decisionRules: policy.decisionRules,
-      reviewReason: policy.reason,
-    };
-    if (policy.verdict === 'review-allow') {
-      this.settlement.finalize(
-        current,
-        'review-allow',
-        'Arbiter: the review allowed this call.',
-        reviewedExtras,
-      );
-      return { kind: 'allow' };
+    switch (instruction.kind) {
+      case 'allow':
+        this.settlement.finalize(
+          current,
+          'review-allow',
+          'Arbiter: the review allowed this call.',
+          extras,
+        );
+        return { kind: 'allow' };
+      case 'deny': {
+        const text = decisionFeedback({
+          result: 'review-deny',
+          ruleId: null,
+          decisionRules: [],
+          reviewReason: instruction.reason,
+          snapshot: reviewed.snapshot,
+        });
+        this.settlement.finalize(current, 'review-deny', text, extras);
+        return deny(text);
+      }
+      case 'ask-human':
+        return await this.settlement.human(
+          this.humanCall(current),
+          instruction.reason,
+          extras,
+        );
+      case 'fallback-deny':
+        return this.settlement.fallbackDeny(
+          this.humanCall(current),
+          instruction.reason,
+          extras,
+          null,
+        );
     }
-    if (policy.verdict === 'review-deny') {
-      const text = decisionFeedback({
-        result: 'review-deny',
-        ruleId: null,
-        decisionRules: policy.decisionRules,
-        reviewReason: modelReasonFor(policy),
-        snapshot: bundle.snapshot,
-      });
-      this.settlement.finalize(current, 'review-deny', text, reviewedExtras);
-      return deny(text);
-    }
-    return this.settlement.human(
-      this.humanCall(current),
-      `review requires a human decision: ${modelReasonFor(policy)}`,
-      reviewedExtras,
-    );
   }
 }

@@ -707,10 +707,6 @@ async function applyBuiltPlugin(options: {
         const answer = JSON.stringify({
           risk: 4,
           authorized: 1,
-          secrets: false,
-          destructive: false,
-          egress: false,
-          bulk: false,
         });
         return {
           [Symbol.asyncIterator]: async function* () {

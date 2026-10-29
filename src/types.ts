@@ -8,8 +8,30 @@
 import type { ShellParse } from './shell/parse.js';
 import type { NormalizationDetail } from './shell/types.js';
 
-export type ApprovalMode = 'normal' | 'strict' | 'progress';
-export type SubagentMode = 'strict' | 'progress';
+/**
+ * The ask policy of one session class.
+ *
+ * There are exactly two modes and they differ in one observable way: whether the
+ * plugin may open a real human approval when a review escalates. Both apply the
+ * same shared matrix, so `no-ask` is not a stricter policy — it is the same
+ * policy with the question removed, and an escalation it cannot ask about settles
+ * as a denial.
+ *
+ * The legacy `normal`/`strict`/`progress` values are deliberately not mapped onto
+ * these: `normal` and `strict` were one engine plus a channel switch (which is
+ * this pair), and `progress` widened the matrix itself, which the design forbids.
+ * A stored value from either mode is therefore a configuration error rather than a
+ * silent reinterpretation.
+ */
+export type ApprovalMode = 'ask' | 'no-ask';
+/**
+ * A subagent's mode. It names the same policy as {@link ApprovalMode}.
+ *
+ * Kept as its own alias because a subagent's answer is not a user preference in
+ * the same sense: a child session has no approval channel of its own, so `ask`
+ * still settles as `fallback-deny` unless the host reaches a real person.
+ */
+export type SubagentMode = ApprovalMode;
 export type SessionKind = 'main' | 'subagent';
 /**
  * The plugin's execution boundary, chosen on the configuration page.
@@ -116,26 +138,6 @@ export interface CommandRule {
   readonly hint?: string;
 }
 
-export interface PolicyThresholds {
-  /** Minimum probability that authorization is at least explicit. */
-  readonly tauAuth: number;
-  /** Minimum probability used for the regular risk gate. */
-  readonly tauRisk: number;
-  /** Minimum probability of critical risk that triggers a hard deny. */
-  readonly tauCritical: number;
-  /** Minimum probability of low risk for the low-risk fast path. */
-  readonly tauLow: number;
-  /** chat risk point at or below which a plain medium call may be allowed. */
-  readonly chatMediumRiskMax: number;
-  /** decision risk ceiling used for the regular medium-risk allow row. */
-  readonly mediumRiskCeiling: number;
-  /** Lowest risk class that requires explicit authorization. */
-  readonly explicitFromRisk: number;
-  /** Whether a bulk + egress operation may be delegated to the model. */
-  readonly allowBulkEgress: boolean;
-}
-
-export type ProbeMode = 'assist' | 'override';
 export type ReviewerType = 'chat' | 'decision';
 export type CostTier = 'free' | 'paid';
 export type BreakerPreset = 'strict' | 'balanced' | 'lenient';
@@ -163,11 +165,19 @@ export interface ReviewerConfig {
   readonly decision: DecisionReviewerConfig;
 }
 
+/**
+ * The review policy.
+ *
+ * It carries a version and nothing tunable. The matrix, the bands and the N0 rule
+ * are the contract (`review-contract`), and the contract's version names them; a
+ * second set of numbers here would be a second answer to the same question, which
+ * is exactly what the shared contract exists to prevent. A configuration document
+ * that still supplies `normal`/`progress`/`probeMode` is a configuration error
+ * rather than a silently ignored section, so an operator learns that those
+ * settings no longer mean anything instead of believing they still apply.
+ */
 export interface PolicyConfig {
   readonly version: string;
-  readonly normal: PolicyThresholds;
-  readonly progress: PolicyThresholds;
-  readonly probeMode: ProbeMode;
 }
 
 export interface ContextConfig {
@@ -649,34 +659,51 @@ export interface ReviewSnapshot {
   };
 }
 
-export interface ReviewSignals {
-  readonly riskDist: Readonly<Record<string, number>> | null;
-  readonly riskPoint: number | null;
-  readonly riskScore: number | null;
-  readonly riskClass: 'low' | 'medium' | 'high';
-  readonly authDist: Readonly<Record<string, number>> | null;
-  readonly authPoint: number | null;
-  readonly authClass: 'none' | 'implied' | 'explicit';
-  readonly secrets: boolean;
-  readonly destructive: boolean;
-  readonly egress: boolean;
-  readonly bulk: boolean;
-  readonly source: 'decision' | 'chat';
-  readonly repairs: number;
-}
-
-export interface PolicyDecision {
+/**
+ * The score pair one review recorded, as the new contract states it.
+ *
+ * This is the only review-result shape a current record carries. It keeps the two
+ * public bands, the weakest authorization the matrix permitted at that risk, the
+ * matrix's own verdict and the audit trails the contract produced. Nothing here is
+ * a threshold, a strategy or a probe: a record must not need a second engine to
+ * explain what its numbers meant.
+ *
+ * `contractVersion` names the semantics (`REVIEW_CONTRACT_VERSION`), so a reader
+ * can tell when a stored number was decided under a different reading.
+ */
+export interface ReviewScores {
+  readonly contractVersion: string;
+  readonly source: 'chat' | 'decision';
+  readonly risk: number;
+  readonly authorization: number;
+  readonly requiredAuthorization: number;
   readonly verdict: ReviewVerdict;
-  readonly decisionRules: readonly string[];
-  readonly reason: string;
-  readonly strategy: string;
-  readonly details: {
-    readonly riskClass: 'low' | 'medium' | 'high';
-    readonly authClass: 'none' | 'implied' | 'explicit';
-    readonly thresholds: PolicyThresholds;
+  /** The contract's own trails, kept for audit and offline replay. */
+  readonly audit: {
+    readonly risk: ReviewScoreTrail;
+    readonly authorization: ReviewScoreTrail;
   };
 }
 
+/** One field's trail: original distribution, public distribution and point. */
+export interface ReviewScoreTrail {
+  readonly native: Readonly<Record<string, number>> | null;
+  readonly published: Readonly<Record<string, number>> | null;
+  readonly point: number | null;
+  readonly score: number;
+}
+
+/**
+ * The review stage a record reached, independent of how it settled.
+ *
+ * It is kept beside the verdict because the two answer different questions: an
+ * escalation that became `fallback-deny` was still an escalation, and reporting
+ * that as a denial would hide the missing channel.
+ */
+export type ReviewStageRecord =
+  'review-allow' | 'review-deny' | 'review-escalate' | 'error-escalate';
+
+/** One model attempt, as the reviewer service reports it. */
 export interface ModelAttemptRecord {
   readonly requestId: string;
   readonly callId: string;
@@ -693,24 +720,19 @@ export interface ModelAttemptRecord {
   readonly responseText: string | null;
   readonly parsed: unknown;
   readonly error: string | null;
+  /**
+   * The provider's usage payload after credential masking, exactly as received.
+   *
+   * `null` is "the provider reported nothing", which is not the same as a payload
+   * of zeros; the difference survives into the normalized value beside it.
+   */
+  readonly usage: unknown;
+  /** The same payload under the shared mapping, or null when nothing arrived. */
+  readonly normalizedUsage: unknown;
   readonly startedAt: number;
   readonly durationMs: number;
   readonly estimatedInputTokens: number;
-  readonly usage: unknown;
 }
-
-export type ModelResult =
-  | {
-      readonly ok: true;
-      readonly signals: ReviewSignals;
-      readonly attempts: readonly ModelAttemptRecord[];
-    }
-  | {
-      readonly ok: false;
-      readonly error: string;
-      readonly attempts: readonly ModelAttemptRecord[];
-      readonly kind: 'review-failure';
-    };
 
 /** How one rule condition evaluated against one call. */
 export type RuleConditionOutcome = 'match' | 'no-match' | 'unknown';

@@ -23,7 +23,7 @@ import {
 } from '../../src/snapshot.js';
 import type { SessionLike, SessionEventLike } from '../../src/snapshot.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
-import { renderRequest } from '../../src/reviewer.js';
+import { renderChatRequest } from '../../src/reviewer.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -671,7 +671,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       snapshot.parentAuthorizationPresent === true,
     );
 
-    const request = renderRequest(snapshot);
+    const request = renderChatRequest(snapshot);
     check(
       'V8',
       'the rendered request carries the source ladder and the facts block',

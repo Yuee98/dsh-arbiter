@@ -2,7 +2,7 @@
 import { mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { ArbiterConfig, ReviewSignals } from './types.js';
+import type { ArbiterConfig, ReviewScores } from './types.js';
 import type {
   AuditHealth,
   CallFilter,
@@ -524,7 +524,7 @@ export class AuditStore {
     readonly arguments: unknown;
     readonly result: string;
     readonly executionStatus: string;
-    readonly signals: ReviewSignals | null;
+    readonly scores: ReviewScores | null;
     readonly effect: unknown;
     readonly fingerprint: string;
   }[] {
@@ -709,9 +709,9 @@ export class AuditStore {
   recentForReplay(limit = 200): readonly {
     readonly callId: string;
     readonly tool: string;
-    readonly signals: ReviewSignals;
+    readonly scores: ReviewScores;
     readonly result: string;
-    readonly strategy: string | null;
+    readonly reviewStage: string | null;
   }[] {
     return recentForReplay(this.db, limit);
   }

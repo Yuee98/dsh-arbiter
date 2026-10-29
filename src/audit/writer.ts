@@ -8,10 +8,10 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     `INSERT OR REPLACE INTO calls(
             call_id, ts, session_id, session_kind, parent_session, profile, workspace, tool, arguments,
             arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-            execution_mode, result, reason, trace, effect, session_record_state, signals,
-            policy_strategy, decision_rules, execution_status, record_format_version,
+            execution_mode, result, reason, trace, effect, session_record_state, scores,
+            review_stage, usage, decision_rules, execution_status, record_format_version,
             execution_started_at, execution_finished_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     record.callId,
     record.ts,
@@ -34,8 +34,12 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     json(record.trace),
     json(record.effect),
     record.sessionRecordState,
-    record.signals === null ? null : json(record.signals),
-    record.policyStrategy,
+    // A current record writes the new shape only. A row with no score writes
+    // `NULL`, which the reader reports as "no new-style score" rather than
+    // defaulting to a band nobody computed.
+    record.scores === null ? null : json(record.scores),
+    record.reviewStage,
+    record.usage === null ? null : json(record.usage),
     json(record.decisionRules),
     record.executionStatus,
     RECORD_FORMAT,
@@ -114,8 +118,8 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
     `INSERT OR REPLACE INTO model_calls(
           id, call_id, attempt, backend, protocol, request, template_id,
           response_text, parsed, error, started_at, duration_ms,
-          estimated_input_tokens, usage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          estimated_input_tokens, usage, normalized_usage)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const attempt of record.modelAttempts) {
     modelStatement.run(
@@ -132,7 +136,11 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
       attempt.startedAt,
       attempt.durationMs,
       attempt.estimatedInputTokens,
+      // Both values are stored: the masked provider payload exactly as received,
+      // so it can be re-normalized after the mapping version changes, and the
+      // normalization done under the mapping this build uses.
       json(attempt.usage),
+      json(attempt.normalizedUsage),
     );
   }
 }

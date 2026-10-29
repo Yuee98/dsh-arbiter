@@ -330,11 +330,7 @@ async function harness(options: {
         const isProbe = text.includes('echo probe');
         const answer = JSON.stringify({
           risk: 4,
-          authorized: isProbe ? 10 : 1,
-          secrets: false,
-          destructive: false,
-          egress: false,
-          bulk: false,
+          authorization: isProbe ? 10 : 1,
         });
         return (async function* () {
           await Promise.resolve();
@@ -511,7 +507,7 @@ function verdictRecord(
     fingerprint: `bash:${callId}`,
     configRevision: 'rev-1',
     configSnapshotId: 'snap-1',
-    approvalMode: 'normal',
+    approvalMode: 'ask',
     executionMode: 'guarded',
     result,
     reason: 'recorded by the audit fixture',
@@ -524,8 +520,9 @@ function verdictRecord(
     sessionRecordState: 'written',
     snapshot: null,
     modelAttempts: [],
-    signals: null,
-    policyStrategy: 'normal',
+    scores: null,
+    reviewStage: null,
+    usage: null,
     decisionRules: [],
     executionStatus: 'not-started',
   };
@@ -693,24 +690,30 @@ function submittedHistoryBlock(host: HostHarness): {
 } {
   const text = host.captured.at(-1);
   if (text === undefined) throw new Error('no review request was captured');
-  const priorMatch = /PRIOR_VERDICTS\n\n(\{[\s\S]*?\n\})/u.exec(text);
-  const missingMatch = /MISSING_INPUT\n\n(\[[\s\S]*?\n\])/u.exec(text);
-  if (priorMatch?.[1] === undefined || missingMatch?.[1] === undefined) {
+  // Both facts travel in the completeness block the current renderer emits:
+  // `missing_input` is the sentence list and `blocking_gaps` the blocking subset.
+  const priorMatch = /PRIOR_VERDICTS\n(\{[\s\S]*?\n\})/u.exec(text);
+  const completeMatch = /MATERIAL_COMPLETENESS\n[\s\S]*?(\{[\s\S]*?\n\})/u.exec(
+    text,
+  );
+  if (priorMatch?.[1] === undefined || completeMatch?.[1] === undefined) {
     throw new Error('the submitted request has no PRIOR_VERDICTS block');
   }
   const prior: unknown = JSON.parse(priorMatch[1]);
-  const missing: unknown = JSON.parse(missingMatch[1]);
-  if (!isRecord(prior) || !Array.isArray(missing)) {
+  const complete: unknown = JSON.parse(completeMatch[1]);
+  if (!isRecord(prior) || !isRecord(complete)) {
     throw new Error('the submitted blocks are malformed');
   }
   const items = prior['prior_verdicts'];
   if (!Array.isArray(items)) throw new Error('no prior_verdicts array');
+  const missing = complete['missing_input'];
+  if (!Array.isArray(missing)) throw new Error('no missing_input array');
   return {
     prior: items.filter(
       (entry): entry is PriorVerdictItem =>
         isRecord(entry) && typeof entry['callId'] === 'string',
     ),
-    truncated: prior['history_truncated'] === true,
+    truncated: prior['truncated'] === true,
     missing: missing.filter(
       (entry): entry is string => typeof entry === 'string',
     ),
@@ -730,7 +733,7 @@ function denyRuleConfig(
   return (base) =>
     extra({
       ...base,
-      modes: { main: 'normal', subagent: 'strict' },
+      modes: { main: 'ask', subagent: 'no-ask' },
       rules: [
         {
           id: 'deny-build',

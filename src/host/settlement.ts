@@ -4,7 +4,6 @@ import type {
   CallResult,
   PreToolDecision,
   PriorVerdictItem,
-  ReviewSnapshot,
   TraceStage,
 } from '../types.js';
 import {
@@ -77,39 +76,75 @@ function humanText(
   });
 }
 
-function humanUnavailable(
+/**
+ * Whether a real person can be reached for this call.
+ *
+ * This is a fact about the host, not a policy, and it is decided once per call by
+ * the gate and then carried here. Three conditions make a question impossible and
+ * they are distinct reasons: a subagent has no channel of its own, a host may
+ * expose no approval service, and a session's own approval policy may already
+ * refuse prompts. None of them is a human answer.
+ */
+export interface AskChannel {
+  readonly available: boolean;
+  /**
+   * Why no person can be asked.
+   *
+   * A stable code, because the record and the agent-facing text localize it; the
+   * four cases above are different facts and collapsing them would lose which one
+   * applied. `null` only when the channel is available.
+   */
+  readonly unavailableCode: UnavailableCode | null;
+  /** The agent-facing sentence for the same reason. */
+  readonly unavailableText: string | null;
+}
+
+/** The code each unavailable case records. */
+type UnavailableCode =
+  | 'automatic_mode_no_human'
+  | 'subagent_no_human_channel'
+  | 'approval_channel_unavailable'
+  | 'host_approval_policy_never';
+
+/** The sentence each unavailable code reports to the agent. */
+const UNAVAILABLE_TEXT: Readonly<Record<UnavailableCode, string>> = {
+  automatic_mode_no_human:
+    'Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.',
+  subagent_no_human_channel:
+    'Not executed [fallback-deny]: this subagent has no human approval channel.',
+  approval_channel_unavailable:
+    'Not executed [fallback-deny]: no human approval channel is available.',
+  host_approval_policy_never:
+    'Not executed [fallback-deny]: the host approval policy rejects prompts in this session.',
+};
+
+/** The channel verdict for one call, from the mode and the host's own services. */
+function channelOf(
   call: CallContext,
   host: HostEnvironment,
   approvalOpen: boolean,
-): { code: string; text: string } | null {
-  // An approval that is already on screen keeps waiting: switching to strict
-  // must not withdraw a question the user is looking at. Only a decision that
-  // has not been asked yet consults the currently effective mode.
-  if (approvalOpen) return null;
-  if (call.mode !== 'normal')
-    return {
-      code: 'automatic_mode_no_human',
-      text: 'Not executed [fallback-deny]: this call requires human approval, but the selected mode does not open approval requests.',
-    };
+): AskChannel {
+  // An approval that is already on screen keeps waiting: switching to `no-ask`
+  // must not withdraw a question the user is looking at. Only a decision that has
+  // not been asked yet consults the currently effective mode.
+  if (approvalOpen)
+    return { available: true, unavailableCode: null, unavailableText: null };
+  const unavailable = (code: UnavailableCode): AskChannel => ({
+    available: false,
+    unavailableCode: code,
+    unavailableText: UNAVAILABLE_TEXT[code],
+  });
+  if (call.mode !== 'ask') return unavailable('automatic_mode_no_human');
   if (call.sessionKind !== 'main')
-    return {
-      code: 'subagent_no_human_channel',
-      text: 'Not executed [fallback-deny]: this subagent has no human approval channel.',
-    };
+    return unavailable('subagent_no_human_channel');
   const approval = host.services.approval;
   if (approval === undefined)
-    return {
-      code: 'approval_channel_unavailable',
-      text: 'Not executed [fallback-deny]: no human approval channel is available.',
-    };
+    return unavailable('approval_channel_unavailable');
   const policy =
     approval.overrideOf?.(call.session) ?? approval.config?.policy ?? 'ask';
   return policy === 'never'
-    ? {
-        code: 'host_approval_policy_never',
-        text: 'Not executed [fallback-deny]: the host approval policy rejects prompts in this session.',
-      }
-    : null;
+    ? unavailable('host_approval_policy_never')
+    : { available: true, unavailableCode: null, unavailableText: null };
 }
 
 /** How many session-record failures stay addressable for diagnostics. */
@@ -361,8 +396,13 @@ export class CallSettlement {
       sessionRecordState,
       snapshot: extras.snapshot,
       modelAttempts: extras.modelAttempts,
-      signals: extras.signals,
-      policyStrategy: extras.strategy,
+      // A current record carries the review's own semantics and nothing from the
+      // retired engine: the two public bands plus their trails, the stage the
+      // review reached, its reason and its usage summary. No thresholds, no probe
+      // booleans and no strategy name, because none of them decides anything now.
+      scores: extras.scores,
+      reviewStage: extras.reviewStage,
+      usage: extras.usage,
       decisionRules: extras.decisionRules,
       // A permission verdict is not an execution result: an approved call is
       // `pending` until the host reports what happened, and a denied one never
@@ -598,42 +638,39 @@ export class CallSettlement {
   }
 
   /**
-   * The outcome for a review whose material the host could not assemble.
+   * Settle a call as a fallback denial for a review-stage escalation.
    *
-   * This is not a review-deny and not a technical failure: no answer can stand
-   * on material that was never read, so the reviewer is not asked. It is an
-   * escalate — a person can supply what the log could not — recorded as
-   * `review-escalate` with the gap sources so the chain says why, and with no
-   * model request attributed to it.
+   * Two different facts reach the agent and the record, and collapsing them would
+   * lose one: *why nobody could be asked* (no channel, a mode that never asks, a
+   * host policy that refuses prompts) and *why the call escalated* (the review's
+   * own reason, a material gap, a reviewer failure). The channel cause is the
+   * stage's outcome reason; the review reason stays the review's.
    */
-  insufficientMaterial(
+  fallbackDeny(
     call: CallContext,
-    snapshot: ReviewSnapshot,
-  ): Promise<PreToolDecision> {
-    const completeness = snapshot.completeness;
-    const reason =
-      completeness.note ??
-      'required review material could not be assembled from this session';
-    call.trace.push({
-      stage: 'review',
-      result: 'review-escalate',
-      reason: `insufficient_material: ${completeness.gaps
-        .map((gap) => gap.source)
-        .join(', ')}`,
-      configRevision: this.host.runtime.effectiveRevision,
-      configSnapshotId: this.host.runtime.configSnapshotId,
-      at: Date.now(),
-    });
-    return this.human(call, reason, {
-      ruleId: null,
-      decisionRules: [],
-      strategy: 'material',
-      effect: null,
-      signals: null,
-      snapshot,
-      reviewReason: reason,
-      modelAttempts: [],
-    });
+    reviewReason: string,
+    extras: AuditExtras,
+    ruleId: string | null,
+  ): PreToolDecision {
+    const channel = channelOf(call, this.host, false);
+    return this.fallback(
+      call,
+      channel.available
+        ? 'approval_channel_unavailable'
+        : (channel.unavailableCode ?? 'approval_channel_unavailable'),
+      { ...extras, ruleId, reviewReason: extras.reviewReason ?? reviewReason },
+    );
+  }
+
+  /**
+   * The channel verdict for one call.
+   *
+   * Exposed because the gate decides rule and review settlements under the same
+   * question, and two independent evaluations of "can a person be asked" is how
+   * a rule path and a review path could disagree about the same call.
+   */
+  channel(call: CallContext): AskChannel {
+    return channelOf(call, this.host, false);
   }
 
   /**
@@ -658,14 +695,13 @@ export class CallSettlement {
       return dispositionOf(existing);
     }
     if (isAborted(call.exec.signal)) return { kind: 'cancel' };
-    const unavailable = humanUnavailable(
-      call,
-      this.host,
-      ask.approvalOpen === true,
-    );
-    if (unavailable !== null)
-      return this.fallback(call, unavailable.code, extras);
-    // humanUnavailable checks the channel before this point.
+    const verdict = channelOf(call, this.host, ask.approvalOpen === true);
+    if (!verdict.available)
+      return this.fallback(
+        call,
+        verdict.unavailableCode ?? 'approval_channel_unavailable',
+        extras,
+      );
     const approval = this.host.services.approval;
     if (approval === undefined)
       return this.fallback(call, 'approval_channel_unavailable', extras);

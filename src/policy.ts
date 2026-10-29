@@ -1,540 +1,148 @@
 /**
- * The review decision engine.
+ * The review decision engine over the shared contract.
  *
- * Models produce signals; this module produces the decision. The regular
- * strategy is shared by `normal` and `strict` (the only difference between
- * those modes is whether the plugin opens a human approval). `progress` uses
- * the same rule order with a wider set of conditions. Every branch names the
- * R-rule it applied so the audit can be replayed.
+ * The engine reads one review outcome — the shared contract's `scored`,
+ * `insufficient-material` or `review-failure` — and returns the settlement a host
+ * should perform. It holds no thresholds, no risk cap and no backend-specific
+ * gate: the matrix in `review-contract/matrix.ts` is the whole approval policy, and
+ * a mode decides only *where* an escalation is sent.
+ *
+ * Three things are deliberately absent, because each of them was a way for the
+ * old engine to disagree with the contract:
+ *
+ *   - the probability thresholds (`tauAuth`, `tauRisk`, `tauCritical`, `tauLow`,
+ *     the two risk ceilings and the bulk-egress switch). They existed to paper
+ *     over a signal shape the contract no longer produces, and a threshold
+ *     redeclares what a band means;
+ *   - the four effect probes (secrets/destructive/egress/bulk) and the
+ *     `probeMode` override. A consequence that matters raises the risk band and a
+ *     permission that does not cover the action lowers the authorization band, so
+ *     a second boolean channel could only contradict the score;
+ *   - the `normal`/`strict`/`progress` strategies. `normal` and `strict` already
+ *     shared one engine and differed only in whether a human is asked, which is
+ *     now the ask policy; `progress` widened the contract's own matrix, which the
+ *     design forbids.
+ *
+ * What remains is the deterministic rule precedence (`deny > force-ask >
+ * force-review > allow`), which lives in the matcher and is applied by the gate,
+ * plus the stage → settlement mapping below.
  */
 
-import { isProhibited } from './review-contract/prohibition.js';
 import type {
-  DerivedFacts,
-  PolicyDecision,
-  PolicyThresholds,
-  ReviewSignals,
-  ReviewVerdict,
-  ProbeMode,
-} from './types.js';
+  ApprovalChannel,
+  AskPolicy,
+  ReviewStage,
+  SettlementInstruction,
+} from './review-contract/matrix.js';
+import { settle } from './review-contract/matrix.js';
+import type { ReviewOutcome } from './review-contract/types.js';
 
-export type StrategyName = 'normal' | 'progress';
+/** The stage an outcome reaches before any approval channel is consulted. */
+export function stageOf(outcome: ReviewOutcome): ReviewStage {
+  switch (outcome.status) {
+    case 'scored':
+      return outcome.verdict;
+    case 'insufficient-material':
+      // The material a score would stand on was never read, so the reviewer is
+      // not asked and no score is invented. A person can supply what the host
+      // could not, which is what an escalation means.
+      return 'review-escalate';
+    case 'review-failure':
+      // The reviewer call, its output or its shape failed. That is a technical
+      // fault, not an assessment, so it keeps its own stage: a human handoff can
+      // then say the reviewer broke instead of implying it judged the action.
+      return 'error-escalate';
+  }
+}
 
 /**
- * The shared risk-category boundary (`docs/reviewer.md#design-5-5`).
+ * The reason a human handoff or a denial reports for one outcome.
  *
- * `low` is 0–3 for both backends, and this cut also defines the low-risk fast
- * path's "no authorization required" band. It is deliberately a constant rather
- * than a policy field: making it configurable would redefine what a risk level
- * *means*, and a wider value could turn a medium-risk decision call into an
- * unauthorized allow while the equivalent chat call still escalated. A tuning
- * parameter must not be able to move an authorization category.
+ * The reason belongs to the outcome, not to the settlement: whether an escalation
+ * became a question or a fallback denial, the operator sees the same explanation
+ * of why the call got there.
  */
-const LOW_RISK_MAX = 3;
+export function reasonOf(outcome: ReviewOutcome): string {
+  switch (outcome.status) {
+    case 'scored':
+      return outcome.verdict === 'review-deny'
+        ? `authorization band ${String(outcome.authorization)} is an applicable prohibition`
+        : `risk ${String(outcome.risk)} requires authorization ${String(
+            outcome.requiredAuthorization,
+          )}; the review found ${String(outcome.authorization)}`;
+    case 'insufficient-material':
+      return outcome.reason;
+    case 'review-failure':
+      return outcome.reason;
+  }
+}
 
 /**
- * The review strategy a session's mode selects.
+ * Turn one review outcome into what the host should do.
  *
- * `normal` and `strict` deliberately share one strategy: the only difference
- * between those modes is whether the plugin opens a human approval, which is a
- * settlement decision, not a review one. Keeping the mapping here is what makes
- * that identity checkable instead of an inline ternary repeated per call site.
+ * `ask` and `no-ask` share this matrix; the only difference is where an escalation
+ * goes. Under `no-ask`, or with no channel, an escalation settles as a denial and
+ * never as a question — the model is not a substitute for a person, so nothing
+ * here can convert an escalation into an allow.
  */
-export function strategyFor(mode: string): StrategyName {
-  return mode === 'progress' ? 'progress' : 'normal';
+export function settleOutcome(
+  outcome: ReviewOutcome,
+  ask: AskPolicy,
+  channel: ApprovalChannel,
+): SettlementInstruction {
+  return settle(stageOf(outcome), ask, channel, reasonOf(outcome));
 }
 
-function probabilityAtLeast(
-  distribution: Readonly<Record<string, number>> | null,
-  minimum: number,
-): number | null {
-  if (distribution === null) return null;
-  let total = 0;
-  let sum = 0;
-  for (const [key, value] of Object.entries(distribution)) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-    total += value;
-    const level = Number(key);
-    if (Number.isFinite(level) && level >= minimum) sum += value;
-  }
-  return total > 0 ? sum / total : null;
-}
-
-function probabilityAtMost(
-  distribution: Readonly<Record<string, number>> | null,
-  maximum: number,
-): number | null {
-  if (distribution === null) return null;
-  let total = 0;
-  let sum = 0;
-  for (const [key, value] of Object.entries(distribution)) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-    total += value;
-    const level = Number(key);
-    if (Number.isFinite(level) && level <= maximum) sum += value;
-  }
-  return total > 0 ? sum / total : null;
-}
-
-function certainty(value: number | null): boolean {
-  return value !== null;
-}
-
-function riskGate(
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): {
-  readonly passed: boolean;
-  readonly rule: string;
-  readonly observed: string;
-} {
-  if (signals.riskPoint !== null) {
-    const point = signals.riskPoint;
-    if (point <= thresholds.chatMediumRiskMax) {
-      return {
-        passed: true,
-        rule: 'R7',
-        observed: `riskPoint=${String(point)}`,
-      };
-    }
-    return {
-      passed: false,
-      rule: 'R5',
-      observed: `riskPoint=${String(point)} > ${String(thresholds.chatMediumRiskMax)}`,
-    };
-  }
-  const low = probabilityAtMost(signals.riskDist, LOW_RISK_MAX);
-  const medium = probabilityAtMost(
-    signals.riskDist,
-    thresholds.mediumRiskCeiling,
-  );
-  if (signals.riskClass === 'low' && low !== null && low >= thresholds.tauLow) {
-    return {
-      passed: true,
-      rule: 'R7',
-      observed: `P(risk<=3)=${low.toFixed(2)}`,
-    };
-  }
-  if (medium !== null && medium >= thresholds.tauRisk) {
-    return {
-      passed: true,
-      rule: 'R7',
-      observed: `P(risk<=${String(thresholds.mediumRiskCeiling)})=${medium.toFixed(2)}`,
-    };
-  }
-  // A distribution that fails this gate has not produced an identified risk: it
-  // produced a reading whose mass is spread across the scale. Reporting that as
-  // R5 would tell the human a risk was measured when the honest answer is that
-  // the signal was not decisive, so it is reported as R8.
-  //
-  // Note the consequence for the decision protocol, recorded as a limitation in
-  // the calibration report rather than hidden: `riskClass === 'high'` is exactly
-  // `P(risk>=9) >= tauCritical`, which R2 already denies, so a decision call can
-  // never reach this gate with an identified risk and R5 is unreachable for that
-  // protocol. R5 needs the operation-class facts the matrix names (production
-  // change, security-control change, irreversible delete), which the signal model
-  // does not yet carry; adding them changes the reviewer contract and is out of
-  // scope for a threshold-calibration issue.
-  return {
-    passed: false,
-    rule: 'R8',
-    observed: `P(risk<=${String(thresholds.mediumRiskCeiling)})=${(medium ?? 0).toFixed(2)}`,
-  };
-}
-
-function authGate(
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-  required: 'none' | 'implied' | 'explicit',
-): { readonly passed: boolean; readonly observed: string } {
-  if (required === 'none')
-    return { passed: true, observed: 'authorization not required' };
-  if (signals.authPoint !== null) {
-    const minimum = required === 'explicit' ? 8 : 5;
-    return {
-      passed: signals.authPoint >= minimum,
-      observed: `authPoint=${String(signals.authPoint)} (needs >=${String(minimum)})`,
-    };
-  }
-  const threshold = required === 'explicit' ? 8 : 5;
-  const probability = probabilityAtLeast(signals.authDist, threshold);
-  return {
-    passed: probability !== null && probability >= thresholds.tauAuth,
-    observed: `P(auth>=${String(threshold)})=${(probability ?? 0).toFixed(2)}`,
-  };
-}
-
-function allow(
-  rule: string,
-  reason: string,
-  strategy: StrategyName,
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): PolicyDecision {
-  return {
-    verdict: 'review-allow',
-    decisionRules: [rule],
-    reason,
-    strategy,
-    details: {
-      riskClass: signals.riskClass,
-      authClass: signals.authClass,
-      thresholds,
-    },
-  };
-}
-
-function escalate(
-  rule: string,
-  reason: string,
-  strategy: StrategyName,
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): PolicyDecision {
-  return {
-    verdict: 'review-escalate',
-    decisionRules: [rule],
-    reason,
-    strategy,
-    details: {
-      riskClass: signals.riskClass,
-      authClass: signals.authClass,
-      thresholds,
-    },
-  };
-}
-
-function deny(
-  rule: string,
-  reason: string,
-  strategy: StrategyName,
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): PolicyDecision {
-  return {
-    verdict: 'review-deny',
-    decisionRules: [rule],
-    reason,
-    strategy,
-    details: {
-      riskClass: signals.riskClass,
-      authClass: signals.authClass,
-      thresholds,
-    },
-  };
-}
-
-interface DecisionContext {
-  readonly signals: ReviewSignals;
-  readonly strategy: StrategyName;
-  readonly thresholds: PolicyThresholds;
-}
-
-function isCriticalRisk({ signals, thresholds }: DecisionContext): boolean {
-  const probability = probabilityAtLeast(signals.riskDist, 9);
-  return (
-    signals.riskClass === 'high' ||
-    (signals.riskPoint !== null && signals.riskPoint >= 9) ||
-    (signals.riskDist !== null &&
-      certainty(probability) &&
-      (probability ?? 0) >= thresholds.tauCritical)
-  );
-}
-
-function fixedDecision(context: DecisionContext): PolicyDecision | null {
-  const { signals, strategy, thresholds } = context;
-  if (signals.secrets && signals.egress) {
-    return deny(
-      'R1',
-      'sensitive material leaves the machine across a trust boundary',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  if (isCriticalRisk(context)) {
-    return deny(
-      'R2',
-      'critical risk of irreversible damage',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  if (signals.destructive && signals.bulk) {
-    return escalate(
-      'R4',
-      'bulk irreversible destruction requires a human decision',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  return null;
-}
+/** One deterministic rule verdict, settled under the current mode. */
+export type RuleSettlement =
+  | { readonly kind: 'ask-human'; readonly reason: string }
+  | { readonly kind: 'fallback-deny'; readonly reason: string }
+  | { readonly kind: 'deny'; readonly reason: string }
+  | { readonly kind: 'review' }
+  | { readonly kind: 'allow' };
 
 /**
- * The authorization level a call needs before the plugin may delegate it.
+ * What a matched rule does under one mode.
  *
- * Both protocols have to reach the same answer for the same facts, so the two
- * branches below are two spellings of one rule rather than two policies: the
- * chat point comparison and the decision class comparison must not drift apart.
- * The rule itself is unchanged by #22 — the calibration only measures the
- * probability gates and the risk ceilings against a labelled sample set, and the
- * `implied` authorization band that this rule leaves unused above the low-risk
- * boundary is recorded as a limitation rather than silently redefined here.
+ * The precedence is fixed by the design (`deny > force-ask > force-review >
+ * allow`) and the matcher already resolved which verdict won, so this maps one
+ * winning verdict to one settlement:
+ *
+ *   - `deny` outranks everything and applies in both modes;
+ *   - `force-ask` demands a real person. Under `no-ask`, or with no reachable
+ *     channel, it becomes a fallback denial: a model review is not a substitute
+ *     for the human this rule requires, so nothing here can turn it into a
+ *     review or an allow;
+ *   - `allow` covers the call completely, so the reviewer is skipped;
+ *   - `force-review` and an unmatched call both go to the reviewer, whose own
+ *     settlement then decides.
  */
-function requiredAuthorization(
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): 'none' | 'explicit' {
-  if (signals.riskPoint !== null) {
-    return signals.riskPoint >= thresholds.explicitFromRisk
-      ? 'explicit'
-      : 'none';
+export function settleRule(options: {
+  readonly verdict: 'allow' | 'deny' | 'force-ask' | 'force-review';
+  readonly ask: AskPolicy;
+  readonly channel: ApprovalChannel;
+}): RuleSettlement {
+  switch (options.verdict) {
+    case 'deny':
+      return { kind: 'deny', reason: 'a deny rule matches this call' };
+    case 'force-ask':
+      // The two reasons are different facts and the record keeps them apart: a
+      // mode that never asks is not a host that could not ask.
+      return options.ask === 'ask' && options.channel.status === 'available'
+        ? {
+            kind: 'ask-human',
+            reason: 'a force-ask rule requires a human decision for this call',
+          }
+        : {
+            kind: 'fallback-deny',
+            reason:
+              options.channel.status === 'unavailable'
+                ? `a force-ask rule requires a human decision, but ${options.channel.reason}`
+                : 'a force-ask rule requires a human decision, but this mode does not open human approval',
+          };
+    case 'allow':
+      return { kind: 'allow' };
+    case 'force-review':
+      return { kind: 'review' };
   }
-  return signals.riskClass === 'low' ? 'none' : 'explicit';
-}
-
-function bulkEgressDecision(context: DecisionContext): PolicyDecision {
-  const { signals, strategy, thresholds } = context;
-  if (!thresholds.allowBulkEgress) {
-    return escalate(
-      'R6',
-      'bulk external sending requires a human decision in this mode',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  const explicit = authGate(signals, thresholds, 'explicit');
-  if (!explicit.passed) {
-    return escalate(
-      'R6',
-      `bulk external sending requires explicit authorization (${explicit.observed})`,
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  const gate = riskGate(signals, thresholds);
-  if (!gate.passed) {
-    return escalate(
-      'R6',
-      `bulk external sending exceeds the risk ceiling (${gate.observed})`,
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  return allow(
-    'R6',
-    'bulk external sending with explicit authorization',
-    strategy,
-    signals,
-    thresholds,
-  );
-}
-
-function riskDecision(context: DecisionContext): PolicyDecision {
-  const { signals, strategy, thresholds } = context;
-  if (signals.riskClass === 'low' && !signals.destructive && !signals.secrets) {
-    return allow(
-      'R7',
-      'ordinary low-risk action',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  const gate = riskGate(signals, thresholds);
-  if (!gate.passed) {
-    // The gate distinguishes two different findings. A failure because the
-    // observed risk sits above the ceiling is an identified risk (R5); a failure
-    // because the signal itself does not clear the probability gate is an
-    // unresolved uncertainty (R8). Reporting both as R5 would tell the human that
-    // a risk was measured when the honest answer is that the model was not
-    // confident enough to measure one — so the gate's own rule is carried out.
-    return escalate(
-      gate.rule,
-      gate.rule === 'R8'
-        ? `the available signals did not clear the risk gate (${gate.observed})`
-        : `risk exceeds the selected ceiling (${gate.observed})`,
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  // Non-bulk destruction still needs explicit authorization and the regular
-  // risk ceiling; deleting one item is not automatically human-only.
-  if (
-    signals.destructive &&
-    signals.riskPoint !== null &&
-    signals.riskPoint > thresholds.chatMediumRiskMax
-  ) {
-    return escalate(
-      'R5',
-      'destructive action exceeds the selected risk ceiling',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  return allow(
-    'R7',
-    'explicitly authorized action within the selected risk ceiling',
-    strategy,
-    signals,
-    thresholds,
-  );
-}
-
-/**
- * Apply fixed denials (R1, R2), mandatory escalation (R4, R3), mode-dependent
- * bulk egress (R6), and finally the regular risk ceiling (R5, R7).
- */
-export function decideReview(
-  signals: ReviewSignals,
-  strategy: StrategyName,
-  thresholds: PolicyThresholds,
-): PolicyDecision {
-  const context = { signals, strategy, thresholds };
-  // An effective prohibition is a refusal, never a weak authorization. The shared
-  // rubric makes band 1 "an applicable prohibition or withdrawal", and the new
-  // matrix refuses it at every risk; the legacy thresholds below predate that band
-  // and would let a low-risk call through it. The check runs first, in every mode,
-  // and reads whichever shape this protocol reported.
-  if (
-    isProhibited({ point: signals.authPoint, distribution: signals.authDist })
-  ) {
-    return deny(
-      'R0',
-      'the effective permission prohibits this action',
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  const fixed = fixedDecision(context);
-  if (fixed !== null) return fixed;
-  const auth = authGate(
-    signals,
-    thresholds,
-    requiredAuthorization(signals, thresholds),
-  );
-  if (!auth.passed) {
-    return escalate(
-      'R3',
-      `authorization is insufficient (${auth.observed})`,
-      strategy,
-      signals,
-      thresholds,
-    );
-  }
-  if (
-    signals.bulk &&
-    signals.egress &&
-    !signals.secrets &&
-    !signals.destructive
-  ) {
-    return bulkEgressDecision(context);
-  }
-  return riskDecision(context);
-}
-
-/**
- * Apply `probeMode: override`: a complete fact may make a probe more dangerous,
- * never safer. Facts never turn an observed risk off.
- */
-export function applyProbeOverrides(
-  signals: ReviewSignals,
-  facts: DerivedFacts | null,
-  mode: ProbeMode,
-): ReviewSignals {
-  if (mode !== 'override' || facts === null) return signals;
-  return {
-    ...signals,
-    secrets: signals.secrets || facts.observed.credentialPaths.length > 0,
-    destructive:
-      signals.destructive ||
-      facts.observed.pipelineExec.length > 0 ||
-      facts.expansionRisk !== null,
-    egress: signals.egress || facts.observed.networkCommands.length > 0,
-    bulk:
-      signals.bulk ||
-      facts.observed.writes.length >= 10 ||
-      (signals.destructive && facts.observed.writes.length > 1),
-  };
-}
-
-/** Re-derive decision-backend classes under the currently effective thresholds. */
-export function reclassifySignals(
-  signals: ReviewSignals,
-  thresholds: PolicyThresholds,
-): ReviewSignals {
-  if (signals.source !== 'decision') return signals;
-  const atLeast = (
-    distribution: Readonly<Record<string, number>> | null,
-    minimum: number,
-  ): number | null => {
-    if (distribution === null) return null;
-    let total = 0;
-    let sum = 0;
-    for (const [key, value] of Object.entries(distribution)) {
-      total += value;
-      if (Number(key) >= minimum) sum += value;
-    }
-    return total > 0 ? sum / total : null;
-  };
-  const atMost = (
-    distribution: Readonly<Record<string, number>> | null,
-    maximum: number,
-  ): number | null => {
-    if (distribution === null) return null;
-    let total = 0;
-    let sum = 0;
-    for (const [key, value] of Object.entries(distribution)) {
-      total += value;
-      if (Number(key) <= maximum) sum += value;
-    }
-    return total > 0 ? sum / total : null;
-  };
-  const critical = atLeast(signals.riskDist, 9);
-  const low = atMost(signals.riskDist, LOW_RISK_MAX);
-  const riskClass =
-    critical !== null && critical >= thresholds.tauCritical
-      ? 'high'
-      : low !== null && low >= thresholds.tauLow
-        ? 'low'
-        : 'medium';
-  const explicit = atLeast(signals.authDist, 8);
-  const implied = atLeast(signals.authDist, 5);
-  const authClass =
-    explicit !== null && explicit >= thresholds.tauAuth
-      ? 'explicit'
-      : implied !== null && implied >= thresholds.tauAuth
-        ? 'implied'
-        : 'none';
-  return { ...signals, riskClass, authClass };
-}
-
-/** Re-evaluate a stored signal set under a comparison strategy without a model call. */
-export function compareStrategies(
-  signals: ReviewSignals,
-  normal: PolicyThresholds,
-  progress: PolicyThresholds,
-): {
-  readonly normal: ReviewVerdict;
-  readonly progress: ReviewVerdict;
-  readonly promoted: boolean;
-} {
-  const normalDecision = decideReview(signals, 'normal', normal);
-  const progressDecision = decideReview(signals, 'progress', progress);
-  return {
-    normal: normalDecision.verdict,
-    progress: progressDecision.verdict,
-    promoted:
-      normalDecision.verdict === 'review-escalate' &&
-      progressDecision.verdict === 'review-allow',
-  };
 }

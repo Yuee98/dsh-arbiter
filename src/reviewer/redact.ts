@@ -34,7 +34,7 @@ export function redact(text: string, secrets: readonly string[]): string {
  * the space would leave the credential itself behind.
  */
 const AUTH_FIELD =
-  'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
+  'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|api_key|access_token|refresh_token';
 
 /**
  * The exact spelling of this contract's authorization score member.
@@ -51,7 +51,69 @@ const SCORE_FIELD = /^"authorization"$/u;
 /** A JSON numeric literal, unquoted. */
 const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 
+/**
+ * The spans where `"authorization"` holds the answer's score *object*.
+ *
+ * The decision protocol answers `{"authorization": {"type":"score",
+ * "probabilities":{…}}}`, so the member's value is an object, not a number. A
+ * regex cannot match a balanced object, and the generic unquoted branch stops at
+ * the first `,` or `}` — masking that fragment would leave the rest of the object
+ * behind and produce invalid JSON. The spans are therefore located by counting
+ * braces (respecting JSON string literals) and the masker skips them.
+ *
+ * Skipping is scoped to the exact JSON spelling of this contract's score member,
+ * so a bare or capitalized header inside the same object is still masked: only the
+ * span owned by `"authorization"` is exempt, not its contents.
+ */
+function scoreObjectSpans(
+  text: string,
+): readonly (readonly [number, number])[] {
+  const spans: (readonly [number, number])[] = [];
+  const opener = /"authorization"\s*:\s*\{/gu;
+  for (
+    let match = opener.exec(text);
+    match !== null;
+    match = opener.exec(text)
+  ) {
+    const start = match.index;
+    // The `{` this member opens: the last character of the match.
+    let depth = 0;
+    let index = start + match[0].length - 1;
+    let inString = false;
+    let escaped = false;
+    for (; index < text.length; index += 1) {
+      const character = text[index];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (character === '{') depth += 1;
+      else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    // An unterminated object is not a span: the text is truncated, and guessing
+    // where it ends is how a masker would drop its own protection.
+    if (depth !== 0) continue;
+    spans.push([start, index + 1]);
+  }
+  return spans;
+}
+
 export function redactAuthHeaders(text: string): string {
+  // The spans are found first, from the original text, so the exemption is decided
+  // by evidence gathered before any masking can move an offset.
+  const spans = scoreObjectSpans(text);
   // One pass over the field name and separator, then the whole value: a quoted
   // value (JSON double quotes, a JS object dump with single quotes, backticks)
   // or everything up to a structural terminator. The unquoted branch must
@@ -63,9 +125,53 @@ export function redactAuthHeaders(text: string): string {
   );
   return text.replace(
     pattern,
-    (match: string, field: string, separator: string, value: string) =>
-      isScoreLiteral(field, value) ? match : `${field}${separator}[redacted]`,
+    (
+      match: string,
+      field: string,
+      separator: string,
+      value: string,
+      offset: number,
+    ) => {
+      // The exemption is the answer's own member, not a safe region: the object it
+      // opens is rescanned without the exemption, so a credential placed inside the
+      // answer is still masked even though that mask makes the object unparseable.
+      // Masking wins over parseability when the two conflict.
+      if (isScoreMember(spans, field, value, offset))
+        return `${field}${separator}${maskStrict(value, pattern)}`;
+      // A numeric literal is a chat answer's band. Everything else is masked, which
+      // is what keeps a credential-shaped value hidden whatever field carries it.
+      return isScoreLiteral(field, value)
+        ? match
+        : `${field}${separator}[redacted]`;
+    },
   );
+}
+
+/** Mask every auth-looking field in a fragment, exempting nothing. */
+function maskStrict(fragment: string, pattern: RegExp): string {
+  return fragment.replace(
+    pattern,
+    (_match: string, field: string, separator: string) =>
+      `${field}${separator}[redacted]`,
+  );
+}
+
+/**
+ * Whether this match is the score object's own opening member.
+ *
+ * Three conditions together, and each rules out a way to over-exempt: the exact
+ * JSON spelling of the key, a value that opens an object (not a quoted string), and
+ * an offset that is exactly where a balanced score-member span begins.
+ */
+function isScoreMember(
+  spans: readonly (readonly [number, number])[],
+  field: string,
+  value: string,
+  offset: number,
+): boolean {
+  if (!SCORE_FIELD.test(field.trim())) return false;
+  if (!value.trimStart().startsWith('{')) return false;
+  return spans.some(([start]) => start === offset);
 }
 
 /**

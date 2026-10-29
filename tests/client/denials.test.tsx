@@ -124,7 +124,7 @@ function mockDetail(callId: string, verdict: string): void {
             workspace: '/workspace/app',
             cwd: '/workspace/app',
             profile: 'default',
-            approvalMode: 'normal',
+            approvalMode: 'ask',
             executionMode: 'guarded',
             verdict,
             verdictReason: 'the verdict recorded with this call',

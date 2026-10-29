@@ -142,7 +142,15 @@ export function stableHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-export function modeForSession(
+/**
+ * The ask policy one session class uses.
+ *
+ * The two session classes keep their own setting; a subagent does not inherit the
+ * main session's mode, because whether the host can reach a person is a property of
+ * the session, not of its parent. `no-ask` is still only a statement about
+ * questions: the same matrix decides the score either way.
+ */
+export function askPolicyForSession(
   config: ArbiterConfig,
   sessionKind: 'main' | 'subagent',
 ): ApprovalMode {

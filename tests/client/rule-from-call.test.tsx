@@ -44,7 +44,7 @@ function detailBody() {
         workspace: '/srv/app',
         cwd: '/srv/app',
         profile: 'default',
-        approvalMode: 'normal',
+        approvalMode: 'ask',
         executionMode: 'guarded',
         verdict: 'review-allow',
         verdictReason: 'the review allowed this call',

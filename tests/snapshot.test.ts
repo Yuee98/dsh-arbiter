@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { DEFAULT_CONFIG, parseConfig } from '../src/config.js';
-import { renderDecisionState, renderRequest } from '../src/reviewer.js';
+import { renderDecisionState, renderChatRequest } from '../src/reviewer.js';
 import {
   buildReviewSnapshot,
   truncationFeedback,
@@ -435,7 +435,10 @@ describe('guidance materials', () => {
       present: true,
       path: '.dsh/arbiter.md',
     });
-    expect(built.user).toContain('MATERIALS');
+    // The submitted payload names the block the current material renderer emits;
+    // the guidance text itself stays in the user payload, never in the contract.
+    expect(built.user).toContain('POLICY_AND_GUIDANCE');
+    expect(built.user).toContain('never touch /etc');
   });
 
   test('the enable switch really prevents reading and says so', async () => {
@@ -545,7 +548,10 @@ describe('truncation as an input fact', () => {
     expect(item?.originalLength).toBe(text.length);
     expect(built.snapshot.evidenceTruncated).toBe(true);
     expect(built.snapshot.missing.join(' ')).toContain('truncated');
-    expect(built.user).toContain('MISSING_INPUT');
+    // The current material renderer reports the same fact under its own block:
+    // `missing_input` is the field the completeness block carries.
+    expect(built.user).toContain('MATERIAL_COMPLETENESS');
+    expect(built.user).toContain('missing_input');
   });
 
   test('a huge run_code program is trimmed last and never throws', async () => {
@@ -645,29 +651,27 @@ describe('reviewer input reuse', () => {
         context: { ...DEFAULT_CONFIG.context, customRules: 'prefer pnpm' },
       },
     });
-    const request = renderRequest(built.snapshot);
+    const request = renderChatRequest(built.snapshot);
     const state = renderDecisionState(request.user);
-    for (const text of [request.system, request.user, state]) {
-      expect(text).toContain('MATERIALS');
-      expect(text).toContain('BUDGET');
+    // Both envelopes carry the one material payload, so every block appears in
+    // both instead of one backend seeing a differently ordered copy.
+    for (const text of [request.user, state]) {
+      expect(text).toContain('POLICY_AND_GUIDANCE');
+      expect(text).toContain('MATERIAL_COMPLETENESS');
+      expect(text).toContain('missing_input');
+      expect(text).toContain('PROJECT_RULES');
+      expect(text).toContain('keep /etc untouched');
+      expect(text).toContain('prefer pnpm');
     }
-    // Both backends carry the "input facts, not findings" contract.
-    expect(request.system).toContain('Input completeness');
-    expect(state).toContain('Input completeness');
-    expect(request.user).toContain('MISSING_INPUT');
-    expect(state).toContain('MISSING_INPUT');
-    // The ladder itself, in both backends (chat system prompt vs decision state).
-    expect(request.system).toContain('## Authorization sources');
-    // The fixed contract is system; both user-authored sources are user payload.
+    // The contract is the only thing in `system`, so a user-authored source can
+    // never acquire the contract's authority by being placed in it.
+    expect(request.system).toContain('REVIEW_CONTRACT');
     expect(request.system).not.toContain('keep /etc untouched');
     expect(request.system).not.toContain('prefer pnpm');
-    expect(request.system).toContain('PROJECT_RULES\n> CUSTOM_RULES');
-    expect(state).toContain('SOURCE_PRIORITY');
-    expect(state).toContain('PROJECT_RULES > CUSTOM_RULES');
-    expect(request.system).toContain('never lowers that ceiling');
-    expect(state).toContain('project-rules');
-    expect(state).toContain('keep /etc untouched');
-    expect(state).toContain('prefer pnpm');
+    // The source ladder is stated once, in the contract both envelopes share.
+    expect(request.system).toContain('PROJECT_RULES');
+    expect(request.system).toContain('CUSTOM_RULES');
+    expect(state).toContain('REVIEW_CONTRACT');
   });
 
   test('the same snapshot renders repeatedly without re-reading the session', async () => {
@@ -690,8 +694,8 @@ describe('reviewer input reuse', () => {
     });
     const afterBuild = reads;
     expect(afterBuild).toBeGreaterThan(0);
-    expect(renderRequest(built.snapshot).user).toBe(
-      renderRequest(built.snapshot).user,
+    expect(renderChatRequest(built.snapshot).user).toBe(
+      renderChatRequest(built.snapshot).user,
     );
     expect(reads).toBe(afterBuild);
   });
@@ -699,6 +703,9 @@ describe('reviewer input reuse', () => {
 
 describe('budget and configuration edges', () => {
   test('non-null facts plus several checkpoints still reach the action', async () => {
+    // The shared contract is a large fixed preamble; the budget below is chosen
+    // to sit just above it so the optional segments are what has to yield.
+    const maxInputTokens = 3_400;
     const cwd = await workspace();
     const facts = {
       version: 1 as const,
@@ -747,7 +754,7 @@ describe('budget and configuration edges', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: { ...DEFAULT_CONFIG.context, maxInputTokens },
       },
     });
     // The action is still reached: checkpoints and facts yield first.
@@ -756,7 +763,7 @@ describe('budget and configuration edges', () => {
     const segments = built.snapshot.budget.truncatedSegments;
     expect(segments).not.toContain('OVER_BUDGET');
     expect(built.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
-      2_000,
+      maxInputTokens,
     );
   });
 
@@ -1207,7 +1214,7 @@ describe('reopened review findings', () => {
     expect((built.snapshot.projectRules ?? '').length).toBe(1_000);
     // Both backends and the audit copy read the same structure, so the metadata
     // cannot drift between the rendered request and the persisted snapshot.
-    const request = renderRequest(built.snapshot);
+    const request = renderChatRequest(built.snapshot);
     const state = renderDecisionState(request.user);
     for (const text of [request.user, state]) {
       expect(text).toContain('"chars": 1000');
@@ -1379,7 +1386,9 @@ describe('third-round review findings', () => {
     const main = session('main', events);
     const overBudget: number[] = [];
     let accepted = 0;
-    for (let budget = 1_900; budget <= 2_600; budget += 10) {
+    // The band starts just above the fixed contract, which is what a caller can
+    // actually satisfy; below it nothing fits at any trim depth.
+    for (let budget = 2_860; budget <= 3_600; budget += 10) {
       const built = await buildReviewSnapshot({
         ...base,
         agent: { session: main },
@@ -1401,8 +1410,8 @@ describe('third-round review findings', () => {
       );
     }
     // Judging the provisional render instead of the stabilized payload used to
-    // report OVER_BUDGET at ~1,960 for this state even though trimming could
-    // satisfy it. A satisfiable band must not be reported as unsatisfiable.
+    // report OVER_BUDGET for this state even though trimming could satisfy it. A
+    // satisfiable band must not be reported as unsatisfiable.
     expect(overBudget).toEqual([]);
     expect(accepted).toBeGreaterThan(0);
   });

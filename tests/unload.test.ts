@@ -313,7 +313,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
 
     // One gated call: coverage is recorded from an actual admission, not from
@@ -344,7 +344,7 @@ describe('unload rollback', () => {
     const { ctx, stub, disposers } = contextFor(session);
     // The configured boundary already matches the recorded one, so teardown
     // has nothing to rewrite.
-    apply(ctx, { ...ALLOW_ECHO, modes: { main: 'normal' } });
+    apply(ctx, { ...ALLOW_ECHO, modes: { main: 'ask' } });
     await stub.gate?.(exec(session, 'c2'), allow);
     const before = events.length;
     await unload(disposers);
@@ -360,7 +360,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await stub.gate?.(exec(session, 'c3'), allow);
 
@@ -391,7 +391,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     // A plain workspace-write session: no admission record, no gated call.
     events.push({ type: 'sandbox/mode', data: { mode: 'danger-full-access' } });
@@ -408,7 +408,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await stub.gate?.(exec(session, 'c7'), allow);
 
@@ -459,7 +459,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
 
     // A child call is gated through its parent's admission and covered.
@@ -491,7 +491,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await stub.gate?.(exec(session, 'c8'), allow);
     // Break the host write path: every append throws, so teardown cannot
@@ -521,7 +521,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await stub.gate?.(exec(session, 'c13-warm'), allow);
     session.onAppend = (type) => type !== 'approval/policy';
@@ -541,7 +541,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await stub.gate?.(exec(session, 'c10'), allow);
     // Fail the first narrow attempt, then let the retry succeed.
@@ -584,7 +584,7 @@ describe('unload rollback', () => {
       });
       // No allow rule on purpose: the call must reach the human stage so the
       // test can hold a real approval while teardown runs.
-      apply(ctx, { boundary: 'trusted', modes: { main: 'normal' } });
+      apply(ctx, { boundary: 'trusted', modes: { main: 'ask' } });
       const gate = stub.gate;
       if (gate === undefined) throw new Error('Gate was not registered');
       pending = gate(exec(session, 'c5'), allow);
@@ -649,7 +649,7 @@ describe('unload rollback', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     // Start unload; the async disposer flips `accepting` synchronously.
     const pending = disposers.map((dispose) => dispose());
@@ -683,7 +683,7 @@ describe('discovery covers inherited subagents', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await unload(disposers);
     expect(
@@ -730,7 +730,7 @@ describe('absent sandbox override at teardown', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     await unload(disposers);
     expect(
@@ -762,7 +762,7 @@ describe('discovery also narrows before it forgets', () => {
     apply(ctx, {
       ...ALLOW_ECHO,
       boundary: 'trusted',
-      modes: { main: 'normal' },
+      modes: { main: 'ask' },
     });
     // The child was covered while the parent was still admitted.
     await stub.gate?.(exec(child, 's16-first'), allow);

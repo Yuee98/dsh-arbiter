@@ -106,15 +106,10 @@ function makeSession(id: string): StubSession {
 }
 
 /** A chat reviewer answer that keeps the call on the normal review path. */
-function chatAnswer(risk: number, authorized: number) {
-  const text = JSON.stringify({
-    risk,
-    authorized,
-    secrets: false,
-    destructive: false,
-    egress: false,
-    bulk: false,
-  });
+function chatAnswer(risk: number, authorization: number) {
+  // The current contract asks for exactly two integers; a third member would be
+  // rejected as an unreadable answer and turn the call into a review failure.
+  const text = JSON.stringify({ risk, authorization });
   return {
     stream: () => {
       return (async function* () {
@@ -208,7 +203,7 @@ function baseConfig(
         verdict: 'force-ask',
       },
     ],
-    modes: { main: 'normal', subagent: 'strict' },
+    modes: { main: 'ask', subagent: 'no-ask' },
     reviewer:
       reviewerType === 'decision'
         ? {
@@ -370,7 +365,7 @@ describe('full audit detail', () => {
     const overview = fieldOf(detail, 'overview');
     expect(stringField(overview, 'verdict')).toBe('deny');
     expect(stringField(overview, 'tool')).toBe('bash');
-    expect(stringField(overview, 'approvalMode')).toBe('normal');
+    expect(stringField(overview, 'approvalMode')).toBe('ask');
     expect(fieldOf(overview, 'cancelled')).toBe(false);
 
     const basis = fieldOf(detail, 'basis');
@@ -454,7 +449,7 @@ describe('full audit detail', () => {
       fingerprint: 'bash:attempt',
       configRevision: 'rev-1',
       configSnapshotId: 'cfg-1',
-      approvalMode: 'normal',
+      approvalMode: 'ask',
       executionMode: 'guarded',
       result: 'review-deny',
       reason: 'the review denied this call',
@@ -484,10 +479,12 @@ describe('full audit detail', () => {
           durationMs: 2,
           estimatedInputTokens: 3,
           usage: null,
+          normalizedUsage: null,
         },
       ],
-      signals: null,
-      policyStrategy: 'normal',
+      scores: null,
+      reviewStage: null,
+      usage: null,
       decisionRules: ['R7'],
       executionStatus: 'not-started',
     };
@@ -674,7 +671,7 @@ describe('conflicting and partial evidence', () => {
       fingerprint: 'bash:empty-trace',
       configRevision: 'rev-1',
       configSnapshotId: 'cfg-1',
-      approvalMode: 'normal',
+      approvalMode: 'ask',
       executionMode: 'guarded',
       result: 'fallback-deny',
       reason: 'the review failed',
@@ -697,10 +694,12 @@ describe('conflicting and partial evidence', () => {
           durationMs: 2,
           estimatedInputTokens: 3,
           usage: null,
+          normalizedUsage: null,
         },
       ],
-      signals: null,
-      policyStrategy: 'normal',
+      scores: null,
+      reviewStage: null,
+      usage: null,
       decisionRules: [],
       executionStatus: 'not-started',
     });
@@ -733,7 +732,7 @@ describe('conflicting and partial evidence', () => {
       fingerprint: 'bash:tpl',
       configRevision: 'rev-1',
       configSnapshotId: 'cfg-1',
-      approvalMode: 'normal',
+      approvalMode: 'ask',
       executionMode: 'guarded',
       result: 'review-deny',
       reason: 'denied',
@@ -762,10 +761,12 @@ describe('conflicting and partial evidence', () => {
           durationMs: 2,
           estimatedInputTokens: 3,
           usage: null,
+          normalizedUsage: null,
         },
       ],
-      signals: null,
-      policyStrategy: 'normal',
+      scores: null,
+      reviewStage: null,
+      usage: null,
       decisionRules: [],
       executionStatus: 'not-started',
     });

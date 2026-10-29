@@ -45,10 +45,6 @@ const CHAT_COMPLETION = JSON.stringify({
         content: JSON.stringify({
           risk: 1,
           authorized: 8,
-          secrets: false,
-          destructive: false,
-          egress: false,
-          bulk: false,
         }),
       },
     },

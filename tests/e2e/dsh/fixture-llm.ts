@@ -19,10 +19,6 @@ import { join } from 'node:path';
 const REVIEW_ANSWER = JSON.stringify({
   risk: 2,
   authorized: 8,
-  secrets: false,
-  destructive: false,
-  egress: false,
-  bulk: false,
 });
 
 export const name = 'arbiter-e2e-llm';

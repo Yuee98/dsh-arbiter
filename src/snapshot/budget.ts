@@ -19,10 +19,9 @@
  */
 import { estimateTokenCount } from 'tokenx';
 import {
-  buildQuestions,
-  renderDecisionState,
-  renderSystem,
-  renderUser,
+  renderChatSystem,
+  renderChatUser,
+  renderDecisionRequest,
 } from '../reviewer.js';
 import type {
   ActionTruncation,
@@ -377,17 +376,21 @@ interface RenderedRequest {
   readonly user: string;
 }
 
-/** Estimated tokens of each payload actually sent to a reviewer backend. */
+/**
+ * Estimated tokens of each payload actually sent to a reviewer backend.
+ *
+ * Both payloads are rendered by the reviewer's own request renderers, so the
+ * budget is measured against exactly what will be submitted. Re-deriving either
+ * envelope here would let the estimate drift from the request as soon as the
+ * renderer changes.
+ */
 function estimatePayloads(
   chatSystem: string,
   chatUser: string,
 ): { readonly chat: number; readonly decision: number } {
-  const decision = renderDecisionState(chatUser);
   return {
     chat: estimateTokenCount(chatSystem) + estimateTokenCount(chatUser),
-    decision:
-      estimateTokenCount(decision) +
-      estimateTokenCount(JSON.stringify(buildQuestions())),
+    decision: renderDecisionRequest(chatUser).estimatedInputTokens,
   };
 }
 
@@ -400,8 +403,8 @@ function estimatePayloads(
  */
 function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
   let snapshot = candidate;
-  let system = renderSystem();
-  let user = renderUser(snapshot);
+  let system = renderChatSystem();
+  let user = renderChatUser(snapshot);
   let payloads = estimatePayloads(system, user);
   for (let round = 0; round < 5; round += 1) {
     const estimated = Math.max(payloads.chat, payloads.decision);
@@ -419,8 +422,8 @@ function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
         ],
       },
     };
-    const nextSystem = renderSystem();
-    const nextUser = renderUser(withBudget);
+    const nextSystem = renderChatSystem();
+    const nextUser = renderChatUser(withBudget);
     const nextPayloads = estimatePayloads(nextSystem, nextUser);
     const stable =
       Math.max(nextPayloads.chat, nextPayloads.decision) === estimated;

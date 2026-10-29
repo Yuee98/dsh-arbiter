@@ -155,10 +155,11 @@ function settle(options: {
   const settlement = new CallSettlement(host, new DecisionHistory(host));
   const extras: AuditExtras = {
     effect: null,
-    signals: null,
+    scores: null,
+    reviewStage: null,
+    usage: null,
     snapshot: null,
     reviewReason: null,
-    strategy: 'normal',
     decisionRules: [],
     modelAttempts: [],
     ruleId: null,
@@ -176,7 +177,7 @@ function settle(options: {
     agent,
     session,
     sessionKind: 'main',
-    mode: 'normal',
+    mode: 'no-ask',
     cwd: '/w',
     trace: [],
   };
@@ -231,7 +232,7 @@ describe('an unmigratable audit database', () => {
       fingerprint: 'bash:abc',
       configRevision: 'r1',
       configSnapshotId: 'cfg-1',
-      approvalMode: 'normal',
+      approvalMode: 'ask',
       executionMode: 'trusted',
       result: 'review-allow',
       reason: 'test',
@@ -240,8 +241,9 @@ describe('an unmigratable audit database', () => {
       sessionRecordState: 'written',
       snapshot: null,
       modelAttempts: [],
-      signals: null,
-      policyStrategy: null,
+      scores: null,
+      reviewStage: null,
+      usage: null,
       decisionRules: [],
       executionStatus: 'pending',
     });
@@ -273,7 +275,7 @@ describe('an unmigratable audit database', () => {
       agent: { session },
       session,
       sessionKind: 'main',
-      mode: 'normal',
+      mode: 'no-ask',
       cwd: '/w',
       trace: [],
     });
@@ -328,16 +330,17 @@ describe('an unmigratable audit database', () => {
       sessionKind: 'main',
       // A mode that cannot open an approval request makes settlement take the
       // fallback path, which pushes the stage this test inspects.
-      mode: 'progress',
+      mode: 'no-ask',
       cwd: '/w',
       trace: [],
     };
     const extras: AuditExtras = {
       effect: null,
-      signals: null,
+      scores: null,
+      reviewStage: null,
+      usage: null,
       snapshot: null,
       reviewReason: null,
-      strategy: 'normal',
       decisionRules: [],
       modelAttempts: [],
       ruleId: null,
@@ -358,7 +361,7 @@ describe('an unmigratable audit database', () => {
     // human is deciding; the granted stage must still be attributed to A.
     let release: (() => void) | undefined;
     const { host } = await startHost({
-      config: { modes: { main: 'strict' } },
+      config: { modes: { main: 'ask' } },
       approval: () =>
         new Promise((resolve) => {
           release = () => {
@@ -377,16 +380,17 @@ describe('an unmigratable audit database', () => {
       agent: { session },
       session,
       sessionKind: 'main',
-      mode: 'normal',
+      mode: 'ask',
       cwd: '/w',
       trace: [],
     };
     const extras: AuditExtras = {
       effect: null,
-      signals: null,
+      scores: null,
+      reviewStage: null,
+      usage: null,
       snapshot: null,
       reviewReason: null,
-      strategy: 'normal',
       decisionRules: [],
       modelAttempts: [],
       ruleId: null,
@@ -399,7 +403,7 @@ describe('an unmigratable audit database', () => {
       host,
       {
         ...host.runtime.config,
-        modes: { main: 'progress', subagent: 'progress' },
+        modes: { main: 'no-ask', subagent: 'no-ask' },
       },
       'file',
     );
@@ -418,12 +422,12 @@ describe('an unmigratable audit database', () => {
   test('the payload keeps the effective revision while history is unavailable', async () => {
     const { host } = await startHost({
       breakDatabase: true,
-      config: { modes: { main: 'strict' } },
+      config: { modes: { main: 'ask' } },
     });
     const payload = stateOf(host);
     expect(stringField(payload, 'effectiveRevision').length).toBeGreaterThan(0);
     expect(recordField(recordField(payload, 'config'), 'modes')).toMatchObject({
-      main: 'strict',
+      main: 'ask',
     });
     const audit = asRecord(recordField(payload, 'audit'));
     const health = asRecord(recordField(audit, 'health'));

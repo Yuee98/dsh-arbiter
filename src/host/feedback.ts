@@ -51,33 +51,6 @@ const RECOVERY_HINTS: Readonly<Record<string, string>> = {
     'This mode does not open approvals, so the call was not executed. Ask the user in conversation, or propose an action that does not need human approval.',
 };
 
-/**
- * The human-readable reason a review rule stands for.
- *
- * Kept next to the composition so the wording a decision reports and the wording
- * the agent sees cannot drift apart.
- */
-export function modelReasonFor(decision: {
-  readonly decisionRules: readonly string[];
-}): string {
-  const reasons: Record<string, string> = {
-    // R0 is the A1 row of the shared matrix: an effective prohibition refuses the
-    // call outright, so it must not read as an ordinary weak-authorization block.
-    R0: 'the effective permission prohibits this action',
-    R1: 'sensitive material would leave the machine',
-    R2: 'critical risk of irreversible damage',
-    R3: 'no sufficient authorization was found',
-    R4: 'bulk irreversible destruction requires a human decision',
-    R5: 'the risk exceeds the selected policy ceiling',
-    R6: 'bulk external sending exceeds the selected policy ceiling',
-    R8: 'the available signals are insufficient',
-  };
-  return (
-    reasons[decision.decisionRules[0] ?? ''] ??
-    'the review did not approve this action'
-  );
-}
-
 export interface FeedbackInput {
   readonly result: CallResult;
   /** Why this stage ended the call, when the outcome is a fallback or abort. */

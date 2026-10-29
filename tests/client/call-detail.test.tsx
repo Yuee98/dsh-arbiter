@@ -68,7 +68,7 @@ function auditDetailBody(): DetailBody {
         workspace: '/workspace/app',
         cwd: '/workspace/app',
         profile: 'default',
-        approvalMode: 'normal',
+        approvalMode: 'ask',
         executionMode: 'guarded',
         verdict: 'review-deny',
         verdictReason: 'the review rejected this call',

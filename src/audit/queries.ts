@@ -1,4 +1,4 @@
-import type { ReviewSignals } from '../types.js';
+import type { ReviewScores, ReviewStageRecord } from '../types.js';
 import type {
   CallFilter,
   CallPage,
@@ -22,7 +22,8 @@ import {
   rowJson,
   rowStrings,
   rowTrace,
-  rowSignals,
+  rowScores,
+  rowReviewStage,
 } from './rows.js';
 export function configHistory(
   db: DatabaseSync,
@@ -305,11 +306,9 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     trace: rowJson(call['trace']),
     effect: rowJson(call['effect']),
     sessionRecordState: rowText(call['session_record_state']),
-    signals: rowJson(call['signals']),
-    policyStrategy:
-      typeof call['policy_strategy'] === 'string'
-        ? call['policy_strategy']
-        : null,
+    scores: rowScores(call['scores']),
+    reviewStage: rowReviewStage(call['review_stage']),
+    usage: rowJson(call['usage']),
     decisionRules: rowStrings(call['decision_rules']),
     executionStatus: rowText(call['execution_status']),
     executionStartedAt: optionalNumber(call['execution_started_at']),
@@ -377,14 +376,14 @@ export function callsForAnalysis(
   readonly arguments: unknown;
   readonly result: string;
   readonly executionStatus: string;
-  readonly signals: ReviewSignals | null;
+  readonly scores: ReviewScores | null;
   readonly effect: unknown;
   readonly fingerprint: string;
 }[] {
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, ts, tool, arguments, result, execution_status, signals, effect, fingerprint,
+        `SELECT call_id, ts, tool, arguments, result, execution_status, scores, effect, fingerprint,
                 record_format_version
            FROM calls WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?`,
       )
@@ -402,7 +401,7 @@ export function callsForAnalysis(
         arguments: rowJson(row['arguments']),
         result: rowText(row['result']),
         executionStatus: rowText(row['execution_status']),
-        signals: rowSignals(row['signals']),
+        scores: rowScores(row['scores']),
         effect: rowJson(row['effect']),
         fingerprint: rowText(row['fingerprint']),
       },
@@ -503,32 +502,32 @@ export function recentForReplay(
 ): readonly {
   readonly callId: string;
   readonly tool: string;
-  readonly signals: ReviewSignals;
+  readonly scores: ReviewScores;
   readonly result: string;
-  readonly strategy: string | null;
+  readonly reviewStage: ReviewStageRecord | null;
 }[] {
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, tool, signals, result, policy_strategy, record_format_version
-           FROM calls WHERE signals IS NOT NULL ORDER BY ts DESC LIMIT ?`,
+        `SELECT call_id, tool, scores, result, review_stage, record_format_version
+           FROM calls WHERE scores IS NOT NULL ORDER BY ts DESC LIMIT ?`,
       )
       .all(limit),
   );
   return rows.flatMap((row) => {
     if (!readableFormat(formatOf(row))) return [];
-    const signals = rowSignals(row['signals']);
-    if (signals === null) return [];
+    const scores = rowScores(row['scores']);
+    // A row whose stored score cannot be interpreted is skipped rather than
+    // guessed at: replaying it under the current matrix would report a decision
+    // this build never made.
+    if (scores === null) return [];
     return [
       {
         callId: rowText(row['call_id']),
         tool: rowText(row['tool']),
-        signals,
+        scores,
         result: rowText(row['result']),
-        strategy:
-          typeof row['policy_strategy'] === 'string'
-            ? row['policy_strategy']
-            : null,
+        reviewStage: rowReviewStage(row['review_stage']),
       },
     ];
   });

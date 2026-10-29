@@ -94,15 +94,11 @@ function makeSession(id: string): StubSession {
 /** A chat-protocol reviewer that always answers with one fixed pair. */
 function chatAnswer(answer: {
   readonly risk: number;
-  readonly authorized: number;
+  readonly authorization: number;
 }): HostServices['llm'] {
   const text = JSON.stringify({
     risk: answer.risk,
-    authorized: answer.authorized,
-    secrets: false,
-    destructive: false,
-    egress: false,
-    bulk: false,
+    authorization: answer.authorization,
   });
   return {
     stream: () => {
@@ -135,7 +131,7 @@ function decisionAnswer(answer: {
     model: 'clef',
     answers: {
       risk: { type: 'score', probabilities: answer.risk, score: 1 },
-      authorized: {
+      authorization: {
         type: 'score',
         probabilities: answer.authorization,
         score: 1,
@@ -216,7 +212,7 @@ function createHarness(options: {
           },
         };
   apply(ctx, {
-    modes: options.modes ?? { main: 'normal', subagent: 'strict' },
+    modes: options.modes ?? { main: 'ask', subagent: 'no-ask' },
     reviewer,
   });
   return {
@@ -243,12 +239,12 @@ const allowNext = (): Promise<{ kind: string }> =>
 describe('an effective prohibition through the real gate', () => {
   test('a chat answer of A1 denies a low-risk call', async () => {
     // Risk 1 with A1 is the case the old engine allowed: the low-risk fast path
-    // never asked for authorization, and `authorized: 0` (the old "no evidence")
+    // never asked for authorization, and `authorization: 0` (the old "no evidence")
     // mapped to the same class as a prohibition.
     const session = makeSession('p-chat-a1');
     const harness = createHarness({
       session,
-      llm: chatAnswer({ risk: 1, authorized: 1 }),
+      llm: chatAnswer({ risk: 1, authorization: 1 }),
       name: `prohibition-chat-${String(harnessSeq++)}`,
     });
     try {
@@ -274,7 +270,7 @@ describe('an effective prohibition through the real gate', () => {
     });
     const harness = createHarness({
       session,
-      llm: chatAnswer({ risk: 1, authorized: 2 }),
+      llm: chatAnswer({ risk: 1, authorization: 2 }),
       name: `prohibition-decision-${String(harnessSeq++)}`,
       reviewer: { type: 'decision', url: 'http://127.0.0.1:9/review' },
     });
@@ -299,7 +295,7 @@ describe('an effective prohibition through the real gate', () => {
     });
     const harness = createHarness({
       session,
-      llm: chatAnswer({ risk: 1, authorized: 2 }),
+      llm: chatAnswer({ risk: 1, authorization: 2 }),
       name: `prohibition-boundary-${String(harnessSeq++)}`,
       reviewer: { type: 'decision', url: 'http://127.0.0.1:9/review' },
     });
@@ -319,7 +315,7 @@ describe('an effective prohibition through the real gate', () => {
     const session = makeSession('p-chat-a2');
     const harness = createHarness({
       session,
-      llm: chatAnswer({ risk: 1, authorized: 2 }),
+      llm: chatAnswer({ risk: 1, authorization: 2 }),
       name: `prohibition-a2-${String(harnessSeq++)}`,
     });
     try {
@@ -331,11 +327,11 @@ describe('an effective prohibition through the real gate', () => {
   });
 });
 
-describe('the decision adapter publishes public keys to the engine', () => {
-  test('a parsed distribution is keyed 1..10, not 0..9', async () => {
-    // The live engine reads public bands. An adapter that published native keys
-    // would make the prohibition guard read the wrong band, so the numbering is
-    // asserted on the persisted signals rather than inferred from a verdict.
+describe('the decision adapter publishes public keys to the record', () => {
+  test('a stored trail is keyed 1..10, not 0..9', async () => {
+    // The engine reads public bands. An adapter that published native keys would
+    // make the prohibition guard read the wrong band, so the numbering is
+    // asserted on the stored trail rather than inferred from a verdict.
     const session = makeSession('p-keys');
     const realFetch = globalThis.fetch;
     globalThis.fetch = decisionAnswer({
@@ -344,32 +340,42 @@ describe('the decision adapter publishes public keys to the engine', () => {
     });
     const harness = createHarness({
       session,
-      llm: chatAnswer({ risk: 1, authorized: 2 }),
+      llm: chatAnswer({ risk: 1, authorization: 2 }),
       name: `prohibition-keys-${String(harnessSeq++)}`,
       reviewer: { type: 'decision', url: 'http://127.0.0.1:9/review' },
     });
     try {
       await harness.gate(call(session, 'pk1'), allowNext);
-      const signals = await storedSignals('pk1');
-      const authDist = readDistribution(signals['authDist']);
-      const keys = Object.keys(authDist)
+      const scores = await storedScores('pk1');
+      const audit = readRecord(scores['audit']);
+      if (audit === null) throw new Error('the score pair stored no trails');
+      const authorization = readRecord(audit['authorization']);
+      if (authorization === null)
+        throw new Error('the authorization trail is missing');
+      const published = readDistribution(authorization['published']);
+      const keys = Object.keys(published)
         .map(Number)
         .sort((a, b) => a - b);
-      // The adapter publishes the public band for each submitted level. A valid
-      // answer carries all ten canonical levels, so the published form does too,
-      // shifted by one: no key is 0 and none exceeds 10, which is what tells this
-      // apart from the native numbering.
+      // The live trail publishes the public band for each submitted level, so a
+      // valid answer covers all ten: no key is 0 and none exceeds 10, which is
+      // what tells this apart from the native numbering.
       expect(keys).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
       expect(keys).not.toContain(0);
-      // The mass submitted at native 0 and 9 lands on public 1 and 10.
-      expect(authDist['1']).toBeCloseTo(0.4, 10);
-      expect(authDist['10']).toBeCloseTo(0.6, 10);
-      expect(Object.values(authDist).reduce((a, b) => a + b, 0)).toBeCloseTo(
+      // The mass submitted at native 0 and 9 lands on public 1 and 10, and the
+      // native distribution is kept beside it for offline replay.
+      expect(published['1']).toBeCloseTo(0.4, 10);
+      expect(published['10']).toBeCloseTo(0.6, 10);
+      expect(Object.values(published).reduce((a, b) => a + b, 0)).toBeCloseTo(
         1,
         10,
       );
-      expect(signals['authPoint']).toBeNull();
-      expect(signals['riskPoint']).toBeNull();
+      const nativeTrail = readDistribution(authorization['native']);
+      expect(nativeTrail['0']).toBeCloseTo(0.4, 10);
+      expect(nativeTrail['9']).toBeCloseTo(0.6, 10);
+      // A decision answer is a distribution, so it has no single point.
+      expect(authorization['point']).toBeNull();
+      // 40% A1 / 60% A10 is A10 by the lower median, which permits risk 1.
+      expect(scores['authorization']).toBe(10);
     } finally {
       harness.dispose();
       globalThis.fetch = realFetch;
@@ -377,8 +383,8 @@ describe('the decision adapter publishes public keys to the engine', () => {
   });
 });
 
-/** The persisted signal object for one call, once the audit row exists. */
-async function storedSignals(callId: string): Promise<Record<string, unknown>> {
+/** The stored score pair for one call, once the audit row exists. */
+async function storedScores(callId: string): Promise<Record<string, unknown>> {
   const module = await import('../../src/audit.js');
   const store = new module.AuditStore(
     join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
@@ -393,13 +399,13 @@ async function storedSignals(callId: string): Promise<Record<string, unknown>> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const row: unknown = store.getCall(callId);
       if (row !== null && typeof row === 'object') {
-        const signals: unknown = Reflect.get(row, 'signals');
-        const record = readRecord(signals);
+        const scores: unknown = Reflect.get(row, 'scores');
+        const record = readRecord(scores);
         if (record !== null) return record;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    throw new Error(`no persisted signals for ${callId}`);
+    throw new Error(`no persisted score pair for ${callId}`);
   } finally {
     store.close();
   }

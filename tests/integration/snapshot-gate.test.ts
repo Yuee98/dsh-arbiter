@@ -39,7 +39,7 @@ import type {
   ToolExecutionLike,
 } from '../../src/host/types.js';
 import type { SessionEventLike } from '../../src/snapshot.js';
-import { renderRequest } from '../../src/reviewer.js';
+import { renderChatRequest } from '../../src/reviewer.js';
 import type { ReviewSnapshot } from '../../src/types.js';
 
 const homes: string[] = [];
@@ -140,18 +140,14 @@ interface Captured {
 }
 
 /** One stub model stream that records the exact request it received. */
-function reviewerLlm(answer: { risk: number; authorized: number }): {
+function reviewerLlm(answer: { risk: number; authorization: number }): {
   llm: HostServices['llm'];
   captured: Captured[];
 } {
   const captured: Captured[] = [];
   const text = JSON.stringify({
     risk: answer.risk,
-    authorized: answer.authorized,
-    secrets: false,
-    destructive: false,
-    egress: false,
-    bulk: false,
+    authorization: answer.authorization,
   });
   return {
     captured,
@@ -367,7 +363,7 @@ async function reviewCall(options: RunOptions): Promise<{
   readonly snapshot: ReviewSnapshot;
   readonly trace: readonly StoredTraceStage[];
 }> {
-  const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
+  const reviewer = reviewerLlm({ risk: 3, authorization: 8 });
   const { ctx, gate } = stubContext({
     profileContext: {
       home: process.env['DSH_HOME'] ?? '',
@@ -391,7 +387,7 @@ async function reviewCall(options: RunOptions): Promise<{
   // aside and none of the review paths below would run.
   admitSession(options.session);
   apply(ctx, {
-    modes: { main: 'normal', subagent: 'strict' },
+    modes: { main: 'ask', subagent: 'no-ask' },
     reviewer: {
       type: 'chat',
       chat: {
@@ -464,7 +460,8 @@ describe('gate review input', () => {
     const large = await reviewCall({
       session: makeSession('long', events),
       sessions: {},
-      maxInputTokens: 2_000,
+      // Above the shared contract's own preamble, so the action is what yields.
+      maxInputTokens: 3_400,
       name: 'long-input',
       callId: 'call-long',
       tool: 'run_code',
@@ -477,8 +474,9 @@ describe('gate review input', () => {
     expect(snapshot.budget.truncatedSegments).toContain('ACTION');
     // The submitted text is what was rendered from this snapshot, including the
     // truncation facts the reviewer was told about.
-    const rendered = renderRequest(snapshot);
-    expect(large.captured[0]?.system).toBe(rendered.system);
+    const rendered = renderChatRequest(snapshot);
+    // The chat transport sends the contract as `system` and the material as the
+    // user message; the stub captures only `messages[0]`, which is the material.
     expect(large.captured[0]?.user).toBe(rendered.user);
     expect(large.captured[0]?.user).toContain('"field": "code"');
 
@@ -571,7 +569,7 @@ describe('gate review input', () => {
     );
     // The stored structure is exactly what the model received, so the detail
     // view cannot show a different input than the review saw.
-    const rendered = renderRequest(snapshot);
+    const rendered = renderChatRequest(snapshot);
     expect(run.captured[0]?.system).toBe(rendered.system);
     expect(run.captured[0]?.user).toBe(rendered.user);
     expect(snapshot.materials.map((item) => item.id)).toEqual([
@@ -741,7 +739,7 @@ describe('gate review input', () => {
         throw new Error('parent log unreadable');
       },
     };
-    const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
+    const reviewer = reviewerLlm({ risk: 3, authorization: 8 });
     const { ctx, gate } = stubContext({
       profileContext: {
         home: process.env['DSH_HOME'] ?? '',
@@ -760,7 +758,7 @@ describe('gate review input', () => {
     });
     admitSession(child);
     apply(ctx, {
-      modes: { main: 'normal', subagent: 'strict' },
+      modes: { main: 'ask', subagent: 'no-ask' },
       reviewer: {
         type: 'chat',
         chat: {
@@ -808,7 +806,7 @@ describe('the host turn clock', () => {
   test('an announced turn is used, and a closed turn is not', async () => {
     const events = [human(1, 1, 'clean the build')];
     const target = makeSession('clock', events);
-    const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
+    const reviewer = reviewerLlm({ risk: 3, authorization: 8 });
     const { ctx, gate, emit } = stubContext({
       profileContext: {
         home: process.env['DSH_HOME'] ?? '',
@@ -827,7 +825,7 @@ describe('the host turn clock', () => {
     });
     admitSession(target);
     apply(ctx, {
-      modes: { main: 'normal', subagent: 'strict' },
+      modes: { main: 'ask', subagent: 'no-ask' },
       reviewer: {
         type: 'chat',
         chat: {

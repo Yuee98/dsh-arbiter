@@ -657,7 +657,7 @@ function detailBody(
       workspace: '/workspace',
       cwd: '/workspace',
       profile: 'default',
-      approvalMode: 'normal',
+      approvalMode: 'ask',
       executionMode: 'trusted',
       verdict: overrides.verdict ?? 'review-deny',
       verdictReason: overrides.verdictReason ?? 'force push is denied',

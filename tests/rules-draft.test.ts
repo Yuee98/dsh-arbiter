@@ -57,7 +57,7 @@ function draft(rules: readonly DraftRule[] = []): Draft {
   return {
     enabled: true,
     boundary: 'guarded',
-    modes: { main: 'normal', subagent: 'strict' },
+    modes: { main: 'ask', subagent: 'no-ask' },
     rules: rules.map((rule) => ({
       ...rule,
       conditions: rule.conditions.map((condition) => ({ ...condition })),
@@ -81,28 +81,7 @@ function draft(rules: readonly DraftRule[] = []): Draft {
       },
     },
     policy: {
-      version: 'arbiter-policy-v2',
-      normal: {
-        tauAuth: 0.8,
-        tauRisk: 0.75,
-        tauCritical: 0.25,
-        tauLow: 0.7,
-        chatMediumRiskMax: 6,
-        mediumRiskCeiling: 6,
-        explicitFromRisk: 4,
-        allowBulkEgress: false,
-      },
-      progress: {
-        tauAuth: 0.8,
-        tauRisk: 0.75,
-        tauCritical: 0.25,
-        tauLow: 0.7,
-        chatMediumRiskMax: 8,
-        mediumRiskCeiling: 8,
-        explicitFromRisk: 4,
-        allowBulkEgress: true,
-      },
-      probeMode: 'assist',
+      version: 'arbiter-policy-v3',
     },
     context: {
       maxInputTokens: 10_000,

@@ -639,8 +639,8 @@ describe('insufficient material', () => {
   });
 });
 
-describe('the default policy is not involved', () => {
-  test('the service never reads the configured thresholds', async () => {
+describe('no configuration can move the matrix', () => {
+  test('the decision is the shared matrix applied to the answer alone', async () => {
     const result = await review({
       snapshot: snapshot(),
       callId: CALL_ID,
@@ -649,19 +649,14 @@ describe('the default policy is not involved', () => {
         scripts: [{ kind: 'text', text: '{"risk":9,"authorization":9}' }],
       }),
     });
-    // A policy threshold set so wide that the legacy engine would allow anything
-    // cannot influence this outcome: the shared matrix decides, not a tuning knob.
-    const wide = {
-      ...DEFAULT_CONFIG.policy.normal,
-      tauAuth: 0,
-      tauRisk: 0,
-      tauLow: 0,
-      tauCritical: 0,
-    };
-    expect(wide.tauAuth).toBe(0);
+    // The policy section carries no tunable threshold any more: the matrix, the
+    // bands and the N0 rule are the contract, so there is nothing an operator
+    // could widen to make this pair pass.
+    expect(Object.keys(DEFAULT_CONFIG.policy)).toEqual(['version']);
     expect(result.outcome.status).toBe('scored');
     if (result.outcome.status !== 'scored') throw new Error('expected scored');
-    // R9 needs A10; A9 is one band short, so the matrix escalates.
+    // Risk 9 needs A10; A9 is one band short, so the matrix escalates.
+    expect(result.outcome.requiredAuthorization).toBe(10);
     expect(result.outcome.verdict).toBe('review-escalate');
   });
 });
@@ -1214,5 +1209,107 @@ describe('round-2 corrections', () => {
     // No text arrived, but the provider said why: classifying that as `network`
     // would tell an operator to check connectivity for a provider outage.
     expect(result.failure).toBe('unavailable');
+  });
+});
+
+describe('the score object is exempt while every header still masks', () => {
+  /** A decision answer body, in the shape the provider actually sends. */
+  const DECISION_BODY = JSON.stringify({
+    result: {
+      model: 'clef',
+      answers: {
+        risk: { type: 'score', probabilities: { '0': 0.1, '9': 0.9 } },
+        authorization: { type: 'score', probabilities: { '9': 1 } },
+      },
+      usage: { input_tokens: 10, output_tokens: 0 },
+    },
+    success: true,
+  });
+
+  test('a decision score object survives as parseable JSON', () => {
+    // The regression: the exemption accepted only a numeric literal, so a score
+    // *object* was masked at its first comma and the record kept a truncated
+    // fragment. `responseText` must stay parseable for the detail reader and for
+    // offline replay.
+    const masked = redactAuthHeaders(DECISION_BODY);
+    expect(() => JSON.parse(masked) as unknown).not.toThrow();
+    expect(masked).toContain('"authorization":{"type":"score"');
+    expect(masked).not.toContain('[redacted]');
+    // The parsed value is the provider's own, not a reconstruction.
+    expect(JSON.parse(masked)).toEqual(JSON.parse(DECISION_BODY));
+  });
+
+  test('a chat band stays exempt, as before', () => {
+    expect(redactAuthHeaders('"authorization": 8')).toBe('"authorization": 8');
+    expect(redactAuthHeaders('{"authorization":2}')).toBe(
+      '{"authorization":2}',
+    );
+  });
+
+  test('a credential-shaped value in that field still masks', () => {
+    // The exemption is the object member, not the name: a string value at this
+    // key is a credential and masks whatever it holds.
+    for (const header of [
+      '"authorization": "Bearer sk-abcdef"',
+      '"authorization":"sk-abcdef"',
+    ]) {
+      expect(redactAuthHeaders(header)).not.toContain('sk-abcdef');
+    }
+  });
+
+  test('a bare or capitalized header masks even inside the score object', () => {
+    // Parseability never buys a credential an exemption: the object is rescanned
+    // without the exemption, so a real header it contains is masked even though
+    // that mask makes the object unparseable.
+    for (const header of [
+      '{"authorization":{"Authorization":"Bearer sk-inner"}}',
+      '{"authorization":{"proxy-authorization":"Bearer sk-inner"}}',
+    ]) {
+      expect(redactAuthHeaders(header)).not.toContain('sk-inner');
+    }
+    // A sibling header outside the member is masked as it always was.
+    const masked = redactAuthHeaders(
+      '{"answers":{"authorization":{"type":"score"}},"headers":{"Authorization":"Bearer sk-sibling"}}',
+    );
+    expect(masked).not.toContain('sk-sibling');
+  });
+
+  test('a credential in a decision attempt record is masked end to end', async () => {
+    // The unit rule above is necessary but not sufficient: the boundary the record
+    // is built at is `maskAttempt`, so a real attempt is what proves the masked
+    // response is both parseable and free of the credential.
+    const secret = 'sk-decision-echo-sentinel';
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              ...NEW_SCALE_CLOUDFLARE,
+              result: {
+                ...NEW_SCALE_CLOUDFLARE.result,
+                // The credential is echoed in a value, not as a header: the known
+                // secret is what removes it, so this case tests that the masking
+                // boundary still runs without claiming the header rule did it.
+                usage: { input_tokens: 1, note: secret },
+              },
+            }),
+          },
+        ],
+        credential: secret,
+      }),
+    });
+    expect(result.protocol).toBe('decision');
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    const text = attempt.responseText ?? '';
+    expect(text).not.toContain(secret);
+    // The score member is untouched, so the stored body stays readable — which is
+    // what the detail reader, the reports and offline replay all depend on.
+    expect(() => JSON.parse(text) as unknown).not.toThrow();
+    expect(text).toContain('"authorization":{"type":"score"');
   });
 });
