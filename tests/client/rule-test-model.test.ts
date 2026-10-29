@@ -12,6 +12,9 @@ import {
   ruleConclusion,
   testSignature,
 } from '../../src/client/components/rules/rule-test-model.js';
+import { evaluateCall } from '../../src/rules/match.js';
+import { nodeTypes } from '../../src/shell/parse.js';
+import type { CommandRule } from '../../src/types.js';
 import type { RuleTestResultView } from '../../src/client/view-types.js';
 import type {
   RuleConditionResult,
@@ -480,9 +483,10 @@ describe('whole-config precedence', () => {
       levels.filter((level) => level.decision === 'effective'),
     ).toHaveLength(1);
     expect(levels[4]?.decision).toBe('effective');
-    // The focused rule was evaluated and did not match; a level that did not
-    // take part is not marked as the current rule's.
-    expect(levels[0]).toMatchObject({ decision: 'none', focused: false });
+    // The marker names where the selected rule sits even though it did not
+    // match: hiding it would remove the tier the reader is asking about.
+    expect(levels[0]).toMatchObject({ decision: 'none', focused: true });
+    expect(levels[1]?.focused).toBe(false);
   });
 });
 
@@ -863,11 +867,12 @@ describe('three-state precedence', () => {
       unknownIds: ['deny-redirect'],
     });
     const allow = levels[3];
-    // The allow was not beaten by a matching higher-priority rule; it was held
-    // back by an undetermined one.
+    // The allow matched conclusively; an undetermined higher-priority rule is
+    // what withheld it. That is not the allow's own outcome.
     expect(allow).toMatchObject({
-      decision: 'unknown',
+      decision: 'withheld-by-unknown',
       otherIds: ['allow-echo'],
+      unknownIds: [],
     });
     expect(levels[4]?.decision).toBe('effective');
   });
@@ -916,5 +921,328 @@ describe('three-state precedence', () => {
       winnerId: 'deny-first',
       otherIds: ['deny-second'],
     });
+  });
+});
+
+/**
+ * A decoded route answer for one real evaluation.
+ *
+ * The explanation layer must not invent facts, so a few tests run the actual
+ * evaluator and decode its answer the way the browser does, instead of hand
+ * writing the fields the panel is about to read.
+ */
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function decoded(
+  rules: readonly CommandRule[],
+  tool: string,
+  args: unknown,
+  cwd = '/w',
+): RuleTestResultView {
+  const evaluation = evaluateCall({
+    rules,
+    tool,
+    arguments: args,
+    identity: 'main',
+    workspaceRoot: cwd,
+    cwd,
+    parentAuthorizationPresent: null,
+    historyTruncated: false,
+    overlapsDeniedEffect: false,
+  });
+  return {
+    input:
+      typeof args === 'object' && args !== null && 'command' in args
+        ? text(args['command'])
+        : '',
+    tool,
+    cwd,
+    path:
+      evaluation.path.kind === 'rule'
+        ? evaluation.path.verdict
+        : 'review(default)',
+    pathDetail: evaluation.path,
+    rule: evaluation.matches.find((match) => match.effective) ?? null,
+    matches: evaluation.matches,
+    rules: evaluation.rules,
+    parse: {
+      status: evaluation.parse.status,
+      statements: evaluation.parse.statements,
+      nodes: nodeTypes(evaluation.parse),
+      completeness: evaluation.parse.completeness,
+      opaque: evaluation.parse.opaque,
+      unresolved: evaluation.parse.unresolved,
+    },
+    argv: evaluation.argv,
+    normalization: evaluation.normalization,
+    shadowed: evaluation.shadowed,
+  };
+}
+
+describe('review round two corrections', () => {
+  const echoAllow = (matchedValues: readonly string[]) =>
+    rule({
+      id: 'allow-echo',
+      verdict: 'allow',
+      conditions: [
+        condition({
+          target: 'command',
+          kind: 'regex',
+          pattern: 'echo .*',
+          matchedValues,
+          // `exactOptionalPropertyTypes` separates an absent key from an
+          // explicit `undefined`, so an empty list omits the field entirely.
+          ...(matchedValues[0] === undefined
+            ? {}
+            : { matchedValue: matchedValues[0] }),
+        }),
+      ],
+    });
+
+  test('a condition that matched two commands names both of them', () => {
+    // `echo a; echo b` against `echo .*`: the evaluator credits both, so the
+    // explanation must not stop at the first matched text.
+    const detail = coverageDetail(
+      result({
+        path: 'allow',
+        pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-echo' },
+        normalization: {
+          raw: 'echo a; echo b',
+          completeness: 'complete',
+          issues: [],
+          commands: [
+            { text: 'echo a', raw: 'echo a', words: [] },
+            { text: 'echo b', raw: 'echo b', words: [] },
+          ],
+        },
+        rules: [echoAllow(['echo a', 'echo b'])],
+      }),
+    );
+    expect(detail.namedCount).toBe(2);
+    expect(detail.nodes.map((node) => node.named)).toEqual([true, true]);
+  });
+
+  test('a matched allow withheld by an unknown higher priority is not called unknown', () => {
+    const levels = priorityView(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'unresolved' },
+        rules: [
+          rule({
+            index: 0,
+            id: 'deny-redirect',
+            verdict: 'deny',
+            outcome: 'unknown',
+          }),
+          rule({
+            index: 1,
+            id: 'allow-echo',
+            verdict: 'allow',
+            outcome: 'match',
+          }),
+        ],
+      }),
+      'allow-echo',
+    );
+    expect(levels[0]).toMatchObject({
+      decision: 'unknown',
+      unknownIds: ['deny-redirect'],
+    });
+    expect(levels[3]).toMatchObject({
+      decision: 'withheld-by-unknown',
+      otherIds: ['allow-echo'],
+    });
+  });
+
+  test('a second allow beside the credited one is neither shadowed nor credited', () => {
+    // `echo a; echo b` matched both allow rules. The answer names allow-a but does
+    // not publish which rule covered which command, so allow-b is neither proven
+    // outranked nor proven to have supplied the missing coverage.
+    const view = coverageView(
+      result({
+        path: 'allow',
+        pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-a' },
+        matches: [
+          {
+            index: 0,
+            id: 'allow-a',
+            verdict: 'allow',
+            effective: true,
+            target: 'command',
+            conditionIndex: 0,
+            nodeIndex: 0,
+            matchedText: 'echo a',
+          },
+          {
+            index: 1,
+            id: 'allow-b',
+            verdict: 'allow',
+            effective: false,
+            target: 'command',
+            conditionIndex: 0,
+            nodeIndex: 1,
+            matchedText: 'echo b',
+          },
+        ],
+      }),
+    );
+    expect(view.shadowed).toEqual([]);
+    expect(view.additionalAllows.map((match) => match.id)).toEqual(['allow-b']);
+  });
+
+  test('an allow beaten by a deny is still reported as shadowed', () => {
+    const view = coverageView(
+      result({
+        path: 'deny',
+        pathDetail: { kind: 'rule', verdict: 'deny', ruleId: 'deny-x' },
+        matches: [
+          {
+            index: 0,
+            id: 'deny-x',
+            verdict: 'deny',
+            effective: true,
+            target: 'command',
+            conditionIndex: 0,
+            nodeIndex: 0,
+            matchedText: 'echo a',
+          },
+          {
+            index: 1,
+            id: 'allow-a',
+            verdict: 'allow',
+            effective: false,
+            target: 'command',
+            conditionIndex: 0,
+            nodeIndex: 0,
+            matchedText: 'echo a',
+          },
+        ],
+      }),
+    );
+    expect(view.shadowed.map((match) => match.id)).toEqual(['allow-a']);
+    expect(view.additionalAllows).toEqual([]);
+  });
+
+  test('a parsed call with no command is distinguished from an unparsed one', () => {
+    const redirectOnly = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+        parse: {
+          status: 'ok',
+          statements: 1,
+          nodes: ['file_redirect'],
+          completeness: 'complete',
+          opaque: false,
+          unresolved: [],
+        },
+        normalization: {
+          raw: '> /tmp/out',
+          completeness: 'complete',
+          issues: [],
+          commands: [],
+        },
+      }),
+    );
+    expect(redirectOnly.parsed).toBe(true);
+    expect(redirectOnly.hasEvidence).toBe(true);
+    expect(redirectOnly.structural).toBe(false);
+    expect(redirectOnly.otherTargets).toEqual(['file_redirect']);
+  });
+
+  test('a failed parse is not reported as a successful one', () => {
+    // `if then fi` fails to parse; the evaluator still publishes a normalization
+    // whose command list is empty. Evidence exists, but calling that "parsed
+    // successfully with nothing to list" would invent a structure nobody read.
+    const failed = coverageDetail(
+      result({
+        path: 'review(default)',
+        pathDetail: { kind: 'review-default', reason: 'incomplete' },
+        parse: {
+          status: 'error',
+          statements: 0,
+          nodes: [],
+          completeness: 'none',
+          opaque: true,
+          unresolved: [],
+        },
+        normalization: {
+          raw: 'if then fi',
+          completeness: 'none',
+          issues: [
+            { kind: 'parse-error', message: 'expected command', pos: 3 },
+          ],
+          commands: [],
+        },
+      }),
+    );
+    expect(failed.hasEvidence).toBe(true);
+    expect(failed.structural).toBe(false);
+    expect(failed.parsed).toBe(false);
+  });
+
+  test('the real evaluator names both commands one condition matched', () => {
+    // `echo .*` matches both commands, and the evaluator returns both in
+    // `matchedValues`. Reading only the first would mark `echo b` unnamed while
+    // the same answer reports the whole call as allowed.
+    const real = decoded(
+      [
+        {
+          id: 'allow-echo',
+          verdict: 'allow',
+          enabled: true,
+          combine: 'any',
+          conditions: [
+            { target: 'command', kind: 'regex', pattern: 'echo .*' },
+          ],
+        },
+      ],
+      'bash',
+      { command: 'echo a; echo b' },
+    );
+    expect(finalPath(real).kind).toBe('rule');
+    const detail = coverageDetail(real);
+    expect(detail.total).toBe(2);
+    expect(detail.namedCount).toBe(2);
+    expect(detail.nodes.map((node) => node.named)).toEqual([true, true]);
+    expect(detail.state).toBe('complete');
+  });
+
+  test('the real evaluator publishes evidence for a failed parse', () => {
+    // `if then fi` fails to parse, yet normalization is not null; only the parse
+    // status distinguishes "nothing was read" from "read and found no command".
+    const real = decoded(
+      [
+        {
+          id: 'allow-echo',
+          verdict: 'allow',
+          enabled: true,
+          combine: 'any',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'echo hi' },
+          ],
+        },
+      ],
+      'bash',
+      { command: 'if then fi' },
+    );
+    const detail = coverageDetail(real);
+    expect(detail.hasEvidence).toBe(true);
+    expect(detail.parsed).toBe(false);
+    expect(detail.structural).toBe(false);
+  });
+
+  test('the real evaluator with an unparsed dialect publishes no evidence', () => {
+    // `pwsh` is a shell tool whose dialect is not read, so normalization is null.
+    // The evaluator still returns a synthetic empty parse, which is why the panel
+    // decides on `hasEvidence` first: `parsed` alone would describe a read that
+    // never happened.
+    const real = decoded([], 'pwsh', { command: 'echo hi' });
+    const detail = coverageDetail(real);
+    expect(detail.hasEvidence).toBe(false);
+    expect(detail.nodes).toEqual([]);
+    expect(detail.structural).toBe(false);
   });
 });

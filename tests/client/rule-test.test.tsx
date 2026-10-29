@@ -960,3 +960,413 @@ describe('final path, precedence and composite coverage', () => {
     expect(coverage).toHaveTextContent(/进入默认审查/);
   });
 });
+
+describe('explanation fidelity', () => {
+  function answer(overrides: {
+    readonly path: string;
+    readonly pathDetail: unknown;
+    readonly normalization?: unknown;
+    readonly nodes?: readonly string[];
+    readonly rules?: unknown;
+    readonly parseStatus?: 'ok' | 'error';
+    readonly parseNodes?: readonly string[];
+    readonly error?: string;
+    readonly matches?: readonly unknown[];
+  }) {
+    return {
+      ok: true,
+      results: [
+        {
+          input: 'sample',
+          tool: 'bash',
+          cwd: '/workspace',
+          path: overrides.path,
+          pathDetail: overrides.pathDetail,
+          rule: null,
+          matches: overrides.matches ?? [],
+          rules: overrides.rules ?? [],
+          parse: {
+            status: overrides.parseStatus ?? 'ok',
+            statements: overrides.parseStatus === 'error' ? 0 : 1,
+            nodes: overrides.parseNodes ?? overrides.nodes ?? ['command'],
+            completeness:
+              overrides.parseStatus === 'error' ? 'none' : 'complete',
+            opaque: overrides.parseStatus === 'error',
+            unresolved: [],
+          },
+          argv: [],
+          ...(overrides.normalization === undefined
+            ? {}
+            : { normalization: overrides.normalization }),
+          shadowed: [],
+          ...(overrides.error === undefined ? {} : { error: overrides.error }),
+        },
+      ],
+    };
+  }
+
+  test('an unparsed shell dialect says so instead of claiming a non-shell call', async () => {
+    // `pwsh` is a shell tool the reader does not parse, so normalization is
+    // absent. The panel must not conclude that its arguments are the whole input.
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'incomplete' },
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    expect(coverage).toHaveTextContent(/没有逐条命令的结构证据/);
+    // The old, wrong claim must be gone.
+    expect(coverage).not.toHaveTextContent(/没有可拆分的 shell 结构/);
+  });
+
+  test('one named command plus a redirect never claims a missing command', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+            nodes: ['command', 'file_redirect'],
+            normalization: {
+              raw: 'echo hi > /tmp/out',
+              completeness: 'complete',
+              issues: [],
+              commands: [{ text: 'echo hi', raw: 'echo hi', words: [] }],
+            },
+            rules: [
+              {
+                index: 0,
+                id: 'allow-echo',
+                verdict: 'allow',
+                outcome: 'match',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'command',
+                    kind: 'exact',
+                    pattern: 'echo hi',
+                    outcome: 'match',
+                    reason: 'resolved',
+                    matchedValue: 'echo hi',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    // Every observed command was named, so "partial commands" would be false.
+    expect(coverage).toHaveTextContent('其中 1 条被 allow 条件命名');
+    expect(coverage).not.toHaveTextContent(/部分命令/);
+    expect(coverage).not.toHaveTextContent(/命名了部分命令/);
+    // The redirect is reported as a structural target of its own, without
+    // asserting that it is the one that was left uncovered.
+    expect(coverage).toHaveTextContent(
+      '本次调用还包含重定向；命令条件的命中不覆盖这些目标，它们需要单独的覆盖条件，因此仅凭命令命中不能确认整次调用已被覆盖，本次进入默认审查。',
+    );
+  });
+
+  test('a matched allow withheld by an unknown rule shows the allow id, not "unknown"', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'unresolved' },
+            rules: [
+              {
+                index: 0,
+                id: 'deny-redirect',
+                verdict: 'deny',
+                outcome: 'unknown',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'file_redirect',
+                    kind: 'glob',
+                    pattern: '/srv/**',
+                    outcome: 'unknown',
+                    reason: 'unresolved-structure',
+                  },
+                ],
+              },
+              {
+                index: 1,
+                id: 'allow-echo',
+                verdict: 'allow',
+                outcome: 'match',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'command',
+                    kind: 'regex',
+                    pattern: 'echo .*',
+                    outcome: 'match',
+                    reason: 'resolved',
+                    matchedValue: 'echo a',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const priority = screen.getByTestId('rule-test-priority');
+    const levels = within(priority).getAllByRole('listitem');
+    // The deny level reports its own unknown id.
+    expect(levels[0]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'unknown',
+    );
+    expect(levels[0]).toHaveTextContent('deny-redirect');
+    // The allow level names the allow that matched, not an empty unknown.
+    expect(levels[3]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'withheld-by-unknown',
+    );
+    expect(levels[3]).toHaveTextContent('allow-echo');
+    expect(levels[3]).not.toHaveTextContent('无法判断（）');
+  });
+
+  test('a redirect-only call says it parsed, without inventing a command', async () => {
+    // `> /tmp/out` parses successfully and publishes a redirect but no command.
+    // That is structure without a command, not an unread call.
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+            nodes: ['file_redirect'],
+            normalization: {
+              raw: '> /tmp/out',
+              completeness: 'complete',
+              issues: [],
+              commands: [],
+            },
+            rules: [
+              {
+                index: 0,
+                id: 'allow-echo',
+                verdict: 'allow',
+                outcome: 'match',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'command',
+                    kind: 'exact',
+                    pattern: 'echo hi',
+                    outcome: 'match',
+                    reason: 'resolved',
+                    matchedValue: 'echo hi',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    expect(coverage).toHaveTextContent(
+      /本次调用解析成功，但没有可逐条列出的命令/,
+    );
+    // No per-command evidence exists, so no command count may be invented.
+    expect(coverage).not.toHaveTextContent(/0 条命令/);
+    expect(coverage).not.toHaveTextContent(/还有 0 条命令/);
+    // The redirect is a coverage target of its own, and that is what the
+    // evaluator's `partial-allow` sentence must attribute the fallback to.
+    expect(coverage).toHaveTextContent(/重定向/);
+  });
+
+  test('a partial allow with no command and no other target states that, not "0 commands"', async () => {
+    // `> /tmp/out; > /tmp/other` is a real partial-allow whose parse publishes
+    // neither a command nor a redirect node of its own, so the count-based
+    // sentence would report a bare zero.
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+            parseNodes: [],
+            normalization: {
+              raw: '> /tmp/out; > /tmp/other',
+              completeness: 'complete',
+              issues: [],
+              commands: [],
+            },
+            rules: [
+              {
+                index: 0,
+                id: 'allow-out',
+                verdict: 'allow',
+                outcome: 'match',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'file_redirect',
+                    kind: 'exact',
+                    pattern: '/tmp/out',
+                    outcome: 'match',
+                    reason: 'resolved',
+                    matchedValue: '/tmp/out',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    expect(coverage).toHaveTextContent('本次没有可逐条命名的命令');
+    expect(coverage).not.toHaveTextContent(/还有 0 条命令/);
+  });
+
+  test('a failed parse is never described as a successful one', async () => {
+    // `if then fi` does not parse. The backend still returns a normalization with
+    // an empty command list, so the panel must not say "parsed successfully".
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'review(default)',
+            pathDetail: { kind: 'review-default', reason: 'incomplete' },
+            parseStatus: 'error',
+            parseNodes: [],
+            error: "expected command after 'if'",
+            normalization: {
+              raw: 'if then fi',
+              completeness: 'none',
+              issues: [
+                {
+                  kind: 'parse-error',
+                  message: 'expected command after `if`',
+                  pos: 3,
+                },
+              ],
+              commands: [],
+            },
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const coverage = screen.getByTestId('rule-test-coverage');
+    expect(coverage).not.toHaveTextContent(/本次调用解析成功/);
+    // With no structure read, the panel falls back to the no-evidence sentence.
+    expect(coverage).toHaveTextContent(/没有逐条命令的结构证据/);
+  });
+
+  test('a second allow at the same priority is not reported as having failed', async () => {
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json({
+          ok: true,
+          results: [
+            {
+              input: 'echo a; echo b',
+              tool: 'bash',
+              cwd: '/workspace',
+              path: 'allow',
+              pathDetail: { kind: 'rule', verdict: 'allow', ruleId: 'allow-a' },
+              rule: null,
+              matches: [
+                {
+                  index: 0,
+                  id: 'allow-a',
+                  verdict: 'allow',
+                  effective: true,
+                  target: 'command',
+                  conditionIndex: 0,
+                  nodeIndex: 0,
+                  matchedText: 'echo a',
+                },
+                {
+                  index: 1,
+                  id: 'allow-b',
+                  verdict: 'allow',
+                  effective: false,
+                  target: 'command',
+                  conditionIndex: 0,
+                  nodeIndex: 1,
+                  matchedText: 'echo b',
+                },
+              ],
+              rules: [],
+              parse: {
+                status: 'ok',
+                statements: 1,
+                nodes: ['command'],
+                completeness: 'complete',
+                opaque: false,
+                unresolved: [],
+              },
+              argv: [],
+              normalization: {
+                raw: 'echo a; echo b',
+                completeness: 'complete',
+                issues: [],
+                commands: [
+                  { text: 'echo a', raw: 'echo a', words: [] },
+                  { text: 'echo b', raw: 'echo b', words: [] },
+                ],
+              },
+              shadowed: [],
+            },
+          ],
+        }),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    // `allow` coverage accumulates across rules, so allow-b is not proven to have
+    // been outranked; but the answer does not say what each rule covered either.
+    // The panel therefore states the match and the accumulation rule only.
+    expect(screen.getByText('同一优先级的其他 allow 命中')).toBeVisible();
+    expect(screen.getByText(/allow-b（免审放行）也命中/)).toBeVisible();
+    expect(screen.queryByText(/allow-b（免审放行）未生效/)).toBeNull();
+    expect(screen.queryByText(/allow-b（免审放行）参与了免审覆盖/)).toBeNull();
+  });
+});
