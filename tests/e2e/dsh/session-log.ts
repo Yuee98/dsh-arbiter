@@ -101,7 +101,18 @@ export async function readSessionLogs(home: string): Promise<LoggedSession[]> {
       const files = await readdir(directory).catch(() => [] as string[]);
       for (const file of files) {
         if (!file.startsWith('session.') || !file.includes('jsonl')) continue;
-        const events = decodeSessionLog(await readFile(join(directory, file)));
+        // The host writes a log by creating a temporary sibling and renaming it
+        // into place, so a poll can observe `session.*.jsonl.<hash>.tmp` between
+        // those two steps. That file is a write in progress, not a log: reading it
+        // races the rename and fails with ENOENT, or decodes a truncated body. The
+        // next poll sees the finished file, so skipping it loses nothing.
+        if (file.endsWith('.tmp')) continue;
+        // The same race in its other form: the file this listing named has been
+        // renamed away by the time it is opened. A session that vanished between
+        // listing and reading is simply not observable this poll.
+        const body = await readFile(join(directory, file)).catch(() => null);
+        if (body === null) continue;
+        const events = decodeSessionLog(body);
         // The creation header carries the durable lineage: `parentSession`,
         // `origin` and `delegationDepth` are what scope a subagent.
         const header = events.find((event) => event.type === 'session');
