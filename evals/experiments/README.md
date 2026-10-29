@@ -50,18 +50,38 @@ withdrawn | recoverable | partially-recoverable | irreversible | unknown
 
 ## 缓存工作负载
 
-序列为 `cold → stable-prefix × 2 → changed-action × 2`：先冷请求，再连续发稳定前缀（契约、量表、policy、许可与判断材料不变，只有动作与完整性块变化）。
+序列为 `cold → stable-prefix × 2 → changed-action × 2`，由两部分具体材料定义：
+
+- `cache.baseCaseId`：所有请求共享的 policy、环境、许可、历史与完整性；冷请求提交它自己的动作。
+- `cache.changedActionCaseIds`：changed-action 槽位按顺序提交这些 case 的动作，前缀仍是基线 case。**列出来而不是推断**，所以调大某个槽位的 `repeats` 会变成真实请求，且必须有真实动作，否则校验失败。
+
+`plan` / `check-all` 会逐条渲染这 5 条请求并测量，`record.json` 的 `cache.expanded` 记录每条请求的 case、角色、输入估计、稳定前缀指纹，以及与矩阵格逐字节相同的项。三条性质是**被测出来的**，不是写死的：
+
+- 全部请求的 `stablePrefixFingerprint` 相同（provider 前缀缓存唯一能依赖的东西）；
+- changed-action 的 `actionFingerprint` 与冷请求不同，且彼此不同；
+- 非 changed 槽位的 `actionFingerprint` 与冷请求完全相同。
+
+`byteIdenticalToMatrix` 只记录哪些请求与某个矩阵格逐字节相同，**不抵扣预算**：那一次派发是否真的发生过属于执行事实，规划不能预先声称省下一条。
 
 **命中是测量结果，不是假设。** 只读 provider 自己报告的缓存读写计数（`review-usage-v1` 映射）；未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。缓存布局同样不提升任何材料的指令层级，也不为命中保留过时授权。
 
-## 预算
+`MATERIAL_COMPLETENESS` 仍取自基线 case（见 `notes`）：它属于前缀的一部分，只有动作区随槽位变化。
 
-`budget` 是本次实验的上限，`plan` 的实测值必须落在其中：
+## 预算与运行上界
 
-- `maxRequests` 624（实测矩阵 312 格）
-- `maxInputTokensTotal` 1700000（实测 818346，含重复）
-- `maxRepairRetries` 1
-- `reasoningEffort` 为 `null`：由 provider 默认决定，理由见下
+两个上限是**实验**的，一个上限是**单次运行**的（沿用 RQ-10 的 `RunBounds`），三者都要满足：
+
+| 字段                         | 值      | 覆盖范围                 | 实测                 |
+| ---------------------------- | ------- | ------------------------ | -------------------- |
+| `budget.maxRequests`         | 640     | 矩阵 + 缓存 + 修复重试   | 629                  |
+| `budget.maxInputTokensTotal` | 1700000 | 全部请求输入估计之和     | 833114 + 14305       |
+| `budget.maxRepairRetries`    | 1       | 每格一次                 | —                    |
+| `bounds.maxAttempts`         | 640     | **单次有界运行**的尝试数 | 629                  |
+| `bounds.maxInputTokens`      | 20000   | **单条请求**的输入       | 最大候选单格远低于此 |
+
+629 = 312 个矩阵格 + 5 条缓存请求 + 312 次允许的修复重试。`maxAttempts` 是单次运行的尝试上限，不是整个实验的上限：比它更大的实验需要切成多次运行，而本实验实测恰好能放进一次运行，所以声明的是覆盖它的数字，不是「已经切分」。
+
+`plan` 还会逐格核对 `bounds.maxInputTokens`：一条渲染后超过单请求上限（或被生产预算标为 `OVER_BUDGET`）的格会被点名拒绝，因为运行器会拒发它而不是发出去。变体渲染也一起测量 —— B 多出的问题与答案格式在 system 消息里，可能撑大生产本身放得下的请求。
 
 token／reasoning 预算与「实际缓存支持」都按**测量**确定：本任务不做真实调用，因此这些上限是给后续运行用的天花板，而不是对模型能力的断言；`reasoningEffort` 保持 `null` 是因为选用哪些模型属 RQ-H1B 的资源决定，这里不预设。
 
@@ -72,4 +92,6 @@ pnpm evals:experiments check-all                 # 定义 + 测量 + 预算（�
 pnpm evals:experiments plan evals/experiments/rq14-matrix.json
 ```
 
-`plan` 逐格渲染（生产渲染器 + 该候选的变体）并报告每候选的 `distinct requests` 与 `estimated input tokens`，不写任何文件，也不调用模型。实测超预算时以非零退出，拒绝原因是实测值而非声明值。
+`plan` 逐格渲染（生产渲染器 + 该候选的变体）**并逐条渲染缓存工作负载**，报告每候选的 `distinct requests` 与 `estimated input tokens`、每格 / 每条缓存请求的实测值，以及它们与三个上限的比较。它不写任何文件，也不调用模型。实测超限时以非零退出，拒绝原因是实测值而非声明值。
+
+`check-all` 对每个已提交定义做同样的事，并额外校验缓存工作负载的字节性质（前缀一致、changed-action 确实改变了动作）。它也在 `pnpm verify` 里，所以这些性质是 CI 检查而非文档承诺。

@@ -237,14 +237,18 @@ pnpm evals:experiments record <定义.json>      # 写出冻结的 experiments/r
 
 候选是**四个独立轴**的组合，身份由四轴派生（`rq14/<prompt>.<scale>.<history>.<structure>`），所以两个候选不可能指向同一个包：
 
-| 轴          | 取值                                  | 含义                                               |
-| ----------- | ------------------------------------- | -------------------------------------------------- |
-| `prompt`    | `no-probe`／`recovery-probe`          | 候选 A 无探针；候选 B 多问一个可恢复／可撤回性问题 |
-| `structure` | `full`／`compact`／`compact-no-audit` | 生产布局／单 JSON 信封／再去掉审计元数据           |
-| `history`   | `current-turn`／`none`                | 当前 turn 工具历史／抽掉并声明「被有意抽掉」       |
-| `scale`     | `complete`／`labels`                  | 十档完整操作条件／一行档位标签＋守卫段             |
+| 轴          | 取值                                  | 含义                                                     |
+| ----------- | ------------------------------------- | -------------------------------------------------------- |
+| `prompt`    | `no-probe`／`recovery-probe`          | 候选 A 无探针；候选 B 多问一个可恢复／可撤回性问题       |
+| `structure` | `full`／`compact`／`compact-no-audit` | 生产布局／单 JSON 信封／再去掉长度、上限与路径等登记信息 |
+| `history`   | `current-turn`／`none`                | 当前 turn 工具历史／抽掉并声明「被有意抽掉」             |
+| `scale`     | `complete`／`labels`                  | 十档完整操作条件／一行档位标签＋守卫段                   |
 
 **生产默认不受影响。** `review()` 固定用生产包（候选 A 即生产包本身）；实验入口是独立函数 `reviewWith(pkg)`，候选只能通过配置选择。压缩量表保留 `SCALE_GUARD`（A1 是禁止、3–10 累积、最弱关键效果封顶、恢复成本留在风险档内），因此量表消融不改变风险定义。
+
+**四个轴在每种布局上都生效。** `history: none` 对 `full`、`compact` 与 `compact-no-audit` 都抽掉工具窗口并写下「被有意抽掉」的说明；两个身份不会共享一种处理。
+
+**压缩只去掉转述，不去掉输入事实。** `compact-no-audit` 移除的是 `config_revision`、`turn`、来源字符数与上限、per-source 路径这类登记信息；每个来源是否 `present`／`enabled`／`truncated` 仍在 `guidance_sources` 里，因此「被预算截断的许可材料」在任何布局下都不会被读成完整材料。
 
 **候选 B 的探针**定义固定在 `src/reviewer/probe.ts`，实验定义里的 `probe` 块与之逐项校验（版本、member、选项集合、`unknown`）。`unknown` 是**合法答案**，表示材料不足以确立事实，不是缺答；「读不出答案」是另一个状态（`member-absent`／`not-a-string`／`not-an-option`）。探针读数与两个档位分开记录，从不参与 outcome、矩阵或判定，所以任何候选都无法靠多答一题引入隐含门。
 
@@ -252,9 +256,13 @@ pnpm evals:experiments record <定义.json>      # 写出冻结的 experiments/r
 
 `experiments record` 写出的 `record.json` 固定：候选 id 与其派生包 id、每轴与生产默认的差异、阶梯（每步只改一个轴）、缓存工作负载、上限与实测值。它**不含分数**：本任务只准备矩阵，真实运行属后续评测任务。
 
-`plan` 逐格渲染并测量：`cells`、每候选的 `distinct requests` 与 `estimated input tokens` 都是实测值。实测总量超过 `maxInputTokensTotal` 或格数超过 `maxRequests` 时拒绝，不会为了塞进预算而裁掉格子。
+`plan` 逐格渲染并测量：`cells`、每候选的 `distinct requests` 与 `estimated input tokens` 都是实测值。实测超出三个上限中的任何一个时拒绝，不会为了塞进预算而裁掉格子：
 
-缓存工作负载只规定「冷请求 → 稳定前缀 → 变化动作」的连续序列；**命中与否只读 provider 自己报告的计数**（经 `review-usage-v1` 映射），未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。
+- `budget.maxRequests`：矩阵格 + 缓存请求 + 每格允许的修复重试；
+- `budget.maxInputTokensTotal`：全部请求的输入估计之和；
+- `bounds.maxAttempts`／`bounds.maxInputTokens`：单次运行的尝试上限与单条请求的输入上限（沿用 RQ-10 的 `RunBounds`）。实测超过单请求上限的格会被点名拒绝，因为运行器会拒发它；变体渲染也一起核对，B 多出的问题可能撑大生产本身放得下的请求。
+
+缓存工作负载不只是「冷请求 → 稳定前缀 → 变化动作」的标签：`cache.baseCaseId` 与 `cache.changedActionCaseIds` 指明材料，`plan`／`check-all` 会逐条渲染并校验稳定前缀逐字一致、changed-action 确实改变动作。**命中与否只读 provider 自己报告的计数**（经 `review-usage-v1` 映射），未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。
 
 ## 目录
 
@@ -266,7 +274,7 @@ evals/
   experiments/       实验定义、schema 与冻结的 record.json
   src/data/          读取、schema 校验、跨文件一致性、hash、rubric 比对
   src/annotation/    导出、回填、汇总
-  src/experiments/   实验定义校验、矩阵展开与测量、记录
+  src/experiments/   实验定义校验、矩阵与缓存工作负载展开测量、记录
   src/cli/           命令解析与命令实现
   src/metrics/       报告的三层指标、分组、逐例证据与可比性规则
   src/report/        Markdown／HTML／JSON 渲染、写出与 report 命令
