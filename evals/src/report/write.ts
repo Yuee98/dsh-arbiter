@@ -16,8 +16,9 @@
  * the settings, and the only timestamp in them is the run's own `updatedAt`.
  */
 
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, normalize, posix, relative } from 'node:path';
 
 import type { EvaluationReport } from '../metrics/types.js';
 import { renderHtml } from './html.js';
@@ -164,10 +165,61 @@ export function destinationsInside(
   return paths.filter((path) =>
     evidence.some((entry) =>
       entry.kind === 'directory'
-        ? path === entry.path || path.startsWith(`${entry.path}/`)
-        : path === entry.path,
+        ? sameOrInside(path, entry.path)
+        : samePath(path, entry.path),
     ),
   );
+}
+
+/**
+ * Whether two paths name the same file, following symbolic links on what exists.
+ *
+ * A lexical comparison is not enough: a run held at `real-run` and reached through a symlink
+ * `alias` has two spellings for one `index.json`, and only one of them matched the protected
+ * path. A write through the other spelling would replace the record while the guard reported
+ * nothing. So each existing path is resolved to its real location first.
+ *
+ * A destination that does not exist yet cannot be resolved, and that is correct: it is a new
+ * report file. Its *parent* is resolved instead, so a symlinked directory cannot hide a
+ * collision either. The comparison stays true when nothing resolves.
+ */
+function samePath(left: string, right: string): boolean {
+  return resolvedName(left) === resolvedName(right);
+}
+
+/**
+ * Whether one path is a directory or sits inside it, with symlinks resolved on both sides.
+ *
+ * The trailing separator in the containment test is what stops `/run` matching `/runaway`.
+ */
+function sameOrInside(path: string, directory: string): boolean {
+  const target = resolvedName(path);
+  const root = resolvedName(directory);
+  const sep = posix.sep;
+  return target === root || target.startsWith(`${root}${sep}`);
+}
+
+/** One path with every existing symbolic link in it resolved, or as written when none can be. */
+function resolvedName(path: string): string {
+  const existing = deepestExisting(path);
+  if (existing === null) return normalize(path);
+  return normalize(join(realpathSync(existing), relative(existing, path)));
+}
+
+/**
+ * The longest prefix of a path that exists, or null when nothing does.
+ *
+ * Walking up from the leaf is what lets an unresolved destination still be compared through a
+ * symlinked ancestor: the report file itself may not exist, but the directory holding it does.
+ */
+function deepestExisting(path: string): string | null {
+  let current = normalize(path);
+  for (;;) {
+    if (existsSync(current)) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
 }
 
 /**

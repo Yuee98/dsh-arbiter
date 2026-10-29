@@ -1450,3 +1450,242 @@ describe('RQ11-B07 (round 3): a damaged dataset is still protected', () => {
     });
   });
 });
+
+describe('Codex review: two targets with one model are two conditions', () => {
+  it('keeps both targets observations when only the settings differ', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [label('read-named-source-file', hashOf(entry), 1, 10)],
+      });
+      const directory = join(created.path, 'run');
+      // One provider and one model name, two targets that differ only in temperature. The run
+      // format permits this and they are separate experimental conditions, not repeats.
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file'],
+          protocols: ['chat'],
+          targets: [
+            chatTarget('cold', { temperature: 0 }),
+            chatTarget('hot', { temperature: 1 }),
+          ],
+        }),
+        fixture: fixtureOf({
+          [cellIdOf({
+            caseId: 'read-named-source-file',
+            targetId: 'cold',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(1, 10)] }),
+          [cellIdOf({
+            caseId: 'read-named-source-file',
+            targetId: 'hot',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(9, 10)] }),
+        }),
+      });
+      const report = await buildFor(directory, dataset);
+      // Both measurements survive, so the far error is counted instead of being hidden behind
+      // the first target.
+      expect(report.diagnostics.risk.comparable).toBe(2);
+      expect(report.diagnostics.risk.exact).toBe(1);
+      expect(report.diagnostics.risk.far).toBe(1);
+      expect(report.diagnostics.pairs.labeled).toBe(2);
+      expect(report.diagnostics.pairs.exactPair).toBe(1);
+      const risk = report.diagnostics.shape.find(
+        (shape) => shape.field === 'risk',
+      );
+      expect(risk?.observedCells).toBe(2);
+    });
+  });
+
+  it('still keeps a repeat of one target out of the diagnostics', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [label('read-named-source-file', hashOf(entry), 1, 10)],
+      });
+      const directory = join(created.path, 'run');
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file'],
+          protocols: ['chat'],
+          targets: [chatTarget()],
+          repeats: 2,
+        }),
+        fixture: fixtureOf({
+          ...Object.fromEntries(
+            [1, 2].map((repeat) => [
+              cellIdOf({
+                caseId: 'read-named-source-file',
+                targetId: 'chat-a',
+                protocol: 'chat',
+                repeat,
+              }),
+              fixtureCell({ chat: [chatAnswer(1, 10)] }),
+            ]),
+          ),
+        }),
+      });
+      const report = await buildFor(directory, dataset);
+      expect(report.diagnostics.risk.comparable).toBe(1);
+    });
+  });
+
+  it('does not let two targets of one model invent a monotonicity reversal', async () => {
+    await withArea(async (created) => {
+      const low = await committedCase('read-named-source-file');
+      const high = await committedCase('read-repo-index-with-cache');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file', 'read-repo-index-with-cache'],
+        labels: [
+          label('read-named-source-file', hashOf(low), 2, 10),
+          label('read-repo-index-with-cache', hashOf(high), 8, 10),
+        ],
+      });
+      const directory = join(created.path, 'run');
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+          protocols: ['chat'],
+          targets: [
+            chatTarget('cold', { temperature: 0 }),
+            chatTarget('hot', { temperature: 1 }),
+          ],
+        }),
+        fixture: fixtureOf({
+          ...Object.fromEntries([
+            [
+              cellIdOf({
+                caseId: 'read-named-source-file',
+                targetId: 'cold',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(1, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-repo-index-with-cache',
+                targetId: 'cold',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(3, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-named-source-file',
+                targetId: 'hot',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(7, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-repo-index-with-cache',
+                targetId: 'hot',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(9, 10)] }),
+            ],
+          ]),
+        }),
+      });
+      const report = await buildFor(directory, dataset);
+      const risk = report.diagnostics.monotonicity.find(
+        (entry2) => entry2.field === 'risk',
+      );
+      expect(risk?.comparablePairs).toBe(2);
+      expect(risk?.reversals).toBe(0);
+    });
+  });
+});
+
+describe('Codex review: a symlinked path cannot hide an evidence collision', () => {
+  it('refuses an output reached through a symlink to the run directory', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const alias = join(created.path, 'alias');
+      const { symlink } = await import('node:fs/promises');
+      await symlink(directory, alias);
+      const indexPath = join(directory, 'index.json');
+      const before = await readFile(indexPath, 'utf8');
+      const err: string[] = [];
+      // The destination is spelled through the alias; a lexical comparison would see a
+      // different path and allow the write.
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(alias, 'index'),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      expect(await readFile(indexPath, 'utf8')).toBe(before);
+    });
+  });
+
+  it('refuses an output inside a symlinked records directory', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const alias = join(created.path, 'records-alias');
+      const { symlink } = await import('node:fs/promises');
+      await symlink(join(directory, 'records'), alias);
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(alias, 'read-named-source-file~chat-a~chat~r1'),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+    });
+  });
+
+  it('still allows an ordinary destination when the run is reached through a symlink', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const alias = join(created.path, 'alias');
+      const { symlink } = await import('node:fs/promises');
+      await symlink(directory, alias);
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: () => undefined,
+        },
+        {
+          directory,
+          output: join(alias, 'report'),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(code).toBe(0);
+    });
+  });
+});

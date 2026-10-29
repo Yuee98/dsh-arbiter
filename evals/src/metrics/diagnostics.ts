@@ -54,11 +54,32 @@ import type {
  */
 interface FieldObservation {
   readonly caseId: string;
+  readonly targetId: string;
   readonly modelKey: string;
   readonly protocol: string;
   readonly repeat: number;
   readonly observed: number;
   readonly reference: number;
+}
+
+/**
+ * The identity of one experimental condition.
+ *
+ * A target is one configured condition, not one model name: two targets can share a provider,
+ * a model and a protocol and still differ in temperature, token budget or declared model
+ * version. Those are separate observations of the same case, so collapsing them on
+ * `provider/model` would let whichever target sorted first decide the headline figure — the
+ * same defect the model-aware key was introduced to fix, one level further out.
+ */
+function conditionOf(parts: {
+  readonly caseId: string;
+  readonly targetId: string;
+  readonly protocol: string;
+}): string {
+  // Deliberately without the repeat: a repeat is the same condition observed again, so it must
+  // collapse. The caller sorts by ascending repeat first, so the value kept for a condition is
+  // its lowest repeat and the choice is reproducible from the artifact.
+  return [parts.caseId, parts.targetId, parts.protocol].join('~');
 }
 
 /** The ten public levels, as strings, in ascending order. */
@@ -99,10 +120,14 @@ function observationsOf(
     if (observed === null) continue;
     const reference = pinnedValue(cell.label.label, field);
     if (reference === null) continue;
-    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    // The key is the cell identity without repeats: one (case, target, protocol) condition,
+    // lowest repeat kept. A target's settings live in its identity, so two configurations of
+    // one model stay separate observations.
+    const key = conditionOf(cell);
     if (kept.has(key)) continue;
     kept.set(key, {
       caseId: cell.caseId,
+      targetId: cell.targetId,
       modelKey: cell.modelKey,
       protocol: cell.protocol,
       repeat: cell.repeat,
@@ -113,7 +138,7 @@ function observationsOf(
   return [...kept.values()].sort(
     (left, right) =>
       compareText(left.caseId, right.caseId) ||
-      compareText(left.modelKey, right.modelKey) ||
+      compareText(left.targetId, right.targetId) ||
       compareText(left.protocol, right.protocol),
   );
 }
@@ -138,10 +163,11 @@ function observationsAnyReference(
     const observed =
       field === 'risk' ? cell.engine.risk : cell.engine.authorization;
     if (observed === null) continue;
-    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    const key = conditionOf(cell);
     if (kept.has(key)) continue;
     kept.set(key, {
       caseId: cell.caseId,
+      targetId: cell.targetId,
       modelKey: cell.modelKey,
       protocol: cell.protocol,
       repeat: cell.repeat,
@@ -218,7 +244,7 @@ export function pairStats(cells: readonly CellFacts[]): PairStats {
     const risk = cell.engine.risk;
     const authorization = cell.engine.authorization;
     if (risk === null || authorization === null) continue;
-    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    const key = conditionOf(cell);
     if (seen.has(key)) continue;
     seen.add(key);
     const pairs = legalPairs(cell.label.label);
@@ -269,13 +295,14 @@ export function monotonicityStats(
   field: 'risk' | 'authorization',
 ): MonotonicityStats {
   const observations = observationsOf(cells, field);
-  // Monotonicity is a claim about one ranker. Comparing model A's answer for one case with
-  // model B's answer for another would invent a reversal whenever the two models sit at
-  // different offsets, which is the normal case rather than a finding. So the comparison runs
-  // within each (model, protocol) population and the counts are summed afterwards.
+  // Monotonicity is a claim about one ranker under one configuration. Comparing model A's
+  // answer for one case with model B's for another would invent a reversal whenever the two
+  // sit at different offsets, which is the normal case rather than a finding — and two targets
+  // sharing a model name but differing in temperature are just as distinct. So the comparison
+  // runs within each (target, protocol) population and the counts are summed afterwards.
   const populations = new Map<string, FieldObservation[]>();
   for (const entry of observations) {
-    const key = [entry.modelKey, entry.protocol].join('~');
+    const key = [entry.targetId, entry.protocol].join('~');
     const existing = populations.get(key);
     if (existing === undefined) populations.set(key, [entry]);
     else existing.push(entry);
