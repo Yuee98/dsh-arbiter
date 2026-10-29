@@ -2755,3 +2755,77 @@ describe('the input bound covers repair attempts', () => {
     });
   });
 });
+
+describe('a decision cell reserves one attempt', () => {
+  it('runs when the fixture holds more responses than the budget allows', async () => {
+    // A decision transport makes exactly one fetch, so unused fixture responses are not a
+    // reservation. Charging them rejected a schema-valid plan without sending anything.
+    await withArea(async (area) => {
+      const caseId = 'read-named-source-file';
+      const cellId = cellIdOf({
+        caseId,
+        targetId: 'decision-a',
+        protocol: 'decision',
+      });
+      const plan = planOf({
+        caseIds: [caseId],
+        protocols: ['decision'],
+        targets: [decisionTarget()],
+        // One attempt of budget, and the fixture holds three responses.
+        bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({
+            decision: [
+              decisionAnswer({ '9': 1 }, { '9': 1 }),
+              decisionAnswer({ '9': 1 }, { '9': 1 }),
+              decisionAnswer({ '9': 1 }, { '9': 1 }),
+            ],
+          }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      // The first response was sent and scored: nothing was refused for unused scripts.
+      expect(result.records).toHaveLength(1);
+      expect(result.records[0]?.status).toBe('reviewed');
+      expect(result.records[0]?.attempts).toHaveLength(1);
+    });
+  });
+
+  it('still reserves the script count for a chat cell', async () => {
+    // The other side of the same rule: a chat adapter *can* spend every scripted answer on
+    // repairs, so its ceiling stays the script count.
+    await withArea(async (area) => {
+      const caseId = 'read-named-source-file';
+      const cellId = cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' });
+      const plan = planOf({
+        caseIds: [caseId],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 2 })],
+        bounds: bounds({ concurrency: 1, maxAttempts: 2 }),
+      });
+      const result = await runPlan({
+        plan,
+        // Three scripted answers: the chat ceiling is three, which does not fit a budget of
+        // two, so the cell is refused rather than admitted.
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({
+            chat: [chatAnswer(2, 10), chatAnswer(2, 10), chatAnswer(2, 10)],
+          }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      expect(result.records).toEqual([]);
+      const read = await runRunStatusOrNull(join(area.path, 'run'));
+      expect(read).toBe('budget-exhausted');
+    });
+  });
+});
+
+/** The first cell's status, for a run that recorded no evidence. */
+async function runRunStatusOrNull(directory: string): Promise<string | null> {
+  const read = await readRun(directory, checkers);
+  if (!read.ok) return null;
+  return read.artifact.index.cells[0]?.status ?? null;
+}

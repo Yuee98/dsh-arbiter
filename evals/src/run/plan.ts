@@ -325,13 +325,15 @@ export function attemptCeilingOf(
   protocol: RunProtocol,
   options: { readonly scripted?: number } = {},
 ): number {
+  // A decision cell never retries: `runDecisionTransport` makes exactly one fetch, so the
+  // number of responses a fixture happens to hold is not a ceiling at all. Reserving them
+  // would reject a schema-valid plan without ever sending its first response.
+  if (protocol === 'decision') return 1;
   if (options.scripted !== undefined) {
-    // The adapter's own rule, mirrored: one attempt per scripted answer.
+    // The offline chat adapter's own rule, mirrored: one attempt per scripted answer.
     return Math.max(1, options.scripted);
   }
-  return protocol === 'chat'
-    ? 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0)
-    : 1;
+  return 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0);
 }
 
 /**
