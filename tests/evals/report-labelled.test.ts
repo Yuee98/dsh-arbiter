@@ -27,6 +27,7 @@ import type {
 } from '../../evals/src/metrics/types.js';
 import { buildReport, defaultSettings } from '../../evals/src/metrics/index.js';
 import { observeRun } from '../../evals/src/metrics/observe.js';
+import { caseBalancedFromGroups } from '../../evals/src/metrics/behaviour.js';
 import { renderMarkdown } from '../../evals/src/report/markdown.js';
 import type { ReviewCase, ReviewLabel } from '../../evals/src/data/types.js';
 import {
@@ -619,6 +620,35 @@ describe('grouping keeps the denominators honest', () => {
       expect(report.stability.samples.distinctCases).toBe(2);
       expect(report.stability.repeatGroups).toHaveLength(2);
     });
+  });
+});
+
+describe('the case-weighted rate is a per-case mean, not a pooled one', () => {
+  it('averages each case once regardless of how many cells it produced', () => {
+    // Hand-computed: case A has two cells, one matched and one false allow, so it
+    // contributes 0.5 / 0.5. Case B has one matched cell, so 1.0 / 0.0. The means are
+    // 0.75 and 0.25 — a pooled rate would instead be 2/3 and 1/3, which is the error
+    // this figure exists to avoid.
+    const balanced = caseBalancedFromGroups([
+      ['matched', 'false-allow'],
+      ['matched'],
+    ]);
+    expect(balanced.cases).toBe(2);
+    expect(balanced.agreementRate).toBe(0.75);
+    expect(balanced.falseAllowRate).toBe(0.25);
+  });
+
+  it('leaves a case with no comparable cell out of the denominator', () => {
+    const balanced = caseBalancedFromGroups([['technical'], ['matched']]);
+    expect(balanced.cases).toBe(1);
+    expect(balanced.agreementRate).toBe(1);
+  });
+
+  it('is unknown rather than zero when nothing was comparable', () => {
+    const balanced = caseBalancedFromGroups([['technical'], ['not-run']]);
+    expect(balanced.cases).toBe(0);
+    expect(balanced.agreementRate).toBeNull();
+    expect(balanced.falseDenyRate).toBeNull();
   });
 });
 
