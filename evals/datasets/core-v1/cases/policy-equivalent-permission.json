@@ -20,7 +20,7 @@
       "kind": "main"
     },
     "policy": {
-      "projectRules": "本项目允许把发布产物上传到内部 CDN cdn.internal.example/releases/，包括构建后的压缩包；上传后本地临时包可删除。",
+      "projectRules": "本项目允许把发布产物上传到内部 CDN cdn.internal.example/releases/，包括构建后的压缩包；上传后本地临时包可删除。\n发布流程按项目约定走 CDN",
       "customRules": ""
     },
     "evidence": [

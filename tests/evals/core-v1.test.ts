@@ -30,6 +30,7 @@ import { checkSnapshot } from '../../evals/src/data/rubric.js';
 import { compileCheckers } from '../../evals/src/data/schemas.js';
 import type {
   AnnotationDocument,
+  CaseReviews,
   DatasetManifest,
   ReviewCase,
   ReviewLabel,
@@ -142,12 +143,38 @@ describe('core-v1 dataset', () => {
     expect(inspection.manifest).not.toBeNull();
   });
 
-  it('carries no gold label and no model opinion yet', async () => {
-    // This task hands over material to label, not a labelled dataset. If a labels
-    // or reviews directory appears here without the annotation window having run,
-    // the dataset is claiming an adjudication nobody made.
-    expect(await jsonFiles(`${DATASET}/labels`).catch(() => [])).toEqual([]);
-    expect(await jsonFiles(`${DATASET}/reviews`).catch(() => [])).toEqual([]);
+  it('holds a coherent label or review set if one has arrived', async () => {
+    // The labelling window (#79) owns `labels/` and `reviews/`; this task delivers
+    // material, not a decision. Asserting the directories are empty would therefore
+    // fail the moment the window does its job, so what is checked instead is that
+    // anything present is well-formed and bound to the input it claims to judge.
+    // With nothing committed yet the assertions below hold trivially.
+    const labels = await jsonFiles(`${DATASET}/labels`).catch(() => []);
+    for (const name of labels) {
+      const label = await readDocument<ReviewLabel>(
+        join(REPOSITORY_ROOT, DATASET, 'labels', name),
+        schemas.label,
+      );
+      const source = caseById.get(label.caseId);
+      if (source === undefined) {
+        throw new Error(`label ${name} names a case the dataset does not hold`);
+      }
+      expect(inputHashOf(source.input)).toBe(label.inputHash);
+    }
+    const reviews = await jsonFiles(`${DATASET}/reviews`).catch(() => []);
+    for (const name of reviews) {
+      const entry = await readDocument<CaseReviews>(
+        join(REPOSITORY_ROOT, DATASET, 'reviews', name),
+        schemas.reviews,
+      );
+      const source = caseById.get(entry.caseId);
+      if (source === undefined) {
+        throw new Error(
+          `reviews ${name} names a case the dataset does not hold`,
+        );
+      }
+      expect(inputHashOf(source.input)).toBe(entry.inputHash);
+    }
   });
 });
 
@@ -518,16 +545,41 @@ describe('core-v1 required shapes', () => {
     }
   });
 
-  it('never presents an earlier turn tool call as authorization material', () => {
-    // `context` is the earlier-turn tool record. Nothing there may carry a
-    // permission claim, because it is the material the design excludes; a case that
-    // needed one would have to express it through `evidence` with its source.
-    for (const entry of cases) {
-      for (const turn of entry.input.context ?? []) {
-        expect(turn.arguments).not.toMatch(
-          /approved|批准|同意|authori[sz]ed/iu,
-        );
-      }
+  it('submits no earlier-turn raw tool history at all', () => {
+    // Design 2.4 keeps only the current turn's raw tool history. The earlier turn is
+    // represented by attributed facts, not by replaying its calls, so `context` — the
+    // earlier-turn tool record — must be absent from every submitted input. Checking
+    // only that its arguments lack permission words would leave the excluded
+    // material in place.
+    const submitted = cases.filter(
+      (entry) => (entry.input.context ?? []).length > 0,
+    );
+    expect(submitted.map((entry) => entry.caseId)).toEqual([]);
+  });
+
+  it('states earlier-turn work as a sourced fact when a case depends on it', () => {
+    // The replacement for that material: a note carrying its own source, so the
+    // reader knows work happened without being handed the excluded records.
+    // Two different things come from an earlier turn, and they are not interchangeable:
+    // the human's words are kept as quotes (that is the authorization), while the tool
+    // calls are summarized as a note that says the records themselves are excluded.
+    const earlierTools = cases.flatMap((entry) =>
+      (entry.input.evidence ?? [])
+        .filter((item) => (item.note ?? '').includes('原始记录不作为'))
+        .map((item) => ({ caseId: entry.caseId, item })),
+    );
+    expect(earlierTools.length).toBeGreaterThan(0);
+    expect(new Set(earlierTools.map((entry) => entry.item.kind))).toEqual(
+      new Set(['note']),
+    );
+    const earlierHuman = cases.flatMap((entry) =>
+      (entry.input.evidence ?? []).filter((item) =>
+        (item.note ?? '').includes('本会话原始人类消息，较早 turn'),
+      ),
+    );
+    expect(earlierHuman.length).toBeGreaterThan(0);
+    for (const item of earlierHuman) {
+      expect(item.kind).toBe('material-quote');
     }
   });
 
@@ -605,6 +657,110 @@ describe('core-v1 annotation pack', () => {
       'utf8',
     );
     expect(checkSnapshot(rubric, document).problems).toEqual([]);
+  });
+});
+
+describe('core-v1 evidence attribution', () => {
+  it('never attributes a quote to a policy file that does not contain it', () => {
+    // A quote marked PROJECT_RULES/CUSTOM_RULES while the file lacks that sentence
+    // tells a reviewer the rules say something they do not, and it is the kind of
+    // error a hand-written evidence item makes silently.
+    const problems: string[] = [];
+    for (const entry of cases) {
+      const { projectRules, customRules } = entry.input.policy;
+      for (const item of entry.input.evidence ?? []) {
+        const source = item.note ?? '';
+        const field = source.includes('PROJECT_RULES')
+          ? projectRules
+          : source.includes('CUSTOM_RULES')
+            ? customRules
+            : null;
+        if (field === null) continue;
+        if (!field.includes(item.ref)) {
+          problems.push(`${entry.caseId}: ${item.ref}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+});
+
+describe('core-v1 single-factor pairs', () => {
+  /** The shell command one case submits, read without asserting its shape. */
+  function commandOf(entry: ReviewCase | undefined): string {
+    const args: unknown = entry?.input.action.arguments;
+    if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+      return '';
+    }
+    const { command } = args as { readonly command?: unknown };
+    return typeof command === 'string' ? command : '';
+  }
+
+  /** The case ids of one family, so a pair can be compared field by field. */
+  function family(caseId: string): readonly ReviewCase[] {
+    const source = caseById.get(caseId);
+    if (source === undefined) throw new Error(`no case ${caseId}`);
+    return cases.filter((entry) => entry.familyId === source.familyId);
+  }
+
+  it('separates the low-risk prohibition pair by the prohibition alone', () => {
+    // The A1/2 boundary is only a boundary if the two cases differ in whether an
+    // applicable prohibition exists. A project rule forbidding edits, or an extra
+    // human request in one half, would make the A2 case a prohibition as well and the
+    // comparison would prove nothing.
+    const both = family('prohibited-config-reformat');
+    const prohibited = both.find(
+      (e) => e.caseId === 'prohibited-config-reformat',
+    );
+    const unrequested = both.find(
+      (e) => e.caseId === 'unrequested-config-reformat',
+    );
+    expect(prohibited).toBeDefined();
+    expect(unrequested).toBeDefined();
+    // Same command, same directory, same policy text.
+    expect(unrequested?.input.action).toEqual(prohibited?.input.action);
+    expect(unrequested?.input.cwd).toBe(prohibited?.input.cwd);
+    expect(unrequested?.input.policy).toEqual(prohibited?.input.policy);
+    // The only difference is the human prohibition, present on one side only.
+    expect((prohibited?.input.evidence ?? []).length).toBe(1);
+    expect(unrequested?.input.evidence ?? []).toEqual([]);
+    // And that rule must not itself forbid the edit, or the A2 half would be A1.
+    const rules = prohibited?.input.policy.projectRules ?? '';
+    expect(rules).not.toMatch(/不要改写|不得修改|禁止/iu);
+  });
+
+  it('gives the equivalent-tool pair the same deletion effect', () => {
+    // The rubric asks for cases where different spellings produce equivalent
+    // consequences. `rsync --delete` removes destination-only files; a plain `cp`
+    // does not, so the pair has to state a destination with nothing else in it, and
+    // the copied action has to delete that content explicitly.
+    const rsync = caseById.get('equivalent-effect-rsync');
+    const copy = caseById.get('equivalent-effect-cp');
+    expect(rsync).toBeDefined();
+    expect(copy).toBeDefined();
+    const rsyncCommand = commandOf(rsync);
+    const copyCommand = commandOf(copy);
+    expect(rsyncCommand).toContain('--delete');
+    expect(copyCommand).toMatch(/^rm -rf .*&& cp /u);
+    // Both cases state that the backup holds nothing else, which is what makes the
+    // two actions equivalent rather than "similar".
+    for (const entry of [rsync, copy]) {
+      expect(entry?.input.policy.projectRules ?? '').toContain('没有其他来源');
+    }
+  });
+
+  it('sends only the files the permission names in the narrow-gap case', () => {
+    // A9 is "all key effects covered, one narrow non-key gap". Archiving the whole
+    // directory would ship the disputed index, turning the gap into an unlicensed
+    // outbound effect — a key boundary question, not a narrow one.
+    const entry = caseById.get('ladder-narrow-gap');
+    if (entry === undefined) throw new Error('no ladder-narrow-gap');
+    const command = commandOf(entry);
+    expect(command).toContain('diagnostics/build.log diagnostics/trace.json');
+    expect(command).not.toMatch(/tar[^&]*-C \S+ diagnostics /u);
+    const permission = entry.input.policy.projectRules ?? '';
+    expect(permission).toContain('diagnostics/build.log');
+    expect(permission).toContain('support.vendor.example/upload');
   });
 });
 
@@ -747,20 +903,13 @@ describe('core-v1 case documents', () => {
     }
   });
 
-  it('keeps every label file out of the dataset until the window runs', async () => {
-    // `readDataset` treats a missing directory as "no labels", which is the normal
-    // interim state. This asserts the earlier claim from the other direction.
-    const labels = await jsonFiles(`${DATASET}/labels`).catch(() => []);
-    const parsed: readonly ReviewLabel[] = await Promise.all(
-      labels.map((name) =>
-        readDocument<ReviewLabel>(
-          join(REPOSITORY_ROOT, DATASET, 'labels', name),
-          schemas.label,
-        ),
-      ),
-    );
-    expect(parsed).toEqual([]);
-    const reviews = await jsonFiles(`${DATASET}/reviews`).catch(() => []);
-    expect(reviews).toEqual([]);
+  it('still hands out blanks even once labels exist', () => {
+    // The complementary invariant: whatever the labelling window commits, the pack
+    // this task publishes has to stay blank, because it is what the next annotator
+    // reads. This is the check that must never relax.
+    expect(auditPack(pack)).toEqual([]);
+    for (const entry of pack.entries) {
+      expect(isBlankTarget(entry.target)).toBe(true);
+    }
   });
 });

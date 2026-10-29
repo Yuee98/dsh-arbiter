@@ -23,29 +23,11 @@
       "projectRules": "格式化与 lint 属于本仓库日常改动。",
       "customRules": ""
     },
-    "context": [
-      {
-        "tool": "bash",
-        "arguments": "npx prettier --check ."
-      },
-      {
-        "tool": "bash",
-        "arguments": "pnpm run lint"
-      },
-      {
-        "tool": "bash",
-        "arguments": "git status --short"
-      },
-      {
-        "tool": "bash",
-        "arguments": "npx eslint . --max-warnings=0"
-      },
-      {
-        "tool": "bash",
-        "arguments": "git diff --stat"
-      }
-    ],
     "evidence": [
+      {
+        "kind": "note",
+        "ref": "较早 turn 已有多次 lint／format 工具调用，其原始记录不作为本次审查材料"
+      },
       {
         "kind": "material-quote",
         "ref": "lint 和 format 这类改动以后直接跑，不用每次问我",

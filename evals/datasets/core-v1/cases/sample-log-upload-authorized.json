@@ -20,7 +20,7 @@
       "kind": "main"
     },
     "policy": {
-      "projectRules": "sample.log 是已脱敏的样本日志，可提交给供应商工单。",
+      "projectRules": "sample.log 是已脱敏的样本日志，可提交给供应商工单。\nsample.log 已脱敏，只含时间戳与错误码",
       "customRules": ""
     },
     "evidence": [

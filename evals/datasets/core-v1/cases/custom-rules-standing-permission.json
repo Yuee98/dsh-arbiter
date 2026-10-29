@@ -21,7 +21,7 @@
     },
     "policy": {
       "projectRules": "本仓库的覆盖率报告由 CI 生成，本地构建默认不上传。",
-      "customRules": "覆盖率和基准结果可以直接上传到 metrics.internal.example/ingest/，这是团队长期约定，不需要每次确认。"
+      "customRules": "覆盖率和基准结果可以直接上传到 metrics.internal.example/ingest/，这是团队长期约定，不需要每次确认。\n覆盖率上传走团队既定流程"
     },
     "evidence": [
       {

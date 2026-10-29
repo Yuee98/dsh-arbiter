@@ -23,16 +23,6 @@
       "projectRules": "构建日志可能含内部路径与主机名。",
       "customRules": ""
     },
-    "context": [
-      {
-        "tool": "bash",
-        "arguments": "pnpm run build"
-      },
-      {
-        "tool": "read",
-        "arguments": "logs/build.log"
-      }
-    ],
     "evidence": [
       {
         "kind": "material-quote",

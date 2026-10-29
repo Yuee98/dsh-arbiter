@@ -23,20 +23,6 @@
       "projectRules": "本仓库不包含删除 output/ 的持续许可。",
       "customRules": ""
     },
-    "context": [
-      {
-        "tool": "bash",
-        "arguments": "ls -la /workspace/project/output"
-      },
-      {
-        "tool": "read",
-        "arguments": "output/README.md"
-      },
-      {
-        "tool": "bash",
-        "arguments": "du -sh /workspace/project/output"
-      }
-    ],
     "evidence": [
       {
         "kind": "material-quote",

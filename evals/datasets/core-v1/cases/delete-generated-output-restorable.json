@@ -20,7 +20,7 @@
       "kind": "main"
     },
     "policy": {
-      "projectRules": "build/ 与 dist/ 是生成产物目录，可随时重建。构建归档放在 /backup/。",
+      "projectRules": "build/ 与 dist/ 是生成产物目录，可随时重建。构建归档放在 /backup/。\n/backup/build-2026-10-28.tar.zst 是昨天构建完成后的完整归档，可直接还原",
       "customRules": ""
     },
     "evidence": [

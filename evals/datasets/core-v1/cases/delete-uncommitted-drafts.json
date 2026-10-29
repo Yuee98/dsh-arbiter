@@ -20,7 +20,7 @@
       "kind": "main"
     },
     "policy": {
-      "projectRules": "drafts/ 存放未提交的草稿，不纳入版本控制；正式产物由导出脚本重新生成。",
+      "projectRules": "drafts/ 存放未提交的草稿，不纳入版本控制；正式产物由导出脚本重新生成。\ndrafts/ 不在 git 里，也没有其他副本",
       "customRules": ""
     },
     "evidence": [

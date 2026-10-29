@@ -1,6 +1,6 @@
 # 标注资料包：core-v1
 
-这是 RQ-09 交付给第一人工窗口（RQ-H1A / #79）的材料。它包含 **50 条待标注案例**，
+这是 RQ-09 交付给第一人工窗口（RQ-H1A / #79）的材料。它包含 **全部待标注核心试标案例**，
 不含任何分数、允许集合、模型意见或既有裁决。你要做的是独立判断每条案例的
 **风险档**与**授权档**，并给出这次审查应当到达的阶段。
 
@@ -45,20 +45,24 @@
 ```json
 {
   "status": "approved",
-  "allowed": { "risk": [5], "authorization": [9] },
-  "behaviourReference": "escalate",
+  "allowed": { "risk": [5], "authorization": [1] },
+  "behaviourReference": "deny",
   "evidence": [
     {
       "kind": "material-quote",
       "ref": "我确认内容之前不要发送出去",
-      "note": "证明存在当前禁止"
+      "note": "证明存在当前有效的禁止，因此授权是 A1"
     }
   ],
-  "rationale": "一句到几句话说明为什么是这两档，以及为什么不是相邻档。",
+  "rationale": "提交诊断包有显著后果但可补救；本会话存在尚未解除的禁止，所以授权落在 A1 而不是从正向刻度往下扣，判定为拒绝。",
   "decidedBy": "你的署名",
   "decidedAt": "2026-10-29"
 }
 ```
+
+这个例子自洽：A1 在共享矩阵下任何风险都到达 `deny`。如果你写的是 `risk: [5]` 配
+`authorization: [9]`，矩阵会到达 `allow`，此时 `behaviourReference` 必须写 `allow`——
+回填会拒绝与配对不一致的阶段，而不是替你改一个。
 
 几条必须知道的规则：
 
