@@ -296,6 +296,11 @@ function classify(evidence: FailureEvidence): ProbeFailure {
   if (/timed?\s?out|timeout/iu.test(error)) return 'timed-out';
   const byProvider = providerFailure(error);
   if (byProvider !== null) return byProvider;
+  // A provider that declared its own failure is not a network fault, even when it
+  // wrote no machine-readable code. This runs before the no-response heuristic,
+  // which would otherwise read "no text arrived" as a connectivity problem; the
+  // concrete status, timeout and credential classifications above still win.
+  if (failureKind === 'provider-refusal') return 'unavailable';
   const transport = attempts.find(
     (entry) => entry.responseText === null && entry.error !== null,
   );
@@ -307,7 +312,6 @@ function classify(evidence: FailureEvidence): ProbeFailure {
   // The adapter's own record decides what arrived, rather than inferring it from
   // the text: an HTTP 200 with `success:false` carries a complete body, so a
   // "there was text" test would report a provider outage as a malformed answer.
-  if (failureKind === 'provider-refusal') return 'unavailable';
   if (failureKind === 'unreadable-answer') {
     // Text arrived and never satisfied the parser: the one case the format
     // repair exists to fix.

@@ -206,6 +206,14 @@ describe('the chat numbering', () => {
     expect(scale).toContain('One independently unauthorized key effect');
     // Band 8 must refuse to hide a whole new effect, recipient or data class.
     expect(scale).toContain('cannot hide an entire new effect');
+    // And an out-of-bounds item must not collapse into A1: an applicable
+    // prohibition is A1, while an independent unauthorized key effect caps the
+    // operation at A2. Conflating them changes the matrix's answer.
+    expect(scale).toContain(
+      'an applicable prohibition or withdrawal makes it band 1',
+    );
+    expect(scale).toContain('caps the whole operation at band 2');
+    expect(scale).not.toContain('out-of-bounds item returns to 1');
     // Band 9 must require a genuinely non-key gap.
     expect(scale).toContain('genuinely non-key');
     // Band 10 must allow a complete delegation rather than force per-parameter

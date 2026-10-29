@@ -37,22 +37,19 @@ const AUTH_FIELD =
   'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
 
 /**
- * The one field whose numeric value is a score, not a credential.
+ * The exact spelling of this contract's authorization score member.
  *
- * `authorization` names both an HTTP header and one of this contract's two public
- * bands, so `{"authorization":8}` is an ordinary reviewer answer and masking it
- * corrupts every stored attempt. The exemption is therefore scoped to this exact
- * field name in exactly that form, rather than to numeric values under any
- * authentication-looking key: `X-Api-Key: 123456789` is still a credential and
- * still masks.
+ * `authorization` names both an HTTP header and one of the two public bands, and
+ * the two spellings are distinguishable: the score member appears in a JSON object
+ * as a lowercase, double-quoted key, while a header is written bare
+ * (`Authorization: …`, `authorization=…`) or with its own capitalized name. So the
+ * exemption requires this exact spelling, case included — a bare or capitalized
+ * `Authorization` is a header whatever its value looks like.
  */
-const SCORE_FIELD = /^(?:"|')?authorization(?:"|')?$/iu;
+const SCORE_FIELD = /^"authorization"$/u;
 
-/** A JSON literal: a number, boolean or null. */
-const LITERAL_VALUE = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)$/u;
-
-/** A JSON string holding only digits, which may be a numeric credential. */
-const QUOTED_LITERAL = /^(?:"|')?(-?\d+(?:\.\d+)?)(?:"|')?$/u;
+/** A JSON numeric literal, unquoted. */
+const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 
 export function redactAuthHeaders(text: string): string {
   // One pass over the field name and separator, then the whole value: a quoted
@@ -72,18 +69,16 @@ export function redactAuthHeaders(text: string): string {
 }
 
 /**
- * Whether this field/value pair is a public score rather than a credential.
+ * Whether this field/value pair is the public authorization score.
  *
- * Two conditions together, not either: the field must be exactly `authorization`,
- * and the value must be a bare number. A quoted or unquoted string — including one
- * that happens to be all digits — still masks, because a header value is
- * arbitrary text and only the score member is known to be numeric.
+ * Both conditions are narrow on purpose: the key must be the exact JSON spelling
+ * this contract's answer uses, and the value must be an unquoted number. Every
+ * other auth-looking field masks whatever it holds, including a numeric-only
+ * value, because a host-owned chat credential has no value available to match and
+ * the structural pass is the only thing standing between it and the record.
  */
 function isScoreLiteral(field: string, value: string): boolean {
-  if (!SCORE_FIELD.test(field.trim())) return false;
-  // A quoted value is a string; only an unquoted numeric literal is the score.
-  if (/^["'`]/u.test(value.trim())) return false;
-  return LITERAL_VALUE.test(value.trim()) && !QUOTED_LITERAL.test(field);
+  return SCORE_FIELD.test(field.trim()) && NUMERIC_LITERAL.test(value.trim());
 }
 
 /**

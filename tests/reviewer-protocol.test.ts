@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { runReviewerProbe } from '../src/reviewer/diagnostic.js';
+import { redactAuthHeaders } from '../src/reviewer/redact.js';
 import { review } from '../src/reviewer/service.js';
 import {
   offlineChatBackend,
@@ -1056,6 +1057,162 @@ describe('a provider-declared failure is not reported as malformed output', () =
     if (result.status !== 'failed') throw new Error('expected a failure');
     // Not `invalid-output`: the answer was complete, the provider refused. The
     // stage decides which escalation a person sees.
+    expect(result.failure).toBe('unavailable');
+  });
+});
+
+describe('round-2 corrections', () => {
+  test('a bare or capitalized Authorization header masks at any value shape', () => {
+    // The round-1 test only covered `X-Api-Key`. `Authorization` is the field whose
+    // numeric form was still escaping, because the score exemption used to be
+    // keyed on the name alone and case-insensitively.
+    for (const header of [
+      'Authorization: 987654321',
+      'authorization=987654321',
+      'authorization:987654321',
+    ]) {
+      expect(redactAuthHeaders(header)).not.toContain('987654321');
+    }
+    // The score member keeps its exact JSON spelling; every other spelling of the
+    // name is a header and masks.
+    expect(redactAuthHeaders('"authorization": 8')).toBe('"authorization": 8');
+  });
+
+  test('a bare numeric Authorization header never reaches a returned field', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'failure',
+            code: 'AUTH',
+            message:
+              'rejected Authorization: 987654321 and authorization=987654321',
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    const serialized = JSON.stringify(result);
+    // Every header spelling of the numeric value is masked, wherever it appears.
+    expect(serialized).not.toContain('987654321');
+    // The score member is still an ordinary answer, in both the object and the
+    // standalone form the answer reader accepts.
+    const scored = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [{ kind: 'text', text: '{"authorization":8,"risk":3}' }],
+      }),
+    });
+    expect(scored.attempts[0]?.responseText).toBe(
+      '{"authorization":8,"risk":3}',
+    );
+  });
+
+  test('a distribution the contract rejects stays out of the partial diagnostic', async () => {
+    // An empty probability object is a complete-looking field the N0 validator
+    // refuses. Reading it through the totality fallback would report band 10, so
+    // the partial trail must validate first.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              model: 'jev',
+              answers: { authorization: { probabilities: {} } },
+            }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    if (result.outcome.status !== 'review-failure') {
+      throw new Error('expected a failure');
+    }
+    // Neither an invented A10 nor an invented R10 reaches the diagnostic: with
+    // nothing left to report, the whole diagnostic is absent rather than a pair of
+    // nulls dressed up as evidence.
+    expect(result.outcome.diagnostic).toBeNull();
+  });
+
+  test('a structurally missing field beside an invalid one still fabricates nothing', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              model: 'jev',
+              answers: {
+                risk: NEW_SCALE_LOW_TOTAL,
+                authorization: { probabilities: {} },
+              },
+            }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    if (result.outcome.status !== 'review-failure') {
+      throw new Error('expected a failure');
+    }
+    // Both halves are null: whatever the diagnostic shape, no band was invented.
+    expect(result.outcome.diagnostic).toMatchObject({
+      risk: null,
+      authorization: null,
+    });
+    // The reason names the N0 rule that failed, not a transport fault.
+    expect(result.outcome.reason).toContain('probability-sum-not-one');
+  });
+
+  test('a provider failure with no code is not reported as a network fault', async () => {
+    const result = await runReviewerProbe({
+      config: {
+        ...DEFAULT_CONFIG,
+        reviewer: {
+          ...DEFAULT_CONFIG.reviewer,
+          type: 'chat',
+          chat: {
+            ...DEFAULT_CONFIG.reviewer.chat,
+            provider: 'offline',
+            model: 'offline-model',
+            timeoutMs: 1_000,
+            maxRepairRetries: 0,
+          },
+        },
+      },
+      llm: {
+        stream: () =>
+          (async function* () {
+            await Promise.resolve();
+            yield {
+              type: 'finish',
+              reason: {
+                kind: 'failure',
+                failure: { message: 'service overloaded' },
+              },
+            };
+          })(),
+      },
+      credentials: undefined,
+      fetch: globalThis.fetch,
+      signal: new AbortController().signal,
+    });
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('expected a failure');
+    // No text arrived, but the provider said why: classifying that as `network`
+    // would tell an operator to check connectivity for a provider outage.
     expect(result.failure).toBe('unavailable');
   });
 });

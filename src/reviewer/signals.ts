@@ -28,6 +28,7 @@ import {
   bandFromNative,
   chatScore,
   distributionToPublic,
+  validateNativeDistribution,
 } from '../review-contract/normalize.js';
 import { decisionAnswers } from './envelope.js';
 import { extractJsonObject } from './json.js';
@@ -190,12 +191,16 @@ export function readDecisionAnswer(parsedBody: unknown): ParsedAnswer {
       ok: false,
       error: problems.join('; '),
       failures: [],
+      // A partial trail is only built for a field whose distribution the contract
+      // actually accepts. Without that check an empty or sparse object would
+      // reach `bandFromNative`, whose totality fallback would report the highest
+      // band — inventing an A10 out of material N0 rejected.
       partial: {
-        risk: typeof risk === 'string' ? null : distributionTrail(risk, 'risk'),
+        risk: typeof risk === 'string' ? null : validatedTrail(risk, 'risk'),
         authorization:
           typeof authorization === 'string'
             ? null
-            : distributionTrail(authorization, 'authorization'),
+            : validatedTrail(authorization, 'authorization'),
       },
     };
   }
@@ -222,10 +227,25 @@ function pointTrail(score: number): ScoreTrail {
 }
 
 /**
+ * A trail for a distribution the contract accepts, or null when it does not.
+ *
+ * The partial diagnostic must not be a second, looser reader: it validates through
+ * the same N0 validator the scored path uses, so a field the contract rejects
+ * stays null here exactly as it would there.
+ */
+function validatedTrail(
+  native: Record<string, number>,
+  rule: 'risk' | 'authorization',
+): ScoreTrail | null {
+  return validateNativeDistribution(native).ok
+    ? distributionTrail(native, rule)
+    : null;
+}
+
+/**
  * A native distribution as a trail.
  *
- * The band is derived by the contract, so an invalid distribution never reaches
- * here: the caller only builds a trail for a field whose probabilities parsed.
+ * Only a validated distribution reaches here; see {@link validatedTrail}.
  */
 function distributionTrail(
   native: Record<string, number>,
