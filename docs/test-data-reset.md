@@ -9,7 +9,7 @@
 | | 内容 |
 |---|---|
 | 作用范围 | **一个** DSH 数据目录下的 `arbiter/` 子目录，且只处理这个插件自己的文件 |
-| 目标文件 | `arbiter.db`、`arbiter.db-wal`、`arbiter.db-shm`、`arbiter.db-journal`、`arbiter.db.backup-v<数字>`、`arbiter.db.backup-v<数字>.staging` |
+| 目标文件 | `arbiter.db`、`arbiter.db-wal`、`arbiter.db-shm`、`arbiter.db-journal`、`arbiter.db.backup-v<数字>`、`arbiter.db.backup-v<数字>.staging`，以及任何备份／残留文件同名的 `-wal`／`-shm`／`-journal` 边车 |
 | 删除条件 | 该文件被证明是**本插件写的旧结构**审计库，或它的迁移备份／残留 |
 | 不删除 | 当前结构的审计库（新记录）、更新版本写的库、其他插件的数据库、其他 profile 的恢复副本、宿主会话日志 |
 | 触发方式 | 只由操作者显式运行；不进入启动、安装钩子或 CI |
@@ -115,6 +115,7 @@ RQ-18 的前后清单、执行命令、数量与新库验证证据由该任务�
 - dry-run 后整棵目录树的**摘要与文件列表都不变**（对真实 `~/.dsh/arbiter/` 也做过同样的逐字节核对，见 PR 正文）；
 - 显式执行只删四类目标（旧库、两个备份、可读的 `.staging` 残留），`other.db`、`notes.txt`、`last-good/`、其他插件目录逐字节保留；
 - 部分失败时报告标为 `PARTIAL`，不写成「nothing removed」；
+- 备份的 `-wal`／`-shm` 随备份一起删除，且只改 WAL 后 `plan id` 会变化、旧 token 被拒绝；
 - 可读的 `.staging` 残留把行数带进预览与执行记录；
 - 重复运行不删新记录；
 - 回传错误的 `plan id`、或用另一个数据目录的 `plan id` 都不删任何东西；
