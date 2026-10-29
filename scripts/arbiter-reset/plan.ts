@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import type { DatabaseProbe, ValueCount } from './inspect.ts';
 import {
   CURRENT_SCHEMA_VERSION,
+  SIDECAR_SUFFIXES,
   absentProbe,
   currentVersionKnown,
   inspectDatabase,
@@ -482,6 +483,43 @@ function entryTarget(
   );
 }
 
+/**
+ * The sidecars that belong to one backup or residue file.
+ *
+ * A backup written in WAL mode can carry committed rows in its `-wal` alone, and
+ * `inspectDatabase` reads those rows because it inspects a copy with the sidecars
+ * attached. Two things then have to follow from that, and both were missing:
+ *
+ * 1. the sidecars must be **deletion targets**, or removing the main file leaves
+ *    committed data and an orphaned `-wal`/`-shm` behind;
+ * 2. their sizes and digests must be in the plan identity, or a change that
+ *    landed only in the WAL does not change `planId` and a stale token would
+ *    still authorize deleting records the operator never saw.
+ *
+ * Each sidecar therefore inherits its parent's decision: deleted with it, kept
+ * with it, or refused with it.
+ */
+function companionTargets(
+  entries: readonly Entry[],
+  parent: ResetTarget,
+): readonly ResetTarget[] {
+  const companions: ResetTarget[] = [];
+  for (const suffix of SIDECAR_SUFFIXES) {
+    const entry = entries.find(
+      (item) => item.name === `${parent.name}${suffix}`,
+    );
+    if (entry === undefined) continue;
+    const reason =
+      parent.action === 'delete'
+        ? `sidecar of ${parent.name}, which this run deletes`
+        : parent.action === 'refuse'
+          ? `its parent ${parent.name} is refused, so the sidecar is left untouched`
+          : `it belongs to ${parent.name}, which this reset keeps`;
+    companions.push(entryTarget(entry, parent.group, parent.action, reason));
+  }
+  return companions;
+}
+
 /** The sidecar targets of the audit database, decided by that database. */
 function sidecarTargets(
   entries: readonly Entry[],
@@ -806,11 +844,19 @@ export function buildPlan(
   targets.push(database);
   targets.push(...sidecarTargets(entries, database));
   for (const entry of entries) {
+    // A sidecar is not a candidate of its own: it is handled with the file it
+    // belongs to, which is how the database is treated as well.
+    if (SIDECAR_SUFFIXES.some((suffix) => entry.name.endsWith(suffix)))
+      continue;
     if (BACKUP_NAME.test(entry.name)) {
-      targets.push(backupTarget(entry));
+      const target = backupTarget(entry);
+      targets.push(target, ...companionTargets(entries, target));
       continue;
     }
-    if (RESIDUE_NAME.test(entry.name)) targets.push(residueTarget(entry));
+    if (RESIDUE_NAME.test(entry.name)) {
+      const target = residueTarget(entry);
+      targets.push(target, ...companionTargets(entries, target));
+    }
   }
 
   // A profile outside the authorized set blocks the run, because deleting the

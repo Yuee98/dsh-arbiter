@@ -543,6 +543,80 @@ describe('apply', () => {
     expect(existsSync(parked)).toBe(true);
   });
 
+  test('deletes a backup sidecar with its backup and binds it into the plan', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    mkdirSync(directory, { recursive: true });
+    // A backup written in WAL mode: committed rows live in the `-wal`, which is
+    // why the inspection reads it. The sidecars therefore have to be part of the
+    // deletion and of the plan identity, or a WAL-only change would slip past the
+    // token and leave committed rows plus an orphaned sidecar behind.
+    const staging = await makeHome();
+    const live = join(staging, 'arbiter.db');
+    const writer = new DatabaseSync(live);
+    writer.exec(OWNED_DDL);
+    writer.exec('PRAGMA user_version = 2');
+    // WAL mode is set *before* the rows are written: switching an existing
+    // database into WAL checkpoints it, so rows written earlier would sit in the
+    // main file and the fixture would not prove anything about a WAL-only change.
+    writer.exec('PRAGMA journal_mode = WAL');
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    insertCall(writer, 'one', { profile: 'gate' });
+    insertCall(writer, 'two', { profile: 'gate' });
+    const backup = join(directory, 'arbiter.db.backup-v2');
+    const copyState = () => {
+      for (const suffix of ['', '-wal', '-shm'])
+        if (existsSync(`${live}${suffix}`))
+          copyFileSync(`${live}${suffix}`, `${backup}${suffix}`);
+    };
+    copyState();
+
+    const first = buildPlan(home);
+    const names = first.targets.map((target) => target.name);
+    expect(names).toContain('arbiter.db.backup-v2');
+    // Which sidecars SQLite keeps is its business; this asserts the rule, not a
+    // particular file set: every sidecar that exists is planned with its parent.
+    const sidecars = ['-wal', '-shm', '-journal'];
+    const present = sidecars.filter((suffix) =>
+      existsSync(`${backup}${suffix}`),
+    );
+    const planned = names.filter(
+      (name) =>
+        name.startsWith('arbiter.db.backup-v2') &&
+        name !== 'arbiter.db.backup-v2',
+    );
+    expect(planned.sort()).toEqual(
+      present.map((suffix) => `arbiter.db.backup-v2${suffix}`).sort(),
+    );
+    // The WAL is the point of this case, so at least it has to be there.
+    expect(present).toContain('-wal');
+    expect(first.deleteRecords).toBe(2);
+
+    // A third call for another profile lands only in the backup's WAL.
+    insertCall(writer, 'three', { profile: 'intruder' });
+    copyState();
+    const second = buildPlan(home);
+    writer.close();
+
+    expect(second.deleteRecords).toBe(3);
+    expect(second.profiles.map((entry) => entry.value)).toContain('intruder');
+    // The token must change, so the earlier preview cannot authorize this state.
+    expect(second.planId).not.toBe(first.planId);
+    const stale = applyPlan(second, first.planId);
+    expect(stale.applied).toBe(false);
+    expect(stale.reason).toContain('confirmation token does not match');
+    expect(existsSync(backup)).toBe(true);
+
+    // The confirmed plan removes the backup and every sidecar with it, so no
+    // committed data and no orphaned log is left behind.
+    const applied = run(['--home', home, '--apply', second.planId]);
+    expect(applied.code).toBe(0);
+    expect(applied.out).toContain('records removed: 3');
+    expect(existsSync(backup)).toBe(false);
+    for (const suffix of ['-wal', '-shm', '-journal'])
+      expect(existsSync(`${backup}${suffix}`)).toBe(false);
+  });
+
   test('reports the record count of a readable staging residue', async () => {
     const home = await makeHome();
     const directory = pluginDir(home);
