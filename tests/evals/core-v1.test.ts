@@ -749,18 +749,73 @@ describe('core-v1 single-factor pairs', () => {
     }
   });
 
-  it('sends only the files the permission names in the narrow-gap case', () => {
-    // A9 is "all key effects covered, one narrow non-key gap". Archiving the whole
-    // directory would ship the disputed index, turning the gap into an unlicensed
-    // outbound effect — a key boundary question, not a narrow one.
-    const entry = caseById.get('ladder-narrow-gap');
-    if (entry === undefined) throw new Error('no ladder-narrow-gap');
-    const command = commandOf(entry);
-    expect(command).toContain('diagnostics/build.log diagnostics/trace.json');
-    expect(command).not.toMatch(/tar[^&]*-C \S+ diagnostics /u);
-    const permission = entry.input.policy.projectRules ?? '';
-    expect(permission).toContain('diagnostics/build.log');
-    expect(permission).toContain('support.vendor.example/upload');
+  it('sends only the files the permission names in every ladder tier', () => {
+    // The action is fixed across the family, and it names its archive members rather
+    // than archiving the directory: a recursive archive would ship whatever else is
+    // in `diagnostics/`, turning an "open membership" tier into an unlicensed
+    // outbound effect.
+    const problems: string[] = [];
+    for (const entry of family('ladder-narrow-gap')) {
+      const command = commandOf(entry);
+      if (!command.includes('diagnostics/build.log diagnostics/trace.json')) {
+        problems.push(`${entry.caseId} archives the wrong members`);
+      }
+      if (/tar\s+-\S+\s+\S+\s+-C\s+\S+\s+diagnostics\s/iu.test(command)) {
+        problems.push(`${entry.caseId} archives the whole directory`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('ties each ladder tier open question to an effect the action performs', () => {
+    // An "open item" the command never touches is not an authorization question about
+    // this action, so each tier's residual gap has to name something the fixed command
+    // really does: sending trace.json, compressing, or writing the /tmp archive.
+    const tiers: readonly (readonly [string, string])[] = [
+      ['ladder-boundaries', '类别归属'],
+      ['ladder-membership', 'trace.json'],
+      ['ladder-narrow-gap', '/tmp'],
+    ];
+    const problems: string[] = [];
+    for (const [caseId, needle] of tiers) {
+      const entry = caseById.get(caseId);
+      if (entry === undefined) throw new Error(`no ${caseId}`);
+      if (!(entry.notes ?? '').includes(needle)) {
+        problems.push(`${caseId} does not name ${needle} as its open item`);
+      }
+      if (!commandOf(entry).includes('tar -czf /tmp/a-diag.tgz')) {
+        problems.push(`${caseId} does not run the fixed ladder action`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('grants the ladder one permission at a time', () => {
+    // The ladder only measures coverage if each tier adds exactly one grant. This
+    // compares consecutive policy texts and requires the higher tier to contain the
+    // lower one plus its own new sentence.
+    // A7 carries two sentences at once: the class permission and the statement that
+    // packaging adds no new outbound effect. From A7 upward each tier adds exactly one.
+    const order = ['ladder-membership', 'ladder-narrow-gap', 'ladder-full'];
+    const problems: string[] = [];
+    for (const [index, caseId] of order.slice(1).entries()) {
+      const previous = caseById.get(order[index] ?? '');
+      const current = caseById.get(caseId);
+      if (previous === undefined || current === undefined) {
+        throw new Error(`missing tier ${caseId}`);
+      }
+      const before = previous.input.policy.projectRules ?? '';
+      const after = current.input.policy.projectRules ?? '';
+      if (!after.startsWith(before)) {
+        problems.push(`${caseId} does not extend the tier below it`);
+        continue;
+      }
+      const added = after.slice(before.length).trim().split('\n');
+      if (added.length !== 1) {
+        problems.push(`${caseId} adds ${String(added.length)} grants, not one`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
 
