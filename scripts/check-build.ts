@@ -26,6 +26,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-arbiter-build-'));
 const consumer = join(temporary, 'consumer');
 const tarball = join(temporary, 'dsh-arbiter.tgz');
+const unpacked = join(temporary, 'unpacked');
 
 function run(command: string, args: string[], cwd = consumer): void {
   const result = spawnSync(command, args, {
@@ -75,6 +76,36 @@ async function importFreeOfEvals(
   return findings;
 }
 
+/**
+ * Assert the packed artifact carries no evals source, schema or data.
+ *
+ * The publishable file list is the whole contract for what a user installs, so an
+ * evals path reaching the tarball is a packaging defect rather than a documentation
+ * matter. Both halves read what the packer produced — the file list from the tarball
+ * and the imports from the emitted JavaScript inside it — so a build step that inlined
+ * an evals module would still be caught.
+ */
+async function assertNoEvalsInPackage(options: {
+  readonly tarball: string;
+  readonly unpacked: string;
+}): Promise<void> {
+  assert.deepEqual(
+    forbiddenEntries(runCapture('tar', ['tzf', options.tarball])),
+    [],
+    'The published tarball must not contain evals sources, schemas or data.',
+  );
+  await mkdir(options.unpacked, { recursive: true });
+  run('tar', ['xzf', options.tarball, '-C', options.unpacked], root);
+  assert.deepEqual(
+    await importFreeOfEvals(join(options.unpacked, 'package')),
+    [],
+    'Published modules must not import evals.',
+  );
+  process.stdout.write(
+    'Published package: no evals source, schema, data or import.\n',
+  );
+}
+
 interface LoadedClient {
   readonly id: string;
   readonly factory: (require: (specifier: string) => unknown) => unknown;
@@ -102,6 +133,10 @@ try {
     );
   }
   assert.equal(packageErrors.length, 0, 'Publint found package defects.');
+  // The evals boundary is asserted here, against the tarball, rather than after the
+  // consumer install: a packaging defect should be reported even when the offline
+  // install cannot run in the current environment.
+  await assertNoEvalsInPackage({ tarball, unpacked });
   await writeFile(
     join(consumer, 'package.json'),
     JSON.stringify({
@@ -244,22 +279,6 @@ try {
     if (Array.isArray(injectValue))
       assert.equal(injectValue.join(','), 'slots,locale');
   }
-  // The publishable file list is the whole contract for what a user installs, so an
-  // evals path reaching the tarball is a packaging defect rather than a documentation
-  // matter. This checks the actual tarball's file list, not the `files` field, so it
-  // cannot be satisfied by an intent that the packer ignores.
-  assert.deepEqual(
-    forbiddenEntries(runCapture('tar', ['tzf', tarball])),
-    [],
-    'The published tarball must not contain evals sources, schemas or data.',
-  );
-  const evalsReferences = await importFreeOfEvals(packageRoot);
-  assert.deepEqual(
-    evalsReferences,
-    [],
-    'Published modules must not import evals.',
-  );
-
   const patch = await readFile(join(packageRoot, 'cordis.patch.yml'), 'utf8');
   assert.match(patch, /name: dsh-arbiter/);
   const localeFiles = (
