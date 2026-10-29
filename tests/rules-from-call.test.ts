@@ -494,6 +494,20 @@ describe('a decoded call detail as a draft source', () => {
     ).toBeNull();
   });
 
+  it('does not treat an ambiguous stored null as a recorded null argument', () => {
+    // The decoded detail cannot say whether `null` is a recorded JSON null or a
+    // field the record never wrote. Offering a draft would claim the call's input
+    // is known when it may be missing, so the entry stays withheld; the tester's
+    // own route does evaluate an explicit null correctly once one is known.
+    const absent = detail();
+    expect(
+      callSourceOfDetail({
+        ...absent,
+        raw: { ...absent.raw, arguments: null },
+      }),
+    ).toBeNull();
+  });
+
   it('offers nothing for an unreadable record', () => {
     expect(
       callSourceOfDetail(detail({ unreadable: true, unreadableReason: 'v9' })),
