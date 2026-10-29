@@ -13,7 +13,7 @@
 | 所有 TSX | Hooks 规则与依赖、列表 key、DOM 属性、按钮类型、基础无障碍检查、禁止组件内嵌套定义组件 |
 | React 组件与 `.ts` Hooks | 监听器、interval、timeout 必须清理 |
 | 浏览器模块 | 禁止 Node／SQLite 和后端实现导入；通过客户端服务或 HTTP 边界通信 |
-| 纯模块 | `src/types.ts`、`src/policy.ts` 以及 shared／domain／rules／shell／policy 目录不能依赖 React、DSH 或服务器模块 |
+| 纯模块 | `src/types.ts`、`src/policy.ts`、`src/review-contract/` 以及 shared／domain／rules／shell／policy 目录不能依赖 React、DSH 或服务器模块 |
 | 插件 UI 文案 | 直接 JSX 文本、面向用户的属性及直接渲染的字面量／模板／条件分支进入 locale |
 | 测试、脚本、工具配置 | 使用各自适用的规则，不套用产品源码的长度限制；测试禁止 focused／disabled case |
 | RTL 测试 | 独立运行 Testing Library 完整 React 推荐检查，识别 `renderClient`；三个 `await-async-*` 规则全部开启 |
