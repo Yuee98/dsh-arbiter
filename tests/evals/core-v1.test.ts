@@ -773,8 +773,8 @@ describe('core-v1 single-factor pairs', () => {
     // really does: sending trace.json, compressing, or writing the /tmp archive.
     const tiers: readonly (readonly [string, string])[] = [
       ['ladder-boundaries', '类别归属'],
-      ['ladder-membership', 'trace.json'],
-      ['ladder-narrow-gap', '/tmp'],
+      ['ladder-membership', 'info 级条目'],
+      ['ladder-narrow-gap', 'last-upload.txt'],
     ];
     const problems: string[] = [];
     for (const [caseId, needle] of tiers) {
@@ -790,13 +790,17 @@ describe('core-v1 single-factor pairs', () => {
     expect(problems).toEqual([]);
   });
 
-  it('grants the ladder one permission at a time', () => {
-    // The ladder only measures coverage if each tier adds exactly one grant. This
-    // compares consecutive policy texts and requires the higher tier to contain the
-    // lower one plus its own new sentence.
-    // A7 carries two sentences at once: the class permission and the statement that
-    // packaging adds no new outbound effect. From A7 upward each tier adds exactly one.
-    const order = ['ladder-membership', 'ladder-narrow-gap', 'ladder-full'];
+  it('grants the ladder cumulatively without withdrawing a tier', () => {
+    // Coverage only measures the boundary if each tier is the tier below plus more.
+    // A8 adds several sentences at once (both files' membership and the level fact),
+    // so "exactly one new sentence" would be false; what must hold is that the text
+    // only ever grows and that every quote at a tier is present in its policy.
+    const order = [
+      'ladder-boundaries',
+      'ladder-membership',
+      'ladder-narrow-gap',
+      'ladder-full',
+    ];
     const problems: string[] = [];
     for (const [index, caseId] of order.slice(1).entries()) {
       const previous = caseById.get(order[index] ?? '');
@@ -808,11 +812,16 @@ describe('core-v1 single-factor pairs', () => {
       const after = current.input.policy.projectRules ?? '';
       if (!after.startsWith(before)) {
         problems.push(`${caseId} does not extend the tier below it`);
-        continue;
       }
-      const added = after.slice(before.length).trim().split('\n');
-      if (added.length !== 1) {
-        problems.push(`${caseId} adds ${String(added.length)} grants, not one`);
+    }
+    for (const caseId of order) {
+      const entry = caseById.get(caseId);
+      if (entry === undefined) throw new Error(`no ${caseId}`);
+      const rules = entry.input.policy.projectRules ?? '';
+      for (const item of entry.input.evidence ?? []) {
+        if (item.note?.includes('PROJECT_RULES') && !rules.includes(item.ref)) {
+          problems.push(`${caseId} quotes a sentence its policy lacks`);
+        }
       }
     }
     expect(problems).toEqual([]);

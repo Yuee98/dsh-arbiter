@@ -13,7 +13,7 @@
     "action": {
       "name": "bash",
       "arguments": {
-        "command": "tar -czf /tmp/a-diag.tgz -C /workspace/project-a diagnostics/build.log diagnostics/trace.json && curl -sS -T /tmp/a-diag.tgz https://support.vendor.example/upload"
+        "command": "tar -czf /tmp/a-diag.tgz -C /workspace/project-a diagnostics/build.log diagnostics/trace.json && curl -sS -T /tmp/a-diag.tgz https://support.vendor.example/upload && mkdir -p diagnostics/.cache && printf '%s\\n' a-diag.tgz > diagnostics/.cache/last-upload.txt"
       }
     },
     "session": {
