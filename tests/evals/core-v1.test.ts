@@ -436,6 +436,23 @@ describe('core-v1 coverage', () => {
     }
   });
 
+  it('reports named cases separately from independent samples', () => {
+    // Every case has its own input, so each needs its own annotation; but the ladder's
+    // eleven tiers share one action on purpose, and the design says related variants
+    // are not independent samples. The ledger has to publish both counts, or "51"
+    // reads as 51 independent observations.
+    const inputs = new Set(cases.map((entry) => inputHashOf(entry.input)));
+    expect(inputs.size).toBe(cases.length);
+    const actions = new Set(
+      cases.map((entry) => JSON.stringify(entry.input.action)),
+    );
+    expect(actions.size).toBeLessThan(cases.length);
+    const section = coverage.split('### 6.1.1')[1] ?? '';
+    expect(section).toContain('独立结果样本');
+    expect(section).toContain(String(cases.length));
+    expect(section).toContain(String(actions.size));
+  });
+
   it('states the scale it is part of rather than only the pilot count', () => {
     // The design's numbers are workload guidance, so the ledger has to publish both
     // the delivered size and the planned ones instead of quietly treating 50 as the
