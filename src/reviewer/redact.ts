@@ -299,90 +299,97 @@ const JSON_STRING = /^"(?:[^"\\]|\\.)*"$/u;
  */
 function rebuildScoreObject(objectText: string): string {
   const kept: string[] = [];
+  // A member may appear once. A second `type` (or a second `probabilities`) is not
+  // part of any answer this contract asks for, and restoring one verbatim would put
+  // attacker-controlled text back into the record.
+  const seen = new Set<string>();
+  let typed = false;
   for (const member of topLevelMemberChunks(objectText.slice(1, -1))) {
     const match = MEMBER_PREFIX.exec(member);
     if (match === null) continue;
     const key = match[2] ?? '';
     const prefix = match[1] ?? '';
-    if (!SCORE_MEMBERS.has(key)) {
+    const value = member.slice(prefix.length).trim();
+    if (!SCORE_MEMBERS.has(key) || seen.has(key)) {
       kept.push(`${prefix}[redacted]`);
       continue;
     }
-    const value = member.slice(prefix.length).trim();
+    seen.add(key);
+    if (key === 'type') {
+      // The only `type` this contract accepts is its own literal. Anything else —
+      // including a second `type` carrying an echo — is not restored; the object
+      // simply does not qualify as a score answer.
+      if (value !== JSON_SCORE_TYPE) return maskHeadersIn(objectText);
+      typed = true;
+      kept.push(`${prefix}${JSON_SCORE_TYPE}`);
+      continue;
+    }
     const shape = retainedShape(key, value);
     kept.push(shape === null ? `${prefix}[redacted]` : `${prefix}${shape}`);
   }
-  // A score object that lost every member keeps its verified type, so the record
-  // still says what the provider claimed rather than becoming an empty object.
-  if (kept.length === 0) kept.push('"type":"score"');
+  if (!typed) return maskHeadersIn(objectText);
+  // A score object that lost every other member keeps only its verified type.
   return `{${kept.join(',')}}`;
 }
+
+/** The one `type` value this contract's score answer carries, with its quotes. */
+const JSON_SCORE_TYPE = '"score"';
+
+/**
+ * A legitimate level key: the decision protocol numbers criteria 0..9 and the public
+ * scale prints 1..10, so both spellings are legal and nothing else is.
+ *
+ * Restricting the *key* as well as the value is what closes the object-shaped hole:
+ * a description can travel in a key as easily as in a value, and the outer masking
+ * pass cannot see inside a score object it has already extracted.
+ */
+const LEVEL_KEY = /^"(?:\d|10)"$/u;
 
 /**
  * The value to retain for one member, or null when it cannot be retained safely.
  *
- * A retained value is always passed through the authentication-header rule, so the
- * answer's own text is held to the same boundary as the rest of the record. The
- * declared shape still has to match what the member means: a `confidence` that is
- * not a number, or a `legend` that is not a string or an object, is not this
- * contract's answer and is dropped rather than stored.
+ * Nothing here restores raw text. A retained fragment is either a JSON number, a
+ * verified literal, or an object whose keys are level identifiers and whose values
+ * have themselves been checked; free text is passed through the authentication-header
+ * rule and dropped when it does not fit the declared shape.
  */
 function retainedShape(key: string, value: string): string | null {
-  if (key === 'type') return value;
-  if (NUMERIC_MEMBERS.has(key)) {
-    if (!JSON_NUMBER.test(value)) return null;
-    return value;
+  if (NUMERIC_MEMBERS.has(key) || key === 'score') {
+    return JSON_NUMBER.test(value) ? value : null;
   }
-  if (key === 'score') {
-    if (!JSON_NUMBER.test(value)) return null;
-    return value;
+  if (key === 'probabilities') return levelObject(value, 'number');
+  // `legend` is descriptive text, or a map of level to description.
+  if (JSON_STRING.test(value)) {
+    // A bare description is model-written text: it is scanned, never trusted.
+    const masked = maskHeadersIn(value);
+    // If scanning changed it, the original carried a header and the masked form is
+    // what belongs in the record.
+    return masked;
   }
-  if (key === 'probabilities') {
-    // A distribution object: its values are numbers keyed by level. Individual
-    // entries are checked rather than the whole text, so a non-numeric entry is
-    // what fails, not an incidentally unusual key order.
-    return distributionText(value);
-  }
-  // `legend` is descriptive text, or a map of level to description. The masking
-  // pass is what makes it safe to retain: it is scanned exactly like any other
-  // text in the record.
-  if (JSON_STRING.test(value)) return maskHeadersIn(value);
-  if (value.startsWith('{')) return objectText(value);
-  return null;
-}
-
-/** A probabilities object whose entries are all numbers, or null. */
-function distributionText(value: string): string | null {
-  if (!value.startsWith('{')) return null;
-  const body = value.slice(1, -1);
-  for (const entry of topLevelMemberChunks(body)) {
-    const match = MEMBER_PREFIX.exec(entry);
-    if (match === null) return null;
-    const number = entry.slice((match[1] ?? '').length).trim();
-    if (!JSON_NUMBER.test(number)) return null;
-  }
-  return objectText(value);
+  return levelObject(value, 'text');
 }
 
 /**
- * A JSON object's text with each of its values held to the header rule.
+ * An object keyed by level identifier, with every value of the declared kind.
  *
- * The level keys are kept as written; only values are scanned, because that is
- * where a description would carry a header.
+ * Keys are only kept when they are a legal level; a key is text the provider chose,
+ * so it is subject to the same rule as a value.
  */
-function objectText(value: string): string | null {
-  const body = value.slice(1, -1);
+function levelObject(value: string, kind: 'number' | 'text'): string | null {
+  if (!value.startsWith('{')) return null;
   const kept: string[] = [];
-  for (const entry of topLevelMemberChunks(body)) {
+  for (const entry of topLevelMemberChunks(value.slice(1, -1))) {
     const match = MEMBER_PREFIX.exec(entry);
-    if (match === null) return null;
+    if (match === null || !LEVEL_KEY.test(`"${match[2] ?? ''}"`)) return null;
     const prefix = match[1] ?? '';
     const inner = entry.slice(prefix.length).trim();
-    kept.push(
-      JSON_STRING.test(inner) || JSON_NUMBER.test(inner)
-        ? `${prefix}${maskHeadersIn(inner)}`
-        : `${prefix}[redacted]`,
-    );
+    if (kind === 'number') {
+      if (!JSON_NUMBER.test(inner)) return null;
+      kept.push(`${prefix}${inner}`);
+      continue;
+    }
+    if (!JSON_STRING.test(inner)) return null;
+    kept.push(`${prefix}${maskHeadersIn(inner)}`);
   }
   return `{${kept.join(',')}}`;
 }

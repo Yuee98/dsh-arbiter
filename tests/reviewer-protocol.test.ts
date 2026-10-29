@@ -1367,6 +1367,61 @@ describe('the score object is exempt while every header still masks', () => {
     expect(attempt.responseText ?? '').not.toContain('sk-legend');
   });
 
+  test('no excluded text is restored verbatim', () => {
+    // The invariant this boundary fails on repeatedly: anything taken out of the
+    // masking pass must not come back unscanned. Keys, a duplicate member and a
+    // distribution key are all text the provider chose, so each is checked too.
+    const cases: readonly (readonly [string, string])[] = [
+      // A description can travel in a *key* just as easily as in a value.
+      [
+        'legend key',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"legend":{"Authorization: Bearer PRIVATE_TOKEN":"normal"}}}',
+      ],
+      // A second `type` is not part of any answer this contract asks for, and its
+      // value must not be restored just because the first one qualified the object.
+      [
+        'duplicate type',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"type":"Authorization: Bearer PRIVATE_TOKEN"}}',
+      ],
+      // A distribution is keyed by level; a key that is not a level is not a level.
+      [
+        'probabilities key',
+        '{"authorization":{"type":"score","probabilities":{"Authorization: Bearer PRIVATE_TOKEN":1}}}',
+      ],
+    ];
+    for (const [label, input] of cases) {
+      // Folded into one matcher per case: the label names which shape failed.
+      expect({
+        label,
+        leaked: redactAuthHeaders(input).includes('PRIVATE_TOKEN'),
+      }).toEqual({ label, leaked: false });
+    }
+    // A legitimate answer is unaffected by these rules.
+    const legit =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"score":1,"legend":{"9":"mass delete"},"confidence":0.5}}';
+    expect(redactAuthHeaders(legit)).toBe(legit);
+  });
+
+  test('a credential in a legend key masks end to end', async () => {
+    // The same shape through the production boundary, with no known credential.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"legend":{"Authorization: Bearer sk-key":"normal"}}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-key');
+  });
+
   test('a verified score answer is exempt in both envelopes', () => {
     // The exemption has to keep working for the real answers, or the fix would
     // trade a security hole for the parseability defect it was introduced to fix.
