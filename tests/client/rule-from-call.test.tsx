@@ -257,9 +257,7 @@ async function openCall(user: ReturnType<typeof renderClient>['user']) {
 async function openDraftDialog(
   user: ReturnType<typeof renderClient>['user'],
 ): Promise<HTMLElement> {
-  await user.click(
-    screen.getByRole('button', { name: '从这次调用创建规则', exact: true }),
-  );
+  await user.click(screen.getByRole('button', { name: '从这次调用创建规则' }));
   return await screen.findByRole('dialog', {
     name: '从这次调用创建规则草稿',
   });
@@ -296,7 +294,7 @@ describe('creating a rule draft from a recorded call', () => {
       expect(unfixed).toHaveTextContent('未勾选：tool');
     });
     expect(
-      within(dialog).getByRole('button', { name: '生成草稿', exact: true }),
+      within(dialog).getByRole('button', { name: '生成草稿' }),
     ).toBeEnabled();
   });
 
@@ -308,7 +306,6 @@ describe('creating a rule draft from a recorded call', () => {
     await user.click(
       within(dialog).getByRole('button', {
         name: '生成草稿并测试',
-        exact: true,
       }),
     );
 
@@ -341,15 +338,11 @@ describe('creating a rule draft from a recorded call', () => {
     const { user } = renderClient(<ArbiterPage />);
     await openCall(user);
     const dialog = await openDraftDialog(user);
-    await user.click(
-      within(dialog).getByRole('button', { name: '生成草稿', exact: true }),
-    );
+    await user.click(within(dialog).getByRole('button', { name: '生成草稿' }));
 
     // Nothing was written to the configuration by creating the draft.
     expect(saves).toEqual([]);
-    await user.click(
-      await screen.findByRole('button', { name: '保存并应用', exact: true }),
-    );
+    await user.click(await screen.findByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
       expect(saves).toHaveLength(1);
     });
@@ -363,9 +356,7 @@ describe('creating a rule draft from a recorded call', () => {
     const { user } = renderClient(<ArbiterPage />);
     await openCall(user);
     const dialog = await openDraftDialog(user);
-    await user.click(
-      within(dialog).getByRole('button', { name: '取消', exact: true }),
-    );
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(
       screen.queryByRole('dialog', { name: '从这次调用创建规则草稿' }),
     ).toBeNull();
@@ -391,12 +382,8 @@ describe('creating a rule draft from a recorded call', () => {
     );
 
     await user.selectOptions(behavior, 'deny');
-    await user.click(
-      within(dialog).getByRole('button', { name: '生成草稿', exact: true }),
-    );
-    await user.click(
-      await screen.findByRole('button', { name: '保存并应用', exact: true }),
-    );
+    await user.click(within(dialog).getByRole('button', { name: '生成草稿' }));
+    await user.click(await screen.findByRole('button', { name: '保存并应用' }));
     await waitFor(() => {
       expect(saves).toHaveLength(1);
     });
@@ -422,9 +409,7 @@ describe('creating a rule draft from a recorded call', () => {
     expect(dialog).toHaveTextContent(`来源调用：${CALL_ID}`);
     expect(within(dialog).getByText(/^tool = /u)).toBeVisible();
 
-    await user.click(
-      within(dialog).getByRole('button', { name: '生成草稿', exact: true }),
-    );
+    await user.click(within(dialog).getByRole('button', { name: '生成草稿' }));
     const row = await screen.findByRole('list', { name: '规则' });
     expect(within(row).getAllByRole('listitem')).toHaveLength(1);
     // No test was requested, so nothing claims to have tested the new rule.
@@ -439,7 +424,6 @@ describe('creating a rule draft from a recorded call', () => {
     await user.click(
       within(dialog).getByRole('button', {
         name: '生成草稿并测试',
-        exact: true,
       }),
     );
     const tester = await screen.findByRole('dialog', { name: '规则测试' });
@@ -469,7 +453,6 @@ describe('creating a rule draft from a recorded call', () => {
     await user.click(
       within(dialog).getByRole('button', {
         name: '生成草稿并测试',
-        exact: true,
       }),
     );
     const tester = await screen.findByRole('dialog', { name: '规则测试' });
@@ -504,7 +487,7 @@ describe('creating a rule draft from a recorded call', () => {
       ),
     ).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: '从这次调用创建规则', exact: true }),
+      screen.queryByRole('button', { name: '从这次调用创建规则' }),
     ).toBeNull();
   });
 });

@@ -128,7 +128,7 @@ export function RuleFromCallDialog(props: {
           </ul>
         </Field>
 
-        <p role="note" className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
+        <p role="note" className="arb:m-0 arb:text-xs arb:text-secondary">
           {t('rules.fromCallCombine')}
         </p>
 
@@ -137,9 +137,9 @@ export function RuleFromCallDialog(props: {
           data-rule-from-call-unfixed={unfixed.length}
           className="arb:flex arb:flex-col arb:gap-1"
         >
-          <h4 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
+          <h3 className="arb:m-0 arb:text-xs arb:font-semibold arb:text-primary">
             {t('rules.fromCallUnfixed')}
-          </h4>
+          </h3>
           {unfixed.length === 0 ? (
             <p className="arb:m-0 arb:text-xs arb:text-secondary">
               {t('rules.fromCallUnfixedNone')}
@@ -177,7 +177,7 @@ export function RuleFromCallDialog(props: {
           <p
             role="note"
             data-rule-from-call-behavior={verdict}
-            className="arb:m-0 arb:text-[11.5px] arb:text-tertiary"
+            className="arb:m-0 arb:text-xs arb:text-secondary"
           >
             {t(VERDICT_BEHAVIOR_KEY[verdict])}
           </p>
@@ -187,7 +187,7 @@ export function RuleFromCallDialog(props: {
           <Notice kind="info" text={t('rules.fromCallEmptySelection')} />
         ) : null}
 
-        <p role="note" className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
+        <p role="note" className="arb:m-0 arb:text-xs arb:text-secondary">
           {t('rules.fromCallDraftNote')}
         </p>
 

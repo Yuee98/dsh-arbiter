@@ -538,7 +538,7 @@ function RecordedNote(props: {
       role="note"
       data-rule-test-source={props.source.callId}
       data-rule-test-source-recorded={props.recorded ? 'yes' : 'no'}
-      className="arb:m-0 arb:text-[11.5px] arb:text-tertiary"
+      className="arb:m-0 arb:text-xs arb:text-secondary"
     >
       {props.recorded
         ? t('ruleTest.sourceCall', { call: props.source.callId })

@@ -264,7 +264,7 @@ function CreateRuleFromCall(props: {
           <span>{t('callDetail.createRuleOpen')}</span>
         </Button>
       </div>
-      <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
+      <p className="arb:m-0 arb:text-xs arb:text-secondary">
         {t('callDetail.createRuleHint')}
       </p>
     </div>
