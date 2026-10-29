@@ -732,6 +732,11 @@
               "type": "null"
             }
           ]
+        },
+        "sent": {
+          "description": "Whether the request behind this attempt actually left the runner. Present and false only when the runner refused to invoke the transport — for example because the built request would exceed the run's input bound. Such an entry is kept as evidence of the refusal but is excluded from usage coverage, from the attempt budget and from the index's spent total, because no provider saw it. Absent means the request was sent: production reports every throw from a stream as an attempt, so absence must not be read as unsent.",
+          "type": "boolean",
+          "const": false
         }
       }
     }

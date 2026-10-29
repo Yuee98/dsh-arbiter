@@ -51,6 +51,8 @@ export interface BackendContext {
   readonly fixture: FixtureCell | null;
   /** The run's input bound, which every chat attempt must respect. */
   readonly maxInputTokens: number;
+  /** Where the guard records the attempts it refused, so the runner trusts a fact. */
+  readonly ledger: PresendLedger;
   /** The caller's lifetime, so an aborted run stops its in-flight request. */
   readonly signal: AbortSignal;
   /** How a live chat call reaches the host's LLM service. */
@@ -75,6 +77,7 @@ function offlineChat(
   target: RunTarget,
   fixture: FixtureCell,
   maxInputTokens: number,
+  ledger: PresendLedger,
 ): BackendResult {
   const config = target.chat;
   if (config === null) {
@@ -112,6 +115,7 @@ function offlineChat(
           maxInputTokens: maxInputTokens,
           provider: config.provider,
           model: config.model,
+          ledger,
         }),
       },
     },
@@ -148,13 +152,25 @@ function offlineDecision(
 }
 
 /**
- * The prefix a pre-send refusal carries.
+ * The attempts a guard refused before invoking the transport, by attempt number.
  *
- * Production's transport turns any thrown stream into an attempt record, keeping only the
- * message. A refused request is therefore indistinguishable from a sent one unless the
- * message says so, so the marker lives in one exported place and both sides read it.
+ * Production's transport turns any thrown stream into an attempt and keeps only the message,
+ * so a marker cannot travel on the error: a live stream can fail with text that looks like a
+ * refusal, and its usage would then be discarded as if no request had been made. The guard
+ * therefore records the fact where the runner can read it — shared per cell, keyed by the
+ * attempt index the transport assigns — rather than inferring it from a string.
  */
-export const PRESEND_PREFIX = 'refusing to send ';
+export interface PresendLedger {
+  /** Attempt numbers (1-based, as `ReviewAttempt.attempt`) the guard refused. */
+  readonly refused: Set<number>;
+  /** How many calls the guard has seen, which is the attempt number of the next one. */
+  seen: number;
+}
+
+/** One ledger per cell, fresh for every dispatch. */
+export function presendLedger(): PresendLedger {
+  return { refused: new Set<number>(), seen: 0 };
+}
 
 /**
  * A chat stream guard that enforces the run's input bound on every attempt.
@@ -175,6 +191,7 @@ function boundedStream(parts: {
   readonly maxInputTokens: number;
   readonly provider: string;
   readonly model: string;
+  readonly ledger: PresendLedger;
 }): LlmLike {
   return {
     stream: (options) => {
@@ -189,13 +206,13 @@ function boundedStream(parts: {
             ),
           0,
         );
+      parts.ledger.seen += 1;
       if (tokens > parts.maxInputTokens) {
-        // The prefix is a contract, not decoration: production records a thrown stream as a
-        // transport attempt and copies the message into `error`, so this is the only channel
-        // that survives into the artifact. `PRESEND_PREFIX` is what the runner checks to know
-        // the request was never sent, and therefore must not consume budget or usage.
+        // Recorded on the ledger *before* throwing, keyed by the attempt number the transport
+        // will assign. The message is for a human; the ledger is what the runner trusts.
+        parts.ledger.refused.add(parts.ledger.seen);
         throw new RangeError(
-          `${PRESEND_PREFIX}${String(tokens)} input tokens from ${parts.provider}/${parts.model} would exceed the run's ${String(parts.maxInputTokens)} bound`,
+          `refusing to send ${String(tokens)} input tokens from ${parts.provider}/${parts.model}: above the run's ${String(parts.maxInputTokens)} bound`,
         );
       }
       return parts.llm.stream(options);
@@ -215,6 +232,7 @@ function liveChat(
   target: RunTarget,
   llm: LlmLike | null,
   maxInputTokens: number,
+  ledger: PresendLedger,
 ): BackendResult {
   const config = target.chat;
   if (config === null) {
@@ -245,6 +263,7 @@ function liveChat(
           maxInputTokens: maxInputTokens,
           provider: config.provider,
           model: config.model,
+          ledger,
         }),
         chat: {
           provider: config.provider,
@@ -344,12 +363,17 @@ export function backendFor(
       context.fixture === null
         ? { ok: false, message: 'an offline cell has no fixture entry' }
         : protocol === 'chat'
-          ? offlineChat(target, context.fixture, context.maxInputTokens)
+          ? offlineChat(
+              target,
+              context.fixture,
+              context.maxInputTokens,
+              context.ledger,
+            )
           : offlineDecision(target, context.fixture);
   } else {
     built =
       protocol === 'chat'
-        ? liveChat(target, context.llm, context.maxInputTokens)
+        ? liveChat(target, context.llm, context.maxInputTokens, context.ledger)
         : liveDecision(target, context.readCredential);
   }
   if (!built.ok) return built;

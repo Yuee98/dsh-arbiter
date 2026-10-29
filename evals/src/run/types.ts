@@ -172,6 +172,15 @@ export type RunAttemptKind =
  */
 export interface RunAttempt extends ReviewAttempt {
   readonly kind: RunAttemptKind;
+  /**
+   * Present and false only when the runner refused to invoke the transport.
+   *
+   * Production reports every throw from a stream as an attempt and keeps only the message,
+   * so an error string cannot say whether a request went out — a live stream can also fail
+   * with text that looks like a refusal. The runner therefore records the fact itself, which
+   * is the only reliable provenance: absent means sent, and only the guard sets it.
+   */
+  readonly sent?: false;
 }
 
 /** What one cell is, relative to the run's plan. */

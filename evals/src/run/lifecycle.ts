@@ -487,7 +487,15 @@ function outstandingAbandonments(
  * that much, and a budget that assumes less is not a bound.
  */
 function attemptsOfCell(record: CellRecord): number {
-  if (record.attempts.length > 0) return record.attempts.length;
+  // Only requests that were sent count. A pre-send refusal is kept in the record as
+  // evidence, but charging it would make the persisted index disagree with the budget the
+  // scheduler enforced — and a continuation reading it would start from an inflated count.
+  const sent = record.attempts.filter(
+    (attempt) => attempt.sent !== false,
+  ).length;
+  if (sent > 0) return sent;
+  // An abandoned cell reports nothing it can prove; its reservation is the only figure that
+  // does not under-count.
   return record.abandonment?.reservedAttempts ?? 0;
 }
 
@@ -570,6 +578,8 @@ export function spendOf(
     estimatedInputTokens += record.material?.estimatedInputTokens ?? 0;
     if (record.attempts.length > 0 || record.abandonment !== null) started += 1;
     for (const attempt of record.attempts) {
+      // A refused request carried no provider payload, so it contributes nothing.
+      if (attempt.sent === false) continue;
       const value = attempt.normalizedUsage?.tokens.outputTokens ?? null;
       if (value === null) continue;
       output = (output ?? 0) + value;
@@ -637,7 +647,9 @@ export function indexFrom(parts: {
     return {
       ...cell,
       status: record.status,
-      attempts: record.attempts.length,
+      // The per-cell figure matches the run total: only requests actually sent.
+      attempts: record.attempts.filter((attempt) => attempt.sent !== false)
+        .length,
       stopReason: record.stopReason,
     };
   });

@@ -31,7 +31,7 @@ import { aggregateUsage } from '../../../src/reviewer/usage.js';
 import { inputHashOf } from '../data/eligibility.js';
 import type { ReviewCase } from '../data/types.js';
 
-import { backendFor, PRESEND_PREFIX } from './backends.js';
+import { backendFor, presendLedger } from './backends.js';
 import type { BackendContext } from './backends.js';
 import type { CaseMaterial } from './material.js';
 import { CELL_RECORD_VERSION } from './types.js';
@@ -104,18 +104,20 @@ function tagged(attempt: ReviewAttempt): RunAttempt {
 }
 
 /**
- * Whether an attempt represents a request that was actually sent.
+ * Whether an attempt is a request that was actually sent.
  *
  * Production reports every throw from a stream as a transport attempt, including one this
  * runner threw *before* invoking the transport to enforce the run's input bound. That entry
  * is a real refusal but not a model call: counting it would inflate the attempt count, put a
  * request nobody made into the usage denominator, and spend budget the run still has.
  *
- * `PRESEND_PREFIX` is the marker, and it is exported rather than inlined so the two sides
- * cannot drift: production keeps only the message, so the message has to carry the fact.
+ * The test is the recorded fact, not the error text. A live stream can also fail with a
+ * message that looks like a refusal, and discarding its usage would lose a request that was
+ * genuinely made — so `sent: false` is written only by the guard, and its absence means the
+ * request went out.
  */
 export function wasSent(attempt: RunAttempt): boolean {
-  return !(attempt.error ?? '').startsWith(PRESEND_PREFIX);
+  return attempt.sent !== false;
 }
 
 /** A non-array object, for narrowing a parsed body without asserting its type. */
@@ -285,6 +287,8 @@ export async function runCell(parts: {
   const { deps } = parts;
   const startedAt = deps.now();
   const cancelled = (): boolean => deps.signal.aborted && !deps.timedOut();
+  // One ledger per cell: the guard records what it refused, keyed by attempt number.
+  const ledger = presendLedger();
   const build = backendFor(deps.target, deps.protocol, {
     transport: deps.transport,
     fixture: deps.fixture,
@@ -293,6 +297,7 @@ export async function runCell(parts: {
     readCredential: deps.readCredential,
     // Every chat attempt, repairs included, must respect the run's bound.
     maxInputTokens: deps.maxInputTokens,
+    ledger,
   });
   if (!build.ok) {
     return {
@@ -337,7 +342,14 @@ export async function runCell(parts: {
     cancelled: cancelled(),
     timedOut: deps.timedOut(),
   });
-  const attempts = result.attempts.map(tagged);
+  // The guard's ledger is the authority on what was never sent; the transport's own record
+  // is kept as it stands and only annotated with that fact.
+  const attempts = result.attempts.map((attempt) => {
+    const taggedAttempt = tagged(attempt);
+    return ledger.refused.has(attempt.attempt)
+      ? { ...taggedAttempt, sent: false as const }
+      : taggedAttempt;
+  });
   return {
     record: recordOf({
       cellId: parts.cellId,

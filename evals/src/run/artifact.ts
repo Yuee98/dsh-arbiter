@@ -260,10 +260,15 @@ export function usageAttemptsOf(record: CellRecord): readonly {
   readonly attemptId: string;
   readonly usage: CellRecord['attempts'][number]['normalizedUsage'];
 }[] {
-  return record.attempts.map((attempt) => ({
-    attemptId: attempt.attemptId,
-    usage: attempt.normalizedUsage,
-  }));
+  // The same population the stored summary covers: requests that were sent. Including a
+  // pre-send refusal would make a downstream re-aggregation disagree with the record's own
+  // `usage`, which is the one thing this helper exists to prevent.
+  return record.attempts
+    .filter((attempt) => attempt.sent !== false)
+    .map((attempt) => ({
+      attemptId: attempt.attemptId,
+      usage: attempt.normalizedUsage,
+    }));
 }
 
 /**

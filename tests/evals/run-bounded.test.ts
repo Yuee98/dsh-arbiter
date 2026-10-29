@@ -24,7 +24,12 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { readRun, RUN_FILES } from '../../evals/src/run/artifact.js';
+import {
+  readRun,
+  RUN_FILES,
+  usageAttemptsOf,
+} from '../../evals/src/run/artifact.js';
+import { aggregateUsage } from '../../src/reviewer/usage.js';
 import {
   createRun,
   readExisting,
@@ -2681,7 +2686,9 @@ describe('the input bound covers repair attempts', () => {
       // attempt's error — the artifact says what was sent and what was not.
       expect(record?.attempts).toHaveLength(2);
       expect(record?.attempts[0]?.error).toContain('must contain exactly');
-      expect(record?.attempts[1]?.error).toContain('would exceed the run');
+      expect(record?.attempts[1]?.error).toContain('above the run');
+      // And the record says the request was never sent, as a fact rather than a message.
+      expect(record?.attempts[1]?.sent).toBe(false);
       expect(record?.attempts[1]?.responseText).toBeNull();
       // The bound was held: the oversized correction message never became a sent request.
       expect(record?.attempts[1]?.failureKind).toBe('transport');
@@ -2842,13 +2849,152 @@ describe('a pre-send refusal is not a model attempt', () => {
       const first = result.records.find((record) => record.cellId === cells[0]);
       expect(first?.attempts).toHaveLength(2);
       expect(first?.attempts[1]?.error).toContain('refusing to send');
-      // Usage covers what was sent: one attempt, not two.
+      // Usage covers what was sent: one attempt, not two. That holds for the stored summary
+      // and for the helper a report re-aggregates with, or the two would disagree.
       expect(first?.usage?.attempts).toBe(1);
+      const firstEntry = first;
+      if (firstEntry === undefined)
+        throw new Error('the first cell recorded nothing');
+      expect(usageAttemptsOf(firstEntry)).toHaveLength(1);
+      expect(aggregateUsage(usageAttemptsOf(firstEntry)).attempts).toBe(
+        firstEntry.usage?.attempts,
+      );
       // And the second cell ran, because the refused request cost no budget.
       const second = result.records.find(
         (record) => record.cellId === cells[1],
       );
       expect(second?.status).toBe('reviewed');
+
+      // The durable accounting agrees with the budget that was enforced: two requests were
+      // sent in total, not three. Without this the saved index would exceed the plan's own
+      // bound, and a continuation reading it would start from an inflated count.
+      if (!result.index.ok) throw new Error('the run directory is unreadable');
+      expect(result.index.existing.index.spent.attempts).toBe(2);
+      const perCell = result.index.existing.index.cells.map(
+        (cell) => cell.attempts,
+      );
+      expect(perCell).toEqual([1, 1]);
+
+      // A cold read — the path a report or a continuation takes — agrees with the live
+      // result, so the filtering is in the artifact rather than in this dispatch.
+      const cold = await readExisting(
+        join(area.path, 'run'),
+        plan,
+        checkers,
+        datasetDigestOfCoreV1,
+      );
+      if (!cold.ok) throw new Error(cold.problems.join('; '));
+      expect(cold.existing.records).toHaveLength(2);
+
+      // And a continuation starts from the same figure rather than re-charging the refusal.
+      const resumed = await resumeRun({
+        directory: join(area.path, 'run'),
+        existing: cold.existing,
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      expect(resumed.index.spent.attempts).toBe(2);
+    });
+  });
+});
+
+describe('provenance comes from the runner, not from an error message', () => {
+  it('counts a real stream failure whose message looks like a refusal', async () => {
+    // The finding: classifying by error text would discard usage from a request that really
+    // reached the provider, because a live stream can fail with any message it likes.
+    await withArea(async (area) => {
+      const caseId = 'read-named-source-file';
+      // A stream that reports usage and then fails with text shaped like our own refusal.
+      const failing: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => {
+            let step = 0;
+            return {
+              next: (): Promise<IteratorResult<Record<string, unknown>>> => {
+                step += 1;
+                if (step === 1) {
+                  return Promise.resolve({
+                    done: false,
+                    value: {
+                      type: 'usage',
+                      usage: { input_tokens: 700, output_tokens: 5 },
+                    },
+                  });
+                }
+                return Promise.reject(
+                  new Error('refusing to send provider response'),
+                );
+              },
+            };
+          },
+        }),
+      };
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        caseIds: [caseId],
+        targets: [
+          {
+            targetId: 'chat-a',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 0,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        bounds: bounds({ concurrency: 1, maxAttempts: 4 }),
+      });
+      const directory = join(area.path, 'run');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        fixture: fixtureOf({}),
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: failing,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      const record = (await recordsOf(directory))[0];
+      // The request reached the provider, so it is an attempt with its usage — the error
+      // text cannot take that away.
+      expect(record?.attempts).toHaveLength(1);
+      expect(record?.attempts[0]?.sent).toBeUndefined();
+      expect(record?.attempts[0]?.error).toContain(
+        'refusing to send provider response',
+      );
+      expect(record?.usage?.attempts).toBe(1);
+      expect(record?.usage?.totals.inputTokens.total).toBe(700);
     });
   });
 });
