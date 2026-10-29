@@ -22,8 +22,13 @@ import type {
   DecisionScores,
   ProtocolScores,
   ScoreFailure,
+  ScoreTrail,
 } from '../review-contract/types.js';
-import { chatScore } from '../review-contract/normalize.js';
+import {
+  bandFromNative,
+  chatScore,
+  distributionToPublic,
+} from '../review-contract/normalize.js';
 import { decisionAnswers } from './envelope.js';
 import { extractJsonObject } from './json.js';
 
@@ -44,7 +49,23 @@ export type ParsedAnswer =
       readonly error: string;
       /** Structured failures, when a field could be named. */
       readonly failures: readonly ScoreFailure[];
+      /**
+       * The half that did read, when only one field failed.
+       *
+       * This is diagnostic evidence and never a verdict: it lets a reader tell
+       * "the reviewer was confused about one field" from "the transport broke",
+       * which is exactly the distinction the shared outcome's `diagnostic` field
+       * exists for. The trails are built by the contract's own readers, so a
+       * partial read cannot disagree with a complete one about what a number means.
+       */
+      readonly partial: PartialTrails;
     };
+
+/** A per-field partial read, in the shared outcome's own trail shape. */
+export interface PartialTrails {
+  readonly risk: ScoreTrail | null;
+  readonly authorization: ScoreTrail | null;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -68,6 +89,7 @@ export function readChatAnswer(text: string): ParsedAnswer {
       ok: false,
       error: 'reviewer output is not valid JSON',
       failures: [],
+      partial: NO_PARTIAL,
     };
   }
   if (!isRecord(value)) {
@@ -75,6 +97,7 @@ export function readChatAnswer(text: string): ParsedAnswer {
       ok: false,
       error: 'reviewer output must be one JSON object',
       failures: [],
+      partial: NO_PARTIAL,
     };
   }
   const keys = Object.keys(value).sort();
@@ -86,6 +109,7 @@ export function readChatAnswer(text: string): ParsedAnswer {
       ok: false,
       error: `reviewer output must contain exactly ${CHAT_MEMBERS.join(', ')}; received ${keys.join(', ') || '(none)'}`,
       failures: [],
+      partial: NO_PARTIAL,
     };
   }
   const failures: ScoreFailure[] = [];
@@ -105,6 +129,13 @@ export function readChatAnswer(text: string): ParsedAnswer {
         .map((failure) => `${failure.field} ${failure.detail}`)
         .join('; '),
       failures,
+      // The field that read its band is kept as a trail; the failed half is null.
+      partial: {
+        risk: read.risk.ok ? pointTrail(read.risk.score) : null,
+        authorization: read.authorization.ok
+          ? pointTrail(read.authorization.score)
+          : null,
+      },
     };
   }
   const scores: ChatScores = {
@@ -130,6 +161,7 @@ export function readDecisionAnswer(parsedBody: unknown): ParsedAnswer {
       ok: false,
       error: 'decision response is not a JSON object',
       failures: [],
+      partial: NO_PARTIAL,
     };
   }
   const answers = decisionAnswers(parsedBody);
@@ -138,15 +170,34 @@ export function readDecisionAnswer(parsedBody: unknown): ParsedAnswer {
       ok: false,
       error: 'decision response has no answers',
       failures: [],
+      partial: NO_PARTIAL,
     };
   }
+  // Both fields are read before either verdict is reported, so one bad answer
+  // cannot hide whether the other one arrived — the valid half is exactly what a
+  // reader needs to classify the failure.
   const risk = probabilitiesOf(answers, 'risk');
-  if (typeof risk === 'string') {
-    return { ok: false, error: risk, failures: [] };
-  }
   const authorization = probabilitiesOf(answers, 'authorization');
-  if (typeof authorization === 'string') {
-    return { ok: false, error: authorization, failures: [] };
+  const problems = [risk, authorization].filter(
+    (entry): entry is string => typeof entry === 'string',
+  );
+  if (
+    problems.length > 0 ||
+    typeof risk === 'string' ||
+    typeof authorization === 'string'
+  ) {
+    return {
+      ok: false,
+      error: problems.join('; '),
+      failures: [],
+      partial: {
+        risk: typeof risk === 'string' ? null : distributionTrail(risk, 'risk'),
+        authorization:
+          typeof authorization === 'string'
+            ? null
+            : distributionTrail(authorization, 'authorization'),
+      },
+    };
   }
   const scores: DecisionScores = {
     source: 'decision',
@@ -154,6 +205,38 @@ export function readDecisionAnswer(parsedBody: unknown): ParsedAnswer {
     authorization,
   };
   return { ok: true, scores, raw: answers };
+}
+
+/** No field of this answer could be read at all. */
+const NO_PARTIAL: PartialTrails = { risk: null, authorization: null };
+
+/** A chat point as a trail. */
+function pointTrail(score: number): ScoreTrail {
+  const legal = chatScore(score);
+  if (!legal.ok) {
+    throw new RangeError(
+      `a validated chat score cannot be illegal: ${legal.reason}`,
+    );
+  }
+  return { native: null, published: null, point: score, score: legal.score };
+}
+
+/**
+ * A native distribution as a trail.
+ *
+ * The band is derived by the contract, so an invalid distribution never reaches
+ * here: the caller only builds a trail for a field whose probabilities parsed.
+ */
+function distributionTrail(
+  native: Record<string, number>,
+  rule: 'risk' | 'authorization',
+): ScoreTrail {
+  return {
+    native,
+    published: distributionToPublic(native),
+    point: null,
+    score: bandFromNative(native, rule),
+  };
 }
 
 /** One answer's probability object, or why it is not one. */

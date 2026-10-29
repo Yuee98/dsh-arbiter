@@ -13,7 +13,11 @@
  */
 
 import type { ArbiterConfig } from '../types.js';
-import { attemptIdOf, type ReviewAttempt } from './attempt.js';
+import {
+  attemptIdOf,
+  type AttemptFailureKind,
+  type ReviewAttempt,
+} from './attempt.js';
 import {
   failureText,
   providerExplanation,
@@ -45,10 +49,36 @@ export interface DecisionTransportContext {
 }
 
 /** One review's decision outcome. */
+/** A decision attempt's record, minus the fields each branch fills in. */
+type DecisionAttemptBase = Omit<
+  ReviewAttempt,
+  | 'responseText'
+  | 'parsed'
+  | 'error'
+  | 'failureKind'
+  | 'rawUsage'
+  | 'normalizedUsage'
+>;
+
 export interface DecisionTransportResult {
   readonly attempts: readonly ReviewAttempt[];
   readonly answer: (ParsedAnswer & { readonly ok: true }) | null;
+  /**
+   * The unreadable answer, which may still hold one readable field.
+   *
+   * A failed review reports which half the reviewer got right rather than
+   * collapsing every failure into "no score".
+   */
+  readonly rejection: (ParsedAnswer & { readonly ok: false }) | null;
   readonly error: string | null;
+  /**
+   * The credential values this run sent, whichever side resolved them.
+   *
+   * The masking boundary needs exactly this list, and only the transport knows it
+   * when it resolves the reference itself. Reporting it keeps one resolution: a
+   * second lookup could return a rotated value that does not match what was sent.
+   */
+  readonly secrets: readonly string[];
 }
 
 /**
@@ -111,10 +141,7 @@ function attemptBase(options: {
   readonly request: DecisionRequest;
   readonly body: unknown;
   readonly startedAt: number;
-}): Omit<
-  ReviewAttempt,
-  'responseText' | 'parsed' | 'error' | 'rawUsage' | 'normalizedUsage'
-> {
+}): DecisionAttemptBase {
   return {
     attemptId: attemptIdOf(options.callId, 1),
     callId: options.callId,
@@ -130,10 +157,15 @@ function attemptBase(options: {
 
 /** The outcome for a body that arrived but could not be read as an answer. */
 function unreadableOutcome(options: {
-  readonly base: ReturnType<typeof attemptBase>;
+  readonly base: DecisionAttemptBase;
   readonly responseText: string;
   readonly error: string;
   readonly rawUsage: unknown;
+  /** Why this response produced no answer. */
+  readonly failureKind: AttemptFailureKind;
+  /** The parsed answer, when the failure was a read rather than a refusal. */
+  readonly rejection?: (ParsedAnswer & { readonly ok: false }) | null;
+  readonly secrets: readonly string[];
 }): DecisionTransportResult {
   return {
     attempts: [
@@ -142,12 +174,15 @@ function unreadableOutcome(options: {
         responseText: options.responseText,
         parsed: null,
         error: options.error,
+        failureKind: options.failureKind,
         rawUsage: options.rawUsage,
         normalizedUsage: normalizeUsage('decision', options.rawUsage),
       },
     ],
     answer: null,
+    rejection: options.rejection ?? null,
     error: options.error,
+    secrets: options.secrets,
   };
 }
 
@@ -182,6 +217,8 @@ function readResponse(options: {
       responseText,
       error,
       rawUsage: reportedUsage(refusal, secrets),
+      failureKind: 'provider-refusal',
+      secrets,
     });
   }
   let parsedBody: unknown;
@@ -195,6 +232,8 @@ function readResponse(options: {
       responseText,
       error: 'response is not valid JSON',
       rawUsage: null,
+      failureKind: 'unreadable-answer',
+      secrets,
     });
   }
   const rawUsage = reportedUsage(parsedBody, secrets);
@@ -210,6 +249,8 @@ function readResponse(options: {
         secrets,
       ),
       rawUsage,
+      failureKind: 'provider-refusal',
+      secrets,
     });
   }
   const answer = readDecisionAnswer(parsedBody);
@@ -219,6 +260,9 @@ function readResponse(options: {
       responseText,
       error: answer.error,
       rawUsage,
+      failureKind: 'unreadable-answer',
+      rejection: answer,
+      secrets,
     });
   }
   return {
@@ -228,12 +272,15 @@ function readResponse(options: {
         responseText,
         parsed: answer.raw,
         error: null,
+        failureKind: null,
         rawUsage,
         normalizedUsage: normalizeUsage('decision', rawUsage),
       },
     ],
     answer,
+    rejection: null,
     error: null,
+    secrets,
   };
 }
 
@@ -249,14 +296,18 @@ export async function runDecisionTransport(
     return {
       attempts: [],
       answer: null,
+      rejection: null,
       error: error instanceof Error ? error.message : String(error),
+      secrets: [],
     };
   }
   if (ctx.decision.url.length === 0) {
     return {
       attempts: [],
       answer: null,
+      rejection: null,
       error: 'decision backend URL is empty',
+      secrets: credential === undefined ? [] : [credential],
     };
   }
   const body = requestBody(ctx.decision, request);
@@ -297,12 +348,15 @@ export async function runDecisionTransport(
           responseText: null,
           parsed: null,
           error: message,
+          failureKind: 'transport',
           rawUsage: null,
           normalizedUsage: null,
         },
       ],
       answer: null,
+      rejection: null,
       error: timeout.aborted ? 'decision backend timed out' : message,
+      secrets,
     };
   }
 }

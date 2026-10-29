@@ -121,11 +121,25 @@ export interface CollectedChat {
  */
 export class ChatStreamError extends Error {
   readonly usage: unknown;
+  /**
+   * Whether the provider declared this failure or the stream simply broke.
+   *
+   * A provider that ends its stream with a failure reason is reporting its own
+   * outage; a stream that throws or stops early is a transport outcome. The two
+   * take different escalation paths, so the difference travels with the error
+   * instead of being re-derived from its wording.
+   */
+  readonly kind: 'provider-refusal' | 'transport';
 
-  constructor(message: string, usage: unknown) {
+  constructor(
+    message: string,
+    usage: unknown,
+    kind: 'provider-refusal' | 'transport' = 'transport',
+  ) {
     super(message);
     this.name = 'ChatStreamError';
     this.usage = usage;
+    this.kind = kind;
   }
 }
 
@@ -143,20 +157,33 @@ export async function collectChatText(
   let text = '';
   let usage: unknown = null;
   let finished = false;
-  for await (const chunk of stream) {
-    const type = chunk['type'];
-    if (type === 'text-delta' && typeof chunk['text'] === 'string') {
-      text += chunk['text'];
-      continue;
+  try {
+    for await (const chunk of stream) {
+      const type = chunk['type'];
+      if (type === 'text-delta' && typeof chunk['text'] === 'string') {
+        text += chunk['text'];
+        continue;
+      }
+      if (type === 'usage') {
+        usage = chunk['usage'] ?? null;
+        continue;
+      }
+      if (type === 'finish') {
+        if (!isStop(chunk['reason'])) throw failureOf(chunk['reason'], usage);
+        finished = true;
+      }
     }
-    if (type === 'usage') {
-      usage = chunk['usage'] ?? null;
-      continue;
-    }
-    if (type === 'finish') {
-      if (!isStop(chunk['reason'])) throw failureOf(chunk['reason'], usage);
-      finished = true;
-    }
+  } catch (error) {
+    // The iterator itself can fail: a connection reset after the provider had
+    // already reported usage. That usage is the only record of what the attempt
+    // cost, so it travels with the error instead of being dropped here — a
+    // consumer cannot recover it later from a stream that is gone.
+    throw error instanceof ChatStreamError
+      ? error
+      : new ChatStreamError(
+          error instanceof Error ? error.message : String(error),
+          usage,
+        );
   }
   if (!finished) {
     throw new ChatStreamError('reviewer emitted no terminal finish', usage);
@@ -199,5 +226,6 @@ function failureOf(reason: unknown, usage: unknown): ChatStreamError {
   return new ChatStreamError(
     `reviewer ended with ${String(field(reason, 'kind'))} ${typeof code === 'string' ? code : ''}: ${typeof message === 'string' ? message : ''}`,
     usage,
+    'provider-refusal',
   );
 }

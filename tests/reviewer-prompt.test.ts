@@ -5,6 +5,10 @@ import {
   RISK_BANDS,
 } from '../src/review-contract/rubrics.js';
 import {
+  AUTHORIZATION_BAND_TEXT,
+  RISK_BAND_TEXT,
+} from '../src/reviewer/rubric-text.js';
+import {
   buildQuestions,
   SCORE_CRITERIA_MAX,
 } from '../src/reviewer/questions.js';
@@ -147,6 +151,18 @@ describe('the fixed contract', () => {
     expect(system).toContain('never creates permission');
   });
 
+  test('never lets a reworded retry raise the risk band', () => {
+    // Rubric R-3: an equivalent effect through another tool, spelling or path
+    // grades the same. A prior denial is context worth noting, but making it a
+    // reason to raise risk would contradict that rule inside one prompt — and the
+    // matrix downstream cannot undo an artificially raised input score.
+    const system = renderChatSystem();
+    expect(system).not.toContain('prefer the higher risk');
+    expect(system).toContain('never a reason to raise the risk band');
+    // The retry/circumvention context is still available to the reviewer.
+    expect(system).toContain('note it as a retry');
+  });
+
   test('states that truncation and absence are input facts', () => {
     const system = renderChatSystem();
     expect(system).toContain('input fact, not a finding');
@@ -165,23 +181,46 @@ describe('the fixed contract', () => {
 describe('the chat numbering', () => {
   test('prints all ten risk bands and all ten authorization bands as 1..10', () => {
     const system = renderChatSystem();
-    for (let score = 1; score <= 10; score += 1) {
-      const risk = RISK_BANDS[score - 1];
-      const auth = AUTHORIZATION_BANDS[score - 1];
-      if (risk === undefined || auth === undefined) {
-        throw new Error('missing band');
-      }
-      expect(system).toContain(`${String(score)} ${risk.criterion}`);
-      expect(system).toContain(`${String(score)} ${auth.criterion}`);
-      // A chat answer is public, so the native 0..9 spelling must not appear in
-      // its scale block: two numberings in one request ask which one is meant.
-      expect(scaleText()).not.toContain(`${String(score)} 0 `);
-    }
-    // The scale block is exactly the ten bands of each, no more.
     const scale = scaleText();
-    for (const band of [...RISK_BANDS, ...AUTHORIZATION_BANDS]) {
-      expect(scale).toContain(band.criterion);
+    for (const band of RISK_BANDS) {
+      const risk = RISK_BAND_TEXT[band.score];
+      // The serialized band is the complete operational definition, not the
+      // terse shared label: a label alone asks the model to infer conditions.
+      expect(scale).toContain(`${String(band.score)} ${risk}`);
+      expect(system).toContain(`${String(band.score)} ${risk}`);
     }
+    for (const band of AUTHORIZATION_BANDS) {
+      expect(scale).toContain(
+        `${String(band.score)} ${AUTHORIZATION_BAND_TEXT[band.score]}`,
+      );
+    }
+    // One public numbering only: the native 0-based spelling stays out of chat.
+    expect(scale).not.toContain('0 No identifiable');
+  });
+
+  test('serializes the conditions that make each band reachable', () => {
+    const scale = scaleText();
+    // Band 2's weakest-independent-effect rule: one unauthorized key effect caps
+    // the whole operation, which the terse "no applicable permission" does not say.
+    expect(scale).toContain('weakest-part');
+    expect(scale).toContain('One independently unauthorized key effect');
+    // Band 8 must refuse to hide a whole new effect, recipient or data class.
+    expect(scale).toContain('cannot hide an entire new effect');
+    // Band 9 must require a genuinely non-key gap.
+    expect(scale).toContain('genuinely non-key');
+    // Band 10 must allow a complete delegation rather than force per-parameter
+    // confirmation.
+    expect(scale).toContain(
+      'A complete task delegation reaches this band directly',
+    );
+    // Risk band 7 is reachable even with a recovery path, which the label omits.
+    expect(scale).toContain(
+      'even when a recovery, replacement or containment path exists',
+    );
+    // Risk 6 must not require the main function to have stopped.
+    expect(scale).toContain(
+      'does not require the main function to have stopped',
+    );
   });
 
   test('asks for exactly two integers and no probes', () => {
@@ -204,30 +243,12 @@ describe('the decision questions', () => {
     const authorization = questions.authorization;
     expect(risk.criteria).toHaveLength(SCORE_CRITERIA_MAX);
     expect(authorization.criteria).toHaveLength(SCORE_CRITERIA_MAX);
-    // Native numbering: the highest criterion is 9, not 10.
-    expect(risk.criteria[0]).toBe(`0 ${RISK_BANDS[0]?.criterion ?? ''}`);
-    expect(risk.criteria[9]).toBe(`9 ${RISK_BANDS[9]?.criterion ?? ''}`);
-    expect(authorization.criteria[0]).toBe(
-      `0 ${AUTHORIZATION_BANDS[0]?.criterion ?? ''}`,
-    );
-  });
-
-  test('are built from the same bands the chat scale prints', () => {
-    const questions = buildQuestions();
-    // Both protocols advertise the same ten bands; only the numbering differs, so
-    // every criterion text appears in both forms.
-    for (const [index, band] of RISK_BANDS.entries()) {
-      expect(questions.risk.criteria[index]).toBe(
-        `${String(index)} ${band.criterion}`,
-      );
-      expect(scaleText()).toContain(`${String(band.score)} ${band.criterion}`);
-    }
-    for (const [index, band] of AUTHORIZATION_BANDS.entries()) {
-      expect(questions.authorization.criteria[index]).toBe(
-        `${String(index)} ${band.criterion}`,
-      );
-      expect(scaleText()).toContain(`${String(band.score)} ${band.criterion}`);
-    }
+    // Native numbering: the highest criterion is 9, not 10, and each entry is the
+    // band's complete definition rather than its terse label.
+    expect(risk.criteria[0]).toBe(`0 ${RISK_BAND_TEXT[1]}`);
+    expect(risk.criteria[9]).toBe(`9 ${RISK_BAND_TEXT[10]}`);
+    expect(authorization.criteria[0]).toBe(`0 ${AUTHORIZATION_BAND_TEXT[1]}`);
+    expect(authorization.criteria[9]).toBe(`9 ${AUTHORIZATION_BAND_TEXT[10]}`);
   });
 
   test('are not the old eleven-band list with the top band cut off', () => {

@@ -1,6 +1,6 @@
 import type { ArbiterConfig, ReviewSnapshot } from '../types.js';
 import type { ReviewOutcome } from '../review-contract/types.js';
-import type { ReviewAttempt } from './attempt.js';
+import type { AttemptFailureKind, ReviewAttempt } from './attempt.js';
 import { review, type DecisionBackend, type ChatBackend } from './service.js';
 import type { LlmLike } from './llm.js';
 import { CHAT_PROTOCOL, DECISION_PROTOCOL } from './contract.js';
@@ -238,6 +238,8 @@ interface FailureEvidence {
   readonly attempts: readonly ProbeAttempt[];
   readonly error: string;
   readonly httpStatus: number | null;
+  /** Why the last attempt failed, as the adapter recorded it. */
+  readonly failureKind: AttemptFailureKind | null;
 }
 
 /** The stage an HTTP rejection names, or null when it names none. */
@@ -280,7 +282,7 @@ function providerFailure(error: string): ProbeFailure | null {
  * Everything unrecognized is `unknown`, never a guessed cause.
  */
 function classify(evidence: FailureEvidence): ProbeFailure {
-  const { attempts, error, httpStatus } = evidence;
+  const { attempts, error, httpStatus, failureKind } = evidence;
   if (
     /credential .*is not configured|credential lookup failed|no api key|MISSING_CREDENTIAL/iu.test(
       error,
@@ -301,9 +303,18 @@ function classify(evidence: FailureEvidence): ProbeFailure {
       ? 'timed-out'
       : 'network';
   }
+  // The adapter's own record decides what arrived, rather than inferring it from
+  // the text: an HTTP 200 with `success:false` carries a complete body, so a
+  // "there was text" test would report a provider outage as a malformed answer.
+  if (failureKind === 'provider-refusal') return 'unavailable';
+  if (failureKind === 'unreadable-answer') {
+    // Text arrived and never satisfied the parser: the one case the format
+    // repair exists to fix.
+    return 'invalid-output';
+  }
   if (attempts.some((entry) => entry.responseText !== null)) {
-    // Text arrived but never satisfied the parser: a contract failure, and the
-    // one case the format repair exists to fix.
+    // No adapter verdict recorded it, but an answer did arrive; the parser is the
+    // only thing that could have rejected it.
     return 'invalid-output';
   }
   return 'unknown';
@@ -419,7 +430,12 @@ async function runChat(
       startedAt,
       callerCancelled(signal)
         ? 'cancelled'
-        : classify({ attempts, error, httpStatus: httpStatusOf(attempts) }),
+        : classify({
+            attempts,
+            error,
+            httpStatus: httpStatusOf(attempts),
+            failureKind: lastFailureKind(result.attempts),
+          }),
       attempts,
     );
   } catch {
@@ -430,6 +446,13 @@ async function runChat(
       [],
     );
   }
+}
+
+/** The last attempt's recorded failure kind, which is what ended this run. */
+function lastFailureKind(
+  attempts: readonly ReviewAttempt[],
+): AttemptFailureKind | null {
+  return attempts.at(-1)?.failureKind ?? null;
 }
 
 /** How many attempts were format repairs: every attempt after the first that read. */
@@ -535,6 +558,7 @@ async function runDecision(
             attempts,
             error: redact(outcomeError(result.outcome), secrets),
             httpStatus: httpStatusOf(attempts),
+            failureKind: lastFailureKind(result.attempts),
           }),
       attempts,
     );

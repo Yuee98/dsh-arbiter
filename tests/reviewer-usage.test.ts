@@ -6,6 +6,7 @@ import {
   USAGE_FIELDS,
   USAGE_MAPPING_VERSION,
 } from '../src/reviewer/usage.js';
+import type { ReviewSnapshot } from '../src/types.js';
 
 /**
  * The shared usage contract.
@@ -324,3 +325,202 @@ describe('aggregation', () => {
     expect(USAGE_MAPPING_VERSION).toBe('review-usage-v1');
   });
 });
+
+describe('provider vocabularies the mapping must read', () => {
+  test('reads the Responses-style cache write and reasoning detail fields', () => {
+    // A compatible service may forward this payload unchanged. Both details
+    // objects sit beside the parent count, and both `_details` sub-counts are part
+    // of it rather than additional to it.
+    const usage = normalizeUsage('decision', {
+      input_tokens: 100,
+      input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10 },
+      output_tokens: 40,
+      output_tokens_details: { reasoning_tokens: 30 },
+      total_tokens: 140,
+    });
+    expect(usage?.tokens).toEqual({
+      inputTokens: 100,
+      outputTokens: 40,
+      totalTokens: 140,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 10,
+      reasoningTokens: 30,
+    });
+    expect(usage?.inclusions.cacheWrite).toBe('contained');
+    expect(usage?.inclusions.reasoning).toBe('contained');
+  });
+
+  test('records Gemini thinking tokens as separate from the candidate count', () => {
+    // Gemini counts thinking outside `candidatesTokenCount`, so this relationship
+    // is established by the field names and is not inferred.
+    const usage = normalizeUsage('decision', {
+      candidatesTokenCount: 100,
+      thoughtsTokenCount: 50,
+      totalTokenCount: 150,
+    });
+    expect(usage?.tokens.outputTokens).toBe(100);
+    expect(usage?.tokens.reasoningTokens).toBe(50);
+    expect(usage?.inclusions.reasoning).toBe('separate');
+  });
+
+  test('a bare generic reasoning alias does not invent a relationship', () => {
+    const usage = normalizeUsage('decision', { reasoning_tokens: 30 });
+    expect(usage?.tokens.reasoningTokens).toBe(30);
+    expect(usage?.inclusions.reasoning).toBe('unknown');
+  });
+});
+
+describe('an inclusion is only claimed when every contribution establishes it', () => {
+  test('a known relationship beside an unknown one stays unknown', () => {
+    // Attempt A says its cache read sits inside the input count; attempt B reports
+    // one under a field whose relationship is not established. The summed value
+    // cannot be called contained, because B's half might sit beside the parent.
+    const summary = aggregateUsage([
+      {
+        attemptId: 'a',
+        usage: normalizeUsage('decision', {
+          prompt_tokens: 100,
+          prompt_tokens_details: { cached_tokens: 20 },
+        }),
+      },
+      {
+        attemptId: 'b',
+        usage: normalizeUsage('decision', {
+          input_tokens: 100,
+          cache_read_tokens: 80,
+        }),
+      },
+    ]);
+    expect(summary.totals.cacheReadTokens.total).toBe(100);
+    expect(summary.inclusions.cacheRead).toBe('unknown');
+  });
+
+  test('cache write and reasoning follow the same rule', () => {
+    const summary = aggregateUsage([
+      {
+        attemptId: 'a',
+        usage: normalizeUsage('decision', {
+          input_tokens: 10,
+          cache_creation_input_tokens: 5,
+          completion_tokens: 10,
+          completion_tokens_details: { reasoning_tokens: 4 },
+        }),
+      },
+      {
+        attemptId: 'b',
+        usage: normalizeUsage('decision', {
+          cache_write_tokens: 5,
+          reasoning_tokens: 4,
+        }),
+      },
+    ]);
+    expect(summary.inclusions.cacheWrite).toBe('unknown');
+    expect(summary.inclusions.reasoning).toBe('unknown');
+  });
+
+  test('an attempt that reported no value adds no constraint', () => {
+    // Attempt B reported no cache read at all, so its silence says nothing about
+    // how the summed value relates to its parent.
+    const summary = aggregateUsage([
+      {
+        attemptId: 'a',
+        usage: normalizeUsage('decision', {
+          prompt_tokens: 100,
+          prompt_tokens_details: { cached_tokens: 20 },
+        }),
+      },
+      {
+        attemptId: 'b',
+        usage: normalizeUsage('decision', { input_tokens: 100 }),
+      },
+    ]);
+    expect(summary.totals.cacheReadTokens.total).toBe(20);
+    expect(summary.inclusions.cacheRead).toBe('contained');
+  });
+});
+
+describe('a stream that fails after reporting usage keeps it', () => {
+  test('an iterator exception mid-stream carries the usage it already saw', async () => {
+    const { review } = await import('../src/reviewer/service.js');
+    const { offlineChatBackend } = await import('../src/reviewer/offline.js');
+    const result = await review({
+      snapshot: snapshotForUsage(),
+      callId: 'call-stream',
+      signal: new AbortController().signal,
+      backend: {
+        kind: 'chat',
+        transport: {
+          llm: {
+            stream: () =>
+              (async function* () {
+                await Promise.resolve();
+                yield { type: 'usage', usage: { inputTokens: 120 } };
+                throw new Error('connection reset');
+              })(),
+          },
+          chat: {
+            provider: 'offline',
+            model: 'offline-model',
+            temperature: 0,
+            maxTokens: 100,
+            timeoutMs: 5_000,
+            maxRepairRetries: 0,
+          },
+          signal: new AbortController().signal,
+        },
+      },
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    // The attempt is a failure, but what it cost is still known: discarding it
+    // here would make the consumption unrecoverable for #74 and #75.
+    expect(result.attempts[0]?.normalizedUsage?.tokens.inputTokens).toBe(120);
+    expect(result.usage.totals.inputTokens.total).toBe(120);
+    expect(offlineChatBackend).toBeDefined();
+  });
+});
+
+/** A minimal snapshot for the usage cases that need a full review. */
+function snapshotForUsage(): ReviewSnapshot {
+  return {
+    version: 1,
+    createdAt: 0,
+    configRevision: 'usage',
+    callId: 'call-stream',
+    sessionId: 'main',
+    sessionKind: 'main',
+    turn: 1,
+    tool: 'bash',
+    cwd: '/work',
+    action: { name: 'bash', arguments: { command: 'ls' } },
+    facts: null,
+    projectRules: null,
+    customRules: '',
+    materials: [],
+    evidence: [],
+    evidenceTruncated: false,
+    parentAuthorizationPresent: null,
+    context: [],
+    checkpoints: [],
+    contextTruncated: false,
+    priorVerdicts: [],
+    historyTruncated: false,
+    historyStatus: {
+      coverage: 'known-empty',
+      windowTruncated: false,
+      reason: null,
+      sources: {
+        memory: { read: 0, unavailable: null },
+        session: { read: 0, unavailable: null },
+        audit: { read: 0, unavailable: null },
+      },
+      reset: false,
+    },
+    completeness: { status: 'complete', items: [], gaps: [], note: null },
+    missing: [],
+    budget: {
+      maxInputTokens: 10_000,
+      estimatedInputTokens: 0,
+      truncatedSegments: [],
+    },
+  };
+}

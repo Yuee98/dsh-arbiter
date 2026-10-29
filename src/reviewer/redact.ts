@@ -36,6 +36,24 @@ export function redact(text: string, secrets: readonly string[]): string {
 const AUTH_FIELD =
   'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
 
+/**
+ * The one field whose numeric value is a score, not a credential.
+ *
+ * `authorization` names both an HTTP header and one of this contract's two public
+ * bands, so `{"authorization":8}` is an ordinary reviewer answer and masking it
+ * corrupts every stored attempt. The exemption is therefore scoped to this exact
+ * field name in exactly that form, rather than to numeric values under any
+ * authentication-looking key: `X-Api-Key: 123456789` is still a credential and
+ * still masks.
+ */
+const SCORE_FIELD = /^(?:"|')?authorization(?:"|')?$/iu;
+
+/** A JSON literal: a number, boolean or null. */
+const LITERAL_VALUE = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)$/u;
+
+/** A JSON string holding only digits, which may be a numeric credential. */
+const QUOTED_LITERAL = /^(?:"|')?(-?\d+(?:\.\d+)?)(?:"|')?$/u;
+
 export function redactAuthHeaders(text: string): string {
   // One pass over the field name and separator, then the whole value: a quoted
   // value (JSON double quotes, a JS object dump with single quotes, backticks)
@@ -43,23 +61,30 @@ export function redactAuthHeaders(text: string): string {
   // consume spaces too, because an auth scheme is only the prefix — stopping at
   // the first space would leave the credential itself in place.
   const pattern = new RegExp(
-    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
+    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?)(\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
     'giu',
   );
-  return text.replace(pattern, (match: string, prefix: string, value: string) =>
-    // A number, boolean or null is not a credential, and masking one destroys a
-    // legitimate value. `authorization` is also the name of one of this
-    // contract's two scores, so `{"authorization":8}` is an ordinary answer and
-    // must survive; a bare quoted or unquoted token still masks, which is what
-    // every authentication header shape is. A one-time secret that happens to be
-    // all digits is still caught by the known-secret pass that runs beside this
-    // one, so narrowing here loses no coverage that pass does not restore.
-    LITERAL_VALUE.test(value) ? match : `${prefix}[redacted]`,
+  return text.replace(
+    pattern,
+    (match: string, field: string, separator: string, value: string) =>
+      isScoreLiteral(field, value) ? match : `${field}${separator}[redacted]`,
   );
 }
 
-/** A JSON literal that cannot be a credential: numbers, booleans, null. */
-const LITERAL_VALUE = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)$/u;
+/**
+ * Whether this field/value pair is a public score rather than a credential.
+ *
+ * Two conditions together, not either: the field must be exactly `authorization`,
+ * and the value must be a bare number. A quoted or unquoted string — including one
+ * that happens to be all digits — still masks, because a header value is
+ * arbitrary text and only the score member is known to be numeric.
+ */
+function isScoreLiteral(field: string, value: string): boolean {
+  if (!SCORE_FIELD.test(field.trim())) return false;
+  // A quoted value is a string; only an unquoted numeric literal is the score.
+  if (/^["'`]/u.test(value.trim())) return false;
+  return LITERAL_VALUE.test(value.trim()) && !QUOTED_LITERAL.test(field);
+}
 
 /**
  * Mask known secrets and recognisable auth headers in an arbitrary value.

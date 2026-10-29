@@ -17,7 +17,11 @@
  */
 
 import type { ChatReviewerConfig } from '../types.js';
-import { attemptIdOf, type ReviewAttempt } from './attempt.js';
+import {
+  attemptIdOf,
+  type AttemptFailureKind,
+  type ReviewAttempt,
+} from './attempt.js';
 import {
   ChatStreamError,
   chatRoute,
@@ -46,8 +50,17 @@ export interface ChatTransportResult {
   readonly attempts: readonly ReviewAttempt[];
   /** The first answer that satisfied the contract, or null when none did. */
   readonly answer: (ParsedAnswer & { readonly ok: true }) | null;
+  /**
+   * The last unreadable answer, which may still hold one readable field.
+   *
+   * Kept so a failed review can report which half the reviewer got right instead
+   * of collapsing every failure into "no score".
+   */
+  readonly rejection: (ParsedAnswer & { readonly ok: false }) | null;
   /** Why no attempt produced a usable answer, when none did. */
   readonly error: string | null;
+  /** No chat credential is known here; the host's LLM service owns it. */
+  readonly secrets: readonly string[];
 }
 
 function chatMessages(
@@ -111,6 +124,7 @@ function attemptRecord(options: {
   readonly responseText: string | null;
   readonly parsed: unknown;
   readonly error: string | null;
+  readonly failureKind: AttemptFailureKind | null;
   readonly rawUsage: unknown;
 }): ReviewAttempt {
   return {
@@ -128,6 +142,7 @@ function attemptRecord(options: {
     responseText: options.responseText,
     parsed: options.parsed,
     error: options.error,
+    failureKind: options.failureKind,
     startedAt: options.startedAt,
     durationMs: Date.now() - options.startedAt,
     estimatedInputTokens: options.request.estimatedInputTokens,
@@ -138,7 +153,7 @@ function attemptRecord(options: {
 
 /** The transport outcome when the route itself cannot be resolved. */
 function routeFailure(error: string): ChatTransportResult {
-  return { attempts: [], answer: null, error };
+  return { attempts: [], answer: null, rejection: null, error, secrets: [] };
 }
 
 export async function runChatTransport(
@@ -155,6 +170,7 @@ export async function runChatTransport(
 
   const attempts: ReviewAttempt[] = [];
   let repair: string | null = null;
+  let rejection: (ParsedAnswer & { readonly ok: false }) | null = null;
   const maxAttempts = 1 + ctx.chat.maxRepairRetries;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
@@ -176,11 +192,16 @@ export async function runChatTransport(
           responseText: collected.text,
           parsed: answer.ok ? answer.raw : null,
           error: answer.ok ? null : answer.error,
+          // An answer arrived; only its shape failed the contract.
+          failureKind: answer.ok ? null : 'unreadable-answer',
           rawUsage: collected.usage,
         }),
       );
-      if (answer.ok) return { attempts, answer, error: null };
+      if (answer.ok) {
+        return { attempts, answer, rejection: null, error: null, secrets: [] };
+      }
       repair = answer.error;
+      rejection = answer;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // A provider may abort for its own reasons, so the timer's own state — not
@@ -200,6 +221,10 @@ export async function runChatTransport(
           responseText: null,
           parsed: null,
           error: failure,
+          // A stream that failed is a transport outcome unless the provider
+          // declared the failure itself, which `ChatStreamError` records.
+          failureKind:
+            error instanceof ChatStreamError ? error.kind : 'transport',
           // A provider that fails its own call may still have reported usage
           // before doing so, and a billed failure is exactly the attempt an
           // operator needs to see. Nothing else about the failure is reused.
@@ -207,12 +232,14 @@ export async function runChatTransport(
         }),
       );
       // Provider failures are not retried; only format failures are.
-      return { attempts, answer: null, error: failure };
+      return { attempts, answer: null, rejection, error: failure, secrets: [] };
     }
   }
   return {
     attempts,
     answer: null,
+    rejection,
     error: `reviewer output remained invalid after ${String(maxAttempts)} attempts: ${repair ?? 'unknown error'}`,
+    secrets: [],
   };
 }

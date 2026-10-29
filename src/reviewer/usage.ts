@@ -187,6 +187,15 @@ const MAPPING_RULES: readonly MappingRule[] = [
   { field: 'cacheWriteTokens', path: 'cacheWriteTokens' },
   {
     field: 'cacheWriteTokens',
+    path: 'input_tokens_details.cache_write_tokens',
+    relative: {
+      parent: 'inputTokens',
+      inclusion: 'contained',
+      slot: 'cacheWrite',
+    },
+  },
+  {
+    field: 'cacheWriteTokens',
     path: 'cache_creation_input_tokens',
     relative: {
       parent: 'inputTokens',
@@ -206,9 +215,28 @@ const MAPPING_RULES: readonly MappingRule[] = [
       slot: 'reasoning',
     },
   },
-  // Gemini reports reasoning beside the candidate count rather than inside it,
-  // so no inclusion is declared and the payload stays `unknown`.
-  { field: 'reasoningTokens', path: 'thoughtsTokenCount' },
+  {
+    field: 'reasoningTokens',
+    path: 'output_tokens_details.reasoning_tokens',
+    relative: {
+      parent: 'outputTokens',
+      inclusion: 'contained',
+      slot: 'reasoning',
+    },
+  },
+  // Gemini counts thinking tokens outside `candidatesTokenCount`, so this one
+  // relationship is established by the field names themselves rather than
+  // inferred. A bare generic alias such as `reasoning_tokens` stays unknown: its
+  // wording does not establish either relationship.
+  {
+    field: 'reasoningTokens',
+    path: 'thoughtsTokenCount',
+    relative: {
+      parent: 'outputTokens',
+      inclusion: 'separate',
+      slot: 'reasoning',
+    },
+  },
 ];
 
 const UNKNOWN_INCLUSIONS: UsageInclusions = {
@@ -348,15 +376,44 @@ export interface UsageAggregate {
 }
 
 /**
- * Merge one sub-count's inclusion across attempts.
+ * Merge one sub-count's inclusion across the attempts that contributed to it.
  *
- * Two attempts that disagree — one saying a cache read is inside the input
- * count and one saying it is beside it — cannot be summed under either reading,
- * so the result is `unknown`. Agreement on one value keeps that value.
+ * Only attempts that actually reported the sub-count matter: an attempt with no
+ * cache-read value adds no tokens, so its silence says nothing about how the
+ * summed value relates to its parent. Among the contributions, one unknown makes
+ * the whole relationship unknown — a known-plus-unknown pair cannot be called
+ * contained, because the unknown half might be reported beside the parent and the
+ * report would then double-count it. Disagreement between two knowns is `unknown`
+ * for the same reason.
  */
-function mergeInclusion(values: readonly UsageInclusion[]): UsageInclusion {
-  const known = new Set(values.filter((value) => value !== 'unknown'));
-  return known.size === 1 ? ([...known][0] ?? 'unknown') : 'unknown';
+function mergeInclusion(
+  contributions: readonly UsageInclusion[],
+): UsageInclusion {
+  if (contributions.length === 0) return 'unknown';
+  const known = new Set(contributions.filter((value) => value !== 'unknown'));
+  if (known.size !== 1) return 'unknown';
+  // Any unknown among the contributors means the aggregate cannot claim one.
+  return contributions.includes('unknown')
+    ? 'unknown'
+    : ([...known][0] ?? 'unknown');
+}
+
+/**
+ * The inclusion each attempt reported for one sub-count, restricted to the
+ * attempts that actually contributed a value to it.
+ *
+ * Filtering here is what keeps the merged relationship meaningful: a silent
+ * attempt contributes no tokens, so classifying the sum by its silence would
+ * claim a relationship for mass that is not part of the total.
+ */
+function contributions(
+  counted: readonly UsageNormalized[],
+  field: UsageField,
+  slot: keyof UsageInclusions,
+): UsageInclusion[] {
+  return counted
+    .filter((usage) => usage.tokens[field] !== null)
+    .map((usage) => usage.inclusions[slot]);
 }
 
 /**
@@ -428,13 +485,13 @@ export function aggregateUsage(
     totals,
     inclusions: {
       cacheRead: mergeInclusion(
-        counted.map((usage) => usage.inclusions.cacheRead),
+        contributions(counted, 'cacheReadTokens', 'cacheRead'),
       ),
       cacheWrite: mergeInclusion(
-        counted.map((usage) => usage.inclusions.cacheWrite),
+        contributions(counted, 'cacheWriteTokens', 'cacheWrite'),
       ),
       reasoning: mergeInclusion(
-        counted.map((usage) => usage.inclusions.reasoning),
+        contributions(counted, 'reasoningTokens', 'reasoning'),
       ),
     },
   };

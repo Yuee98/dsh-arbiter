@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
+import { runReviewerProbe } from '../src/reviewer/diagnostic.js';
 import { review } from '../src/reviewer/service.js';
 import {
   offlineChatBackend,
@@ -847,5 +848,214 @@ describe('a repaired review keeps every attempt and its usage', () => {
       complete: true,
     });
     expect(result.usage.totals.outputTokens.total).toBe(32);
+  });
+});
+
+describe('the masking boundary applies to the public review result', () => {
+  test('a credential echoed in a successful answer never leaves review()', async () => {
+    // A provider may echo the credential it received into an explanatory field
+    // beside the answer. The success path is the one that used to leak it, because
+    // `parsed` held the provider's own object verbatim.
+    const secret = 'sk-success-path-echo';
+    const echoed = (level: number): unknown => ({
+      type: 'score',
+      probabilities: Object.fromEntries(
+        Array.from({ length: 10 }, (_, index) => [
+          String(index),
+          index === level ? 1 : 0,
+        ]),
+      ),
+      legend: { note: `authenticated with ${secret}` },
+    });
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        credential: secret,
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              model: 'jev',
+              answers: { risk: echoed(4), authorization: echoed(9) },
+              usage: { [secret]: 7, input_tokens: 100 },
+            }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('scored');
+    // Not just the response text: every field of every attempt is masked, which is
+    // what makes the record safe for the audit and for evals artifacts.
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result.attempts[0]?.rawUsage).toMatchObject({
+      '[redacted]': 7,
+      input_tokens: 100,
+    });
+  });
+
+  test('a credential resolved by the transport itself is masked too', async () => {
+    const secret = 'sk-transport-resolved';
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        credential: secret,
+        scripts: [
+          {
+            status: 422,
+            body: JSON.stringify({
+              errors: [{ message: `bad key ${secret}` }],
+            }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    expect(JSON.stringify(result)).not.toContain(secret);
+    // Only the transport knows which value it sent when it resolves the reference
+    // itself, which is why it reports that value rather than the caller guessing.
+    expect(result.attempts[0]?.error).toContain('HTTP 422');
+  });
+
+  test('a numeric authentication header still masks while a score does not', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'failure',
+            code: 'AUTH',
+            message: 'rejected X-Api-Key: 123456789',
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    // The header value is a credential even though it is all digits.
+    expect(JSON.stringify(result)).not.toContain('123456789');
+    // A score member is a number, not a credential, so it survives.
+    const scored = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [{ kind: 'text', text: '{"risk":3,"authorization":8}' }],
+      }),
+    });
+    expect(scored.outcome.status).toBe('scored');
+    expect(scored.attempts[0]?.responseText).toBe(
+      '{"risk":3,"authorization":8}',
+    );
+  });
+});
+
+describe('a valid half of a failed answer survives as a diagnostic', () => {
+  test('chat keeps the risk band when the authorization band is illegal', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [{ kind: 'text', text: '{"risk":5,"authorization":11}' }],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    if (result.outcome.status !== 'review-failure') {
+      throw new Error('expected a failure');
+    }
+    // Still a failure: no verdict is derived from the half that read.
+    expect(result.outcome.diagnostic?.risk?.score).toBe(5);
+    expect(result.outcome.diagnostic?.authorization).toBeNull();
+    expect(result.outcome.failures).toEqual([]);
+  });
+
+  test('chat keeps the authorization band when the risk band is illegal', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [{ kind: 'text', text: '{"risk":0,"authorization":8}' }],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    if (result.outcome.status !== 'review-failure') {
+      throw new Error('expected a failure');
+    }
+    expect(result.outcome.diagnostic?.risk).toBeNull();
+    expect(result.outcome.diagnostic?.authorization?.score).toBe(8);
+  });
+
+  test('decision keeps the readable distribution of the other field', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              model: 'jev',
+              answers: {
+                risk: NEW_SCALE_RISK_MAX,
+                // A sparse distribution: refused, while the risk answer above is legal.
+                authorization: { type: 'score', probabilities: { '9': 1 } },
+              },
+            }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('review-failure');
+    if (result.outcome.status !== 'review-failure') {
+      throw new Error('expected a failure');
+    }
+    expect(result.outcome.diagnostic?.risk?.score).toBe(10);
+    expect(result.outcome.diagnostic?.authorization).toBeNull();
+  });
+});
+
+describe('a provider-declared failure is not reported as malformed output', () => {
+  test('HTTP 200 with success:false classifies as a provider failure', async () => {
+    const result = await runReviewerProbe({
+      config: {
+        ...DEFAULT_CONFIG,
+        reviewer: {
+          ...DEFAULT_CONFIG.reviewer,
+          type: 'decision',
+          decision: {
+            ...DEFAULT_CONFIG.reviewer.decision,
+            url: 'https://offline.test/v1/systemone',
+            apiKeyRef: '',
+            timeoutMs: 1_000,
+          },
+        },
+      },
+      llm: undefined,
+      credentials: undefined,
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...NEW_SCALE_CLOUDFLARE,
+              success: false,
+              errors: [{ message: 'model unavailable' }],
+            }),
+            { status: 200 },
+          ),
+        ),
+      signal: new AbortController().signal,
+    });
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('expected a failure');
+    // Not `invalid-output`: the answer was complete, the provider refused. The
+    // stage decides which escalation a person sees.
+    expect(result.failure).toBe('unavailable');
   });
 });

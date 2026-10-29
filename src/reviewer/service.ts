@@ -25,10 +25,11 @@
 import type {
   ProtocolScores,
   ReviewOutcome,
+  ScoreTrail,
 } from '../review-contract/types.js';
-import { evaluateReview, reviewFailure } from '../review-contract/evaluate.js';
+import { evaluateReview } from '../review-contract/evaluate.js';
 import type { ReviewSnapshot } from '../types.js';
-import type { ReviewAttempt } from './attempt.js';
+import { maskAttempt, type ReviewAttempt } from './attempt.js';
 import { runChatTransport, type ChatTransportContext } from './chat.js';
 import {
   runDecisionTransport,
@@ -39,6 +40,7 @@ import {
   renderChatUser,
   renderDecisionRequest,
 } from './prompt.js';
+import { redact, redactAuthHeaders } from './redact.js';
 import { aggregateUsage, type UsageAggregate } from './usage.js';
 
 /** What a caller must supply to run one review. */
@@ -118,37 +120,127 @@ function outcomeOf(
  */
 export async function review(request: ReviewRequest): Promise<ReviewResult> {
   const { snapshot, callId, signal } = request;
+  const transport = await runTransport(request, snapshot, callId, signal);
+  // One masking boundary, applied to every attempt before it is exposed. A
+  // consumer storing or reporting these records must not have to know which field
+  // can carry a credential, and two consumers implementing that rule separately is
+  // how a boundary leaks.
+  const attempts = transport.attempts.map((attempt) =>
+    maskAttempt(attempt, transport.secrets),
+  );
+  return {
+    protocol: transport.protocol,
+    attempts,
+    usage: usageOf(attempts),
+    outcome:
+      transport.answer === null
+        ? failureOutcome(
+            // The reason quotes provider text, so it crosses the same boundary as
+            // the attempt's own error. Masking it here means a caller never has to
+            // remember that the two fields carry the same risk.
+            redact(
+              redactAuthHeaders(
+                transport.error ?? 'the reviewer produced no answer',
+              ),
+              transport.secrets,
+            ),
+            transport.rejection?.partial ?? NO_PARTIAL,
+          )
+        : outcomeOf(snapshot, transport.answer.scores),
+  };
+}
+
+/** No field of a failed answer could be read. */
+const NO_PARTIAL = { risk: null, authorization: null };
+
+/** What one transport run produced, before masking and outcome mapping. */
+interface TransportRun {
+  readonly protocol: 'chat' | 'decision';
+  readonly attempts: readonly ReviewAttempt[];
+  readonly answer: {
+    readonly ok: true;
+    readonly scores: ProtocolScores;
+  } | null;
+  /**
+   * The last unreadable answer's readable half, when it had one.
+   *
+   * It travels to the failure outcome's `diagnostic`, which is how a person tells
+   * a reviewer that misgraded one field from a transport that broke.
+   */
+  readonly rejection: {
+    readonly ok: false;
+    readonly partial: {
+      readonly risk: ScoreTrail | null;
+      readonly authorization: ScoreTrail | null;
+    };
+  } | null;
+  readonly error: string | null;
+  /** The credential values this adapter knows it sent, for masking. */
+  readonly secrets: readonly string[];
+}
+
+/** Run whichever transport this request names. */
+async function runTransport(
+  request: ReviewRequest,
+  snapshot: ReviewSnapshot,
+  callId: string,
+  signal: AbortSignal,
+): Promise<TransportRun> {
   if (request.backend.kind === 'chat') {
-    const chat = renderChatRequest(snapshot);
     const result = await runChatTransport(
       { ...request.backend.transport, signal },
-      chat,
+      renderChatRequest(snapshot),
       callId,
     );
     return {
       protocol: 'chat',
       attempts: result.attempts,
-      usage: usageOf(result.attempts),
-      outcome:
-        result.answer === null
-          ? reviewFailure(result.error ?? 'the reviewer produced no answer')
-          : outcomeOf(snapshot, result.answer.scores),
+      answer: result.answer,
+      rejection: result.rejection,
+      error: result.error,
+      // The host's LLM service owns the chat credential, so there is no value this
+      // adapter could match; the structural pass in `maskAttempt` covers it.
+      secrets: result.secrets,
     };
   }
-  const decision = renderDecisionRequest(renderChatUser(snapshot));
   const result = await runDecisionTransport(
     { ...request.backend.transport, signal },
-    decision,
+    renderDecisionRequest(renderChatUser(snapshot)),
     callId,
   );
   return {
     protocol: 'decision',
     attempts: result.attempts,
-    usage: usageOf(result.attempts),
-    outcome:
-      result.answer === null
-        ? reviewFailure(result.error ?? 'the reviewer produced no answer')
-        : outcomeOf(snapshot, result.answer.scores),
+    answer: result.answer,
+    rejection: result.rejection,
+    error: result.error,
+    // The transport reports whichever credential it actually sent, because only
+    // it knows when it resolved the reference itself. A second lookup here could
+    // return a rotated value that is not the one that authenticated the request.
+    secrets: result.secrets,
+  };
+}
+
+/**
+ * The failure outcome, keeping whatever half of the answer did read.
+ *
+ * The partial trails are diagnostic only: no score, verdict or threshold is
+ * derived from them, and the outcome stays a failure.
+ */
+function failureOutcome(
+  error: string,
+  partial: {
+    readonly risk: ScoreTrail | null;
+    readonly authorization: ScoreTrail | null;
+  },
+): ReviewOutcome {
+  const diagnostic =
+    partial.risk === null && partial.authorization === null ? null : partial;
+  return {
+    status: 'review-failure',
+    failures: [],
+    reason: error,
+    diagnostic,
   };
 }
 
