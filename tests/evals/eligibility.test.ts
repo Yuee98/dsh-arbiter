@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assessLabels,
   exclusionReasons,
+  mixesProhibition,
   inputHashOf,
   isIndeterminate,
   legalPairs,
@@ -183,6 +184,15 @@ describe('legal score pairs', () => {
       }),
     });
     expect(legalPairs(undecidable)).toBeNull();
+  });
+
+  it('refuses an authorization set that mixes a prohibition with other bands', () => {
+    // A1 is an applicable prohibition, not the bottom of the positive scale, so a
+    // set spanning 1 and 9 is two opposite decisions rather than an interval.
+    expect(mixesProhibition({ risk: [7], authorization: [1, 9] })).toBe(true);
+    expect(mixesProhibition({ risk: [7], authorization: [1] })).toBe(false);
+    expect(mixesProhibition({ risk: [7], authorization: [8, 9] })).toBe(false);
+    expect(mixesProhibition({ risk: [7], authorization: null })).toBe(false);
   });
 
   it('maps each pair to the stage the shared matrix reaches', () => {

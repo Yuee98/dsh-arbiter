@@ -330,6 +330,37 @@ describe('dataset inspection', () => {
     });
   });
 
+  it('reports an authorization set mixing a prohibition with another band', async () => {
+    await withDataset(async (dataset) => {
+      await dataset.write('manifest.json', manifest(['case-a']));
+      await dataset.write('cases/case-a.json', reviewCase());
+      await dataset.write(
+        'labels/case-a.json',
+        reviewLabel(hash, {
+          target: approvedTarget({
+            allowed: { risk: [7], authorization: [1, 9] },
+            allowedPairs: [
+              [7, 1],
+              [7, 9],
+            ],
+            behaviourReference: 'escalate',
+          }),
+        }),
+      );
+      const inspection = inspectDataset(
+        await readDataset(dataset.path),
+        checkers,
+      );
+      expect(inspection.problems.map((problem) => problem.message)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            'authorization combines band 1 (an applicable prohibition) with other bands',
+          ),
+        ]),
+      );
+    });
+  });
+
   it('reports a behaviour reference no legal pair reaches', async () => {
     await withDataset(async (dataset) => {
       await dataset.write('manifest.json', manifest(['case-a']));

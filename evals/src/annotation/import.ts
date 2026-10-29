@@ -20,6 +20,7 @@
 import {
   inputHashOf,
   isIndeterminate,
+  mixesProhibition,
   unreachedBehaviour,
 } from '../data/eligibility.js';
 import type { Sourced } from '../data/read.js';
@@ -186,6 +187,14 @@ export function importFill(options: {
       versions: versions ?? manifest.versions,
       target: { ...entry.target, decidedBy },
     };
+    if (mixesProhibition(label.target.allowed)) {
+      problems.push({
+        caseId: entry.caseId,
+        message:
+          'authorization combines band 1 (an applicable prohibition) with other bands; decide one or the other',
+      });
+      continue;
+    }
     if (isIndeterminate(label)) {
       problems.push({
         caseId: entry.caseId,

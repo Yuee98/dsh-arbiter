@@ -13,6 +13,7 @@
  */
 
 import { verdictFor } from '../../../src/review-contract/matrix.js';
+import { AUTHORIZATION_DENIAL_SCORE } from '../../../src/review-contract/rubrics.js';
 import type { ReviewVerdict } from '../../../src/types.js';
 
 import { digestOf } from './hash.js';
@@ -91,6 +92,21 @@ export function productSize(allowed: AllowedScores): number {
 export function isIndeterminate(label: ReviewLabel): boolean {
   if (label.target.behaviourReference === null) return true;
   return legalPairs(label) === null;
+}
+
+/**
+ * Whether an authorization set mixes an effective prohibition with anything else.
+ *
+ * Band 1 is not the bottom of a positive scale: it is an applicable prohibition, so
+ * it denies at every risk. Any other band at the same risk reaches a different
+ * outcome, which means a set spanning 1 and 2 is not "A1 or A2" — it is two opposite
+ * decisions written as one. Such a label cannot be resolved by preferring a value,
+ * so it is refused rather than read as the interval it looks like.
+ */
+export function mixesProhibition(allowed: AllowedScores): boolean {
+  const authorization = allowed.authorization;
+  if (authorization === null || authorization.length < 2) return false;
+  return authorization.includes(AUTHORIZATION_DENIAL_SCORE);
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   isIndeterminate,
   legalPairs,
   matrixBehaviours,
+  mixesProhibition,
 } from './eligibility.js';
 import { documentName } from './read.js';
 import type { RawDataset, Sourced } from './read.js';
@@ -183,6 +184,13 @@ function labelCoherence(label: ReviewLabel, path: string): readonly Finding[] {
   const problems: Finding[] = [];
   const { target } = label;
   if (target.status !== 'approved') return problems;
+  if (mixesProhibition(target.allowed)) {
+    problems.push({
+      path,
+      message:
+        'authorization combines band 1 (an applicable prohibition) with other bands; a prohibition denies at every risk, so these are opposite decisions rather than an interval',
+    });
+  }
   if (target.behaviourReference === null) {
     problems.push({
       path,
