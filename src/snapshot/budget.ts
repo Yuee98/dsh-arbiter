@@ -292,6 +292,25 @@ function trimEvidence(state: BudgetState): boolean {
   return true;
 }
 
+/**
+ * Trim one tool call, dropping the **oldest** step.
+ *
+ * `state.context` is in submitted order — oldest first — because that is how the
+ * history reads: it is the sequence of steps the pending action follows. So the
+ * oldest call is the *first* element, not the last. Cutting the last element
+ * would discard the step immediately preceding the pending action — the newest
+ * operation and often the recorded failure that explains it — and keep the
+ * earliest, least relevant part of the window.
+ */
+function trimContext(state: BudgetState): boolean {
+  if (state.context.length === 0) return false;
+  state.context = state.context.slice(1);
+  state.contextTruncated = true;
+  state.toolCallsTrimmed = true;
+  state.truncatedSegments.add('CONTEXT');
+  return true;
+}
+
 function trimCheckpoints(state: BudgetState): boolean {
   if (state.checkpoints.length === 0) return false;
   state.checkpoints = state.checkpoints.slice(0, -1);
@@ -307,13 +326,7 @@ function trimCheckpoints(state: BudgetState): boolean {
  * re-enter the same branch with unchanged material.
  */
 function truncateNext(state: BudgetState): boolean {
-  if (state.context.length > 0) {
-    state.context = state.context.slice(0, -1);
-    state.contextTruncated = true;
-    state.toolCallsTrimmed = true;
-    state.truncatedSegments.add('CONTEXT');
-    return true;
-  }
+  if (trimContext(state)) return true;
   if (trimCheckpoints(state)) return true;
   if (state.prior.length > 0) {
     state.prior = state.prior.slice(0, -1);

@@ -1132,3 +1132,208 @@ describe('a closed turn cannot become the current turn', () => {
     );
   });
 });
+
+describe('review threads: question scope and tool-history trim direction', () => {
+  test('an answer in the next turn keeps the question the previous turn ended with', async () => {
+    const cwd = await workspace();
+    // Asking a question is how a turn normally ends, so the host writes
+    // `turn/end`, then a new `turn/start`, then the human's answer. Treating that
+    // boundary as staleness drops the operation the human actually approved,
+    // because assistant text is not evidence and the previous turn's tool calls
+    // are no longer in the window either.
+    const events: SessionEventLike[] = [
+      turnStart(1, 1, 1),
+      human(2, 1, 'clean up the tree', 1),
+      {
+        seq: 3,
+        time: 2,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '可以删除 /workspace/app/build 吗？' },
+            ],
+          },
+        },
+      },
+      turnEnd(4, 3, 1),
+      turnStart(5, 4, 2),
+      human(6, 5, '同意', 2),
+      toolCall(7, 6, 'current', 'bash', { command: 'rm -rf build' }, 2),
+    ];
+    const main = session('main', events);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    const answer = built.snapshot.evidence.find((item) => item.text === '同意');
+    expect(answer?.question).toContain('/workspace/app/build');
+    // It stays context on an explicit human instruction, and the answer is
+    // attributed to the turn the human gave it in.
+    expect(answer?.evidence).toBe('explicit');
+    expect(answer?.turn).toBe(2);
+  });
+
+  test('an intervening statement still makes the question stale across turns', async () => {
+    const cwd = await workspace();
+    // Turning a boundary transparent must not turn the search into "any earlier
+    // question". A statement after the question means the answer belongs to
+    // something else.
+    const events: SessionEventLike[] = [
+      turnStart(1, 1, 1),
+      human(2, 1, 'clean up the tree', 1),
+      {
+        seq: 3,
+        time: 2,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '是否删除生产数据库？' }],
+          },
+        },
+      },
+      {
+        seq: 4,
+        time: 3,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '好，改用备份验证方案。' }],
+          },
+        },
+      },
+      turnEnd(5, 4, 1),
+      turnStart(6, 5, 2),
+      human(7, 6, '同意', 2),
+      toolCall(8, 7, 'current', 'bash', { command: 'rm -rf build' }, 2),
+    ];
+    const main = session('main', events);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    const answer = built.snapshot.evidence.find((item) => item.text === '同意');
+    expect(answer?.question).toBeUndefined();
+  });
+
+  test('a tool exchange across the boundary still makes the question stale', async () => {
+    const cwd = await workspace();
+    const events: SessionEventLike[] = [
+      turnStart(1, 1, 1),
+      human(2, 1, 'clean up the tree', 1),
+      {
+        seq: 3,
+        time: 2,
+        type: 'assistant/message',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '是否删除生产数据库？' }],
+          },
+        },
+      },
+      toolCall(4, 3, 'other', 'bash', { command: 'echo other' }, 1),
+      toolResult(5, 3, 'other', false, 1),
+      turnEnd(6, 4, 1),
+      turnStart(7, 5, 2),
+      human(8, 6, '同意', 2),
+      toolCall(9, 7, 'current', 'bash', { command: 'rm -rf build' }, 2),
+    ];
+    const main = session('main', events);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    // A completed tool exchange is not a question awaiting an answer.
+    const answer = built.snapshot.evidence.find((item) => item.text === '同意');
+    expect(answer?.question).toBeUndefined();
+  });
+
+  test('budget trimming keeps the newest tool steps, not the oldest', async () => {
+    const cwd = await workspace();
+    // Six steps with the pending call last. The submitted order is oldest-first
+    // because that is how the history reads, so trimming must drop from the
+    // front: the step immediately before the pending action — and its recorded
+    // failure — is the one that explains what is about to run.
+    const steps: SessionEventLike[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      steps.push(
+        toolCall(
+          10 + index * 2,
+          10 + index,
+          `step-${String(index)}`,
+          'bash',
+          { command: `echo step-${String(index)}-END ${'x'.repeat(400)}` },
+          1,
+        ),
+        toolResult(
+          11 + index * 2,
+          10 + index,
+          `step-${String(index)}`,
+          index === 5,
+          1,
+        ),
+      );
+    }
+    const main = session('main', [
+      turnStart(1, 1, 1),
+      human(2, 1, 'run the steps', 1),
+      ...steps,
+      toolCall(90, 90, 'current', 'bash', { command: 'echo current' }, 1),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: {
+          ...DEFAULT_CONFIG.context,
+          maxInputTokens: 2_000,
+          historyMaxItems: 8,
+        },
+      },
+    });
+    expect(built.snapshot.budget.truncatedSegments).toContain('CONTEXT');
+    const submitted = built.snapshot.context.map(
+      (call) => /step-(\d+)/.exec(call.arguments)?.[1] ?? '?',
+    );
+    // The retained window ends at the newest step, not at the oldest.
+    expect(submitted).toEqual(['4', '5']);
+    // The newest step's recorded failure survives with it.
+    expect(built.snapshot.context.at(-1)?.result).toEqual({ ok: false });
+  });
+
+  test('an untrimmed window still reads oldest first', async () => {
+    const cwd = await workspace();
+    const main = session('main', [
+      turnStart(1, 1, 1),
+      human(2, 1, 'run the steps', 1),
+      toolCall(3, 2, 'a', 'bash', { command: 'echo a' }, 1),
+      toolResult(4, 2, 'a', false, 1),
+      toolCall(5, 3, 'b', 'bash', { command: 'echo b' }, 1),
+      toolResult(6, 3, 'b', false, 1),
+      toolCall(7, 4, 'current', 'bash', { command: 'echo current' }, 1),
+    ]);
+    const built = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: DEFAULT_CONFIG,
+    });
+    expect(built.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo a"}',
+      '{"command":"echo b"}',
+    ]);
+    expect(built.snapshot.budget.truncatedSegments).not.toContain('CONTEXT');
+  });
+});

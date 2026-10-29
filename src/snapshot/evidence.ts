@@ -299,9 +299,16 @@ function isShortAnswer(text: string): boolean {
  *
  * A plain chat "同意" is only meaningful with the operation it answered, so the
  * preceding assistant question is attached as context. It stays context: the
- * assistant text is never evidence and never authorizes anything. The search
- * stops at a turn boundary too, because a question cannot survive into a later
- * turn in which other work happened.
+ * assistant text is never evidence and never authorizes anything.
+ *
+ * A completed turn boundary is *not* a stop. Asking a question is how a turn
+ * usually ends, so the host writes `turn/end` and a fresh `turn/start` between
+ * the question and the answer; treating that as staleness would strip the scope
+ * from the most common real approval, and the design requires a short answer to
+ * keep the question it answered. The search therefore continues past a paired
+ * `turn/end`+`turn/start`, while the real staleness signals still stop it: any
+ * other user message, a compaction summary, or a tool exchange (including an ask
+ * that already answered) means the answer no longer belongs to that question.
  */
 function precedingQuestion(
   events: readonly SessionEventLike[],
@@ -313,9 +320,10 @@ function precedingQuestion(
     // Another user message or a compaction summary starts a separate exchange:
     // an answer after either cannot be attributed to a question beyond it.
     if (event.type === 'user/message') return null;
-    // A turn boundary ends the exchange as well: the answer belongs to whatever
-    // was asked inside the turn it was given in.
-    if (event.type === 'turn/start' || event.type === 'turn/end') return null;
+    // A turn boundary is transparent: a question is normally how the previous
+    // turn ended, so the answer in the new turn is still answering it. The loop
+    // simply keeps looking for the assistant message on the other side.
+    if (event.type === 'turn/start' || event.type === 'turn/end') continue;
     // A tool exchange is a boundary too. An ask result may already carry the
     // human's answer, so a later "continue" must not be attributed to the
     // question that a completed ask already answered.
