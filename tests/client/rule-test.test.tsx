@@ -1296,6 +1296,116 @@ describe('explanation fidelity', () => {
     expect(coverage).toHaveTextContent(/没有逐条命令的结构证据/);
   });
 
+  test('a partial-allow fallback does not call a matched allow "not in effect"', async () => {
+    // Both allows matched; the third command is what left the call in review. No
+    // rule decided it, so the second allow was not outranked by anything.
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json({
+          ok: true,
+          results: [
+            {
+              input: 'echo a; echo b; echo c',
+              tool: 'bash',
+              cwd: '/workspace',
+              path: 'review(default)',
+              pathDetail: { kind: 'review-default', reason: 'partial-allow' },
+              rule: null,
+              matches: [
+                {
+                  index: 0,
+                  id: 'allow-a',
+                  verdict: 'allow',
+                  effective: true,
+                  target: 'command',
+                  conditionIndex: 0,
+                  nodeIndex: 0,
+                  matchedText: 'echo a',
+                },
+                {
+                  index: 1,
+                  id: 'allow-b',
+                  verdict: 'allow',
+                  effective: false,
+                  target: 'command',
+                  conditionIndex: 0,
+                  nodeIndex: 1,
+                  matchedText: 'echo b',
+                },
+              ],
+              rules: [
+                {
+                  index: 0,
+                  id: 'allow-a',
+                  verdict: 'allow',
+                  outcome: 'match',
+                  conditions: [
+                    {
+                      index: 0,
+                      target: 'command',
+                      kind: 'exact',
+                      pattern: 'echo a',
+                      outcome: 'match',
+                      reason: 'resolved',
+                      matchedValue: 'echo a',
+                    },
+                  ],
+                },
+                {
+                  index: 1,
+                  id: 'allow-b',
+                  verdict: 'allow',
+                  outcome: 'match',
+                  conditions: [
+                    {
+                      index: 0,
+                      target: 'command',
+                      kind: 'exact',
+                      pattern: 'echo b',
+                      outcome: 'match',
+                      reason: 'resolved',
+                      matchedValue: 'echo b',
+                    },
+                  ],
+                },
+              ],
+              parse: {
+                status: 'ok',
+                statements: 3,
+                nodes: ['command'],
+                completeness: 'complete',
+                opaque: false,
+                unresolved: [],
+              },
+              argv: [],
+              normalization: {
+                raw: 'echo a; echo b; echo c',
+                completeness: 'complete',
+                issues: [],
+                commands: [
+                  { text: 'echo a', raw: 'echo a', words: [] },
+                  { text: 'echo b', raw: 'echo b', words: [] },
+                  { text: 'echo c', raw: 'echo c', words: [] },
+                ],
+              },
+              shadowed: [],
+            },
+          ],
+        }),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    // The false cause must not appear anywhere on the panel.
+    expect(screen.queryByText(/allow-b（免审放行）未生效/)).toBeNull();
+    // It matched, and only the accumulated coverage fell short.
+    expect(screen.getByText('同一优先级的其他 allow 命中')).toBeVisible();
+    expect(screen.getByText(/allow-b（免审放行）也命中/)).toBeVisible();
+  });
+
   test('a second allow at the same priority is not reported as having failed', async () => {
     server.use(
       http.post('*/api/arbiter/test', () =>

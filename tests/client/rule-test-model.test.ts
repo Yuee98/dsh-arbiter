@@ -275,7 +275,15 @@ describe('rule test conclusions', () => {
       }),
     );
     expect(view.unknown).toEqual(['deny-redirect']);
-    expect(view.shadowed.map((match) => match.id)).toEqual(['allow-deploy']);
+    // No rule decided this call: it is `review(default)`. The allow was withheld
+    // by an undetermined higher-priority rule, which the priority block already
+    // reports as `withheld-by-unknown`, so listing it as outranked here would
+    // claim a decision nobody made. `shadowedNone` says "not overridden by a
+    // higher-priority rule", which is exactly this state.
+    expect(view.shadowed).toEqual([]);
+    expect(view.additionalAllows.map((match) => match.id)).toEqual([
+      'allow-deploy',
+    ]);
     expect(view.reviewReason).toBe('unresolved');
     expect(view.allowMatched).toBe(true);
   });
@@ -1181,6 +1189,44 @@ describe('review round two corrections', () => {
     expect(failed.hasEvidence).toBe(true);
     expect(failed.structural).toBe(false);
     expect(failed.parsed).toBe(false);
+  });
+
+  test('a partial-allow fallback never blames priority for a coverage shortfall', () => {
+    // `echo a; echo b; echo c` with one allow per covered command: both allows
+    // match, the third command is uncovered, and the path is `review(default)`
+    // with `partial-allow`. No rule decided that call, so nothing outranked
+    // allow-b; reporting it as "did not take effect" would name the wrong cause.
+    const real = decoded(
+      [
+        {
+          id: 'allow-a',
+          verdict: 'allow',
+          enabled: true,
+          combine: 'any',
+          conditions: [{ target: 'command', kind: 'exact', pattern: 'echo a' }],
+        },
+        {
+          id: 'allow-b',
+          verdict: 'allow',
+          enabled: true,
+          combine: 'any',
+          conditions: [{ target: 'command', kind: 'exact', pattern: 'echo b' }],
+        },
+      ],
+      'bash',
+      { command: 'echo a; echo b; echo c' },
+    );
+    // The engine side of the premise: a fallback path, and one allow still
+    // flagged `effective` from before the path was chosen.
+    expect(real.path).toBe('review(default)');
+    expect(real.pathDetail).toMatchObject({ reason: 'partial-allow' });
+    const view = coverageView(real);
+    expect(view.shadowed).toEqual([]);
+    expect(view.additionalAllows.map((match) => match.id)).toEqual(['allow-b']);
+    // Two of three commands are named, and the third is what remains uncovered.
+    const detail = coverageDetail(real);
+    expect(detail.namedCount).toBe(2);
+    expect(detail.nodes.map((node) => node.named)).toEqual([true, true, false]);
   });
 
   test('the real evaluator names both commands one condition matched', () => {
