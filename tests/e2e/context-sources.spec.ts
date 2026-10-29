@@ -23,7 +23,7 @@ import {
 } from '../../src/snapshot.js';
 import type { SessionLike, SessionEventLike } from '../../src/snapshot.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
-import { renderRequest } from '../../src/reviewer.js';
+import { renderChatRequest } from '../../src/reviewer.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -671,13 +671,14 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       snapshot.parentAuthorizationPresent === true,
     );
 
-    const request = renderRequest(snapshot);
+    const request = renderChatRequest(snapshot);
     check(
       'V8',
-      'the rendered request carries the source ladder and the facts block',
-      request.system.includes('## Authorization sources') &&
-        request.user.includes('MATERIALS') &&
-        request.user.includes('BUDGET'),
+      'the rendered request carries the contract, the material blocks and the source ladder',
+      request.system.includes('REVIEW_CONTRACT') &&
+        request.system.includes('PROJECT_RULES') &&
+        request.user.includes('POLICY_AND_GUIDANCE') &&
+        request.user.includes('MATERIAL_COMPLETENESS'),
     );
 
     // --- a long program: only the submission shrinks ---------------------
@@ -704,7 +705,12 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       cwd: workspace,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          // Above the shared contract's own preamble, so the action is the thing
+          // that has to yield rather than the request being unfittable.
+          maxInputTokens: 3_400,
+        },
       },
       facts: null,
       priorVerdicts: [],
@@ -716,7 +722,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       'a real long program is trimmed inside the budget as an input fact',
       large.snapshot.action.truncated !== undefined &&
         large.snapshot.budget.truncatedSegments.includes('ACTION') &&
-        large.snapshot.budget.estimatedInputTokens <= 2_000 &&
+        large.snapshot.budget.estimatedInputTokens <= 3_400 &&
         large.snapshot.missing
           .join(' ')
           .includes('truncated by the input budget'),

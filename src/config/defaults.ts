@@ -1,65 +1,35 @@
-import type { ArbiterConfig, PolicyThresholds } from '../types.js';
+import type { ArbiterConfig } from '../types.js';
 
 /**
- * The calibrated first-release policy version.
+ * The review policy version this build implements.
  *
- * v1 shipped the prototype's numbers, reported every risk-gate failure as R5
- * (which made R8 unreachable), and derived decision risk classes from a
- * hardcoded low band. #22 fixed those and replaced the numbers with values whose
- * admissible intervals are derived from a labelled sample set in
- * `validation/arbiter-integration/2026-10-26-policy-calibration/`.
- *
- * R5 still means "above the selected risk ceiling": the operation classes the
- * rule matrix names (production change, security-control change, irreversible
- * delete) have no observable signal yet, so they are recorded as a limitation
- * rather than claimed as implemented. Old audit rows keep their own recorded
- * thresholds, so they stay explainable under the version they were decided with.
+ * It names the *runtime* policy epoch, which changed when the execution chain moved
+ * onto the shared contract: the thresholds, the three strategies and the probe
+ * override are gone, and the matrix in `review-contract` decides. The semantic
+ * version of the score bands themselves is `REVIEW_CONTRACT_VERSION`; the two are
+ * separate so a stored record can say both which bands it was graded on and which
+ * engine applied them.
  */
-export const POLICY_VERSION = 'arbiter-policy-v2';
+export const POLICY_VERSION = 'arbiter-policy-v3';
 
 /**
- * The regular strategy, shared by `normal` and `strict`.
+ * The confirmed configuration.
  *
- * Read the calibration record before changing any of these numbers: the values
- * are the grid midpoints of the intervals the labelled samples permit, and
- * `tests/policy-calibration.test.ts` fails when a default leaves its interval.
- * That test proves the values agree with the documented matrix. A small real-model
- * run (see the same record's `model-run/`) showed the chat backend produces
- * conforming signals, but it measured no false-allow or false-block rate, so
- * these remain reviewed initial values rather than a calibration result.
- */
-export const DEFAULT_NORMAL: PolicyThresholds = {
-  tauAuth: 0.8,
-  tauRisk: 0.75,
-  tauCritical: 0.25,
-  tauLow: 0.7,
-  chatMediumRiskMax: 6,
-  mediumRiskCeiling: 6,
-  explicitFromRisk: 4,
-  allowBulkEgress: false,
-};
-
-/**
- * The progress strategy.
+ * `modes` is the only policy knob left, and it names one observable difference:
+ * whether an escalation may open a real human approval. Both values apply the same
+ * matrix, so `no-ask` is not a stricter policy.
  *
- * It differs from the regular strategy on exactly the two axes the design names:
- * the medium-risk ceiling (6 → 8, i.e. force pushes and staging deploys become
- * delegable) and bulk external sending. It never widens a fixed denial, the
- * authorization standard or the critical gate.
+ * `no-ask` is the default for a subagent because a child session has no approval
+ * channel of its own; asking for one would settle as a fallback denial anyway, and
+ * stating that up front makes the record say why instead of implying a question
+ * nobody could answer.
  */
-export const DEFAULT_PROGRESS: PolicyThresholds = {
-  ...DEFAULT_NORMAL,
-  chatMediumRiskMax: 8,
-  mediumRiskCeiling: 8,
-  allowBulkEgress: true,
-};
-
 export const DEFAULT_CONFIG: ArbiterConfig = {
   enabled: true,
   // The confirmed first-release boundary. It is applied only when a session is
   // enabled, so installation still takes over nothing.
   boundary: 'guarded',
-  modes: { main: 'normal', subagent: 'strict' },
+  modes: { main: 'ask', subagent: 'no-ask' },
   rules: [],
   reviewer: {
     type: 'chat',
@@ -86,9 +56,6 @@ export const DEFAULT_CONFIG: ArbiterConfig = {
   },
   policy: {
     version: POLICY_VERSION,
-    normal: DEFAULT_NORMAL,
-    progress: DEFAULT_PROGRESS,
-    probeMode: 'assist',
   },
   context: {
     maxInputTokens: 10_000,

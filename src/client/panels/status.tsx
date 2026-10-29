@@ -17,9 +17,8 @@ import type { Draft, StateResponse } from '../view-types.js';
 
 function modeHelp(t: Translate): Record<string, string> {
   return {
-    normal: t('status.normalHelp'),
-    strict: t('status.strictHelp'),
-    progress: t('status.progressHelp'),
+    ask: t('status.askHelp'),
+    'no-ask': t('status.noAskHelp'),
   };
 }
 
@@ -92,11 +91,10 @@ export function StatusPanel(props: {
             <div className="arb:w-full">
               <Select
                 value={draft.modes.main}
-                options={['normal', 'strict', 'progress'] as const}
+                options={['ask', 'no-ask'] as const}
                 labels={{
-                  normal: t('status.normal'),
-                  strict: t('status.strict'),
-                  progress: t('status.progress'),
+                  ask: t('status.ask'),
+                  'no-ask': t('status.noAsk'),
                 }}
                 onChange={(value) => {
                   onDraft((next) => {
@@ -113,10 +111,10 @@ export function StatusPanel(props: {
             <div className="arb:w-full">
               <Select
                 value={draft.modes.subagent}
-                options={['strict', 'progress'] as const}
+                options={['ask', 'no-ask'] as const}
                 labels={{
-                  strict: t('status.strict'),
-                  progress: t('status.progress'),
+                  ask: t('status.ask'),
+                  'no-ask': t('status.noAsk'),
                 }}
                 onChange={(value) => {
                   onDraft((next) => {

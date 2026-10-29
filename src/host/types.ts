@@ -1,12 +1,15 @@
 import type { AuditStore, CallRecord } from '../audit.js';
 import type { AgentLike, SessionLike, SessionsLike } from '../snapshot.js';
 import type { LlmLike } from '../reviewer.js';
+import type { UsageAggregate } from '../reviewer/usage.js';
 import type {
+  ApprovalMode,
   ArbiterConfig,
   HistoryStatus,
   PriorVerdictItem,
-  ReviewSignals,
+  ReviewScores,
   ReviewSnapshot,
+  ReviewStageRecord,
   SessionKind,
   TraceStage,
 } from '../types.js';
@@ -330,9 +333,19 @@ export interface AuditExtras {
   readonly effect: unknown;
   /** The review's own reason, when the review produced one. */
   readonly reviewReason: string | null;
-  readonly signals: ReviewSignals | null;
+  /** The scored pair a successful review reached, or null when it scored nothing. */
+  readonly scores: ReviewScores | null;
+  /**
+   * The stage the review reached, whether or not it settled as that stage.
+   *
+   * Kept apart from `scores` because a material gap and a reviewer failure reach
+   * stages without producing a score, and an escalation that settled as a denial
+   * still has to say it escalated.
+   */
+  readonly reviewStage: ReviewStageRecord | null;
+  /** The review's usage summary over its actual attempts. */
+  readonly usage: UsageAggregate | null;
   readonly snapshot: ReviewSnapshot | null;
-  readonly strategy: string | null;
   readonly decisionRules: readonly string[];
   readonly modelAttempts: CallRecord['modelAttempts'];
   readonly ruleId: string | null;
@@ -343,7 +356,7 @@ export interface CallContext {
   readonly agent: AgentLike;
   readonly session: SessionLike;
   readonly sessionKind: SessionKind;
-  readonly mode: string;
+  readonly mode: ApprovalMode;
   readonly cwd: string;
   readonly trace: TraceStage[];
 }

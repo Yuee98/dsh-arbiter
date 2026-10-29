@@ -732,7 +732,7 @@ test.describe('installation does not take over', () => {
       const state = await readState(host);
       expect(state.rules).toEqual([]);
       expect(state.invalidConfigError).toBeNull();
-      expect(state.modes).toMatchObject({ main: 'normal', subagent: 'strict' });
+      expect(state.modes).toMatchObject({ main: 'ask', subagent: 'no-ask' });
       expect(record(state.config, 'config')['boundary']).toBe('guarded');
 
       await openHost(page, host);

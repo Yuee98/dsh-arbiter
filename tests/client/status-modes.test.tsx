@@ -43,33 +43,36 @@ function usePageHandlers(options: { readonly writes: string[] }): void {
   );
 }
 
+/**
+ * The two modes, and the one sentence that actually distinguishes them.
+ *
+ * Both apply the shared matrix; only the human question differs. A test that
+ * checked "auto review happens" per mode would now pass for either one, so the
+ * distinguishing claim is what each entry asserts.
+ */
 const APPROVAL_TEXT: readonly {
   readonly label: string;
   readonly help: RegExp;
 }[] = [
   {
-    label: '交互审批',
-    help: /同样进行自动审查/u,
+    label: '交互审批（ask）',
+    help: /需要人工决定时向真人发起审批/u,
   },
   {
-    label: '自动审批',
-    help: /不新发起审批/u,
-  },
-  {
-    label: '自动审批 · 推进',
-    help: /自动批准更多符合条件的操作/u,
+    label: '自动审批（no-ask）',
+    help: /需要人工决定的调用不提问、不执行/u,
   },
 ];
 
 describe('approval-mode settings', () => {
-  test('renders every mode tooltip through the locale, including auto review on normal', async () => {
+  test('renders both modes with the one thing that differs between them', async () => {
     usePageHandlers({ writes: [] });
     const { user } = renderClient(<ArbiterPage />);
     const main = await screen.findByLabelText('主会话审批模式', {
       exact: false,
     });
     await waitFor(() => {
-      expect(main).toHaveValue('normal');
+      expect(main).toHaveValue('ask');
     });
     // A real `<select>`: its options are reachable through the accessible
     // role, not by walking the DOM.
@@ -83,22 +86,22 @@ describe('approval-mode settings', () => {
     }
 
     // Each mode's hint is the one for the *selected* value, so the tooltip is
-    // checked by selecting that mode rather than by scraping all three at once.
+    // checked by selecting that mode rather than by scraping both at once.
     for (const entry of APPROVAL_TEXT) {
       await user.selectOptions(main, entry.label);
-      // The subagent select renders the shared `strict` hint too, so a mode
-      // both selects share legitimately matches more than once.
+      // Both selects can legitimately render the same hint, so a shared mode
+      // matches more than once.
       expect((await screen.findAllByText(entry.help)).length).toBeGreaterThan(
         0,
       );
     }
-    // `normal` is the key claim: it reviews automatically too, and asks a human
-    // only when the review's conclusion needs one.
-    await user.selectOptions(main, '交互审批');
-    expect(screen.getByText(/同样进行自动审查/u)).toBeInTheDocument();
+    // The key claim: `ask` reviews with the same matrix and asks a person only
+    // when that matrix escalates. It is not a stricter review.
+    await user.selectOptions(main, '交互审批（ask）');
     expect(
-      screen.getByText(/只有审查结论需要人工决定时才发起审批/u),
+      screen.getByText(/需要人工决定时向真人发起审批/u),
     ).toBeInTheDocument();
+    expect(screen.getByText(/模式只决定是否提问/u)).toBeInTheDocument();
   });
 
   test('states that subagents have one shared mode and no per-subagent switch', async () => {
@@ -160,7 +163,7 @@ describe('approval-mode settings', () => {
     await user.click(trustedRadio);
     await user.selectOptions(
       screen.getByLabelText('主会话审批模式', { exact: false }),
-      'progress',
+      '自动审批（no-ask）',
     );
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     await waitFor(() => {

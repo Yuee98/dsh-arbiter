@@ -54,6 +54,9 @@ const NOT_A_PRIOR_VERDICT: ReadonlySet<string> = new Set([
   'allow',
   'review-allow',
   'human-allow',
+  // Cancelled before anything was decided: there is no verdict to carry forward,
+  // and offering "cancelled" as precedent would misdescribe later calls.
+  'review-cancelled',
 ]);
 
 /** Whether one logical call belongs in the prior-verdict window. */
@@ -447,6 +450,11 @@ const CALL_RESULTS: readonly CallResult[] = [
   'human-deny',
   'human-abort',
   'fallback-deny',
+  // A cancellation that arrived after the request was sent. It is a result, so a
+  // durable reader must recognize it; it is not a verdict, so it is excluded from
+  // the prior-verdict window below. Without this entry the record was rejected by
+  // both durable sources and surfaced as an uninterpretable-history gap.
+  'review-cancelled',
 ];
 
 /** Narrow an unknown value to a known decision result. */

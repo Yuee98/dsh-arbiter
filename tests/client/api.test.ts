@@ -136,7 +136,7 @@ describe('typed browser response boundaries', () => {
     {
       config: {
         ...DEFAULT_CONFIG,
-        modes: { main: 'unknown', subagent: 'strict' },
+        modes: { main: 'unknown', subagent: 'no-ask' },
       },
       field: 'main',
     },

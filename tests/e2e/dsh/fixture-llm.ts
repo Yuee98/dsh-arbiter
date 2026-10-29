@@ -18,11 +18,7 @@ import { join } from 'node:path';
 /** The fixed reviewer answer: low risk, clearly authorized, nothing alarming. */
 const REVIEW_ANSWER = JSON.stringify({
   risk: 2,
-  authorized: 8,
-  secrets: false,
-  destructive: false,
-  egress: false,
-  bulk: false,
+  authorization: 8,
 });
 
 export const name = 'arbiter-e2e-llm';
@@ -280,7 +276,11 @@ class FixtureAdapter {
     // tick must not observe a fully synchronous answer.
     await Promise.resolve();
     const system = options.system ?? '';
-    if (system.startsWith('REVIEW_POLICY')) {
+    // The contract both protocols start with. Checking the current prefix is what
+    // keeps this fixture recognizing a review after the shared-contract switch: a
+    // fixture keyed on the retired policy prefix would answer every review request
+    // as an ordinary conversation turn.
+    if (system.startsWith('REVIEW_CONTRACT')) {
       await this.barrier(options.messages ?? []);
       yield { type: 'block-start', index: 0, blockType: 'text' };
       yield { type: 'text-delta', index: 0, text: REVIEW_ANSWER };
@@ -481,8 +481,11 @@ function pendingActionText(messages: readonly ChatMessage[]): string {
   const at = text.lastIndexOf('PENDING_ACTION');
   if (at === -1) return '';
   const rest = text.slice(at + 'PENDING_ACTION'.length);
+  // The blocks that can follow the action in the current material renderer.
+  // Naming them exactly keeps the barrier key scoped to the pending action's own
+  // JSON instead of swallowing the completeness report after it.
   const end = rest.search(
-    /\n(?:REVIEW_HINT|DERIVED_FACTS|MISSING_INPUT|PRIOR_VERDICTS)\b/u,
+    /\n(?:ACTION_FACTS|REVIEW_HINT|MATERIAL_COMPLETENESS)\b/u,
   );
   return end === -1 ? rest : rest.slice(0, end);
 }

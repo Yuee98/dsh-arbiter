@@ -198,6 +198,8 @@ function attempt(value: unknown): CallDetailModelAttemptView {
     durationMs: field(source, 'durationMs', number),
     estimatedInputTokens: field(source, 'estimatedInputTokens', number),
     usage: field(source, 'usage', unknownValue),
+    normalizedUsage: field(source, 'normalizedUsage', unknownValue),
+    failureKind: field(source, 'failureKind', nullable(text)),
   };
 }
 
@@ -268,7 +270,8 @@ function detail(value: unknown): CallDetailView {
         choice('none', 'reviewed', 'unknown'),
       ),
       trace: field(basis, 'trace', strings),
-      signals: field(basis, 'signals', unknownValue),
+      scores: field(basis, 'scores', unknownValue),
+      usage: field(basis, 'usage', unknownValue),
       evidence: field(basis, 'evidence', array(unknownValue)),
       materials: field(basis, 'materials', array(unknownValue)),
       evidenceTruncated: field(basis, 'evidenceTruncated', boolean),

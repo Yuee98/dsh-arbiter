@@ -17,10 +17,15 @@ import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
-import { runDecisionReviewer } from '../src/reviewer/legacy/decision.js';
+import { runDecisionTransport } from '../src/reviewer/decision.js';
+import { storedAttemptOf } from '../src/reviewer/attempt.js';
+import {
+  renderChatUser,
+  renderDecisionRequest,
+} from '../src/reviewer/prompt.js';
 import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
-import type { ReviewSignals, TraceStage } from '../src/types.js';
+import type { ReviewScores, TraceStage } from '../src/types.js';
 
 const dirs: string[] = [];
 
@@ -51,20 +56,18 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 
-const signals: ReviewSignals = {
-  riskDist: null,
-  riskPoint: 1,
-  riskScore: null,
-  riskClass: 'low',
-  authDist: null,
-  authPoint: 1,
-  authClass: 'none',
-  secrets: false,
-  destructive: false,
-  egress: false,
-  bulk: false,
+/** One stored score pair, in the shape a current record writes. */
+const scores: ReviewScores = {
+  contractVersion: 'review-contract-v1',
   source: 'chat',
-  repairs: 0,
+  risk: 1,
+  authorization: 2,
+  requiredAuthorization: 2,
+  verdict: 'review-allow',
+  audit: {
+    risk: { native: null, published: null, point: 1, score: 1 },
+    authorization: { native: null, published: null, point: 2, score: 2 },
+  },
 };
 
 function record(
@@ -87,7 +90,7 @@ function record(
     fingerprint: fingerprintOf('bash', { command: 'echo hi' }),
     configRevision: 'rev-1',
     configSnapshotId: 'cfg-1',
-    approvalMode: 'normal',
+    approvalMode: 'ask',
     executionMode: 'trusted',
     reason: 'test',
     trace,
@@ -95,8 +98,9 @@ function record(
     sessionRecordState: 'written',
     snapshot: null,
     modelAttempts: [],
-    signals,
-    policyStrategy: 'normal',
+    scores,
+    reviewStage: 'review-allow',
+    usage: null,
     decisionRules: ['R7'],
     executionStatus: 'pending',
     ...overrides,
@@ -171,7 +175,9 @@ describe('audit store', () => {
     expect(detail).toMatchObject({
       result: 'review-allow',
       stages: expect.any(Array) as unknown,
-      signals: expect.objectContaining({ riskPoint: 1 }) as unknown,
+      // A current record stores the new score shape, not the retired probes.
+      scores: expect.objectContaining({ risk: 1, authorization: 2 }) as unknown,
+      reviewStage: 'review-allow',
     });
     store.close();
   });
@@ -758,6 +764,8 @@ describe('credential boundary in stored material', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),
@@ -795,7 +803,7 @@ describe('credential boundary in stored material', () => {
     // guarantee is about what the adapter hands the writer, and a hand-built
     // record would assert the test's own masking instead.
     const sentinel = 'sk-adapter-echo-sentinel';
-    const result = await runDecisionReviewer(
+    const result = await runDecisionTransport(
       {
         fetch: () =>
           Promise.resolve(
@@ -818,21 +826,19 @@ describe('credential boundary in stored material', () => {
           timeoutMs: 1000,
           costTier: 'free',
         },
-        thresholds: DEFAULT_CONFIG.policy.normal,
         signal: new AbortController().signal,
       },
-      PROBE_SNAPSHOT,
-      { user: 'STATE', estimatedInputTokens: 10 },
+      renderDecisionRequest(renderChatUser(PROBE_SNAPSHOT)),
       'echo-call',
     );
-    expect(result.ok).toBe(false);
+    expect(result.answer).toBe(null);
     const { store } = await makeStore();
     const path = store.databasePath;
     store.enqueue(
       record({
         callId: 'echo-call',
         result: 'review-deny',
-        modelAttempts: result.attempts,
+        modelAttempts: result.attempts.map(storedAttemptOf),
       }),
     );
     await store.flush();
@@ -882,6 +888,8 @@ describe('credential boundary in stored material', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),
@@ -921,6 +929,35 @@ describe('prior verdicts: window, ordering and unreadable count', () => {
       'c4',
       'c3',
     ]);
+    store.close();
+  });
+
+  test('a cancelled review is filtered before LIMIT, not after', async () => {
+    // A cancellation is not a verdict. If it is removed only in JavaScript, the
+    // LIMIT has already spent window slots on it, so real denials fall out of the
+    // window and cold recovery sees no history at all.
+    const { store } = await makeStore();
+    let ts = 1_700_000_000_000;
+    store.enqueue(
+      deniedRow({ callId: 'the-denial', result: 'review-deny', ts }),
+    );
+    for (const suffix of ['1', '2', '3', '4']) {
+      ts += 1;
+      store.enqueue(
+        deniedRow({
+          callId: `cancelled-${suffix}`,
+          result: 'review-cancelled',
+          ts,
+        }),
+      );
+    }
+    await store.flush();
+    // The window is one row; the denial is the only verdict in it.
+    const prior = store.priorVerdictsForSession('session-1', 1);
+    expect(prior.verdicts.map((item) => item.callId)).toEqual(['the-denial']);
+    // A wider window still contains no cancellation: it is not a verdict at all.
+    const wider = store.priorVerdictsForSession('session-1', 10);
+    expect(wider.verdicts.map((item) => item.callId)).toEqual(['the-denial']);
     store.close();
   });
 
@@ -1233,7 +1270,7 @@ describe('record and stage provenance', () => {
 });
 
 describe('analysis consumers and unknown formats', () => {
-  test('a partial signal set is unknown rather than defaulted to false', async () => {
+  test('a retired signal set carries no new-style score', async () => {
     const { store } = await makeStore();
     const path = store.databasePath;
     store.close();
@@ -1246,7 +1283,7 @@ describe('analysis consumers and unknown formats', () => {
          execution_started_at, execution_finished_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      'partial-signals',
+      'retired-signals',
       Date.now(),
       's1',
       'main',
@@ -1257,19 +1294,20 @@ describe('analysis consumers and unknown formats', () => {
       '{"command":"echo hi"}',
       null,
       '/w',
-      'bash:partial',
+      'bash:retired',
       'rev-1',
       'cfg-1',
-      'normal',
+      'ask',
       'trusted',
       'review-allow',
-      'partial',
+      'retired',
       '[]',
       'null',
       'written',
-      // A v1 signal set without the later probes.
+      // A row written before the shared-contract switch: the retired probe
+      // encoding is present, and no new-style score exists.
       '{"source":"chat","riskClass":"low","authClass":"none","riskPoint":1,"authDist":null,"riskDist":null,"riskScore":null,"authPoint":1}',
-      null,
+      'normal',
       '[]',
       'pending',
       1,
@@ -1279,10 +1317,13 @@ describe('analysis consumers and unknown formats', () => {
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
     const analysis = reopened.callsForAnalysis(0, Date.now() + 1_000);
-    // Unknown is not "all probes false": the row is skipped, not misread.
+    // The retired encoding is not reinterpreted as a band: the row reports no
+    // new-style score, which is a different fact from a score of the lowest band.
     expect(
-      analysis.find((row) => row.callId === 'partial-signals')?.signals,
+      analysis.find((row) => row.callId === 'retired-signals')?.scores,
     ).toBe(null);
+    // A replay only considers rows whose stored score this build can read, so a
+    // retired row is skipped rather than graded under today's matrix.
     expect(reopened.recentForReplay(10)).toEqual([]);
     reopened.close();
   });
@@ -1986,6 +2027,8 @@ describe('template snapshots are immutable and reused', () => {
     durationMs: 2,
     estimatedInputTokens: 3,
     usage: null,
+    normalizedUsage: null,
+    failureKind: null,
   });
 
   test('two calls with the same template share one stored row', async () => {
@@ -2220,6 +2263,8 @@ describe('structured-content format registries are independent', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),
@@ -2432,6 +2477,8 @@ describe('retention reclaims and protects the right references', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),
@@ -2508,6 +2555,8 @@ describe('capacity pressure from auxiliary files', () => {
               durationMs: 2,
               estimatedInputTokens: 3,
               usage: null,
+              normalizedUsage: null,
+              failureKind: null,
             },
           ],
         }),
@@ -2551,6 +2600,8 @@ describe('capacity pressure from auxiliary files', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),
@@ -2631,6 +2682,8 @@ describe('retention does not mistake free pages for auxiliary files', () => {
               durationMs: 2,
               estimatedInputTokens: 3,
               usage: null,
+              normalizedUsage: null,
+              failureKind: null,
             },
           ],
         }),
@@ -3171,6 +3224,8 @@ describe('call list paging and filtering', () => {
             durationMs: 2,
             estimatedInputTokens: 3,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
       }),

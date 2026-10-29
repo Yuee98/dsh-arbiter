@@ -44,11 +44,7 @@ const CHAT_COMPLETION = JSON.stringify({
         role: 'assistant',
         content: JSON.stringify({
           risk: 1,
-          authorized: 8,
-          secrets: false,
-          destructive: false,
-          egress: false,
-          bulk: false,
+          authorization: 8,
         }),
       },
     },

@@ -1063,7 +1063,7 @@ describe('protected authorization originals survive every cut', () => {
           ...DEFAULT_CONFIG.context,
           // Tight enough to force evidence trimming, so the trimmer must choose
           // which original to keep rather than dropping by position.
-          maxInputTokens: 2_200,
+          maxInputTokens: 3_000,
           evidenceMaxItems: 10,
         },
       },
@@ -1298,7 +1298,10 @@ describe('review threads: question scope and tool-history trim direction', () =>
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          maxInputTokens: 2_000,
+          // The shared contract is a large fixed preamble (rubric text, source
+          // ladder, answer shape): the budget has to leave room above it before
+          // any optional segment can be the thing that fails to fit.
+          maxInputTokens: 3_000,
           historyMaxItems: 8,
         },
       },
@@ -1307,8 +1310,14 @@ describe('review threads: question scope and tool-history trim direction', () =>
     const submitted = built.snapshot.context.map(
       (call) => /step-(\d+)/.exec(call.arguments)?.[1] ?? '?',
     );
-    // The retained window ends at the newest step, not at the oldest.
-    expect(submitted).toEqual(['4', '5']);
+    // The retained window ends at the newest step and is a contiguous suffix:
+    // cutting from the oldest end is the property, and it holds whatever the
+    // shared contract's own preamble costs.
+    expect(submitted.length).toBeGreaterThan(0);
+    expect(submitted.at(-1)).toBe('5');
+    expect(submitted).toEqual(
+      submitted.map((_step, index) => String(Number(submitted[0]) + index)),
+    );
     // The newest step's recorded failure survives with it.
     expect(built.snapshot.context.at(-1)?.result).toEqual({ ok: false });
   });

@@ -89,6 +89,17 @@ const SCHEMA_SQL = `
           trace TEXT NOT NULL,
           effect TEXT NOT NULL,
           session_record_state TEXT NOT NULL,
+          -- The current review shape. A record this build writes fills these and
+          -- only these; the signals and policy_strategy columns below are retired
+          -- and are never written by a current record.
+          scores TEXT,
+          review_stage TEXT,
+          usage TEXT,
+          -- Retired by the shared-contract switch: the old probe booleans,
+          -- probability classes and strategy name decided nothing the matrix does
+          -- not decide. Kept nullable so rows an earlier build wrote stay readable
+          -- as carrying no new-style score; RQ-06 removes the columns together
+          -- with the legacy read path.
           signals TEXT,
           policy_strategy TEXT,
           decision_rules TEXT NOT NULL,
@@ -137,7 +148,12 @@ const SCHEMA_SQL = `
           started_at INTEGER NOT NULL,
           duration_ms INTEGER NOT NULL,
           estimated_input_tokens INTEGER NOT NULL,
-          usage TEXT
+          usage TEXT,
+          normalized_usage TEXT,
+          -- Why this attempt produced no answer, as the transport classified it
+          -- (provider-refusal / unreadable-answer / transport). NULL means the
+          -- attempt succeeded, which is different from "unknown".
+          failure_kind TEXT
         );
         CREATE INDEX IF NOT EXISTS model_calls_call ON model_calls(call_id, attempt);
         CREATE TABLE IF NOT EXISTS candidates (
@@ -186,6 +202,14 @@ const ADDED_COLUMNS: readonly (readonly [string, string, string])[] = [
   ['calls', 'arguments_schema', 'TEXT'],
   ['calls', 'execution_started_at', 'INTEGER'],
   ['calls', 'execution_finished_at', 'INTEGER'],
+  // The new review shape. These are nullable with no default, so a row written
+  // by an earlier build keeps `NULL` and reads as "this row has no new-style
+  // score" — never as a score of zero or a backfilled value.
+  ['calls', 'scores', 'TEXT'],
+  ['calls', 'review_stage', 'TEXT'],
+  ['calls', 'usage', 'TEXT'],
+  ['model_calls', 'normalized_usage', 'TEXT'],
+  ['model_calls', 'failure_kind', 'TEXT'],
   ['stages', 'rule_name', 'TEXT'],
   ['stages', 'config_snapshot_id', 'TEXT'],
   ['model_calls', 'template_id', 'TEXT'],

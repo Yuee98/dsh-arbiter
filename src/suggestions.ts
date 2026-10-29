@@ -11,8 +11,7 @@
 import { createHash } from 'node:crypto';
 
 import type { AuditStore } from './audit.js';
-import type { PolicyThresholds, ReviewSignals } from './types.js';
-import { compareStrategies } from './policy.js';
+import type { ReviewScores } from './types.js';
 import { parseShell } from './shell/parse.js';
 
 export interface SuggestionOptions {
@@ -76,17 +75,22 @@ function commandOf(argumentsValue: unknown): string | null {
   return null;
 }
 
+/**
+ * The reason one allowed call is not a candidate for an allow rule.
+ *
+ * The old version read the four effect probes. Those are gone, so the same
+ * question is answered from what actually decides a call now: a risk band the
+ * matrix treats as consequential, and the observed effects the shell reader
+ * derived. A call the review only allowed because its authorization was complete
+ * is still excluded at high risk — turning "the user had authorized this once"
+ * into a standing rule is exactly what the shared matrix refuses.
+ */
 function hardCategory(
-  signals: ReviewSignals | null,
+  scores: ReviewScores | null,
   effect: unknown,
 ): string | null {
-  if (signals === null) return null;
-  if (signals.secrets && signals.egress)
-    return 'credential or sensitive material egress';
-  if (signals.secrets) return 'credential material';
-  if (signals.destructive) return 'destructive effect';
-  if (signals.egress) return 'network egress';
-  if (signals.bulk) return 'bulk or unbounded effect';
+  if (scores !== null && scores.risk >= 7)
+    return `risk band ${String(scores.risk)} is too consequential to generalize`;
   return observedCategory(effect);
 }
 
@@ -187,7 +191,7 @@ function accumulateCall(groups: Map<string, Group>, call: AnalysisCall): void {
     commands: [],
     skipped: [],
   };
-  const category = hardCategory(call.signals, call.effect);
+  const category = hardCategory(call.scores, call.effect);
   group.occurrences += 1;
   if (ALLOWED_RESULTS.has(call.result)) {
     if (category !== null) group.skipped.push(category);
@@ -256,69 +260,5 @@ function proposalFor(
       commands: group.commands,
       skipped: group.skipped,
     },
-  };
-}
-
-export interface ReplayResult {
-  readonly considered: number;
-  readonly comparable: number;
-  readonly promoted: number;
-  readonly normalAllow: number;
-  readonly progressAllow: number;
-  readonly changed: number;
-  readonly skipped: number;
-  readonly items: readonly {
-    readonly callId: string;
-    readonly tool: string;
-    readonly normal: string;
-    readonly progress: string;
-    readonly promoted: boolean;
-  }[];
-}
-
-/** Compare the regular and progress strategies over stored signals only. */
-export function replayPolicy(
-  store: AuditStore,
-  normal: PolicyThresholds,
-  progress: PolicyThresholds,
-  limit = 200,
-): ReplayResult {
-  const rows = store.recentForReplay(limit);
-  const items: Array<{
-    readonly callId: string;
-    readonly tool: string;
-    readonly normal: string;
-    readonly progress: string;
-    readonly promoted: boolean;
-  }> = [];
-  let comparable = 0;
-  let promoted = 0;
-  let normalAllow = 0;
-  let progressAllow = 0;
-  let changed = 0;
-  for (const row of rows) {
-    comparable += 1;
-    const compared = compareStrategies(row.signals, normal, progress);
-    if (compared.normal === 'review-allow') normalAllow += 1;
-    if (compared.progress === 'review-allow') progressAllow += 1;
-    if (compared.normal !== compared.progress) changed += 1;
-    if (compared.promoted) promoted += 1;
-    items.push({
-      callId: row.callId,
-      tool: row.tool,
-      normal: compared.normal,
-      progress: compared.progress,
-      promoted: compared.promoted,
-    });
-  }
-  return {
-    considered: rows.length,
-    comparable,
-    promoted,
-    normalAllow,
-    progressAllow,
-    changed,
-    skipped: rows.length - comparable,
-    items: items.slice(0, 50),
   };
 }

@@ -272,7 +272,11 @@ function rememberedDetail(
       chain,
       reviewState,
       trace,
-      signals: null,
+      // A session record keeps result strings only: it carries no score pair and no
+      // usage summary, so both stay unknown instead of being reconstructed from the
+      // live configuration or a later default.
+      scores: null,
+      usage: null,
       evidence: [],
       materials: [],
       evidenceTruncated: false,

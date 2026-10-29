@@ -137,7 +137,15 @@ export interface CallDetailBasis {
   readonly reviewState: CallDetailReviewState;
   /** The stored result sequence every source carries. */
   readonly trace: readonly string[];
-  readonly signals: unknown;
+  /**
+   * The scored pair this review reached, or null when it produced no score.
+   *
+   * `null` is a real state — a material gap or a reviewer failure reached its own
+   * stage without a number — so it never means "a score of the lowest band".
+   */
+  readonly scores: unknown;
+  /** The usage summary over this review's actual attempts, or null. */
+  readonly usage: unknown;
   /** Authorisation evidence and material provenance the review actually saw. */
   readonly evidence: readonly unknown[];
   readonly materials: readonly unknown[];
@@ -163,7 +171,18 @@ export interface CallDetailModelAttempt {
   readonly startedAt: number;
   readonly durationMs: number;
   readonly estimatedInputTokens: number;
+  /** The provider's usage payload after masking, exactly as received, or null. */
   readonly usage: unknown;
+  /** The same payload under the shared usage mapping, or null when nothing arrived. */
+  readonly normalizedUsage: unknown;
+  /**
+   * Why this attempt produced no answer, as the transport classified it.
+   *
+   * `null` means the attempt succeeded. The category is kept apart from the error
+   * text because a provider refusal, an unreadable answer and a broken transport
+   * are different facts, and inferring one from wording is not reliable.
+   */
+  readonly failureKind: string | null;
 }
 
 export interface CallDetailRaw {

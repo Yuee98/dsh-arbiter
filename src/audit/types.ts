@@ -1,10 +1,12 @@
 import type {
   CallResult,
   ModelAttemptRecord,
-  ReviewSignals,
+  ReviewScores,
   ReviewSnapshot,
+  ReviewStageRecord,
   TraceStage,
 } from '../types.js';
+
 export interface CallRecord {
   readonly callId: string;
   readonly ts: number;
@@ -34,8 +36,18 @@ export interface CallRecord {
   readonly sessionRecordState: string;
   readonly snapshot: ReviewSnapshot | null;
   readonly modelAttempts: readonly ModelAttemptRecord[];
-  readonly signals: ReviewSignals | null;
-  readonly policyStrategy: string | null;
+  /**
+   * The scored pair this review reached, or null when it produced no score.
+   *
+   * `null` is a real state — a material gap or a reviewer failure reached its own
+   * stage without a number — and it is stored as `NULL` rather than as a default
+   * band, so a reader can tell "no score" from "a score of the lowest band".
+   */
+  readonly scores: ReviewScores | null;
+  /** The stage the review reached, whether or not it settled as that stage. */
+  readonly reviewStage: ReviewStageRecord | null;
+  /** The review's usage summary over its actual attempts, or null when it ran none. */
+  readonly usage: unknown;
   readonly decisionRules: readonly string[];
   readonly executionStatus: string;
   /** When execution began, or null when it never began. */

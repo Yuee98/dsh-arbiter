@@ -1,4 +1,4 @@
-import type { ReviewSignals } from '../types.js';
+import type { ReviewScores, ReviewStageRecord } from '../types.js';
 import type {
   CallFilter,
   CallPage,
@@ -22,7 +22,8 @@ import {
   rowJson,
   rowStrings,
   rowTrace,
-  rowSignals,
+  rowScores,
+  rowReviewStage,
 } from './rows.js';
 export function configHistory(
   db: DatabaseSync,
@@ -172,7 +173,14 @@ function modelCallRow(model: Record<string, unknown>): Record<string, unknown> {
     startedAt: rowNumber(model['started_at']),
     durationMs: rowNumber(model['duration_ms']),
     estimatedInputTokens: rowNumber(model['estimated_input_tokens']),
+    // Both usage values are returned: the provider's masked payload so a reader can
+    // re-normalize it after the mapping version changes, and the normalization this
+    // build reads. A null is "the provider reported nothing", never a payload of
+    // zeros.
     usage: rowJson(model['usage']),
+    normalizedUsage: rowJson(model['normalized_usage']),
+    failureKind:
+      typeof model['failure_kind'] === 'string' ? model['failure_kind'] : null,
   };
 }
 
@@ -305,11 +313,9 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     trace: rowJson(call['trace']),
     effect: rowJson(call['effect']),
     sessionRecordState: rowText(call['session_record_state']),
-    signals: rowJson(call['signals']),
-    policyStrategy:
-      typeof call['policy_strategy'] === 'string'
-        ? call['policy_strategy']
-        : null,
+    scores: rowScores(call['scores']),
+    reviewStage: rowReviewStage(call['review_stage']),
+    usage: rowJson(call['usage']),
     decisionRules: rowStrings(call['decision_rules']),
     executionStatus: rowText(call['execution_status']),
     executionStartedAt: optionalNumber(call['execution_started_at']),
@@ -377,14 +383,14 @@ export function callsForAnalysis(
   readonly arguments: unknown;
   readonly result: string;
   readonly executionStatus: string;
-  readonly signals: ReviewSignals | null;
+  readonly scores: ReviewScores | null;
   readonly effect: unknown;
   readonly fingerprint: string;
 }[] {
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, ts, tool, arguments, result, execution_status, signals, effect, fingerprint,
+        `SELECT call_id, ts, tool, arguments, result, execution_status, scores, effect, fingerprint,
                 record_format_version
            FROM calls WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?`,
       )
@@ -402,7 +408,7 @@ export function callsForAnalysis(
         arguments: rowJson(row['arguments']),
         result: rowText(row['result']),
         executionStatus: rowText(row['execution_status']),
-        signals: rowSignals(row['signals']),
+        scores: rowScores(row['scores']),
         effect: rowJson(row['effect']),
         fingerprint: rowText(row['fingerprint']),
       },
@@ -428,6 +434,30 @@ export function callsForAnalysis(
  * unreadable row anywhere in the session answers it. Deleted or expired rows are
  * not counted, because they are genuinely gone rather than unreadable.
  */
+/**
+ * Results that are not prior verdicts, as one SQL list.
+ *
+ * The filter has to live in the statement, not after it: the `LIMIT` decides which
+ * rows are the window, so a row excluded only in JavaScript has already displaced a
+ * real verdict by the time it is dropped. A cancellation is not a verdict — nothing
+ * was decided — and letting it consume the window is how a stored denial disappears
+ * on cold recovery, when the session log cannot supply the missing decisions.
+ *
+ * This list and `NOT_A_PRIOR_VERDICT` in `history-record.ts` express the same rule
+ * for two readers; both must name every non-verdict result.
+ */
+const PRIOR_VERDICT_EXCLUSIONS = sqlList([
+  'allow',
+  'review-allow',
+  'human-allow',
+  'review-cancelled',
+]);
+
+/** Render literals as a quoted SQL list for an `IN`/`NOT IN` clause. */
+function sqlList(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(', ');
+}
+
 export function priorVerdictsForSession(
   db: DatabaseSync,
   sessionId: string,
@@ -458,7 +488,7 @@ export function priorVerdictsForSession(
                 decision_rules, effect
            FROM calls
           WHERE session_id = ?
-            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
             AND record_format_version IN (${placeholders})
           ORDER BY ts DESC, call_id DESC
           LIMIT ?`,
@@ -470,7 +500,7 @@ export function priorVerdictsForSession(
       .prepare(
         `SELECT COUNT(*) AS count FROM calls
           WHERE session_id = ?
-            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
             AND record_format_version NOT IN (${placeholders})`,
       )
       .get(sessionId, ...READABLE_CALL_FORMATS),
@@ -503,32 +533,32 @@ export function recentForReplay(
 ): readonly {
   readonly callId: string;
   readonly tool: string;
-  readonly signals: ReviewSignals;
+  readonly scores: ReviewScores;
   readonly result: string;
-  readonly strategy: string | null;
+  readonly reviewStage: ReviewStageRecord | null;
 }[] {
   const rows = asRows(
     db
       .prepare(
-        `SELECT call_id, tool, signals, result, policy_strategy, record_format_version
-           FROM calls WHERE signals IS NOT NULL ORDER BY ts DESC LIMIT ?`,
+        `SELECT call_id, tool, scores, result, review_stage, record_format_version
+           FROM calls WHERE scores IS NOT NULL ORDER BY ts DESC LIMIT ?`,
       )
       .all(limit),
   );
   return rows.flatMap((row) => {
     if (!readableFormat(formatOf(row))) return [];
-    const signals = rowSignals(row['signals']);
-    if (signals === null) return [];
+    const scores = rowScores(row['scores']);
+    // A row whose stored score cannot be interpreted is skipped rather than
+    // guessed at: replaying it under the current matrix would report a decision
+    // this build never made.
+    if (scores === null) return [];
     return [
       {
         callId: rowText(row['call_id']),
         tool: rowText(row['tool']),
-        signals,
+        scores,
         result: rowText(row['result']),
-        strategy:
-          typeof row['policy_strategy'] === 'string'
-            ? row['policy_strategy']
-            : null,
+        reviewStage: rowReviewStage(row['review_stage']),
       },
     ];
   });

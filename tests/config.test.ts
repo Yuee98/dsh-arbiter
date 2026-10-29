@@ -18,7 +18,7 @@ describe('configuration', () => {
   test('defaults are complete and valid', () => {
     const parsed = parseConfig({});
     expect(parsed.errors).toEqual([]);
-    expect(parsed.config.modes).toEqual({ main: 'normal', subagent: 'strict' });
+    expect(parsed.config.modes).toEqual({ main: 'ask', subagent: 'no-ask' });
     expect(parsed.config.reviewer.chat.provider).toBe('session');
     expect(parsed.config.audit.retentionDays).toBe(30);
     expect(parsed.config.audit.retentionBytes).toBe(1024 * 1024 * 1024);
@@ -71,14 +71,46 @@ describe('configuration', () => {
 
   test('rejects unknown modes and an unknown reviewer type', () => {
     const parsed = parseConfig({
-      modes: { main: 'yolo', subagent: 'normal' },
+      modes: { main: 'yolo', subagent: 'nope' },
       reviewer: { type: 'magic' },
     });
     expect(parsed.errors.map((error) => error.path)).toEqual(
       expect.arrayContaining(['modes.main', 'modes.subagent', 'reviewer.type']),
     );
-    expect(parsed.config.modes.main).toBe('normal');
-    expect(parsed.config.modes.subagent).toBe('strict');
+    // Absent/invalid values fall back to the confirmed defaults.
+    expect(parsed.config.modes.main).toBe('ask');
+    expect(parsed.config.modes.subagent).toBe('no-ask');
+  });
+
+  test('names the retired modes instead of converting them', () => {
+    // A stored document from the previous build is not silently reinterpreted:
+    // `progress` widened the matrix, and `normal`/`strict` were one engine plus a
+    // channel switch. Both are refused with the replacement named, so an
+    // operator learns the setting changed meaning rather than losing it.
+    const parsed = parseConfig({
+      modes: { main: 'progress', subagent: 'strict' },
+    });
+    const retired = parsed.errors.filter(
+      (error) => error.code === 'modes.retired',
+    );
+    expect(retired.map((error) => error.path)).toEqual([
+      'modes.main',
+      'modes.subagent',
+    ]);
+    // Nothing is converted: the fallback defaults apply, not a mapped value.
+    expect(parsed.config.modes).toEqual({ main: 'ask', subagent: 'no-ask' });
+  });
+
+  test('refuses the retired threshold and probe sections', () => {
+    // A document that still tunes `tauRisk` or `probeMode` is an error, not a
+    // silently ignored section: the operator must not believe a setting applies.
+    const parsed = parseConfig({
+      policy: { normal: { tauRisk: 0.6 }, probeMode: 'override' },
+    });
+    expect(parsed.errors.map((error) => error.path)).toEqual(
+      expect.arrayContaining(['policy.normal', 'policy.probeMode']),
+    );
+    expect(parsed.config.policy).toEqual({ version: 'arbiter-policy-v3' });
   });
 
   test('requires a URL and credential reference for the decision backend', () => {
@@ -256,7 +288,7 @@ describe('configuration', () => {
   });
 
   test('default configuration remains the fallback shape', () => {
-    expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v2');
+    expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v3');
     expect(DEFAULT_CONFIG.rules).toEqual([]);
   });
 });
@@ -269,7 +301,7 @@ describe('first install defaults', () => {
       expect(parsed.warnings).toEqual([]);
       expect(parsed.config).toMatchObject({
         enabled: true,
-        modes: { main: 'normal', subagent: 'strict' },
+        modes: { main: 'ask', subagent: 'no-ask' },
         rules: [],
         reviewer: { type: 'chat', chat: { provider: 'session' } },
         audit: {
@@ -285,7 +317,7 @@ describe('first install defaults', () => {
   test('an existing document keeps its values instead of being overwritten by defaults', () => {
     const parsed = parseConfig({
       enabled: false,
-      modes: { main: 'strict', subagent: 'progress' },
+      modes: { main: 'no-ask', subagent: 'ask' },
       audit: { retentionDays: 7, retentionBytes: 1024 * 1024 },
       reviewer: {
         type: 'decision',
@@ -295,8 +327,8 @@ describe('first install defaults', () => {
     expect(parsed.errors).toEqual([]);
     expect(parsed.config.enabled).toBe(false);
     expect(parsed.config.modes).toEqual({
-      main: 'strict',
-      subagent: 'progress',
+      main: 'no-ask',
+      subagent: 'ask',
     });
     expect(parsed.config.audit).toMatchObject({
       retentionDays: 7,
@@ -870,7 +902,7 @@ describe('format round-trip through a save payload', () => {
 describe('malformed parent objects', () => {
   test('a supplied non-object parent is an error instead of reverting silently', () => {
     const parsed = parseConfig({
-      modes: 'strict',
+      modes: 'ask',
       reviewer: null,
       policy: 7,
       context: [],
@@ -892,15 +924,15 @@ describe('malformed parent objects', () => {
     );
     // The normalized value still carries defaults, but the document is invalid,
     // so the caller keeps the configuration that is already in effect.
-    expect(parsed.config.modes.main).toBe('normal');
+    expect(parsed.config.modes.main).toBe('ask');
   });
 
   test('absent parents still use defaults without errors', () => {
     const parsed = parseConfig({ enabled: false });
     expect(parsed.errors).toEqual([]);
     expect(parsed.config.modes).toEqual({
-      main: 'normal',
-      subagent: 'strict',
+      main: 'ask',
+      subagent: 'no-ask',
     });
   });
 

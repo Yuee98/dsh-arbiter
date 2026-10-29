@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import {
   Field,
   NumberInput,
-  RadioGroup,
   Section,
   Select,
   TextInput,
@@ -21,7 +20,7 @@ export function AdvancedPanel(props: {
 
   return (
     <>
-      <PolicySettings draft={draft} onDraft={onDraft} />
+      <PolicySettings />
 
       <ContextSettings draft={draft} onDraft={onDraft} />
 
@@ -30,101 +29,25 @@ export function AdvancedPanel(props: {
   );
 }
 
-function PolicySettings({
-  draft,
-  onDraft,
-}: {
-  readonly draft: Draft;
-  readonly onDraft: (mutator: (draft: Draft) => void) => void;
-}): ReactNode {
+/**
+ * The review policy section.
+ *
+ * There is nothing to tune here any more, and the page says so instead of showing
+ * retired numbers: the ten bands, the N0 rule and the matrix are the shared review
+ * contract, and the only mode choice lives on the status panel. Showing the old
+ * thresholds would invite an operator to change a setting that no longer reaches
+ * the engine.
+ */
+function PolicySettings(): ReactNode {
   const t = useArbiterTranslation();
-  const thresholdFields = [
-    ['tauAuth', t('advanced.tauAuth'), 0, 1, 0.05],
-    ['tauRisk', t('advanced.tauRisk'), 0, 1, 0.05],
-    ['tauCritical', t('advanced.tauCritical'), 0, 1, 0.05],
-    ['tauLow', t('advanced.tauLow'), 0, 1, 0.05],
-    ['chatMediumRiskMax', t('advanced.chatMediumMax'), 0, 10, 1],
-    ['mediumRiskCeiling', t('advanced.decisionMax'), 0, 10, 1],
-    ['explicitFromRisk', t('advanced.explicitRisk'), 0, 10, 1],
-  ] as const;
   return (
     <Section
       title={t('advanced.policyTitle')}
-      description={t('advanced.policyDescription')}
+      description={t('advanced.policyFixed')}
     >
-      <div className="arb:grid arb:grid-cols-3 arb:gap-2.5 arb:max-w-2xl">
-        <div className="arb:text-xs arb:font-semibold arb:text-primary">
-          {t('advanced.parameter')}
-        </div>
-        <div className="arb:text-xs arb:font-semibold arb:text-primary">
-          {t('advanced.normal')}
-        </div>
-        <div className="arb:text-xs arb:font-semibold arb:text-primary">
-          {t('advanced.progress')}
-        </div>
-        {thresholdFields.map(([key, label, min, max, step]) => (
-          <div key={key} className="arb:contents">
-            <div className="arb:text-xs arb:leading-[30px] arb:text-secondary">
-              {label}
-            </div>
-            <NumberInput
-              value={draft.policy.normal[key]}
-              min={min}
-              max={max}
-              step={step}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.policy.normal[key] = value;
-                });
-              }}
-            />
-            <NumberInput
-              value={draft.policy.progress[key]}
-              min={min}
-              max={max}
-              step={step}
-              onChange={(value) => {
-                onDraft((next) => {
-                  next.policy.progress[key] = value;
-                });
-              }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="arb:flex arb:flex-wrap arb:items-center arb:gap-4 arb:pt-2">
-        <label className="arb:flex arb:cursor-pointer arb:items-center arb:gap-1.5 arb:text-xs arb:text-primary">
-          <input
-            type="checkbox"
-            checked={draft.policy.progress.allowBulkEgress}
-            className="arb:rounded arb:border-border-default arb:accent-accent"
-            onChange={(event) => {
-              onDraft((next) => {
-                next.policy.progress.allowBulkEgress = event.target.checked;
-              });
-            }}
-          />
-          {t('advanced.bulkEgress')}
-        </label>
-        <div className="arb:flex arb:flex-col arb:gap-1.5 arb:text-xs">
-          <span className="arb:text-secondary">{t('advanced.probeMode')}</span>
-          <RadioGroup
-            ariaLabel={t('advanced.probeMode')}
-            name="advanced-probe-mode"
-            value={draft.policy.probeMode}
-            options={['assist', 'override'] as const}
-            labels={{
-              assist: t('advanced.assist'),
-              override: t('advanced.override'),
-            }}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.policy.probeMode = value;
-              });
-            }}
-          />
-        </div>
-      </div>
+      <p className="arb:m-0 arb:text-[11.5px] arb:text-tertiary">
+        {t('advanced.policyModesNote')}
+      </p>
     </Section>
   );
 }

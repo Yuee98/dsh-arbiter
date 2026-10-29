@@ -155,7 +155,7 @@ describe('first install and reload activation', () => {
       const state = harness.state();
       expect(state['config']).toMatchObject({
         enabled: true,
-        modes: { main: 'normal', subagent: 'strict' },
+        modes: { main: 'ask', subagent: 'no-ask' },
         rules: [],
         reviewer: { type: 'chat', chat: { provider: 'session' } },
         audit: { retentionDays: 30, retentionBytes: 1024 ** 3 },
@@ -173,12 +173,12 @@ describe('first install and reload activation', () => {
 
   test('an existing document is not overwritten by the first-install defaults', async () => {
     const harness = await createHarness({
-      config: { enabled: false, modes: { main: 'strict' } },
+      config: { enabled: false, modes: { main: 'no-ask' } },
     });
     try {
       expect(harness.state()['config']).toMatchObject({
         enabled: false,
-        modes: { main: 'strict', subagent: 'strict' },
+        modes: { main: 'no-ask', subagent: 'no-ask' },
       });
       expect(harness.history()[0]?.entry).toBe('startup');
     } finally {
@@ -208,7 +208,7 @@ describe('first install and reload activation', () => {
     const before = first.state();
     const reloaded = first.reread({
       enabled: true,
-      modes: { main: 'progress' },
+      modes: { main: 'no-ask' },
     });
     try {
       expect(reloaded.state()['effectiveRevision']).not.toBe(
@@ -216,7 +216,7 @@ describe('first install and reload activation', () => {
       );
       expect(reloaded.state()['config']).toMatchObject({
         enabled: true,
-        modes: { main: 'progress' },
+        modes: { main: 'no-ask' },
       });
       expect(reloaded.history()[0]?.entry).toBe('file');
       expect(reloaded.history()).toHaveLength(2);
@@ -271,7 +271,7 @@ describe('shared save path', () => {
       const before = harness.state();
       const result = await save(harness, {
         enabled: true,
-        modes: { main: 'progress' },
+        modes: { main: 'no-ask' },
       });
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({
@@ -288,7 +288,7 @@ describe('shared save path', () => {
       expect(
         JSON.parse(await readFile(harness.documentPath, 'utf8')),
       ).toMatchObject({ enabled: true });
-      expect(harness.host.runtime.config.modes.main).toBe('progress');
+      expect(harness.host.runtime.config.modes.main).toBe('no-ask');
       expect(harness.history()[0]?.entry).toBe('ui');
       expect(harness.services.sessions).not.toHaveBeenCalled();
       expect(harness.services.approvalRequest).not.toHaveBeenCalled();
@@ -397,7 +397,7 @@ describe('shared save path', () => {
     try {
       const result = await save(harness, {
         enabled: true,
-        modes: { main: 'strict' },
+        modes: { main: 'no-ask' },
       });
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({
@@ -409,7 +409,7 @@ describe('shared save path', () => {
       expect(typeof result.body['auditError']).toBe('string');
       expect(harness.host.runtime.config).toMatchObject({
         enabled: true,
-        modes: { main: 'strict' },
+        modes: { main: 'no-ask' },
       });
       expect(harness.state()['effectiveRevision']).toMatch(/^[0-9a-f]{8}$/);
       expect(harness.history()).toEqual([]);
@@ -671,7 +671,7 @@ describe('cold restart recovery', () => {
     try {
       expect(cold.runtime.config).toMatchObject({
         enabled: false,
-        modes: { main: 'normal', subagent: 'strict' },
+        modes: { main: 'ask', subagent: 'no-ask' },
       });
       expect(cold.runtime.invalidConfigError).toContain('format');
       // Identical content reuses the persisted snapshot, so a cold start never
@@ -698,7 +698,7 @@ describe('UI attribution correlation', () => {
       editor.edit = () => {
         const external = harness.reread({
           enabled: true,
-          modes: { main: 'progress' },
+          modes: { main: 'no-ask' },
         });
         external.dispose();
         return Promise.reject(new Error('revision changed'));
@@ -707,7 +707,7 @@ describe('UI attribution correlation', () => {
       expect(result.status).toBe(422);
       // The external change is attributed to the file, not to this save.
       expect(harness.history()[0]?.entry).toBe('file');
-      expect(harness.host.runtime.config.modes.main).toBe('progress');
+      expect(harness.host.runtime.config.modes.main).toBe('no-ask');
     } finally {
       harness.dispose();
     }
@@ -772,7 +772,7 @@ describe('competing UI saves', () => {
         // lock; it must be rejected by the revision check, not steal the marker.
         if (nested === undefined)
           nested = new ConfigurationAccess(harness.host).save(
-            request({ enabled: true, modes: { main: 'progress' } }),
+            request({ enabled: true, modes: { main: 'no-ask' } }),
           );
         return firstEdit(entry, change);
       };
@@ -782,7 +782,7 @@ describe('competing UI saves', () => {
       expect(await nested?.then((response) => response.status)).toBe(409);
       // The accepted content's reload is attributed to the UI exactly once.
       expect(harness.history()[0]?.entry).toBe('ui');
-      expect(harness.host.runtime.config.modes.main).toBe('normal');
+      expect(harness.host.runtime.config.modes.main).toBe('ask');
     } finally {
       harness.dispose();
     }

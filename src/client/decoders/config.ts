@@ -2,7 +2,6 @@ import type {
   ArbiterConfig,
   CommandRule,
   ContextConfig,
-  PolicyThresholds,
   ReviewerConfig,
   RuleCondition,
   RuleScope,
@@ -97,20 +96,6 @@ export function commandRule(value: unknown): CommandRule {
   };
 }
 
-function thresholds(value: unknown): PolicyThresholds {
-  const source = object(value);
-  return {
-    tauAuth: field(source, 'tauAuth', number),
-    tauRisk: field(source, 'tauRisk', number),
-    tauCritical: field(source, 'tauCritical', number),
-    tauLow: field(source, 'tauLow', number),
-    chatMediumRiskMax: field(source, 'chatMediumRiskMax', number),
-    mediumRiskCeiling: field(source, 'mediumRiskCeiling', number),
-    explicitFromRisk: field(source, 'explicitFromRisk', number),
-    allowBulkEgress: field(source, 'allowBulkEgress', boolean),
-  };
-}
-
 function reviewer(value: unknown): ReviewerConfig {
   const source = object(value);
   const chat = field(source, 'chat', object);
@@ -173,16 +158,13 @@ export function configuration(value: unknown): ArbiterConfig {
       field(source, 'boundary', optional(choice('guarded', 'trusted'))) ??
       'guarded',
     modes: {
-      main: field(modes, 'main', choice('normal', 'strict', 'progress')),
-      subagent: field(modes, 'subagent', choice('strict', 'progress')),
+      main: field(modes, 'main', choice('ask', 'no-ask')),
+      subagent: field(modes, 'subagent', choice('ask', 'no-ask')),
     },
     rules: field(source, 'rules', array(commandRule)),
     reviewer: field(source, 'reviewer', reviewer),
     policy: {
       version: field(policy, 'version', text),
-      normal: field(policy, 'normal', thresholds),
-      progress: field(policy, 'progress', thresholds),
-      probeMode: field(policy, 'probeMode', choice('assist', 'override')),
     },
     context: field(source, 'context', context),
     audit: {

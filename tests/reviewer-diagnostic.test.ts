@@ -4,7 +4,7 @@ import { NEW_SCALE_CLOUDFLARE } from './helpers/decision-captures.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
   PROBE_SNAPSHOT,
-  renderUser,
+  renderChatUser,
   runReviewerProbe,
 } from '../src/reviewer.js';
 import type { ArbiterConfig } from '../src/types.js';
@@ -106,14 +106,14 @@ describe('probe input', () => {
     expect(PROBE_SNAPSHOT.missing).toEqual([]);
     expect(PROBE_SNAPSHOT.budget.truncatedSegments).toEqual([]);
     // The probe never carries a caller's session identity.
-    expect(renderUser(PROBE_SNAPSHOT)).toContain('printf arbiter-probe');
+    expect(renderChatUser(PROBE_SNAPSHOT)).toContain('printf arbiter-probe');
   });
 
   test('the rendered material is stable across runs', () => {
-    const first = renderUser(PROBE_SNAPSHOT);
+    const first = renderChatUser(PROBE_SNAPSHOT);
     // `createdAt` is not part of the material, so a different clock value must
     // not change what the model is asked.
-    const second = renderUser({ ...PROBE_SNAPSHOT, createdAt: 999 });
+    const second = renderChatUser({ ...PROBE_SNAPSHOT, createdAt: 999 });
     expect(second).toBe(first);
   });
 });

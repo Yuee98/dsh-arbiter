@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { ReviewSignals, TraceStage } from '../types.js';
+import type {
+  ReviewScores,
+  ReviewScoreTrail,
+  ReviewStageRecord,
+  TraceStage,
+} from '../types.js';
 export function json(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
@@ -61,73 +66,88 @@ export function rowDistribution(
 }
 
 /**
- * A stored signal set, or null when it cannot be interpreted.
+ * A stored score pair, or null when it cannot be interpreted.
  *
- * A v1 row predates some fields. Reporting `secrets: false` for a value that
- * was never recorded would turn "unknown" into a positive claim a later
- * analysis or replay reads as fact, so the whole row is treated as unknown
- * instead. Known format versions must already carry every probe.
- */
-/** The probes every interpretable signal set must carry as booleans. */
-const SIGNAL_PROBES = ['secrets', 'destructive', 'egress', 'bulk'] as const;
-
-/**
- * Whether a stored signal set carries every field this build interprets.
+ * Every field a decision needs is required: the two bands, the required
+ * authorization the matrix applied, the verdict and the contract version that
+ * names the semantics. A row missing any of them is not guessed at — reporting a
+ * default band would state a decision this build never made.
  *
- * A row missing a probe is *unknown*, not "all probes false": a later analysis
- * that read a default would turn an absence into a positive claim.
+ * `signals` and `policy_strategy` are the *retired* encoding and are absent from a
+ * current record by construction, so nothing here reads them: a row that carries
+ * only those columns has no new-style score, which is the honest answer.
  */
-function completeSignals(parsed: Record<string, unknown>): boolean {
-  if (parsed['source'] !== 'chat' && parsed['source'] !== 'decision')
-    return false;
-  if (!SIGNAL_PROBES.every((probe) => typeof parsed[probe] === 'boolean'))
-    return false;
-  if (typeof parsed['repairs'] !== 'number') return false;
-  const riskClass = parsed['riskClass'];
-  const authClass = parsed['authClass'];
-  if (riskClass !== 'low' && riskClass !== 'medium' && riskClass !== 'high')
-    return false;
-  return (
-    authClass === 'none' || authClass === 'implied' || authClass === 'explicit'
-  );
-}
-
-export function rowSignals(value: unknown): ReviewSignals | null {
+export function rowScores(value: unknown): ReviewScores | null {
   const parsed = rowJson(value);
   if (!isRecord(parsed)) return null;
-  // `completeSignals` already proved every field this object uses is present
-  // and well-typed, so the narrowing below is reading proven facts.
-  if (!completeSignals(parsed)) return null;
-  const riskClass = parsed['riskClass'];
-  const authClass = parsed['authClass'];
-  if (riskClass !== 'low' && riskClass !== 'medium' && riskClass !== 'high')
-    return null;
-  if (
-    authClass !== 'none' &&
-    authClass !== 'implied' &&
-    authClass !== 'explicit'
-  )
-    return null;
   const source = parsed['source'];
   if (source !== 'chat' && source !== 'decision') return null;
+  const verdict = parsed['verdict'];
+  if (
+    verdict !== 'review-allow' &&
+    verdict !== 'review-deny' &&
+    verdict !== 'review-escalate'
+  )
+    return null;
+  const risk = parsed['risk'];
+  const authorization = parsed['authorization'];
+  const required = parsed['requiredAuthorization'];
+  const contractVersion = parsed['contractVersion'];
+  if (
+    typeof risk !== 'number' ||
+    typeof authorization !== 'number' ||
+    typeof required !== 'number' ||
+    typeof contractVersion !== 'string'
+  )
+    return null;
+  const audit = parsed['audit'];
+  if (!isRecord(audit)) return null;
+  const riskTrail = rowTrail(audit['risk']);
+  const authorizationTrail = rowTrail(audit['authorization']);
+  if (riskTrail === null || authorizationTrail === null) return null;
   return {
-    riskDist: rowDistribution(parsed['riskDist']),
-    riskPoint:
-      typeof parsed['riskPoint'] === 'number' ? parsed['riskPoint'] : null,
-    riskScore:
-      typeof parsed['riskScore'] === 'number' ? parsed['riskScore'] : null,
-    riskClass,
-    authDist: rowDistribution(parsed['authDist']),
-    authPoint:
-      typeof parsed['authPoint'] === 'number' ? parsed['authPoint'] : null,
-    authClass,
-    secrets: parsed['secrets'] === true,
-    destructive: parsed['destructive'] === true,
-    egress: parsed['egress'] === true,
-    bulk: parsed['bulk'] === true,
+    contractVersion,
     source,
-    repairs: typeof parsed['repairs'] === 'number' ? parsed['repairs'] : 0,
+    risk,
+    authorization,
+    requiredAuthorization: required,
+    verdict,
+    audit: { risk: riskTrail, authorization: authorizationTrail },
   };
+}
+
+/** One field's stored score trail, or null when it cannot be interpreted. */
+function rowTrail(value: unknown): ReviewScoreTrail | null {
+  if (!isRecord(value)) return null;
+  const score = value['score'];
+  if (typeof score !== 'number') return null;
+  const point = value['point'];
+  return {
+    native: rowDistribution(value['native']),
+    published: rowDistribution(value['published']),
+    point: typeof point === 'number' ? point : null,
+    score,
+  };
+}
+
+/**
+ * A stored review stage, or null when it is absent or not one of the four.
+ *
+ * The four values are a closed set: an unrecognized string is reported as absent
+ * rather than passed through, so a reader that switches on the stage cannot be
+ * handed a value it has no branch for.
+ */
+export function rowReviewStage(value: unknown): ReviewStageRecord | null {
+  if (typeof value !== 'string') return null;
+  switch (value) {
+    case 'review-allow':
+    case 'review-deny':
+    case 'review-escalate':
+    case 'error-escalate':
+      return value;
+    default:
+      return null;
+  }
 }
 
 export function rowChanges(value: unknown): number {

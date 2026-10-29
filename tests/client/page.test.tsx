@@ -36,7 +36,7 @@ describe('prototype page after panel extraction', () => {
     const mode = await screen.findByLabelText('主会话审批模式', {
       exact: false,
     });
-    await user.selectOptions(mode, 'strict');
+    await user.selectOptions(mode, 'no-ask');
     await user.click(screen.getByRole('button', { name: 'Reviewer' }));
     expect(
       await screen.findByRole('heading', { name: 'Reviewer 类型' }),
@@ -44,12 +44,12 @@ describe('prototype page after panel extraction', () => {
     await user.click(screen.getByRole('button', { name: '状态与模式' }));
     expect(
       screen.getByLabelText('主会话审批模式', { exact: false }),
-    ).toHaveValue('strict');
+    ).toHaveValue('no-ask');
     await user.click(screen.getByRole('button', { name: '校验草稿' }));
     await waitFor(() => {
       expect(requests).toHaveLength(1);
       expect(requests[0]).toMatchObject({
-        config: { modes: { main: 'strict', subagent: 'strict' } },
+        config: { modes: { main: 'no-ask', subagent: 'no-ask' } },
       });
     });
   });
@@ -166,7 +166,7 @@ describe('prototype page after panel extraction', () => {
         saves += 1;
         expect(await request.json()).toMatchObject({
           revision: 'file-1',
-          config: { modes: { main: 'progress' } },
+          config: { modes: { main: 'no-ask' } },
         });
         return HttpResponse.json(
           {
@@ -183,7 +183,7 @@ describe('prototype page after panel extraction', () => {
     const mode = await screen.findByLabelText('主会话审批模式', {
       exact: false,
     });
-    await user.selectOptions(mode, 'progress');
+    await user.selectOptions(mode, 'no-ask');
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
     expect(await screen.findByText(/配置文件已被外部修改/)).toBeInTheDocument();
     expect(pageSaveStatus()).toHaveTextContent(
@@ -192,7 +192,7 @@ describe('prototype page after panel extraction', () => {
     // The draft survives the rejected save.
     expect(
       screen.getByLabelText('主会话审批模式', { exact: false }),
-    ).toHaveValue('progress');
+    ).toHaveValue('no-ask');
     expect(saves).toBe(1);
   });
 
@@ -393,7 +393,7 @@ test('an explicitly declared format survives decode, draft and the actual save r
   );
   const { user } = renderClient(<ArbiterPage />);
   const mode = await screen.findByLabelText('主会话审批模式', { exact: false });
-  await user.selectOptions(mode, 'strict');
+  await user.selectOptions(mode, 'no-ask');
   await user.click(screen.getByRole('button', { name: '校验草稿' }));
   await user.click(screen.getByRole('button', { name: '保存并应用' }));
   await waitFor(() => {
@@ -403,7 +403,7 @@ test('an explicitly declared format survives decode, draft and the actual save r
     expect(body).toMatchObject({
       config: {
         format: 'arbiter-config-v1',
-        modes: { main: 'strict' },
+        modes: { main: 'no-ask' },
       },
     });
   }
@@ -448,7 +448,7 @@ test('editing a legacy document saves canonical rules instead of failing', async
   const { user } = renderClient(<ArbiterPage />);
   // Change an unrelated setting; the rule itself is untouched.
   const mode = await screen.findByLabelText('主会话审批模式', { exact: false });
-  await user.selectOptions(mode, 'strict');
+  await user.selectOptions(mode, 'no-ask');
   await user.click(screen.getByRole('button', { name: '保存并应用' }));
   await waitFor(() => {
     expect(bodies).toHaveLength(1);
@@ -456,7 +456,7 @@ test('editing a legacy document saves canonical rules instead of failing', async
   // Saving canonical rules requires the declaration this build writes, otherwise
   // the document would be re-read as an older format and lose the connective.
   expect(bodies[0]).toMatchObject({
-    config: { format: 'arbiter-config-v3', modes: { main: 'strict' } },
+    config: { format: 'arbiter-config-v3', modes: { main: 'no-ask' } },
   });
 });
 

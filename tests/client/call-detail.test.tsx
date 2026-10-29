@@ -68,7 +68,7 @@ function auditDetailBody(): DetailBody {
         workspace: '/workspace/app',
         cwd: '/workspace/app',
         profile: 'default',
-        approvalMode: 'normal',
+        approvalMode: 'ask',
         executionMode: 'guarded',
         verdict: 'review-deny',
         verdictReason: 'the review rejected this call',
@@ -115,7 +115,8 @@ function auditDetailBody(): DetailBody {
         reviewState: 'reviewed',
         conflicts: [],
         conflictsTruncated: false,
-        signals: null,
+        scores: null,
+        usage: null,
         evidence: [
           {
             ts: 1_700_000_000_000,
@@ -146,13 +147,15 @@ function auditDetailBody(): DetailBody {
             protocol: 'arbiter-chat-json-v1',
             templateId: 'tpl-1',
             request: { system: 'review this' },
-            responseText: '{"risk":9,"authorized":1}',
-            parsed: { risk: 9, authorized: 1 },
+            responseText: '{"risk":9,"authorization":1}',
+            parsed: { risk: 9, authorization: 1 },
             error: null,
             startedAt: 1_700_000_000_002,
             durationMs: 120,
             estimatedInputTokens: 900,
             usage: null,
+            normalizedUsage: null,
+            failureKind: null,
           },
         ],
         templates: [],
@@ -185,6 +188,73 @@ function verdictRegion(): HTMLElement {
 function overviewGroup(): HTMLElement {
   return screen.getByRole('group', { name: '调用概览' });
 }
+
+describe('per-attempt usage and failure classification', () => {
+  test('shows the provider payload, its normalization and the failure class', async () => {
+    // A repair: the first attempt was unreadable and reported partial usage, the
+    // second succeeded. The page has to let a reader tell which attempt cost what
+    // and why the first one produced nothing — the aggregate cannot answer that.
+    const body = auditDetailBody();
+    body.detail.raw['modelAttempts'] = [
+      {
+        requestId: 'call-1:model:1',
+        attempt: 1,
+        backend: 'chat',
+        protocol: 'arbiter-chat-json-v2',
+        templateId: 'tpl-1',
+        request: { system: 'prompt 1' },
+        responseText: '{"risk":1}',
+        parsed: null,
+        error: 'reviewer output must contain exactly risk, authorization',
+        startedAt: 1_700_000_000_002,
+        durationMs: 120,
+        estimatedInputTokens: 900,
+        usage: { inputTokens: 900, outputTokens: 5, totalTokens: 905 },
+        normalizedUsage: {
+          mappingVersion: 'review-usage-v1',
+          tokens: { inputTokens: 900, outputTokens: 5, totalTokens: 905 },
+        },
+        failureKind: 'unreadable-answer',
+      },
+      {
+        requestId: 'call-1:model:2',
+        attempt: 2,
+        backend: 'chat',
+        protocol: 'arbiter-chat-json-v2',
+        templateId: 'tpl-2',
+        request: { system: 'prompt 2' },
+        responseText: '{"risk":2,"authorization":9}',
+        parsed: { risk: 2, authorization: 9 },
+        error: null,
+        startedAt: 1_700_000_000_200,
+        durationMs: 150,
+        estimatedInputTokens: 950,
+        // The provider reported nothing here, which is different from zero.
+        usage: null,
+        normalizedUsage: null,
+        failureKind: null,
+      },
+    ];
+    mockDetail(body);
+    const { user } = renderClient(<CallDetailPanel callId="call-1" />);
+    await screen.findByRole('heading', { name: '调用详情 · call-1' });
+    await user.click(screen.getByRole('button', { name: /原始材料/u }));
+
+    // The first attempt's failure category and both of its usage values.
+    expect(screen.getByText('unreadable-answer')).toBeInTheDocument();
+    expect(screen.getAllByText('规范化用量').length).toBeGreaterThan(0);
+    // Both usage cards are present: the provider payload and its normalization.
+    expect(screen.getAllByText('用量').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('规范化用量').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/905/u).length).toBeGreaterThan(0);
+
+    // Selecting the second attempt shows the explicit "nothing recorded" state
+    // rather than an empty panel that could read as "zero tokens".
+    const second = screen.getByRole('button', { name: /第 2 次|attempt 2|2/u });
+    await user.click(second);
+    expect(screen.getAllByText('没有记录用量。').length).toBeGreaterThan(0);
+  });
+});
 
 describe('shared call detail', () => {
   test('renders the final verdict before the other overview facts', async () => {
@@ -236,7 +306,7 @@ describe('shared call detail', () => {
     expect(screen.getByText('提交的请求')).toBeInTheDocument();
     expect(screen.getByText('模型原文')).toBeInTheDocument();
     // The model's own answer is shown verbatim, as stored.
-    const answers = screen.getAllByText(/authorized/u);
+    const answers = screen.getAllByText(/authorization/u);
     expect(answers.length).toBeGreaterThanOrEqual(1);
     expect(answers[0]?.textContent).toContain('risk');
     // The runtime's own reason is a separate layer, not this answer text.
@@ -245,23 +315,37 @@ describe('shared call detail', () => {
     );
   });
 
-  test('shows the policy signals without presenting them as the verdict', async () => {
+  test('shows the scored pair and usage without presenting them as the verdict', async () => {
     const body = auditDetailBody();
-    body.detail.basis['signals'] = {
-      riskPoint: 9,
-      authPoint: 1,
-      riskClass: 'high',
+    body.detail.basis['scores'] = {
+      risk: 9,
+      authorization: 1,
+      requiredAuthorization: 10,
+      verdict: 'review-deny',
+    };
+    body.detail.basis['usage'] = {
+      attempts: 1,
+      withUsage: 1,
+      totals: {
+        inputTokens: { total: 900, reported: 1, missing: 0, complete: true },
+      },
     };
     mockDetail(body);
     const { user } = renderClient(<CallDetailPanel callId="call-1" />);
     await screen.findByRole('region', { name: '最终裁决' });
-    await user.click(screen.getByRole('button', { name: '信号与阈值' }));
+    await user.click(screen.getByRole('button', { name: '审查结果' }));
 
-    const signals = screen.getByRole('region', { name: '信号与阈值' });
-    expect(signals).toHaveTextContent('riskPoint');
-    // The verdict region stays the review's conclusion; signals are evidence.
+    // Both sections are named for what they hold: the score pair is what the
+    // reviewer concluded, the usage summary is what the review cost.
+    expect(screen.getByRole('region', { name: '两项评分' })).toHaveTextContent(
+      'requiredAuthorization',
+    );
+    expect(screen.getByRole('region', { name: '用量' })).toHaveTextContent(
+      'inputTokens',
+    );
+    // The verdict region stays the review's conclusion; the detail is evidence.
     expect(verdictRegion()).toHaveTextContent('审查拒绝');
-    expect(verdictRegion()).not.toHaveTextContent('riskPoint');
+    expect(verdictRegion()).not.toHaveTextContent('requiredAuthorization');
   });
 
   test('says a review happened but its material is gone, not that none ran', async () => {
@@ -551,13 +635,15 @@ describe('call detail localization', () => {
         protocol: 'arbiter-chat-json-v1',
         templateId: 'tpl-1',
         request: { system: 'prompt 1' },
-        responseText: '{"risk":1,"authorized":0}',
-        parsed: { risk: 1, authorized: 0 },
+        responseText: '{"risk":1,"authorization":0}',
+        parsed: { risk: 1, authorization: 0 },
         error: null,
         startedAt: 1_700_000_000_002,
         durationMs: 120,
         estimatedInputTokens: 900,
         usage: null,
+        normalizedUsage: null,
+        failureKind: null,
       },
       {
         requestId: 'call-1:model:2',
@@ -566,13 +652,15 @@ describe('call detail localization', () => {
         protocol: 'arbiter-chat-json-v1',
         templateId: 'tpl-2',
         request: { system: 'prompt 2' },
-        responseText: '{"risk":9,"authorized":1}',
-        parsed: { risk: 9, authorized: 1 },
+        responseText: '{"risk":9,"authorization":1}',
+        parsed: { risk: 9, authorization: 1 },
         error: null,
         startedAt: 1_700_000_000_200,
         durationMs: 150,
         estimatedInputTokens: 950,
         usage: null,
+        normalizedUsage: null,
+        failureKind: null,
       },
     ];
     mockDetail(body);

@@ -8,9 +8,16 @@ import { fileURLToPath } from 'node:url';
 import {
   historicalVerdict,
   parseCases,
+  retiredVerdict,
   scopeVerdict,
 } from './regression-verdict.ts';
 import type { RunVerdict } from './regression-verdict.ts';
+import {
+  RETIRED_ENGINE_SYMBOLS,
+  symbolLabel,
+  type EngineProbeReport,
+  type RetiredEngineModule,
+} from './retired-engine.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, '.local', 'regressions');
@@ -38,6 +45,47 @@ const runs: readonly {
     verdict: scopeVerdict,
   },
 ];
+
+/**
+ * Which of the retired engine's symbols this build still exports.
+ *
+ * The probe imports the built library exactly as the frozen script does, so a
+ * module that fails to load is reported as unreadable rather than as "absent".
+ * Those two are different facts: absent means the symbol is gone, unreadable means
+ * this build cannot be inspected at all, and only the first can retire a run.
+ */
+async function probeEngine(): Promise<EngineProbeReport> {
+  const absent: string[] = [];
+  const present: string[] = [];
+  const unreadable: string[] = [];
+  const modules = new Map<RetiredEngineModule, Record<string, unknown>>();
+  for (const name of ['policy', 'reviewer'] as const) {
+    try {
+      const namespace: unknown = await import(
+        new URL(`../lib/${name}.js`, import.meta.url).href
+      );
+      if (!isRecord(namespace))
+        throw new TypeError('the built module exported no namespace');
+      modules.set(name, namespace);
+    } catch (error) {
+      unreadable.push(
+        `${name} (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  }
+  for (const entry of RETIRED_ENGINE_SYMBOLS) {
+    const namespace = modules.get(entry.module);
+    if (namespace === undefined) continue;
+    const label = symbolLabel(entry);
+    (entry.symbol in namespace ? present : absent).push(label);
+  }
+  return { absent, present, unreadable };
+}
+
+/** A module namespace or any object, narrowed without an assertion. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 /** Read a runner report as untrusted JSON; null when unreadable or malformed. */
 function readReport(path: string): ReturnType<typeof parseCases> {
@@ -67,8 +115,25 @@ for (const run of runs) {
   const reportPath = join(directory, 'results.json');
   const cases = readReport(reportPath);
   if (cases === null) {
+    // A missing report is only excused for the historical run, and only when the
+    // probe proves the engine it imports is gone. Every other missing report —
+    // including the scope run's — is a failure, because a script that crashed for
+    // an unrelated reason also leaves no file behind.
+    const retired =
+      run.name === 'R1–R9' ? retiredVerdict(await probeEngine()) : null;
+    if (retired !== null && retired.retired) {
+      process.stdout.write(
+        `R1–R9: retired with the legacy engine; the frozen script imports symbols this build no longer exports, so it cannot run. ` +
+          'The script and its recorded results stay unmodified as prototype evidence.\n',
+      );
+      continue;
+    }
     failedRuns += 1;
-    process.stderr.write(`${run.name}: results.json is unreadable\n`);
+    process.stderr.write(
+      retired === null
+        ? `${run.name}: results.json is unreadable\n`
+        : `${run.name}: results.json is unreadable and the run is not retired: ${retired.problems.join('; ')}\n`,
+    );
     continue;
   }
   const verdict = run.verdict(cases);

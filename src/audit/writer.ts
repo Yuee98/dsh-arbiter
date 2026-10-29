@@ -1,6 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CallRecord } from './types.js';
 import { json, hash } from './rows.js';
+
+/**
+ * A JSON column value, or SQLite `NULL` for an absent one.
+ *
+ * `undefined` is not bindable; SQLite would reject the statement and drop the
+ * record. Both "absent" spellings therefore become one value.
+ */
+function nullableJson(value: unknown): string | null {
+  return value === undefined || value === null ? null : json(value);
+}
 import { RECORD_FORMAT } from './schema.js';
 import { saveTemplateSnapshot } from './metadata.js';
 function insertCall(db: DatabaseSync, record: CallRecord): void {
@@ -8,10 +18,10 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     `INSERT OR REPLACE INTO calls(
             call_id, ts, session_id, session_kind, parent_session, profile, workspace, tool, arguments,
             arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-            execution_mode, result, reason, trace, effect, session_record_state, signals,
-            policy_strategy, decision_rules, execution_status, record_format_version,
+            execution_mode, result, reason, trace, effect, session_record_state, scores,
+            review_stage, usage, decision_rules, execution_status, record_format_version,
             execution_started_at, execution_finished_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     record.callId,
     record.ts,
@@ -34,8 +44,15 @@ function insertCall(db: DatabaseSync, record: CallRecord): void {
     json(record.trace),
     json(record.effect),
     record.sessionRecordState,
-    record.signals === null ? null : json(record.signals),
-    record.policyStrategy,
+    // A current record writes the new shape only. A row with no score writes
+    // `NULL`, which the reader reports as "no new-style score" rather than
+    // defaulting to a band nobody computed. A record built by a caller that does
+    // not know these fields passes `undefined`, which is not a bindable value and
+    // would abort the whole insert — so it is normalized to `NULL` here rather
+    // than trusting every caller to spell "absent" the same way.
+    nullableJson(record.scores),
+    record.reviewStage ?? null,
+    nullableJson(record.usage),
     json(record.decisionRules),
     record.executionStatus,
     RECORD_FORMAT,
@@ -114,8 +131,8 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
     `INSERT OR REPLACE INTO model_calls(
           id, call_id, attempt, backend, protocol, request, template_id,
           response_text, parsed, error, started_at, duration_ms,
-          estimated_input_tokens, usage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          estimated_input_tokens, usage, normalized_usage, failure_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const attempt of record.modelAttempts) {
     modelStatement.run(
@@ -132,7 +149,12 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
       attempt.startedAt,
       attempt.durationMs,
       attempt.estimatedInputTokens,
-      json(attempt.usage),
+      // Both values are stored: the masked provider payload exactly as received,
+      // so it can be re-normalized after the mapping version changes, and the
+      // normalization done under the mapping this build uses.
+      nullableJson(attempt.usage),
+      nullableJson(attempt.normalizedUsage),
+      attempt.failureKind ?? null,
     );
   }
 }

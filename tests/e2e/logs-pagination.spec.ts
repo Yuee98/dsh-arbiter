@@ -61,10 +61,10 @@ function insertRow(db: DatabaseSync, row: SeedRow): void {
     `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
         tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
         approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
-        signals, policy_strategy, decision_rules, execution_status, record_format_version,
+        scores, review_stage, usage, decision_rules, execution_status, record_format_version,
         execution_started_at, execution_finished_at)
      VALUES (?, ?, 'session-1', ?, NULL, 'e2e', '/workspace/app', ?, ?, NULL, '/workspace/app',
-        'fp', 'rev-1', 'cfg-1', 'normal', 'trusted', ?, ?, ?, 'null', 'written', NULL, NULL,
+        'fp', 'rev-1', 'cfg-1', 'ask', 'trusted', ?, ?, ?, 'null', 'written', NULL, NULL, NULL,
         ?, 'pending', 2, NULL, NULL)`,
   ).run(
     row.callId,

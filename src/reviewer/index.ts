@@ -21,7 +21,7 @@ export type {
 export { review } from './service.js';
 
 export type { ReviewAttempt, ReviewerBackend } from './attempt.js';
-export { attemptIdOf } from './attempt.js';
+export { attemptIdOf, storedAttemptOf } from './attempt.js';
 
 export type { ChatTransportContext, ChatTransportResult } from './chat.js';
 export { runChatTransport } from './chat.js';

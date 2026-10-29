@@ -639,8 +639,8 @@ describe('insufficient material', () => {
   });
 });
 
-describe('the default policy is not involved', () => {
-  test('the service never reads the configured thresholds', async () => {
+describe('no configuration can move the matrix', () => {
+  test('the decision is the shared matrix applied to the answer alone', async () => {
     const result = await review({
       snapshot: snapshot(),
       callId: CALL_ID,
@@ -649,19 +649,14 @@ describe('the default policy is not involved', () => {
         scripts: [{ kind: 'text', text: '{"risk":9,"authorization":9}' }],
       }),
     });
-    // A policy threshold set so wide that the legacy engine would allow anything
-    // cannot influence this outcome: the shared matrix decides, not a tuning knob.
-    const wide = {
-      ...DEFAULT_CONFIG.policy.normal,
-      tauAuth: 0,
-      tauRisk: 0,
-      tauLow: 0,
-      tauCritical: 0,
-    };
-    expect(wide.tauAuth).toBe(0);
+    // The policy section carries no tunable threshold any more: the matrix, the
+    // bands and the N0 rule are the contract, so there is nothing an operator
+    // could widen to make this pair pass.
+    expect(Object.keys(DEFAULT_CONFIG.policy)).toEqual(['version']);
     expect(result.outcome.status).toBe('scored');
     if (result.outcome.status !== 'scored') throw new Error('expected scored');
-    // R9 needs A10; A9 is one band short, so the matrix escalates.
+    // Risk 9 needs A10; A9 is one band short, so the matrix escalates.
+    expect(result.outcome.requiredAuthorization).toBe(10);
     expect(result.outcome.verdict).toBe('review-escalate');
   });
 });
@@ -1214,5 +1209,440 @@ describe('round-2 corrections', () => {
     // No text arrived, but the provider said why: classifying that as `network`
     // would tell an operator to check connectivity for a provider outage.
     expect(result.failure).toBe('unavailable');
+  });
+});
+
+describe('the score object is exempt while every header still masks', () => {
+  /** A decision answer body, in the shape the provider actually sends. */
+  const DECISION_BODY = JSON.stringify({
+    result: {
+      model: 'clef',
+      answers: {
+        risk: { type: 'score', probabilities: { '0': 0.1, '9': 0.9 } },
+        authorization: { type: 'score', probabilities: { '9': 1 } },
+      },
+      usage: { input_tokens: 10, output_tokens: 0 },
+    },
+    success: true,
+  });
+
+  test('a decision score object survives as parseable JSON', () => {
+    // The regression: the exemption accepted only a numeric literal, so a score
+    // *object* was masked at its first comma and the record kept a truncated
+    // fragment. `responseText` must stay parseable for the detail reader and for
+    // offline replay.
+    const masked = redactAuthHeaders(DECISION_BODY);
+    expect(() => JSON.parse(masked) as unknown).not.toThrow();
+    expect(masked).toContain('"authorization":{"type":"score"');
+    expect(masked).not.toContain('[redacted]');
+    // The parsed value is the provider's own, not a reconstruction.
+    expect(JSON.parse(masked)).toEqual(JSON.parse(DECISION_BODY));
+  });
+
+  test('a chat band stays exempt, as before', () => {
+    expect(redactAuthHeaders('"authorization": 8')).toBe('"authorization": 8');
+    expect(redactAuthHeaders('{"authorization":2}')).toBe(
+      '{"authorization":2}',
+    );
+  });
+
+  test('a credential-shaped value in that field still masks', () => {
+    // The exemption is the object member, not the name: a string value at this
+    // key is a credential and masks whatever it holds.
+    for (const header of [
+      '"authorization": "Bearer sk-abcdef"',
+      '"authorization":"sk-abcdef"',
+    ]) {
+      expect(redactAuthHeaders(header)).not.toContain('sk-abcdef');
+    }
+  });
+
+  test('a bare or capitalized header masks even inside the score object', () => {
+    // Parseability never buys a credential an exemption: the object is rescanned
+    // without the exemption, so a real header it contains is masked even though
+    // that mask makes the object unparseable.
+    for (const header of [
+      '{"authorization":{"Authorization":"Bearer sk-inner"}}',
+      '{"authorization":{"proxy-authorization":"Bearer sk-inner"}}',
+    ]) {
+      expect(redactAuthHeaders(header)).not.toContain('sk-inner');
+    }
+    // A sibling header outside the member is masked as it always was.
+    const masked = redactAuthHeaders(
+      '{"answers":{"authorization":{"type":"score"}},"headers":{"Authorization":"Bearer sk-sibling"}}',
+    );
+    expect(masked).not.toContain('sk-sibling');
+  });
+
+  test('an arbitrary object at that key is not a score and still masks', () => {
+    // The exemption is a *verified score answer*, not "a balanced object after the
+    // exact key". An object is the obvious way to smuggle a credential past a
+    // matcher that only rescans auth-named fields, so shape alone must not be
+    // enough: `value` is not an auth field, and this must still be masked.
+    const smuggled = '{"authorization":{"value":"Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(smuggled)).not.toContain('PRIVATE_TOKEN');
+    // A nested `type: score` does not make its container a score answer either:
+    // the container's own members are what the exemption reads, so the object at
+    // this key is masked as a whole rather than kept intact.
+    const nested =
+      '{"authorization":{"wrapper":{"type":"score"},"value":"Bearertoken"}}';
+    expect(redactAuthHeaders(nested)).toContain('"authorization":[redacted]');
+    // A different answer type, and an object with no type at all, are not scores:
+    // both are masked as a whole at that key instead of being kept intact.
+    expect(
+      redactAuthHeaders('{"authorization":{"type":"noul","noul":0.5}}'),
+    ).toContain('"authorization":[redacted]');
+    expect(redactAuthHeaders('{"authorization":{"value":"TOK"}}')).toContain(
+      '"authorization":[redacted]',
+    );
+  });
+
+  test('a forged score object cannot carry a credential beside a real distribution', () => {
+    // The round-2 hole: declaring `type: "score"` was enough to exempt the whole
+    // object, so a valid distribution could ride shotgun for an arbitrary member.
+    // Verified by the parser too — `readDecisionAnswer` reads `probabilities` and
+    // does not reject extra members, so this shape can score *and* store the echo.
+    const forged =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"value":"Bearer PRIVATE_TOKEN"}}';
+    const masked = redactAuthHeaders(forged);
+    expect(masked).not.toContain('PRIVATE_TOKEN');
+    // The distribution still survives, so the record keeps the answer it judged.
+    expect(masked).toContain('"type":"score"');
+    expect(masked).toContain('"probabilities":{"9":1}');
+
+    // Any unrecognized member is replaced, not only auth-named ones.
+    const noted =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":0.9,"note":"Bearer TOK"}}';
+    expect(redactAuthHeaders(noted)).not.toContain('Bearer TOK');
+    // `confidence` is a score member and is kept; `note` is not.
+    expect(redactAuthHeaders(noted)).toContain('"confidence":0.9');
+  });
+
+  test('a credential inside a retained score member is rescanned, not restored', () => {
+    // Round-3 hole: allowlisted members were restored verbatim, so a descriptive
+    // member could carry an actual authentication-header echo. Keeping the member
+    // is only safe if its *content* goes through the same rule.
+    const legendText =
+      '{"authorization":{"type":"score","probabilities":{"0":0,"9":1},"legend":"Authorization: Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(legendText)).not.toContain('PRIVATE_TOKEN');
+    // The distribution survives, so the answer the engine judged is still readable.
+    expect(redactAuthHeaders(legendText)).toContain(
+      '"probabilities":{"0":0,"9":1}',
+    );
+
+    // A legend map is scanned value by value.
+    const legendMap =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"legend":{"9":"Authorization: Bearer TOK"}}}';
+    expect(redactAuthHeaders(legendMap)).not.toContain('Bearer TOK');
+
+    // A declared number that is not a number is not this contract's answer.
+    const badConfidence =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":"Bearer TOK"}}';
+    expect(redactAuthHeaders(badConfidence)).not.toContain('Bearer TOK');
+    // A genuine numeric confidence is kept.
+    expect(
+      redactAuthHeaders(
+        '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":0.4}}',
+      ),
+    ).toContain('"confidence":0.4');
+  });
+
+  test('a score object with a credential-bearing legend masks end to end', async () => {
+    // The same shape through the production boundary, with no known credential.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"legend":"Authorization: Bearer sk-legend"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-legend');
+  });
+
+  test('no excluded text is restored verbatim', () => {
+    // The invariant this boundary fails on repeatedly: anything taken out of the
+    // masking pass must not come back unscanned. Keys, a duplicate member and a
+    // distribution key are all text the provider chose, so each is checked too.
+    const cases: readonly (readonly [string, string])[] = [
+      // A description can travel in a *key* just as easily as in a value.
+      [
+        'legend key',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"legend":{"Authorization: Bearer PRIVATE_TOKEN":"normal"}}}',
+      ],
+      // A second `type` is not part of any answer this contract asks for, and its
+      // value must not be restored just because the first one qualified the object.
+      [
+        'duplicate type',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"type":"Authorization: Bearer PRIVATE_TOKEN"}}',
+      ],
+      // A distribution is keyed by level; a key that is not a level is not a level.
+      [
+        'probabilities key',
+        '{"authorization":{"type":"score","probabilities":{"Authorization: Bearer PRIVATE_TOKEN":1}}}',
+      ],
+      // The rejected member's own key is provider text too: masking its value while
+      // reprinting the key would restore the echo one field to the left.
+      [
+        'rejected member key',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"Authorization: Bearer PRIVATE_TOKEN":"normal"}}',
+      ],
+    ];
+    for (const [label, input] of cases) {
+      // Folded into one matcher per case: the label names which shape failed.
+      expect({
+        label,
+        leaked: redactAuthHeaders(input).includes('PRIVATE_TOKEN'),
+      }).toEqual({ label, leaked: false });
+    }
+    // A legitimate answer is unaffected by these rules.
+    const legit =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"score":1,"legend":{"9":"mass delete"},"confidence":0.5}}';
+    expect(redactAuthHeaders(legit)).toBe(legit);
+  });
+
+  test('a value that only looks like an internal token is not exempt', () => {
+    // The token is an implementation detail; provider text must not be able to claim
+    // the exemption by imitating it. Chat text is decoded before it reaches here, so
+    // JSON's ban on literal NULs is not a defence.
+    const forged = 'Authorization: \u0000score:0\u0000Bearer PRIVATE_TOKEN';
+    expect(redactAuthHeaders(forged)).not.toContain('PRIVATE_TOKEN');
+    // Nor may a real token's spelling carry a suffix into the exemption.
+    expect(
+      redactAuthHeaders(
+        'Authorization: \u0000score:0\u0000 Bearer PRIVATE_TOKEN',
+      ),
+    ).not.toContain('PRIVATE_TOKEN');
+  });
+
+  test('a score object nested inside another does not leak the outer tail', () => {
+    // Extraction walks left to right, so a *nested* candidate would move the cursor
+    // backwards and the slice closing the outer span would reintroduce the original
+    // text after the inner one — arbitrary member text that was never sanitized.
+    // Only the outermost object is rebuilt; what is inside it is ordinary untrusted
+    // member data.
+    const nested =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"authorization":{"type":"score","probabilities":{"9":1}},"value":"Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(nested)).not.toContain('PRIVATE_TOKEN');
+    // The outer object is still rebuilt rather than discarded.
+    expect(redactAuthHeaders(nested)).toContain('"probabilities":{"9":1}');
+
+    // Two sibling objects at the same level are both rebuilt independently.
+    const siblings =
+      '{"a":{"authorization":{"type":"score","probabilities":{"9":1}}},"b":{"authorization":{"type":"score","probabilities":{"8":1}}}}';
+    const masked = redactAuthHeaders(siblings);
+    expect(() => JSON.parse(masked) as unknown).not.toThrow();
+    expect(masked).toContain('"probabilities":{"8":1}');
+  });
+
+  test('a nested score object masks end to end', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"authorization":{"type":"score","probabilities":{"9":1}},"value":"Bearer sk-nested"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-nested');
+  });
+
+  test('a valid score answer with trailing whitespace stays readable', () => {
+    // The unquoted branch consumes the blanks that follow a value, so a real answer
+    // written as `…} }` reaches the check with trailing whitespace. Matching it
+    // strictly would mask a valid score and lose the distribution from the record.
+    const shapes = [
+      '{"authorization":{"type":"score","probabilities":{"9":1}} }',
+      '{"authorization":{"type":"score","probabilities":{"9":1}}\t}',
+      '{"authorization":{"type":"score","probabilities":{"9":1}},\r\n"success":true}',
+    ];
+    for (const input of shapes) {
+      const masked = redactAuthHeaders(input);
+      expect(() => JSON.parse(masked) as unknown).not.toThrow();
+      expect(masked).toContain('"probabilities":{"9":1}');
+    }
+  });
+
+  test('a replacement pattern in provider text is restored literally', () => {
+    // `String.replace` with a string replacement interprets `$&`, `$'` and `` $` ``
+    // in the *replacement*, so provider text carrying one would be rewritten into
+    // the token or into surrounding response text. The audited answer must survive
+    // byte for byte when nothing needed masking.
+    const patterns = ['literal $& text', "a $' b $` c", 'x $$ y', 'cost: $100'];
+    for (const legend of patterns) {
+      const input = JSON.stringify({
+        authorization: { type: 'score', probabilities: { '9': 1 }, legend },
+      });
+      const masked = redactAuthHeaders(input);
+      expect(() => JSON.parse(masked) as unknown).not.toThrow();
+      expect(masked).toContain(JSON.stringify(legend).slice(1, -1));
+    }
+  });
+
+  test('a credential in a rejected member key masks end to end', async () => {
+    // Codex P1 on head d53e25b: this shape kept the key verbatim.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"Authorization: Bearer sk-member-key":"normal"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-member-key');
+  });
+
+  test('a credential in a legend key masks end to end', async () => {
+    // The same shape through the production boundary, with no known credential.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"legend":{"Authorization: Bearer sk-key":"normal"}}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-key');
+  });
+
+  test('a verified score answer is exempt in both envelopes', () => {
+    // The exemption has to keep working for the real answers, or the fix would
+    // trade a security hole for the parseability defect it was introduced to fix.
+    const native = JSON.stringify({
+      model: 'jev',
+      answers: {
+        risk: { type: 'score', probabilities: { '0': 0.5, '9': 0.5 } },
+        authorization: { type: 'score', probabilities: { '9': 1 } },
+      },
+    });
+    expect(
+      () => JSON.parse(redactAuthHeaders(native)) as unknown,
+    ).not.toThrow();
+    const wrapped = JSON.stringify({
+      result: {
+        answers: {
+          authorization: { type: 'score', probabilities: { '9': 1 } },
+        },
+      },
+      success: true,
+    });
+    expect(
+      () => JSON.parse(redactAuthHeaders(wrapped)) as unknown,
+    ).not.toThrow();
+  });
+
+  test('a forged score object with no known secret still masks end to end', async () => {
+    // The chat path has no credential value to substitute, so the structural pass is
+    // the only protection — including when the answer is a valid score plus an echo.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"value":"Bearer sk-forged"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    const text = attempt.responseText ?? '';
+    expect(text).not.toContain('sk-forged');
+    // The rebuilt object keeps the answer and replaces only the member that is not
+    // part of a score, so a reader can still see what the provider claimed.
+    expect(text).toContain('"probabilities":{"9":1}');
+    expect(text).toContain('"value":[redacted]');
+  });
+
+  test('a decision attempt with no known secret still masks a structured echo', async () => {
+    // The chat path is the acute case: the host owns the credential, so the
+    // adapter has no value to substitute and the structural pass is the only
+    // protection. A nested auth-named key must therefore still mask.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","Authorization":"Bearer sk-structural"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-structural');
+  });
+
+  test('a credential in a decision attempt record is masked end to end', async () => {
+    // The unit rule above is necessary but not sufficient: the boundary the record
+    // is built at is `maskAttempt`, so a real attempt is what proves the masked
+    // response is both parseable and free of the credential.
+    const secret = 'sk-decision-echo-sentinel';
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              ...NEW_SCALE_CLOUDFLARE,
+              result: {
+                ...NEW_SCALE_CLOUDFLARE.result,
+                // The credential is echoed in a value, not as a header: the known
+                // secret is what removes it, so this case tests that the masking
+                // boundary still runs without claiming the header rule did it.
+                usage: { input_tokens: 1, note: secret },
+              },
+            }),
+          },
+        ],
+        credential: secret,
+      }),
+    });
+    expect(result.protocol).toBe('decision');
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    const text = attempt.responseText ?? '';
+    expect(text).not.toContain(secret);
+    // The score member is untouched, so the stored body stays readable — which is
+    // what the detail reader, the reports and offline replay all depend on.
+    expect(() => JSON.parse(text) as unknown).not.toThrow();
+    expect(text).toContain('"authorization":{"type":"score"');
   });
 });

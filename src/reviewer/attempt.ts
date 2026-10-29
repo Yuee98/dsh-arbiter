@@ -115,3 +115,47 @@ export function maskAttempt(
         : normalizeUsage(attempt.normalizedUsage.source, maskedRaw),
   };
 }
+
+/**
+ * The stored-record shape one attempt contributes to a call record.
+ *
+ * The service reports `attemptId`/`rawUsage`; the audit writes `requestId`/`usage`.
+ * Converting in one place means a consumer storing an attempt cannot disagree with
+ * the writer about which field holds what, and the normalized value always travels
+ * beside the raw one it was derived from.
+ */
+export function storedAttemptOf(attempt: ReviewAttempt): {
+  readonly requestId: string;
+  readonly callId: string;
+  readonly attempt: number;
+  readonly backend: ReviewerBackend;
+  readonly protocol: string;
+  readonly request: unknown;
+  readonly responseText: string | null;
+  readonly parsed: unknown;
+  readonly error: string | null;
+  readonly failureKind: AttemptFailureKind | null;
+  readonly usage: unknown;
+  readonly normalizedUsage: UsageNormalized | null;
+  readonly startedAt: number;
+  readonly durationMs: number;
+  readonly estimatedInputTokens: number;
+} {
+  return {
+    requestId: attempt.attemptId,
+    callId: attempt.callId,
+    attempt: attempt.attempt,
+    backend: attempt.backend,
+    protocol: attempt.protocol,
+    request: attempt.request,
+    responseText: attempt.responseText,
+    parsed: attempt.parsed,
+    error: attempt.error,
+    failureKind: attempt.failureKind,
+    usage: attempt.rawUsage,
+    normalizedUsage: attempt.normalizedUsage,
+    startedAt: attempt.startedAt,
+    durationMs: attempt.durationMs,
+    estimatedInputTokens: attempt.estimatedInputTokens,
+  };
+}

@@ -295,7 +295,17 @@ export interface CallDetailModelAttemptView {
   readonly startedAt: number;
   readonly durationMs: number;
   readonly estimatedInputTokens: number;
+  /** The provider's masked usage payload, exactly as received, or null. */
   readonly usage: unknown;
+  /** The same payload under the shared usage mapping, or null. */
+  readonly normalizedUsage: unknown;
+  /**
+   * Why this attempt produced no answer, or null when it succeeded.
+   *
+   * Kept apart from the error text: a provider refusal, an unreadable answer and
+   * a broken transport are different facts.
+   */
+  readonly failureKind: string | null;
 }
 
 /**
@@ -356,7 +366,15 @@ export interface CallDetailView {
      */
     readonly reviewState: 'none' | 'reviewed' | 'unknown';
     readonly trace: readonly string[];
-    readonly signals: unknown;
+    /**
+     * The scored pair this review reached, or null when it produced no score.
+     *
+     * The dialog shows what the reviewer said; a null is a real state (a material
+     * gap or a reviewer failure), never a score of the lowest band.
+     */
+    readonly scores: unknown;
+    /** The usage summary over this review's actual attempts, or null. */
+    readonly usage: unknown;
     readonly evidence: readonly unknown[];
     readonly materials: readonly unknown[];
     readonly evidenceTruncated: boolean;
@@ -505,7 +523,7 @@ export interface ReviewerProbeAttemptView {
  * One completed connection test.
  *
  * A pass means the answer satisfied the formal parser, not that the action would
- * be allowed; the signals stay raw so the dialog can show what the model said.
+ * be allowed; the score pair stays raw so the dialog can show what the model said.
  */
 /**
  * Why a probe did not pass. The host sends a stable code; the page owns the
