@@ -1296,6 +1296,96 @@ describe('explanation fidelity', () => {
     expect(coverage).toHaveTextContent(/没有逐条命令的结构证据/);
   });
 
+  test('a decisive rule does not relabel another tier as "no match"', async () => {
+    // The deny rule could not be judged (an unparsed dialect), while a matching
+    // tool rule decided the call. The deny tier must keep saying "could not be
+    // determined" rather than "no match this time".
+    server.use(
+      http.post('*/api/arbiter/test', () =>
+        HttpResponse.json(
+          answer({
+            path: 'force-review',
+            pathDetail: {
+              kind: 'rule',
+              verdict: 'force-review',
+              ruleId: 'review-tool',
+            },
+            matches: [
+              {
+                index: 0,
+                id: 'review-tool',
+                verdict: 'force-review',
+                effective: true,
+                target: 'tool',
+                conditionIndex: 0,
+                nodeIndex: 0,
+                matchedText: 'pwsh',
+              },
+            ],
+            rules: [
+              {
+                index: 0,
+                id: 'deny-cmd',
+                verdict: 'deny',
+                outcome: 'unknown',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'command',
+                    kind: 'exact',
+                    pattern: 'echo hi',
+                    outcome: 'unknown',
+                    reason: 'unresolved-structure',
+                  },
+                ],
+              },
+              {
+                index: 1,
+                id: 'review-tool',
+                verdict: 'force-review',
+                outcome: 'match',
+                conditions: [
+                  {
+                    index: 0,
+                    target: 'tool',
+                    kind: 'exact',
+                    pattern: 'pwsh',
+                    outcome: 'match',
+                    reason: 'resolved',
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { user } = openTester([ALLOW_TEST]);
+    await user.click(screen.getByRole('button', { name: '运行测试' }));
+    await screen.findByText('本规则匹配', { exact: true });
+    await user.click(screen.getByText('查看详细解释'));
+
+    const priority = screen.getByTestId('rule-test-priority');
+    const levels = within(priority).getAllByRole('listitem');
+    // The deny tier names its own undetermined rule and does not claim a
+    // non-match, while the decisive tier is the effective one.
+    expect(levels[0]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'unknown',
+    );
+    expect(levels[0]).toHaveTextContent('deny-cmd');
+    expect(levels[0]).not.toHaveTextContent('本次未命中');
+    expect(levels[2]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'effective',
+    );
+    // A tier that really did nothing still says so.
+    expect(levels[3]).toHaveAttribute(
+      'data-arbiter-test-priority-decision',
+      'none',
+    );
+  });
+
   test('a partial-allow fallback does not call a matched allow "not in effect"', async () => {
     // Both allows matched; the third command is what left the call in review. No
     // rule decided it, so the second allow was not outranked by anything.

@@ -1191,6 +1191,61 @@ describe('review round two corrections', () => {
     expect(failed.parsed).toBe(false);
   });
 
+  test('a decisive rule does not turn another tier into a non-match', () => {
+    // `pwsh` is a shell tool this reader does not parse, so a command-target deny
+    // stays undetermined while a tool-target force-review matches. The
+    // force-review decides the call, but the deny tier was never shown to be a
+    // non-match: the evaluator reports `unknown` and the undetermined list names
+    // it, so the priority block must not say "no match this time".
+    const real = decoded(
+      [
+        {
+          id: 'deny-cmd',
+          verdict: 'deny',
+          enabled: true,
+          combine: 'any',
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'echo hi' },
+          ],
+        },
+        {
+          id: 'review-tool',
+          verdict: 'force-review',
+          enabled: true,
+          combine: 'any',
+          conditions: [{ target: 'tool', kind: 'exact', pattern: 'pwsh' }],
+        },
+      ],
+      'pwsh',
+      { command: 'echo hi' },
+    );
+    // The engine side of the premise.
+    expect(real.pathDetail).toMatchObject({
+      kind: 'rule',
+      verdict: 'force-review',
+      ruleId: 'review-tool',
+    });
+    expect(real.rules.find((entry) => entry.id === 'deny-cmd')?.outcome).toBe(
+      'unknown',
+    );
+
+    const levels = priorityView(real, null);
+    const deny = levels[0];
+    expect(deny).toMatchObject({
+      verdict: 'deny',
+      decision: 'unknown',
+      unknownIds: ['deny-cmd'],
+    });
+    // The decisive tier is still the only effective one.
+    expect(levels[2]).toMatchObject({
+      verdict: 'force-review',
+      decision: 'effective',
+      winnerId: 'review-tool',
+    });
+    // A tier with neither a match nor an unknown keeps saying "no match".
+    expect(levels[3]).toMatchObject({ verdict: 'allow', decision: 'none' });
+  });
+
   test('a partial-allow fallback never blames priority for a coverage shortfall', () => {
     // `echo a; echo b; echo c` with one allow per covered command: both allows
     // match, the third command is uncovered, and the path is `review(default)`
