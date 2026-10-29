@@ -1002,6 +1002,51 @@ describe('core-v1 ledger corrections', () => {
     expect(rules).not.toMatch(/允许删除|可以删除/u);
   });
 
+  it('counts every authorization band from the per-case rows', () => {
+    // A case whose risk cannot be scored still has an authorization grade. Reading the
+    // risk column as a filter dropped `truncated-program-material` from A2, so the band
+    // table under-counted by one. The table is now derived from the rows, including the
+    // one with no risk band, and this recomputes it the same way.
+    const rows = ledgerRows(coverage).filter(
+      (cells) => cells[0]?.startsWith('`') && cells[5] !== undefined,
+    );
+    expect(rows).toHaveLength(cases.length);
+    const expected = new Map<string, number>();
+    for (const cells of rows) {
+      const authorization = (cells[5] ?? '').split('／')[1] ?? '';
+      expected.set(authorization, (expected.get(authorization) ?? 0) + 1);
+    }
+    const section = coverage.split('### 5.2 授权十档')[1] ?? '';
+    const problems: string[] = [];
+    for (const [band, count] of expected) {
+      const row = ledgerRows(section).find((cells) => cells[0] === band);
+      if (row === undefined) {
+        problems.push(`authorization band ${band} has no row`);
+        continue;
+      }
+      if (row[1] !== String(count)) {
+        problems.push(
+          `authorization band ${band} claims ${String(row[1])}, the rows give ${String(count)}`,
+        );
+      }
+    }
+    expect(problems).toEqual([]);
+    // The case with no risk band must still appear in an authorization band.
+    expect(expected.get('2')).toBeGreaterThanOrEqual(9);
+  });
+
+  it('does not claim single-factor pairs it no longer has', () => {
+    // §5.3 discloses that R8/9 and R9/10 are cross-dimension. The acceptance summary
+    // must not then advertise all nine as single-factor pairs.
+    const section = coverage.split('### 5.4')[1]?.split('###')[0] ?? '';
+    const row = section
+      .split('\n')
+      .find((line) => line.includes('覆盖十档锚点'));
+    expect(row).toBeDefined();
+    expect(row).toContain('七对');
+    expect(row).not.toMatch(/九个风险边界[^。]*各有一对只差一个因素/u);
+  });
+
   it('puts the A8 unresolved membership in the material the annotator sees', () => {
     // `blankEntry()` exports caseId/familyId/split/input/target, so a case-level
     // `notes` never reaches the annotator. An uncertainty recorded only there reads to
