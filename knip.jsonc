@@ -14,7 +14,6 @@
     // from the evals runner. Both make its surface larger than today's in-tree
     // callers, the same reason the review contract has its own entry.
     "src/reviewer.ts",
-    "scripts/repair-session.ts",
     "tests/e2e/**/*.spec.ts",
     // Loaded by the isolated host as a plugin module, not imported by a test.
     "tests/e2e/dsh/fixture-llm.ts",

@@ -1,55 +1,59 @@
-import { existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
+/**
+ * The one audit database structure this build creates and reads.
+ *
+ * There is no migration chain and no compatibility read path: a database is
+ * either in the structure below or it is refused with a reason. The design fixes
+ * one audit shape per release and leaves older test data to an explicit reset
+ * operation, so an old file is never rewritten in place and old rows are never
+ * reinterpreted as current scores.
+ *
+ * Two refusals survive because they protect data rather than an old format:
+ *
+ * - a file written by a **newer** build is not modified at all, so a downgrade
+ *   cannot corrupt a database this build does not understand;
+ * - a file whose **tables are gone** is not recreated, because an empty table
+ *   would report a lost history as a complete one.
+ */
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * Application schema version, carried by `PRAGMA user_version`.
  *
  * This is the *database structure* version, distinct from the per-row record
- * format (`record_format_version`) that says how one record was written. A v1
- * row inside a v2 database is normal; a v2 row inside a v1 database is not.
+ * format (`record_format_version`) that says how one record was written. Only
+ * this version is supported; a file carrying another one must be reset rather
+ * than upgraded.
  */
 const SCHEMA_VERSION = 2;
 
-/** How many pre-migration backups to keep; older ones are removed. */
-export const BACKUP_KEEP = 2;
-
-/** Record format this build writes and can fully interpret. */
+/**
+ * Record format this build writes and can fully interpret.
+ *
+ * There is exactly one: `formatOf` and the list reader treat any other value as
+ * unreadable rather than downgrading it to today's semantics.
+ */
 export const RECORD_FORMAT = 2;
 
 /**
  * Supported formats per structured-content kind.
  *
- * These are independent registries: a record format 2 says nothing about
- * whether a configuration snapshot, review snapshot or template format 2 can be
- * interpreted, so each kind is validated against its own set.
+ * These are independent registries: a call record being readable says nothing
+ * about whether a configuration snapshot, review snapshot or template can be
+ * interpreted, so each kind is validated against its own set. Only the format
+ * this build writes is listed; anything else is reported as unreadable instead
+ * of being read under today's semantics.
  */
-export const READABLE_CALL_FORMATS: readonly number[] = [2, 1];
 export const READABLE_CONFIG_SNAPSHOT_FORMATS: readonly number[] = [1];
 export const READABLE_REVIEW_SNAPSHOT_FORMATS: readonly number[] = [1];
 export const READABLE_TEMPLATE_FORMATS: readonly number[] = [1];
 
-/** The highest call-record format this build writes and reads. */
-export const LATEST_CALL_FORMAT = 2;
-
 /**
- * The table this version added on top of v1.
+ * The structure this build writes.
  *
- * Kept as its own statement because a file already stamped with this version
- * must still get it: `CREATE TABLE IF NOT EXISTS` never runs for such a file, so
- * a build that stamped the version before creating it leaves a file with no
- * `templates` table, and template snapshots then fail on every write.
+ * `CREATE TABLE IF NOT EXISTS` is kept so an interrupted first creation cannot
+ * leave a half-built file that later looks complete; the version stamp is the
+ * last statement, so it is only written once every table exists.
  */
-const TEMPLATES_DDL = `
-        CREATE TABLE IF NOT EXISTS templates (
-          template_id TEXT PRIMARY KEY,
-          content_hash TEXT NOT NULL UNIQUE,
-          content TEXT NOT NULL,
-          format_version INTEGER NOT NULL,
-          renderer_version TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-`;
-
 const SCHEMA_SQL = `
         CREATE TABLE IF NOT EXISTS config_snapshots (
           snapshot_id TEXT PRIMARY KEY,
@@ -66,7 +70,14 @@ const SCHEMA_SQL = `
           scope TEXT NOT NULL,
           revision TEXT NOT NULL
         );
-        ${TEMPLATES_DDL}
+        CREATE TABLE IF NOT EXISTS templates (
+          template_id TEXT PRIMARY KEY,
+          content_hash TEXT NOT NULL UNIQUE,
+          content TEXT NOT NULL,
+          format_version INTEGER NOT NULL,
+          renderer_version TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS calls (
           call_id TEXT PRIMARY KEY,
           ts INTEGER NOT NULL,
@@ -89,19 +100,12 @@ const SCHEMA_SQL = `
           trace TEXT NOT NULL,
           effect TEXT NOT NULL,
           session_record_state TEXT NOT NULL,
-          -- The current review shape. A record this build writes fills these and
-          -- only these; the signals and policy_strategy columns below are retired
-          -- and are never written by a current record.
+          -- The current review shape: the scored pair, the stage the review
+          -- reached, and the attempts' usage summary. A record this build writes
+          -- fills these and only these.
           scores TEXT,
           review_stage TEXT,
           usage TEXT,
-          -- Retired by the shared-contract switch: the old probe booleans,
-          -- probability classes and strategy name decided nothing the matrix does
-          -- not decide. Kept nullable so rows an earlier build wrote stay readable
-          -- as carrying no new-style score; RQ-06 removes the columns together
-          -- with the legacy read path.
-          signals TEXT,
-          policy_strategy TEXT,
           decision_rules TEXT NOT NULL,
           execution_status TEXT NOT NULL,
           record_format_version INTEGER NOT NULL,
@@ -182,47 +186,59 @@ const SCHEMA_SQL = `
         PRAGMA user_version = ${String(SCHEMA_VERSION)};
       `;
 
-/**
- * Columns this version added on top of v1.
- *
- * This list is both the upgrade recipe and the completeness check for a file
- * that already carries the current stamp. The stamp is a build's claim about the
- * file, not proof of its contents: a build that stamped the version before
- * running these additions leaves a file that reports v2, rejects every record,
- * and never repairs itself, because `user_version` already matches.
- *
- * `ADD COLUMN` with a constant default is safe on populated tables, and a
- * nullable column without a default leaves old rows `NULL` — which the read
- * adapter reports as unknown rather than inventing `0`, `false` or `allow`. The
- * `record_format_version` default is what makes existing v1 rows readable as v1
- * records instead of unversioned ones.
- */
-const ADDED_COLUMNS: readonly (readonly [string, string, string])[] = [
-  ['calls', 'record_format_version', 'INTEGER NOT NULL DEFAULT 1'],
-  ['calls', 'arguments_schema', 'TEXT'],
-  ['calls', 'execution_started_at', 'INTEGER'],
-  ['calls', 'execution_finished_at', 'INTEGER'],
-  // The new review shape. These are nullable with no default, so a row written
-  // by an earlier build keeps `NULL` and reads as "this row has no new-style
-  // score" — never as a score of zero or a backfilled value.
-  ['calls', 'scores', 'TEXT'],
-  ['calls', 'review_stage', 'TEXT'],
-  ['calls', 'usage', 'TEXT'],
-  ['model_calls', 'normalized_usage', 'TEXT'],
-  ['model_calls', 'failure_kind', 'TEXT'],
-  ['stages', 'rule_name', 'TEXT'],
-  ['stages', 'config_snapshot_id', 'TEXT'],
-  ['model_calls', 'template_id', 'TEXT'],
+/** Every table the structure above defines; a missing one means a lost history. */
+const REQUIRED_TABLES: readonly string[] = [
+  'config_snapshots',
+  'config_activations',
+  'templates',
+  'calls',
+  'stages',
+  'snapshots',
+  'model_calls',
+  'candidates',
+  'analysis_runs',
+  'meta',
 ];
 
-/** A migration that could not be completed; the database is left untouched. */
-export class AuditMigrationError extends Error {
-  readonly backupPath: string | null;
+/**
+ * The columns one current record writes, per table.
+ *
+ * The structure check compares this list as well as the tables: a file that
+ * carries the version stamp but not the columns would accept every connection
+ * and then reject each record, one at a time, with the failure contained as a
+ * degraded store. Naming the drift at start-up is the honest answer, and the fix
+ * is the same reset a wrong version needs. Extra columns are ignored: a file from
+ * an earlier build of this same structure stays usable.
+ */
+const REQUIRED_COLUMNS: readonly (readonly [string, readonly string[]])[] = [
+  [
+    'calls',
+    [
+      'scores',
+      'review_stage',
+      'usage',
+      'record_format_version',
+      'execution_status',
+      'execution_started_at',
+      'execution_finished_at',
+      'arguments_schema',
+    ],
+  ],
+  ['stages', ['rule_name', 'config_snapshot_id']],
+  ['model_calls', ['normalized_usage', 'failure_kind', 'template_id']],
+];
 
-  constructor(message: string, backupPath: string | null, cause?: unknown) {
+/**
+ * A database this build will not open.
+ *
+ * The store catches this, pauses writes for that database and reports the
+ * message through `health()`; approvals never depend on audit storage, so the
+ * rest of the plugin keeps working.
+ */
+export class AuditSchemaError extends Error {
+  constructor(message: string, cause?: unknown) {
     super(message, { cause });
-    this.name = 'AuditMigrationError';
-    this.backupPath = backupPath;
+    this.name = 'AuditSchemaError';
   }
 }
 
@@ -234,128 +250,7 @@ function userVersion(db: DatabaseSync): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
 
-/**
- * Rows in a table this migration is supposed to preserve.
- *
- * A missing table must fail loudly here rather than count as zero: the caller
- * uses this as the "before" side of a preservation check, and an absent table
- * silently reporting 0 would let a recreated empty table compare equal.
- */
-function rowCount(
-  db: DatabaseSync,
-  table: 'calls' | 'config_activations',
-): number {
-  const row: unknown = db
-    .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
-    .get();
-  if (row === null || typeof row !== 'object' || !('count' in row)) return 0;
-  const value = (row as { readonly count?: unknown }).count ?? 0;
-  return typeof value === 'bigint' ? Number(value) : Number(value);
-}
-
-/**
- * Take a consistent copy before touching the structure.
- *
- * `VACUUM INTO` writes a transactionally consistent snapshot of the current
- * database, including committed WAL content, without blocking readers. That is
- * the backup the design requires before a migration; a failed migration keeps
- * it so the operator can go back.
- *
- * The copy is written beside the target and renamed over it, so an earlier
- * backup of the same version survives a `VACUUM INTO` that fails part-way. Only
- * a complete copy replaces it.
- */
-function backupDatabase(db: DatabaseSync, path: string): string {
-  const backupPath = `${path}.backup-v${String(userVersion(db))}`;
-  const stagingPath = `${backupPath}.staging`;
-  try {
-    if (existsSync(stagingPath)) unlinkSync(stagingPath);
-    db.exec(`VACUUM INTO '${stagingPath.replaceAll("'", "''")}'`);
-    renameSync(stagingPath, backupPath);
-  } catch (error) {
-    // A partial staging file is not a backup; drop it rather than leave it to be
-    // mistaken for one.
-    try {
-      if (existsSync(stagingPath)) unlinkSync(stagingPath);
-    } catch {
-      // Best effort: the original error is the useful one.
-    }
-    throw new AuditMigrationError(
-      `audit backup failed: ${error instanceof Error ? error.message : String(error)}`,
-      null,
-      error,
-    );
-  }
-  return backupPath;
-}
-
-/**
- * Backup versions this plugin can produce, including 0.
- *
- * Version 0 is a real case: a populated file that never had the stamp written
- * is backed up as `.backup-v0` before it is upgraded. Pruning and the capacity
- * accounting both read this list, so a new version cannot be created in one
- * place and forgotten in another.
- */
-const BACKUP_VERSIONS: readonly number[] = Array.from(
-  { length: 9 },
-  (_, index) => index,
-);
-
-/**
- * Every migration-backup path that could exist for this database.
- *
- * Exported so the store's capacity accounting enumerates the same set pruning
- * does, instead of hard-coding a subset.
- */
-export function backupPaths(path: string): readonly string[] {
-  return BACKUP_VERSIONS.map((version) => `${path}.backup-v${String(version)}`);
-}
-
-/** Keep only the newest few backups, so they cannot accumulate without bound. */
-export function pruneBackups(
-  path: string,
-  keep = BACKUP_KEEP,
-): readonly string[] {
-  const removed: string[] = [];
-  const candidates = backupPaths(path)
-    .filter((candidate) => existsSync(candidate))
-    .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
-  for (const stale of candidates.slice(keep)) {
-    try {
-      unlinkSync(stale);
-      removed.push(stale);
-    } catch {
-      // A backup that cannot be removed is not a reason to stop serving.
-    }
-  }
-  return removed;
-}
-
-/**
- * Upgrade the database to this build's structure version: back up consistently,
- * migrate inside one transaction, verify, then prune old backups. The entry
- * point and its rules live with `migrateAudit` below.
- */
-/** Verify the structure after the DDL, before the transaction commits. */
-function verifyMigration(
-  db: DatabaseSync,
-  before: { readonly calls: number; readonly activations: number },
-): void {
-  const integrity: unknown = db.prepare('PRAGMA integrity_check').get();
-  const verdict =
-    integrity !== null && typeof integrity === 'object'
-      ? (integrity as { readonly integrity_check?: unknown }).integrity_check
-      : null;
-  if (verdict !== 'ok')
-    throw new Error(`integrity check reported ${String(verdict)}`);
-  if (rowCount(db, 'calls') !== before.calls)
-    throw new Error('call row count changed during migration');
-  if (rowCount(db, 'config_activations') !== before.activations)
-    throw new Error('activation row count changed during migration');
-}
-
-/** Columns a database may already carry from an interrupted earlier attempt. */
+/** The columns one table actually has, whatever its declaration claims. */
 function columnNames(db: DatabaseSync, table: string): ReadonlySet<string> {
   const rows: readonly unknown[] = db
     .prepare(`PRAGMA table_info(${table})`)
@@ -383,175 +278,11 @@ function tableNames(db: DatabaseSync): ReadonlySet<string> {
   return names;
 }
 
-/** Tables this plugin has written since v1, other than the ones it adds. */
-const ESTABLISHED_TABLES: readonly string[] = [
-  'config_snapshots',
-  'config_activations',
-  'calls',
-  'stages',
-  'snapshots',
-  'model_calls',
-  'candidates',
-  'analysis_runs',
-  'meta',
-];
-
-/**
- * What a file is missing, compared with the structure this version needs.
- *
- * `user_version` is a build's claim about the file, not proof of it, so the
- * structure is always compared rather than trusted. The comparison separates two
- * conditions that would otherwise both look like "0 rows":
- *
- * - A **missing established table** means this file is damaged or was never
- *   written by this plugin. It cannot be reconstructed: an empty table would
- *   turn an unreadable history into a clean-looking empty one. The store must
- *   pause writes instead.
- * - A **missing column this version added**, in a table that exists, is the
- *   repairable case: the additions are known and adding them keeps every row.
- *   `templates` is in this group because this version introduced it.
- */
-function structureState(db: DatabaseSync): {
-  readonly absentTables: readonly string[];
-  readonly missingAdditions: readonly string[];
-} {
-  const tables = tableNames(db);
-  const absentTables = ESTABLISHED_TABLES.filter((table) => !tables.has(table));
-  const missingAdditions: string[] = [];
-  if (!tables.has('templates')) missingAdditions.push('templates');
-  for (const [table, column] of ADDED_COLUMNS) {
-    if (!tables.has(table)) continue;
-    if (!columnNames(db, table).has(column))
-      missingAdditions.push(`${table}.${column}`);
-  }
-  return { absentTables, missingAdditions };
-}
-
-/**
- * Add what this version introduced, inside the transaction.
- *
- * A genuine upgrade runs the whole DDL, which also creates every table. A file
- * already stamped with the current version only gets the `templates` table: it
- * is the one this version adds, and running the rest of the DDL would recreate a
- * dropped table as an empty one. Columns are added after either path, checked
- * individually because a partially applied earlier attempt may already have some
- * of them.
- */
-function applyStep(db: DatabaseSync, from: number): void {
-  if (from < SCHEMA_VERSION) db.exec(SCHEMA_SQL);
-  else db.exec(TEMPLATES_DDL);
-  const tables = tableNames(db);
-  for (const [table, column, type] of ADDED_COLUMNS) {
-    if (!tables.has(table)) continue;
-    if (columnNames(db, table).has(column)) continue;
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-  }
-}
-
-/**
- * Whether this file is genuinely new.
- *
- * `user_version = 0` is not proof: SQLite sets that pragma to 0 on any file that
- * never had it written, including one that already holds this plugin's tables
- * and records. A file is fresh only when the version says so **and** no
- * application table exists yet; anything else is an existing database that
- * happens to lack the stamp.
- */
-function isFreshDatabase(db: DatabaseSync): boolean {
-  if (userVersion(db) !== 0) return false;
-  return tableNames(db).size === 0;
-}
-
-/**
- * Refuse a file whose established tables are gone.
- *
- * Recreating them would report an empty history as a complete one; the file is
- * either damaged or not one this plugin wrote. A genuinely fresh file is exempt
- * because the DDL is about to create every table for the first time.
- */
-function refuseMissingHistory(db: DatabaseSync, fresh: boolean): void {
-  if (fresh) return;
-  const { absentTables } = structureState(db);
-  if (absentTables.length === 0) return;
-  throw new AuditMigrationError(
-    `audit database is missing the ${absentTables.join(', ')} table(s); refusing to recreate an empty history`,
-    null,
-  );
-}
-
-/** True when nothing this build needs is missing. */
-function isComplete(db: DatabaseSync): boolean {
-  const { absentTables, missingAdditions } = structureState(db);
-  return absentTables.length === 0 && missingAdditions.length === 0;
-}
-
-/**
- * Fail the migration if the structure is still incomplete after the step.
- *
- * A file left incomplete would accept the version stamp and then reject every
- * record, so it must pause writes with a reason instead.
- */
-function refuseIncompleteResult(db: DatabaseSync): void {
-  const { absentTables, missingAdditions } = structureState(db);
-  if (absentTables.length === 0 && missingAdditions.length === 0) return;
-  const missing = [
-    ...absentTables.map((table) => `table ${table}`),
-    ...missingAdditions,
-  ];
-  throw new Error(
-    `structure is still incomplete after migration: ${missing.join(', ')}`,
-  );
-}
-
-/**
- * Upgrade the database to this build's structure version.
- *
- * The sequence is: back up consistently, migrate inside one transaction, verify
- * integrity and row preservation, commit, then prune old backups. On any
- * failure the transaction rolls back, `user_version` stays where it was, the
- * backup is kept, and a typed error is thrown so the store can pause writes for
- * this database instead of corrupting it or blocking approvals.
- *
- * The version stamp is checked against the structure rather than trusted. Two
- * outcomes are possible for a file that is not complete:
- *
- * - This version's own additions are missing → repair them. That is a file some
- *   build stamped before creating what it introduced; leaving it alone drops
- *   every record silently, and the repair keeps all existing rows.
- * - An established table is missing → refuse. That file is damaged or is not
- *   one this plugin wrote; reconstructing the table would report an empty
- *   history as a complete one, and later writes would fail anyway.
- */
-export function migrateAudit(db: DatabaseSync, path?: string): void {
-  const currentVersion = userVersion(db);
-  if (currentVersion > SCHEMA_VERSION) {
-    throw new AuditMigrationError(
-      `audit database schema ${String(currentVersion)} is newer than this plugin (${String(SCHEMA_VERSION)}); refusing to modify it`,
-      null,
-    );
-  }
-  // A fresh file has none of these tables yet; the DDL is about to create them.
-  // The version alone cannot say that: an unstamped file may already hold
-  // history, and recreating its missing tables would erase that history.
-  const fresh = isFreshDatabase(db);
-  refuseMissingHistory(db, fresh);
-  if (currentVersion === SCHEMA_VERSION && isComplete(db)) return;
-
-  // Any existing file is backed up before it is touched, including an
-  // unstamped one: it may hold history even though it carries no version.
-  const backupPath =
-    !fresh && path !== undefined ? backupDatabase(db, path) : null;
-  const before = {
-    calls: fresh ? 0 : rowCount(db, 'calls'),
-    activations: fresh ? 0 : rowCount(db, 'config_activations'),
-  };
-
+/** Create the structure in one transaction, then stamp the version. */
+function createSchema(db: DatabaseSync): void {
   db.exec('BEGIN IMMEDIATE');
   try {
-    applyStep(db, currentVersion);
-    db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`);
-    if (!fresh) verifyMigration(db, before);
-    refuseIncompleteResult(db);
+    db.exec(SCHEMA_SQL);
     db.exec('COMMIT');
   } catch (error) {
     try {
@@ -559,11 +290,66 @@ export function migrateAudit(db: DatabaseSync, path?: string): void {
     } catch {
       // Keep the original error; a rollback failure adds no useful signal.
     }
-    throw new AuditMigrationError(
-      `audit migration failed: ${error instanceof Error ? error.message : String(error)}`,
-      backupPath,
+    throw new AuditSchemaError(
+      `audit database could not be created: ${error instanceof Error ? error.message : String(error)}`,
       error,
     );
   }
-  if (backupPath !== null && path !== undefined) pruneBackups(path);
+}
+
+/**
+ * Open one audit database for this build.
+ *
+ * A genuinely new file is created and stamped. An existing file is accepted only
+ * when it carries this structure version, every required table and every column a
+ * current record writes; anything else is refused with a message naming the
+ * reason, and the file is left exactly as it was. Nothing is backed up, upgraded,
+ * recreated or reinterpreted.
+ *
+ * `user_version = 0` is not proof that a file is new: SQLite reports 0 for any
+ * file that never had the pragma written, including one that already holds this
+ * plugin's tables. Fresh therefore means "no application table exists", and a
+ * populated unstamped file is refused like any other unsupported structure.
+ */
+export function openAuditSchema(db: DatabaseSync): void {
+  const version = userVersion(db);
+  // A newer file is not this build's to modify: a downgrade must not rewrite a
+  // structure it cannot interpret.
+  if (version > SCHEMA_VERSION) {
+    throw new AuditSchemaError(
+      `audit database schema ${String(version)} is newer than this plugin (${String(SCHEMA_VERSION)}); refusing to modify it`,
+    );
+  }
+  const tables = tableNames(db);
+  // A genuinely new file has no application table yet and no stamp; SQLite
+  // reports 0 for any file that never had the pragma written, so "no tables" is
+  // the only honest test for "nothing here to preserve".
+  if (version === 0 && tables.size === 0) {
+    createSchema(db);
+    return;
+  }
+  // The stamp decides first, because an older release's file is unsupported as a
+  // whole: naming its own missing tables would describe a reset as a repair.
+  if (version !== SCHEMA_VERSION) {
+    throw new AuditSchemaError(
+      `audit database schema ${String(version)} is not supported by this build (only ${String(SCHEMA_VERSION)} is read); reset the audit database instead of migrating it`,
+    );
+  }
+  const absent = REQUIRED_TABLES.filter((table) => !tables.has(table));
+  if (absent.length > 0) {
+    throw new AuditSchemaError(
+      `audit database is missing the ${absent.join(', ')} table(s); this build does not recreate them, so the audit history must be reset`,
+    );
+  }
+  const drift = REQUIRED_COLUMNS.flatMap(([table, columns]) => {
+    const present = columnNames(db, table);
+    return columns
+      .filter((column) => !present.has(column))
+      .map((column) => `${table}.${column}`);
+  });
+  if (drift.length > 0) {
+    throw new AuditSchemaError(
+      `audit database is missing the ${drift.join(', ')} column(s); this build does not alter an existing structure, so the audit history must be reset`,
+    );
+  }
 }

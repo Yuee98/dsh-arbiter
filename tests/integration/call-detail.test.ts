@@ -971,20 +971,23 @@ describe('pre-request review failures', () => {
   });
 });
 
-describe('old records and endings', () => {
-  test('a v1 row is shown with its absent columns unknown, not defaulted', async () => {
+describe('scoreless records and endings', () => {
+  test('a current row that produced no score reports absence, not a defaulted band', async () => {
     const harness = startHarness();
     harness.host.currentAudit()?.close();
     const db = new DatabaseSync(auditPath());
+    // The shape a rule-decided or failed review writes: the call happened and
+    // the verdict is real, but no score pair, no usage summary and no snapshot
+    // were ever produced. The detail must say exactly that.
     db.prepare(
       `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
          tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-         execution_mode, result, reason, trace, effect, session_record_state, signals,
-         policy_strategy, decision_rules, execution_status, record_format_version,
+         execution_mode, result, reason, trace, effect, session_record_state,
+         decision_rules, execution_status, record_format_version,
          execution_started_at, execution_finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      'legacy-detail',
+      'scoreless-detail',
       Date.now(),
       harness.session.id,
       'main',
@@ -994,21 +997,19 @@ describe('old records and endings', () => {
       'bash',
       '{"command":"echo hi"}',
       process.cwd(),
-      'bash:legacy',
+      'bash:scoreless',
       'rev-old',
       'cfg-old',
-      'normal',
+      'ask',
       'guarded',
       'review-deny',
-      'legacy row',
+      'scoreless row',
       '[]',
       'null',
       'written',
-      null,
-      null,
       '[]',
       'pending',
-      1,
+      2,
       null,
       null,
     );
@@ -1019,8 +1020,8 @@ describe('old records and endings', () => {
       audit: { ...harness.host.runtime.config.audit, enabled: true },
     };
 
-    const detail = await detailOf(harness.host, 'legacy-detail');
-    expect(fieldOf(detail, 'recordFormatVersion')).toBe(1);
+    const detail = await detailOf(harness.host, 'scoreless-detail');
+    expect(fieldOf(detail, 'recordFormatVersion')).toBe(2);
     const overview = fieldOf(detail, 'overview');
     expect(stringField(overview, 'verdict')).toBe('review-deny');
     expect(fieldOf(overview, 'execution')).toEqual({
@@ -1030,19 +1031,16 @@ describe('old records and endings', () => {
     });
     const basis = fieldOf(detail, 'basis');
     expect(fieldOf(basis, 'chain')).toBeNull();
-    // A v1 row carries none of the current review shape: no score pair, no usage
-    // summary, no strategy name. All three report as absent rather than as a
-    // defaulted band, a zeroed summary or a borrowed label.
+    // No score pair and no usage summary: both report as absent rather than as a
+    // defaulted band or a zeroed summary.
     expect(fieldOf(basis, 'scores')).toBeNull();
     expect(fieldOf(basis, 'usage')).toBeNull();
-    expect(fieldOf(basis, 'policyStrategy')).toBeNull();
     const raw = fieldOf(detail, 'raw');
     expect(fieldOf(raw, 'snapshot')).toBeNull();
     expect(fieldOf(raw, 'config')).toBeNull();
-    // A v1 row has no stage rows and no snapshot column, so whether a review
-    // happened is unknown: the view names that rather than claiming a snapshot
-    // went missing. The named configuration snapshot has no row, which is a
-    // real gap.
+    // With no stage rows and no snapshot, whether a review happened is unknown:
+    // the view names that rather than claiming material went missing. The named
+    // configuration snapshot has no row, which is a real gap.
     const missing = missingOf(detail);
     expect(missing).toContain('stages-missing');
     expect(missing).toContain('config-missing');
@@ -1056,10 +1054,10 @@ describe('old records and endings', () => {
     db.prepare(
       `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
          tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-         execution_mode, result, reason, trace, effect, session_record_state, signals,
-         policy_strategy, decision_rules, execution_status, record_format_version,
+         execution_mode, result, reason, trace, effect, session_record_state,
+         decision_rules, execution_status, record_format_version,
          execution_started_at, execution_finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       'future-detail',
       Date.now(),
@@ -1081,8 +1079,6 @@ describe('old records and endings', () => {
       '[]',
       'null',
       'written',
-      null,
-      null,
       '[]',
       'success',
       99,
@@ -1095,7 +1091,7 @@ describe('old records and endings', () => {
     const detail = await detailOf(harness.host, 'future-detail');
     expect(boolField(detail, 'unreadable')).toBe(true);
     expect(fieldOf(detail, 'recordFormatVersion')).toBe(99);
-    expect(stringField(detail, 'unreadableReason')).toContain('newer');
+    expect(stringField(detail, 'unreadableReason')).toContain('not supported');
     // The verdict is not read from a shape this build cannot interpret.
     expect(fieldOf(fieldOf(detail, 'overview'), 'verdict')).toBeNull();
     expect(missingOf(detail)).toEqual(['record-format-newer']);

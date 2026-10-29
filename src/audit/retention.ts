@@ -80,7 +80,7 @@ export interface RetentionOutcome {
    * keeps nothing is worse than one that states its constraint.
    */
   readonly irreducible: boolean;
-  /** Total bytes the target applies to, including sidecars and backups. */
+  /** Total bytes the target applies to, including the WAL and SHM sidecars. */
   readonly bytes: number;
 }
 
@@ -120,7 +120,7 @@ export function runRetention(
   retentionDays: number,
   retentionBytes: number,
   /**
-   * Total bytes of auxiliary audit files (migration backups and sidecars).
+   * Total bytes of auxiliary audit files (the WAL and SHM sidecars).
    *
    * These are reported separately from the database because deleting rows can
    * never reclaim them, and they must not be confused with SQLite's free pages:
@@ -174,7 +174,7 @@ export function runRetention(
         .prepare(
           `SELECT AVG(
                length(arguments) + length(trace) + length(effect) +
-               COALESCE(length(signals), 0) + 256
+               COALESCE(length(scores), 0) + COALESCE(length(usage), 0) + 256
              ) AS average FROM calls`,
         )
         .get(),
@@ -209,8 +209,8 @@ export function runRetention(
   // footprint would include bytes the checkpoint is about to reclaim.
   checkpoint(db);
   // After compaction the physical footprint may still exceed the target because
-  // the single newest call (or a sidecar/backup) is larger than it. Say so
-  // rather than deleting the last record to satisfy a number.
+  // the single newest call (or a sidecar) is larger than it. Say so rather than
+  // deleting the last record to satisfy a number.
   const irreducible = occupiedBytes(db) > databaseBudget;
   return { deleted, irreducible, bytes: occupiedBytes(db) + auxiliaryBytes() };
 }

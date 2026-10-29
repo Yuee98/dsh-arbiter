@@ -19,7 +19,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CallAnchor, CallFilter, CallPage, CallSummary } from './types.js';
 import { DENIED_RESULTS } from './types.js';
-import { LATEST_CALL_FORMAT, READABLE_CALL_FORMATS } from './schema.js';
+import { RECORD_FORMAT } from './schema.js';
 import { asRow, asRows, rowNumber, rowText } from './rows.js';
 
 /** The window a list request gets when it does not ask for one. */
@@ -242,25 +242,31 @@ const ROW_COLUMNS = `call_id, ts, session_id, session_kind, tool, result,
 /**
  * The format marker on a list row.
  *
- * An unknown (newer) format is not an error and not a reason to hide the row:
- * the identifying fields are still what the list is for, and a record written by
- * a newer build must not vanish from browsing while it is still in SQLite.
+ * A row this build did not write is not hidden: its identifying fields are still
+ * what the list is for, and a record from another build must not vanish from
+ * browsing while it is still in SQLite. It is reported as unreadable instead, so
+ * no current semantics are claimed for it.
  */
 function versionOf(row: Record<string, unknown>): {
-  readonly recordFormatVersion: number;
+  readonly recordFormatVersion: number | null;
   readonly unreadable: boolean;
   readonly unreadableReason: string | null;
 } {
   const raw = row['record_format_version'];
-  const parsed = typeof raw === 'bigint' ? Number(raw) : Number(raw ?? 1);
-  const version = Number.isFinite(parsed) ? parsed : 1;
-  const readable = READABLE_CALL_FORMATS.includes(version);
+  // `Number(null)` is 0, so an absent value has to be excluded before conversion
+  // or it would read as a written format nobody wrote.
+  const parsed =
+    typeof raw === 'number' || typeof raw === 'bigint' ? Number(raw) : null;
+  const version = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+  const readable = version === RECORD_FORMAT;
   return {
     recordFormatVersion: version,
     unreadable: !readable,
     unreadableReason: readable
       ? null
-      : `record format ${String(version)} is newer than this plugin (${String(LATEST_CALL_FORMAT)})`,
+      : version === null
+        ? `this row declares no record format; only format ${String(RECORD_FORMAT)} is supported`
+        : `record format ${String(version)} is not supported by this plugin (only ${String(RECORD_FORMAT)})`,
   };
 }
 

@@ -7,8 +7,7 @@ import type {
 } from './types.js';
 import { callPage } from './call-list.js';
 import {
-  LATEST_CALL_FORMAT,
-  READABLE_CALL_FORMATS,
+  RECORD_FORMAT,
   READABLE_CONFIG_SNAPSHOT_FORMATS,
   READABLE_REVIEW_SNAPSHOT_FORMATS,
   READABLE_TEMPLATE_FORMATS,
@@ -55,23 +54,33 @@ export function configHistory(
   }));
 }
 
-/** The format a row was written with; a v1 database has no such column yet. */
-function formatOf(row: Record<string, unknown>): number {
+/**
+ * The format a row was written with, or `null` when the row states none.
+ *
+ * This build writes one format and refuses any other database, so the column is
+ * always present and never null; a row that names no format therefore did not
+ * come from this build, and it must not be guessed into one.
+ */
+function formatOf(row: Record<string, unknown>): number | null {
   const raw = row['record_format_version'];
-  const value = typeof raw === 'bigint' ? Number(raw) : Number(raw ?? 1);
-  return Number.isFinite(value) ? value : 1;
+  // `Number(null)` is 0, so an absent value has to be excluded before conversion
+  // or it would read as a written format nobody wrote.
+  if (typeof raw !== 'number' && typeof raw !== 'bigint') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 /**
  * Whether this build can interpret a stored record.
  *
- * An unknown (newer) format is not an error and not a reason to rewrite the
- * row: the caller can still show the identifying fields, and the operator is
- * told the record needs a newer plugin. Expressing that as a flag keeps the
- * read path total instead of throwing on data it did not write.
+ * Only the current format is readable. A row carrying another one is reported as
+ * unreadable rather than reinterpreted under today's semantics; the caller keeps
+ * the identifying fields and the operator is told the record is not this build's.
+ * Expressing that as a flag keeps the read path total instead of throwing on data
+ * it did not write.
  */
-function readableFormat(version: number): boolean {
-  return READABLE_CALL_FORMATS.includes(version);
+function readableFormat(version: number | null): boolean {
+  return version === RECORD_FORMAT;
 }
 
 /** Whether a stored configuration snapshot's format can be interpreted. */
@@ -97,11 +106,11 @@ function optionalNumber(value: unknown): number | null {
 /**
  * The version marker every detail/list reader attaches.
  *
- * Absent columns stay `null`: a v1 row genuinely has no execution timestamps,
- * and reporting `0` would claim an execution that never happened.
+ * Absent columns stay `null`: a row without an observed execution start really
+ * has none, and reporting `0` would claim an execution that never happened.
  */
 function versionFields(row: Record<string, unknown>): {
-  readonly recordFormatVersion: number;
+  readonly recordFormatVersion: number | null;
   readonly unreadable: boolean;
   readonly unreadableReason: string | null;
 } {
@@ -110,10 +119,21 @@ function versionFields(row: Record<string, unknown>): {
   return {
     recordFormatVersion: version,
     unreadable: !readable,
-    unreadableReason: readable
-      ? null
-      : `record format ${String(version)} is newer than this plugin (${String(LATEST_CALL_FORMAT)})`,
+    unreadableReason: readable ? null : unsupportedFormatReason(version),
   };
+}
+
+/**
+ * Why a row's declared format is not readable.
+ *
+ * A row with no declared format is named as such rather than as a numbered
+ * format nobody wrote, so the reason can be acted on: both cases mean the record
+ * is not this build's and the audit history has to be reset, not reinterpreted.
+ */
+function unsupportedFormatReason(version: number | null): string {
+  return version === null
+    ? `this row declares no record format; only format ${String(RECORD_FORMAT)} is supported`
+    : `record format ${String(version)} is not supported by this plugin (only ${String(RECORD_FORMAT)})`;
 }
 
 /**
@@ -297,8 +317,8 @@ export function getCall(db: DatabaseSync, callId: string): StoredCall | null {
     workspace: typeof call['workspace'] === 'string' ? call['workspace'] : null,
     tool: rowText(call['tool']),
     arguments: rowJson(call['arguments']),
-    // Absent stays null: a v1 row recorded no schema, and inventing one would
-    // claim the host declared something it did not.
+    // Absent stays null: a record whose host declared no schema must not be
+    // given one invented later.
     argumentsSchema:
       typeof call['arguments_schema'] === 'string'
         ? rowJson(call['arguments_schema'])
@@ -478,9 +498,6 @@ export function priorVerdictsForSession(
   }[];
   readonly unreadableCount: number;
 } {
-  // The placeholders keep the filter and the JS reader in one definition: the
-  // readable formats are decided by `READABLE_CALL_FORMATS`.
-  const placeholders = READABLE_CALL_FORMATS.map(() => '?').join(', ');
   const rows = asRows(
     db
       .prepare(
@@ -489,11 +506,11 @@ export function priorVerdictsForSession(
            FROM calls
           WHERE session_id = ?
             AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
-            AND record_format_version IN (${placeholders})
+            AND record_format_version = ?
           ORDER BY ts DESC, call_id DESC
           LIMIT ?`,
       )
-      .all(sessionId, ...READABLE_CALL_FORMATS, limit),
+      .all(sessionId, RECORD_FORMAT, limit),
   );
   const excluded = asRow(
     db
@@ -501,9 +518,9 @@ export function priorVerdictsForSession(
         `SELECT COUNT(*) AS count FROM calls
           WHERE session_id = ?
             AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
-            AND record_format_version NOT IN (${placeholders})`,
+            AND record_format_version <> ?`,
       )
-      .get(sessionId, ...READABLE_CALL_FORMATS),
+      .get(sessionId, RECORD_FORMAT),
   );
   return {
     unreadableCount: rowNumber(excluded['count']),

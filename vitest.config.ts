@@ -34,7 +34,6 @@ export default defineConfig({
           exclude: [
             'tests/audit.test.ts',
             'tests/suggestions.test.ts',
-            'tests/repair.test.ts',
             'tests/unload.test.ts',
             'tests/integration/**',
             'tests/client/**',
@@ -50,7 +49,6 @@ export default defineConfig({
           include: [
             'tests/audit.test.ts',
             'tests/suggestions.test.ts',
-            'tests/repair.test.ts',
             'tests/unload.test.ts',
             'tests/integration/**/*.test.{ts,tsx}',
           ],

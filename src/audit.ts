@@ -21,7 +21,7 @@ export type {
 } from './audit/types.js';
 import { hash, json, rowChanges } from './audit/rows.js';
 import { clampPageSize } from './audit/call-list.js';
-import { backupPaths, migrateAudit } from './audit/schema.js';
+import { openAuditSchema } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
 import {
   configHistory,
@@ -90,9 +90,9 @@ export class AuditStore {
   /**
    * Why this store stopped writing, if it did.
    *
-   * A migration that could not complete leaves the database untouched; the
-   * store keeps serving reads and refuses new writes, so approvals never depend
-   * on storage. The value is surfaced through `health()`.
+   * A database this build cannot open is left untouched; the store keeps serving
+   * reads and refuses new writes, so approvals never depend on storage. The value
+   * is surfaced through `health()`.
    */
   private pausedReason: string | null = null;
   /** Identity used for the per-path retention registry. */
@@ -110,7 +110,7 @@ export class AuditStore {
     // first would already have altered a newer database we promised not to touch.
     try {
       this.db.exec('PRAGMA foreign_keys = ON');
-      migrateAudit(this.db, path);
+      openAuditSchema(this.db);
       // Only a database this build owns is switched to WAL.
       this.db.exec('PRAGMA journal_mode = WAL');
     } catch (error) {
@@ -202,21 +202,17 @@ export class AuditStore {
   /**
    * Bytes of auxiliary audit files that deleting rows cannot reclaim.
    *
-   * Migration backups and the WAL/SHM sidecars are separate files; the database
-   * itself is deliberately excluded, because its free pages are reclaimable by
-   * compaction and therefore belong to the database's own budget.
+   * The WAL/SHM sidecars are separate files; the database itself is deliberately
+   * excluded, because its free pages are reclaimable by compaction and therefore
+   * belong to the database's own budget.
    */
   private get auxiliaryBytes(): number {
     let total = 0;
-    for (const candidate of [
-      `${this.path}-wal`,
-      `${this.path}-shm`,
-      ...backupPaths(this.path),
-    ]) {
+    for (const candidate of [`${this.path}-wal`, `${this.path}-shm`]) {
       try {
         total += statSync(candidate).size;
       } catch {
-        // A missing sidecar or backup is normal.
+        // A missing sidecar is normal.
       }
     }
     return total;
@@ -225,9 +221,9 @@ export class AuditStore {
   /**
    * Bytes the retention target governs.
    *
-   * The database, its WAL/SHM sidecars and its own migration backups all live
-   * in the audit directory, so the capacity goal has to account for them; a
-   * database-only measurement would silently exceed the user's budget.
+   * The database and its WAL/SHM sidecars live in the audit directory, so the
+   * capacity goal has to account for them; a database-only measurement would
+   * silently exceed the user's budget.
    */
   get databaseBytes(): number {
     let total = 0;
@@ -235,7 +231,6 @@ export class AuditStore {
       this.path,
       `${this.path}-wal`,
       `${this.path}-shm`,
-      ...backupPaths(this.path),
     ]) {
       try {
         total += statSync(candidate).size;
@@ -663,8 +658,8 @@ export class AuditStore {
    * The full stored stage chain for one call, or `[]` when it has none.
    *
    * Recovery uses this to complete a chain another source recorded only partly; it
-   * reads stages rather than re-projecting the call row, so no new schema or
-   * migration is involved.
+   * reads stages rather than re-projecting the call row, so no new schema is
+   * involved.
    */
   priorVerdictStages(callId: string): readonly StoredStage[] {
     try {
