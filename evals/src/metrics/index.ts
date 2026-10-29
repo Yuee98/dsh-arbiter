@@ -255,6 +255,17 @@ function notesOf(parts: {
   for (const finding of parts.observation.dataset.findings) {
     notes.push(`数据集：${finding}`);
   }
+  const moved = parts.cells.filter(
+    (cell) => cell.caseFacts?.conflictsWithDataset === true,
+  );
+  if (moved.length > 0) {
+    const cases = [...new Set(moved.map((cell) => cell.caseId))].sort(
+      compareText,
+    );
+    notes.push(
+      `${String(cases.length)} 个案例在数据集中的家族、split 或来源已与运行记录不同（${cases.join('、')}）；分组以运行记录为准，差异在此列出。`,
+    );
+  }
   const projection = isProjection(parts.cells);
   if (projection) {
     notes.push(

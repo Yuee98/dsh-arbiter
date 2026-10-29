@@ -27,7 +27,12 @@ import type {
   ReferenceWord,
 } from './types.js';
 import { challengeClassOf, recordInputHash } from './observe.js';
-import type { DatasetFacts, LabelFacts, Observation } from './observe.js';
+import type {
+  CaseFacts,
+  DatasetFacts,
+  LabelFacts,
+  Observation,
+} from './observe.js';
 import type { CellRecord, CellState, RunProtocol } from '../run/types.js';
 import type { UsageField } from '../../../src/reviewer/usage.js';
 
@@ -77,14 +82,35 @@ export interface CellFacts {
     readonly familyId: string;
     readonly split: string;
     readonly provenance: string;
-    readonly path: string;
-    readonly challenge: readonly string[];
+    /** Dataset-relative path of the case document, or null when the dataset lacks it. */
+    readonly path: string | null;
+    /** The mechanisms the input uses, or null when the dataset did not supply the case. */
+    readonly challenge: readonly string[] | null;
+    /** Which input supplied these figures. */
+    readonly source: 'record' | 'dataset' | 'record-and-dataset';
+    /** Whether the dataset has since been reorganised away from what the run recorded. */
+    readonly conflictsWithDataset: boolean;
   } | null;
   readonly challengeClass: 'ordinary' | 'targeted' | 'unclassified';
   readonly label: LabelFacts | null;
   readonly engine: EngineAnswer;
+  /**
+   * The reference, only when the label actually adjudicated this cell's input.
+   *
+   * A label is approved against an input fingerprint, and a run records the fingerprint it
+   * submitted. Joining them by case id alone would let a label for a newer input become the
+   * reference for an older answer — which is a comparison nobody made, reported as a
+   * measured one. So the comparison is gated on the two fingerprints agreeing, and a
+   * mismatch is its own label status rather than a silent exclusion.
+   */
   readonly reference: ReferenceWord | null;
-  readonly labelStatus: 'gold' | 'missing' | 'excluded' | 'case-absent';
+  readonly labelStatus:
+    | 'gold'
+    | 'missing'
+    | 'excluded'
+    | 'case-absent'
+    | 'input-mismatch'
+    | 'authority-conflict';
   readonly labelReasons: readonly string[];
   /** What the engine said, as a word, or null when it said nothing. */
   readonly engineWord: EngineWord | null;
@@ -199,19 +225,42 @@ function isRecordless(status: CellState['status']): boolean {
   );
 }
 
-/** The label standing of one case, from the dataset's own assessment. */
-function labelStatusOf(
-  label: LabelFacts | null,
-  caseKnown: boolean,
-): 'gold' | 'missing' | 'excluded' | 'case-absent' {
-  if (!caseKnown) return 'case-absent';
-  if (label === null) return 'missing';
-  return label.gold ? 'gold' : 'excluded';
+/**
+ * The label standing of one cell, from the dataset's assessment and its own fingerprint.
+ *
+ * The two fingerprints are compared here rather than trusted: `label.inputHash` was recorded
+ * when the adjudicator decided, and `cellInputHash` is what this run actually submitted. A
+ * disagreement means the label judges material this cell never saw.
+ *
+ * `authority-conflict` is the third state: two adjudications claim the same case, or the
+ * dataset's own inspection found the label incoherent. Neither can become a reference,
+ * because neither establishes which decision a human made.
+ */
+function labelStatusOf(parts: {
+  readonly label: LabelFacts | null;
+  readonly caseKnown: boolean;
+  readonly cellInputHash: string | null;
+  readonly conflicted: boolean;
+}): CellFacts['labelStatus'] {
+  if (!parts.caseKnown) return 'case-absent';
+  if (parts.label === null) return 'missing';
+  if (parts.conflicted) return 'authority-conflict';
+  if (!parts.label.gold) return 'excluded';
+  if (
+    parts.cellInputHash !== null &&
+    parts.label.label.inputHash !== parts.cellInputHash
+  ) {
+    return 'input-mismatch';
+  }
+  return 'gold';
 }
 
 /** The reference a gold label records, or null when there is none to compare against. */
-function referenceOf(label: LabelFacts | null): ReferenceWord | null {
-  if (label === null || !label.gold) return null;
+function referenceOf(
+  label: LabelFacts | null,
+  status: CellFacts['labelStatus'],
+): ReferenceWord | null {
+  if (label === null || status !== 'gold') return null;
   const recorded = label.label.target.behaviourReference;
   return recorded === null ? null : recorded;
 }
@@ -272,6 +321,49 @@ function tokensOf(
   };
 }
 
+/**
+ * The case metadata a cell is grouped by.
+ *
+ * The saved record is authoritative for a cell that actually ran: it recorded the family,
+ * split and provenance at execution time, and those are what the run was. Reorganising the
+ * dataset afterwards must not move an old run into a new family, so the dataset fills in
+ * only what the record could not say — which is the whole of a cell that never ran, and the
+ * challenge mechanisms, which the record never carried.
+ *
+ * `source` states which of the two supplied each figure, so a reader can tell an execution
+ * fact from a present-day one.
+ */
+function caseFactsOf(parts: {
+  readonly record: CellRecord | null;
+  readonly datasetCase: CaseFacts | null;
+}): CellFacts['caseFacts'] {
+  const recorded = parts.record?.case ?? null;
+  const datasetCase = parts.datasetCase;
+  if (recorded === null && datasetCase === null) return null;
+  return {
+    familyId: recorded?.familyId ?? datasetCase?.familyId ?? 'unknown',
+    split: recorded?.split ?? datasetCase?.split ?? 'unknown',
+    provenance:
+      recorded?.provenanceSource ?? datasetCase?.provenance ?? 'unknown',
+    path: datasetCase?.path ?? null,
+    challenge: datasetCase?.challenge ?? null,
+    source:
+      recorded !== null && datasetCase !== null
+        ? 'record-and-dataset'
+        : recorded !== null
+          ? 'record'
+          : 'dataset',
+    // A conflict is a dataset that has since been reorganized. It is reported rather than
+    // resolved: the grouping follows the record, and the reader is told the two disagree.
+    conflictsWithDataset:
+      recorded !== null &&
+      datasetCase !== null &&
+      (recorded.familyId !== datasetCase.familyId ||
+        recorded.split !== datasetCase.split ||
+        recorded.provenanceSource !== datasetCase.provenance),
+  };
+}
+
 /** Join one planned cell with its record, its dataset facts and its label. */
 export function cellFactsOf(parts: {
   readonly state: CellState;
@@ -281,6 +373,14 @@ export function cellFactsOf(parts: {
   const facts = parts.dataset.cases.get(parts.state.caseId) ?? null;
   const label = parts.dataset.labels.get(parts.state.caseId) ?? null;
   const engine = engineAnswerOf(parts.record);
+  const inputHash =
+    parts.record === null ? null : recordInputHash(parts.record);
+  const labelStatus = labelStatusOf({
+    label,
+    caseKnown: facts !== null,
+    cellInputHash: inputHash,
+    conflicted: parts.dataset.contestedCases.has(parts.state.caseId),
+  });
   return {
     cellId: parts.state.cellId,
     caseId: parts.state.caseId,
@@ -290,25 +390,16 @@ export function cellFactsOf(parts: {
     indexStatus: parts.state.status,
     standing: standingOf(parts.state, parts.record),
     record: parts.record,
-    inputHash: parts.record === null ? null : recordInputHash(parts.record),
+    inputHash,
     model: modelOf(parts.record),
     modelKey: modelKeyOf(parts.record),
-    caseFacts:
-      facts === null
-        ? null
-        : {
-            familyId: facts.familyId,
-            split: facts.split,
-            provenance: facts.provenance,
-            path: facts.path,
-            challenge: facts.challenge,
-          },
+    caseFacts: caseFactsOf({ record: parts.record, datasetCase: facts }),
     challengeClass: challengeClassOf(facts?.challenge ?? null),
     label,
     engine,
-    reference: referenceOf(label),
-    labelStatus: labelStatusOf(label, facts !== null),
-    labelReasons: label?.reasons ?? [],
+    reference: referenceOf(label, labelStatus),
+    labelStatus,
+    labelReasons: label === null ? [] : [...label.reasons],
     engineWord: engine.word,
     judged: isJudged(engine),
     durationMs: parts.record?.timing.durationMs ?? 0,

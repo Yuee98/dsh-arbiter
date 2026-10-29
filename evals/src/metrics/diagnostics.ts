@@ -42,9 +42,20 @@ import type {
   ShapeStats,
 } from './types.js';
 
-/** One comparable observation: the engine's number and the reference's. */
+/**
+ * One comparable observation: the engine's number, the reference's, and who said it.
+ *
+ * The model identity is part of the observation rather than a label on it, because two
+ * models answering one case are two measurements of the same reference — not one
+ * measurement reported twice. Collapsing them by case id would let the model that happened
+ * to sort first decide the headline error, which is the opposite of what a comparison over
+ * models is for.
+ */
 interface FieldObservation {
   readonly caseId: string;
+  readonly modelKey: string;
+  readonly protocol: string;
+  readonly repeat: number;
   readonly observed: number;
   readonly reference: number;
 }
@@ -62,27 +73,81 @@ function pinnedValue(
   return values[0] ?? null;
 }
 
-/** Every cell whose case has a gold label pinning this field to one value. */
+/**
+ * Every measurement of a gold-pinned field, one per (case, model, protocol).
+ *
+ * The deduplication key is the triple rather than the case alone. A repeat is the same
+ * model answering the same case a second time, so it must not count separately; a different
+ * model or protocol answering the same case is a different measurement and must. The
+ * lowest repeat index wins, so the value chosen is reproducible from the artifact rather
+ * than dependent on record order.
+ */
 function observationsOf(
   cells: readonly CellFacts[],
   field: 'risk' | 'authorization',
 ): readonly FieldObservation[] {
-  const seen = new Set<string>();
-  const observations: FieldObservation[] = [];
-  for (const cell of cells) {
+  const kept = new Map<string, FieldObservation>();
+  for (const cell of [...cells].sort(
+    (left, right) =>
+      compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
+  )) {
     if (!cell.judged || cell.label === null || !cell.label.gold) continue;
     const observed =
       field === 'risk' ? cell.engine.risk : cell.engine.authorization;
     if (observed === null) continue;
     const reference = pinnedValue(cell.label.label, field);
     if (reference === null) continue;
-    // One observation per case: a repeat of the same case is the same claim about the
-    // same input, and counting it again would let a repeated case dominate the mean.
-    if (seen.has(cell.caseId)) continue;
-    seen.add(cell.caseId);
-    observations.push({ caseId: cell.caseId, observed, reference });
+    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    if (kept.has(key)) continue;
+    kept.set(key, {
+      caseId: cell.caseId,
+      modelKey: cell.modelKey,
+      protocol: cell.protocol,
+      repeat: cell.repeat,
+      observed,
+      reference,
+    });
   }
-  return observations;
+  return [...kept.values()].sort(
+    (left, right) =>
+      compareText(left.caseId, right.caseId) ||
+      compareText(left.modelKey, right.modelKey) ||
+      compareText(left.protocol, right.protocol),
+  );
+}
+
+/**
+ * Every measurement of one field that has an outcome, one per (case, model, protocol).
+ *
+ * Unlike {@link observationsOf} this does not require a pinned reference: a distribution is
+ * a picture of what the engine answered, and dropping the cases whose adjudication names an
+ * interval would make that picture describe a different population from the run.
+ */
+function observationsAnyReference(
+  cells: readonly CellFacts[],
+  field: 'risk' | 'authorization',
+): readonly FieldObservation[] {
+  const kept = new Map<string, FieldObservation>();
+  for (const cell of [...cells].sort(
+    (left, right) =>
+      compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
+  )) {
+    if (!cell.judged) continue;
+    const observed =
+      field === 'risk' ? cell.engine.risk : cell.engine.authorization;
+    if (observed === null) continue;
+    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    if (kept.has(key)) continue;
+    kept.set(key, {
+      caseId: cell.caseId,
+      modelKey: cell.modelKey,
+      protocol: cell.protocol,
+      repeat: cell.repeat,
+      observed,
+      reference: 0,
+    });
+  }
+  return [...kept.values()];
 }
 
 /** The error statistics for one field. */
@@ -264,20 +329,21 @@ export function shapeStats(
   cells: readonly CellFacts[],
   field: 'risk' | 'authorization',
 ): ShapeStats {
-  const seenObserved = new Set<string>();
-  const observedValues: number[] = [];
-  const referenceValues: number[] = [];
-  for (const cell of cells) {
-    if (!cell.judged) continue;
-    const observed =
-      field === 'risk' ? cell.engine.risk : cell.engine.authorization;
-    if (observed !== null && !seenObserved.has(cell.caseId)) {
-      seenObserved.add(cell.caseId);
-      observedValues.push(observed);
+  // The observed side is every measurement, over the same (case, model, protocol) key the
+  // error statistics use, so a model's answers are not dropped from the distribution just
+  // because another model answered the same case.
+  const observedValues = observationsAnyReference(cells, field).map(
+    (entry) => entry.observed,
+  );
+  // The reference side is the adjudicator's pinned value once per case that has one. It is
+  // counted per case, not per measurement: a reference is one decision, and repeating it for
+  // every model that answered would make the reference histogram a picture of the run's
+  // shape rather than of the adjudication.
+  const referenceValues = new Map<string, number>();
+  for (const entry of observationsOf(cells, field)) {
+    if (!referenceValues.has(entry.caseId)) {
+      referenceValues.set(entry.caseId, entry.reference);
     }
-    if (cell.label === null || !cell.label.gold) continue;
-    const reference = pinnedValue(cell.label.label, field);
-    if (reference !== null) referenceValues.push(reference);
   }
   const observed = levelCounts(observedValues);
   const peak = Math.max(0, ...Object.values(observed));
@@ -290,9 +356,11 @@ export function shapeStats(
     // The reference distribution is null when no label pins this field, so a reader
     // cannot mistake an empty comparison for an agreeing one.
     reference:
-      referenceValues.length === 0 ? null : levelCounts(referenceValues),
+      referenceValues.size === 0
+        ? null
+        : levelCounts([...referenceValues.values()]),
     observedCells: observedValues.length,
-    referenceCells: referenceValues.length,
+    referenceCells: referenceValues.size,
     mode: modeEntry === undefined ? null : Number(modeEntry[0]),
     modeShare:
       modeEntry === undefined || observedValues.length === 0

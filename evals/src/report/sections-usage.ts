@@ -46,24 +46,26 @@ function aggregateRows(aggregate: UsageAggregate | null): readonly string[] {
   );
 }
 
-/** One scope's row, over the six buckets the summary prints. */
-function scopeRow(scope: UsageScope): string {
-  const aggregate = scope.aggregate;
-  const value = (total: number | null | undefined): string =>
-    total === null || total === undefined ? '未知' : String(total);
-  return row([
-    scope.key,
-    String(scope.cells),
-    String(aggregate?.attempts ?? 0),
-    value(aggregate?.totals.inputTokens.total),
-    value(aggregate?.totals.outputTokens.total),
-    value(aggregate?.totals.totalTokens.total),
-    aggregate === null
-      ? 'n/a'
-      : aggregate.totals.totalTokens.complete
-        ? '是'
-        : '否',
-  ]);
+/** One scope's six buckets, as rows with their own coverage. */
+function scopeRows(scope: UsageScope): readonly string[] {
+  if (scope.aggregate === null) {
+    return [row([scope.key, '（无已发送 attempt）', '未知', '0', '0', '否'])];
+  }
+  return scope.fields.map((field) =>
+    row([
+      scope.key,
+      field.field,
+      num(field.total),
+      String(field.reported),
+      String(field.missing),
+      field.complete ? '是' : '否',
+    ]),
+  );
+}
+
+/** The attempt count and cell count a scope's table needs above its buckets. */
+function scopeSummary(scope: UsageScope): string {
+  return `${scope.key}：${String(scope.cells)} 个格子、${String(scope.aggregate?.attempts ?? 0)} 个已发送 attempt`;
 }
 
 /** One attempt row of the per-attempt table. */
@@ -84,7 +86,13 @@ function attemptRow(attempt: AttemptUsageRow): string {
   ]);
 }
 
-/** One scope table. */
+/**
+ * One scope table, over all six buckets.
+ *
+ * Empty and partially known are different states and are printed differently: a scope with
+ * no sent attempt says so rather than showing zeroes, and a bucket whose coverage is
+ * incomplete says `否` in its own row rather than borrowing another bucket's flag.
+ */
 function scopeTable(
   title: string,
   key: string,
@@ -93,10 +101,11 @@ function scopeTable(
   return [
     heading(3, title),
     '',
-    row([key, '格子', 'attempt', 'input', 'output', 'total', '完整']),
-    separator(7),
-    ...scopes.map(scopeRow),
+    row([key, '桶', '合计', '报告数', '缺失数', '该桶完整']),
+    separator(6),
+    ...scopes.flatMap(scopeRows),
     '',
+    ...(scopes.length === 0 ? [] : [scopes.map(scopeSummary).join('；'), '']),
   ].join('\n');
 }
 

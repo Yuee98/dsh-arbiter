@@ -132,13 +132,21 @@ function scopeOf(key: string, cells: readonly CellFacts[]): UsageScope {
   const attempts = cells.flatMap((cell) =>
     cell.record === null ? [] : attemptsOf(cell.record),
   );
+  const aggregate = attempts.length === 0 ? null : aggregateUsage(attempts);
   return {
     key,
     cells: cells.length,
     // An empty population has no aggregate at all: an aggregate over zero attempts
     // would report `attempts: 0` and six null totals, which reads like a measured
     // "nothing was spent" rather than "this subset ran nothing".
-    aggregate: attempts.length === 0 ? null : aggregateUsage(attempts),
+    aggregate,
+    fields: FIELDS.map((field) => ({
+      field,
+      total: aggregate?.totals[field].total ?? null,
+      reported: aggregate?.totals[field].reported ?? 0,
+      missing: aggregate?.totals[field].missing ?? 0,
+      complete: aggregate?.totals[field].complete ?? false,
+    })),
   };
 }
 
@@ -182,6 +190,7 @@ export function usageSection(cells: readonly CellFacts[]): UsageSection {
         repeat: cell.repeat,
         status: cell.indexStatus,
         aggregate: null,
+        storedAggregate: null,
         // A cell with no record has nothing to reproduce, so the cross-check does not
         // apply. Saying `true` would claim a comparison that never happened.
         matchesRecord: true,
@@ -193,6 +202,13 @@ export function usageSection(cells: readonly CellFacts[]): UsageSection {
     }
     const cellAttempts = attemptsOf(record);
     allAttempts.push(...cellAttempts);
+    // The published figure is the recomputation, never the stored summary: when the two
+    // disagree the document already reports the disagreement, and publishing the stored
+    // number would put consumption figures in the report that its own self-check says are
+    // wrong. The stored value is compared against and then dropped, which is what makes the
+    // comparison useful rather than decorative.
+    const recomputed =
+      cellAttempts.length === 0 ? null : aggregateUsage(cellAttempts);
     byCell.push({
       cellId: cell.cellId,
       caseId: cell.caseId,
@@ -200,11 +216,9 @@ export function usageSection(cells: readonly CellFacts[]): UsageSection {
       protocol: cell.protocol,
       repeat: cell.repeat,
       status: record.status,
-      aggregate: record.usage,
-      matchesRecord: sameAggregate(
-        record.usage,
-        cellAttempts.length === 0 ? null : aggregateUsage(cellAttempts),
-      ),
+      aggregate: recomputed,
+      matchesRecord: sameAggregate(record.usage, recomputed),
+      storedAggregate: record.usage,
     });
     // The adapter's own estimate, kept apart from what the provider reported. It is a
     // different quantity: an estimate covers the request that was built, and the

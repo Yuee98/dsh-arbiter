@@ -85,6 +85,8 @@ export function cellViewOf(parts: {
     }),
     inputHash: cell.inputHash ?? '',
     casePath: cell.caseFacts?.path ?? null,
+    caseFactsSource: cell.caseFacts?.source ?? null,
+    caseFactsConflict: cell.caseFacts?.conflictsWithDataset ?? false,
     labelPath: cell.label?.path ?? null,
     reason: cell.engine.reason,
     rationale: cell.label?.label.target.rationale ?? null,

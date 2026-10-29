@@ -80,7 +80,10 @@ function repeatGroupOf(cells: readonly CellFacts[]): RepeatGroup | null {
     repeats: ordered.length,
     judged: answers.length,
     answers,
-    stable: new Set(behaviours).size <= 1,
+    // Fewer than two judged answers is not stability: it is the absence of the comparison
+    // the figure is about. A group whose repeats all timed out must not raise the count of
+    // groups that held steady.
+    stable: answers.length < 2 ? null : new Set(behaviours).size <= 1,
     distinctAnswers: new Set(
       answers.map(
         (answer) => `${String(answer.risk)}/${String(answer.authorization)}`,
@@ -155,8 +158,9 @@ export function stabilitySection(
   return {
     samples: sampleWeightsOf(cells),
     repeatGroups: groups,
-    stableGroups: groups.filter((group) => group.stable).length,
-    unstableGroups: groups.filter((group) => !group.stable).length,
+    stableGroups: groups.filter((group) => group.stable === true).length,
+    unstableGroups: groups.filter((group) => group.stable === false).length,
+    unassessableGroups: groups.filter((group) => group.stable === null).length,
     withRepeats: groups.reduce((total, group) => total + group.repeats, 0),
   };
 }

@@ -17,7 +17,7 @@
  * default because a report is evidence.
  */
 
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import {
   buildReport,
@@ -27,7 +27,9 @@ import {
 } from '../metrics/index.js';
 import { observeRun } from '../metrics/observe.js';
 import type { ReportSettings } from '../metrics/types.js';
+import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
+import type { EvidencePath } from './write.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -133,6 +135,47 @@ export function isReportCommand(name: string): boolean {
   return name === 'report';
 }
 
+/**
+ * The evidence this report reads, and may therefore never overwrite.
+ *
+ * The run directory's own documents are protected by name and its records directory by
+ * prefix, because a record is addressed by cell id and a report must not be able to land on
+ * one by choosing a clever prefix. The dataset's three document directories are protected
+ * the same way. What is deliberately *not* protected is the run directory itself: a report
+ * written beside the run's index is the normal, documented destination.
+ *
+ * A dataset the report did not actually join is not protected, because writing a report into
+ * an unrelated directory is ordinary use.
+ */
+function protectedEvidenceOf(parts: {
+  readonly directory: string;
+  readonly root: string;
+  readonly settings: ReportSettings;
+  readonly observation: {
+    readonly dataset: { readonly status: string };
+  };
+}): readonly EvidencePath[] {
+  const evidence: EvidencePath[] = [
+    { path: join(parts.directory, RUN_FILES.plan), kind: 'file' },
+    { path: join(parts.directory, RUN_FILES.index), kind: 'file' },
+    { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
+    { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
+  ];
+  const dataset = parts.settings.dataset;
+  if (
+    parts.observation.dataset.status === 'joined' &&
+    dataset.kind === 'path'
+  ) {
+    const base = dataset.path.startsWith('/')
+      ? dataset.path
+      : resolve(parts.root, dataset.path);
+    for (const name of ['cases', 'labels', 'reviews']) {
+      evidence.push({ path: join(base, name), kind: 'directory' });
+    }
+  }
+  return evidence;
+}
+
 /** The settings a parsed command implies. */
 function settingsOf(
   io: ReportIo,
@@ -179,6 +222,13 @@ export async function reportRun(
     return 2;
   }
   const directory = resolve(io.root, command.directory);
+  // The destinations are computed before the read so a prefix that would land inside the
+  // evidence is refused without opening anything: `--force` may replace a report, never the
+  // run or dataset the report is built from.
+  const prefix =
+    command.output === null
+      ? defaultPrefixOf(directory)
+      : resolve(io.root, command.output);
   const read = await observeRun({
     directory,
     root: io.root,
@@ -189,14 +239,17 @@ export async function reportRun(
     return 1;
   }
   const report = buildReport({ observation: read.observation, settings });
-  // The default sits inside the run directory, which is where a reader looks for it. An
-  // explicit `--out` is a prefix, not a directory: the three extensions are added here so
-  // `--out validation/review-quality/run-a` produces three files sharing that stem.
-  const prefix =
-    command.output === null
-      ? defaultPrefixOf(directory)
-      : resolve(io.root, command.output);
-  const written = await writeReport({ prefix, report, force: command.force });
+  const written = await writeReport({
+    prefix,
+    report,
+    force: command.force,
+    protectedEvidence: protectedEvidenceOf({
+      directory,
+      root: io.root,
+      settings,
+      observation: read.observation,
+    }),
+  });
   if (!written.ok) {
     for (const problem of written.problems) io.err(`problem ${problem}`);
     return 1;

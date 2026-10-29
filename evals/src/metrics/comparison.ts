@@ -146,6 +146,21 @@ function comparisonOf(
   };
 }
 
+/**
+ * Whether two sides recorded one model identity.
+ *
+ * Both sides must name exactly one model, and it must be the same one. Two distinct models
+ * on one side is already a confound; an empty identity means the cell reported no model at
+ * all, which cannot establish sameness.
+ */
+function sameIdentity(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  if (left.length !== 1 || right.length !== 1) return false;
+  return left[0] === right[0];
+}
+
 /** One target-and-protocol group that the run actually executed. */
 interface Exercised {
   readonly targetId: string;
@@ -201,6 +216,10 @@ function systemCombinations(
       const b = exercised[right];
       if (a === undefined || b === undefined) continue;
       if (a.model === b.model || a.protocol === b.protocol) continue;
+      // One target whose two protocols named different models is already reported as a
+      // system combination by the per-target pass above; adding the cross-target entry for
+      // the same pair would report one confound twice.
+      if (a.targetId === b.targetId) continue;
       systems.push({
         targetId: `${a.targetId} vs ${b.targetId}`,
         model: `${a.model} vs ${b.model}`,
@@ -252,6 +271,7 @@ export function comparisonSection(
 ): ComparisonSection {
   const byTarget = groupBy(cells, (cell) => cell.targetId);
   const comparisons: ProtocolComparison[] = [];
+  const systems: SystemCombination[] = [];
   const notes: string[] = [];
   for (const [targetId, group] of [...byTarget.entries()].sort(
     ([left], [right]) => compareText(left, right),
@@ -260,9 +280,38 @@ export function comparisonSection(
     const decision = group.filter((cell) => cell.protocol === 'decision');
     const ranChat = chat.filter(executed);
     const ranDecision = decision.filter(executed);
+    // Two protocols of one *target* are only a same-model comparison when the model identity
+    // the two sides actually recorded is the same. A target's contract permits different
+    // chat and decision models, and a pair that differs in both is the confounded case this
+    // section exists to refuse — so the check is against the recorded identity, not against
+    // the plan's intention.
+    const chatModels = distinct(
+      ranChat.map((cell) => cell.modelKey).filter((key) => key !== ''),
+    );
+    const decisionModels = distinct(
+      ranDecision.map((cell) => cell.modelKey).filter((key) => key !== ''),
+    );
+    if (
+      ranChat.length > 0 &&
+      ranDecision.length > 0 &&
+      sameIdentity(chatModels, decisionModels)
+    ) {
+      comparisons.push(
+        comparisonOf(targetId, chatModels.join('、'), ranChat, ranDecision),
+      );
+      continue;
+    }
     if (ranChat.length > 0 && ranDecision.length > 0) {
-      const model = distinct(group.map((cell) => cell.modelKey)).join('、');
-      comparisons.push(comparisonOf(targetId, model, ranChat, ranDecision));
+      // Both protocols ran under one target id but not under one model, so the pair is a
+      // system combination. Reporting it as a protocol comparison would attribute a model
+      // difference to the protocol.
+      systems.push({
+        targetId,
+        model: `${chatModels.join('、')} vs ${decisionModels.join('、')}`,
+        protocols: ['chat', 'decision'],
+        reason:
+          '这个目标下两种协议实际记录到的模型不同，因此差异只能作为系统组合报告，不能归因于单一协议。',
+      });
       continue;
     }
     // A protocol that was planned but never dispatched is not a side of a comparison:
@@ -285,7 +334,12 @@ export function comparisonSection(
   }
   return {
     protocolComparisons: comparisons,
-    systems: systemCombinations(exercisedOf(cells)),
+    systems: [
+      ...systems.sort((left, right) =>
+        compareText(left.targetId, right.targetId),
+      ),
+      ...systemCombinations(exercisedOf(cells)),
+    ],
     unsupported: unsupportedOf(cells),
     notes,
   };

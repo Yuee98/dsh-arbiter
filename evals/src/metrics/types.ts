@@ -217,7 +217,13 @@ export interface BehaviourSection {
 /** One label, as the report accounts for it. */
 export interface LabelRow {
   readonly caseId: string;
-  readonly outcome: 'gold' | 'missing' | 'excluded' | 'case-absent';
+  readonly outcome:
+    | 'gold'
+    | 'missing'
+    | 'excluded'
+    | 'case-absent'
+    | 'input-mismatch'
+    | 'authority-conflict';
   /** Why a label is not gold; empty for a gold label. */
   readonly reasons: readonly string[];
   readonly status: 'pending' | 'approved' | 'disputed' | null;
@@ -244,6 +250,10 @@ export interface LabelCoverage {
   readonly gold: number;
   readonly excluded: number;
   readonly missing: number;
+  /** Labels whose input fingerprint does not match what the run submitted. */
+  readonly inputMismatch: number;
+  /** Cases whose adjudication is contested, so no reference is used. */
+  readonly authorityConflict: number;
   readonly pending: number;
   readonly disputed: number;
   readonly excludedByReason: Readonly<Record<string, number>>;
@@ -411,6 +421,21 @@ export interface UsageScope {
   readonly cells: number;
   /** Null when no cell in this scope ran a sent attempt. */
   readonly aggregate: UsageAggregate | null;
+  /**
+   * The six buckets, each with its own sum and coverage.
+   *
+   * This is what a scope table prints instead of three columns and one flag: a scope where
+   * two attempts reported `totalTokens` but only one reported `inputTokens` has a partial
+   * input sum, and a single `complete` flag derived from one bucket would present it as
+   * whole.
+   */
+  readonly fields: readonly {
+    readonly field: UsageField;
+    readonly total: number | null;
+    readonly reported: number;
+    readonly missing: number;
+    readonly complete: boolean;
+  }[];
 }
 
 /** One cell's usage, with the cross-check against the record's own summary. */
@@ -421,7 +446,16 @@ export interface CellUsage {
   readonly protocol: RunProtocol;
   readonly repeat: number;
   readonly status: string;
+  /** The aggregate this report publishes, recomputed from the stored attempts. */
   readonly aggregate: UsageAggregate | null;
+  /**
+   * The summary the record itself stored.
+   *
+   * Kept beside the recomputation so a reader can see both when they disagree: the report
+   * publishes the recomputation and states that the artifact's own figure differed, which
+   * is only checkable if the original is still there.
+   */
+  readonly storedAggregate: UsageAggregate | null;
   /** Whether re-aggregating the attempts reproduced the record's own `usage`. */
   readonly matchesRecord: boolean;
 }
@@ -472,7 +506,13 @@ export interface RepeatGroup {
     readonly authorization: number;
     readonly behaviour: BehaviourWord;
   }[];
-  readonly stable: boolean;
+  /**
+   * Whether the repeats agree, or null when there is not enough evidence to say.
+   *
+   * A group with fewer than two judged answers has no pair to compare: calling that stable
+   * would turn a timeout into a clean stability result.
+   */
+  readonly stable: boolean | null;
   readonly distinctAnswers: number;
   readonly riskSpread: number | null;
   readonly authorizationSpread: number | null;
@@ -497,6 +537,8 @@ export interface StabilitySection {
   readonly repeatGroups: readonly RepeatGroup[];
   readonly stableGroups: number;
   readonly unstableGroups: number;
+  /** Groups with fewer than two judged answers, so stability is unknown. */
+  readonly unassessableGroups: number;
   readonly withRepeats: number;
 }
 
@@ -598,7 +640,13 @@ export interface CellView {
   readonly outcomeStatus: string | null;
   readonly engine: EngineAnswer;
   readonly reference: ReferenceWord | null;
-  readonly labelStatus: 'gold' | 'missing' | 'excluded' | 'case-absent';
+  readonly labelStatus:
+    | 'gold'
+    | 'missing'
+    | 'excluded'
+    | 'case-absent'
+    | 'input-mismatch'
+    | 'authority-conflict';
   readonly labelReasons: readonly string[];
   readonly labelVersions: LabelVersions | null;
   readonly classification: BehaviourClass;
@@ -607,6 +655,10 @@ export interface CellView {
   readonly inputHash: string;
   /** Dataset-relative path of the case document, or null when the dataset did not resolve it. */
   readonly casePath: string | null;
+  /** Which input supplied the case metadata: the saved record, the dataset, or both. */
+  readonly caseFactsSource: 'record' | 'dataset' | 'record-and-dataset' | null;
+  /** Whether the dataset has been reorganised away from what the run recorded. */
+  readonly caseFactsConflict: boolean;
   readonly labelPath: string | null;
   /** The production service's own reason for an insufficiency or a failure. */
   readonly reason: string | null;

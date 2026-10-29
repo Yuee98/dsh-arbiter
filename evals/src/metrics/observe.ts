@@ -74,6 +74,15 @@ export interface DatasetFacts {
   /** The inspection, kept for the label coverage table and for findings. */
   readonly inspection: DatasetInspection | null;
   readonly reviews: readonly Sourced<CaseReviews>[];
+  /**
+   * Cases whose adjudication cannot be established, so nothing may use it.
+   *
+   * Two situations land here and both mean the same thing: either the dataset's own
+   * inspection found the label incoherent or stale in a way that blocks it, or two label
+   * files claim the same case. A map from case id would have silently kept whichever file
+   * was read last, which is a decision nobody made.
+   */
+  readonly contestedCases: ReadonlySet<string>;
   readonly problems: readonly string[];
   readonly findings: readonly string[];
 }
@@ -266,6 +275,7 @@ async function readDatasetFacts(
     labels: labelsOf(inspection),
     inspection,
     reviews: inspection.reviews,
+    contestedCases: contestedOf(inspection),
     problems: inspection.problems.map(
       (problem) => `${problem.path}: ${problem.message}`,
     ),
@@ -281,6 +291,59 @@ async function readDatasetFacts(
   };
 }
 
+/**
+ * The cases whose adjudication the report may not use, and why each one is contested.
+ *
+ * Two shapes of conflict land here, and both have the same consequence: no reference exists
+ * that the report can attribute to a human decision.
+ *
+ *   - the dataset's own inspection reported a *blocking* problem for a label file:
+ *     duplicate ids, a filename that disagrees with its id, or a label whose own coherence
+ *     rules were violated. Those are dataset defects, so the decision they carry is not one
+ *     a reader can trust.
+ *   - two or more label files claim the same case id. A map keyed by case id would keep
+ *     whichever file happened to be read last, which silently picks one of two
+ *     contradictory decisions.
+ *
+ * Problems that merely say a label is stale or unapproved are *not* conflicts: those labels
+ * are already excluded by the eligibility rules with their own reason, and treating them as
+ * contested would collapse two different facts into one.
+ */
+function contestedOf(inspection: DatasetInspection): ReadonlySet<string> {
+  const contested = new Set<string>();
+  const labelFiles = new Map<string, number>();
+  for (const entry of inspection.labels.gold) {
+    labelFiles.set(
+      entry.label.caseId,
+      (labelFiles.get(entry.label.caseId) ?? 0) + 1,
+    );
+  }
+  for (const entry of inspection.labels.excluded) {
+    labelFiles.set(
+      entry.label.caseId,
+      (labelFiles.get(entry.label.caseId) ?? 0) + 1,
+    );
+  }
+  for (const [caseId, count] of labelFiles) {
+    if (count > 1) contested.add(caseId);
+  }
+  // A *structural* defect in a label file is its own conflict: a filename that disagrees
+  // with its id, or a label whose own coherence rules were violated. The inspector reports
+  // those against the label's dataset-relative path.
+  //
+  // The staleness report is deliberately not included. It says a label could not count,
+  // which the eligibility rules already decide with a precise reason — an input that moved,
+  // a version that drifted, an adjudication that was never approved. Treating that as a
+  // conflict would replace those reasons with one word and hide which of them applies.
+  for (const problem of inspection.problems) {
+    if (!problem.path.startsWith('labels/')) continue;
+    if (problem.message.startsWith('this label cannot count')) continue;
+    const caseId = problem.path.slice('labels/'.length).replace(/\.json$/u, '');
+    contested.add(caseId);
+  }
+  return contested;
+}
+
 /** An empty dataset result with the reason it is empty. */
 function emptyDataset(
   status: 'absent' | 'unreadable',
@@ -294,6 +357,7 @@ function emptyDataset(
     labels: new Map(),
     inspection: null,
     reviews: [],
+    contestedCases: new Set<string>(),
     problems: status === 'unreadable' ? notes : [],
     findings: status === 'absent' ? notes : [],
   };

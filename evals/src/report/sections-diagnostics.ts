@@ -47,6 +47,14 @@ function labelSection(labels: LabelCoverage): string {
     row(['被排除', String(labels.excluded)]),
     row(['缺标签', String(labels.missing)]),
     row([
+      '**输入指纹不符（不用于比较）**',
+      `**${String(labels.inputMismatch)}**`,
+    ]),
+    row([
+      '**裁决冲突（不用于比较）**',
+      `**${String(labels.authorityConflict)}**`,
+    ]),
+    row([
       'case 缺失（数据集未发布）',
       String(
         labels.rows.filter((entry) => entry.outcome === 'case-absent').length,

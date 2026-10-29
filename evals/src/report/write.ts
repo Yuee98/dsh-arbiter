@@ -112,25 +112,98 @@ export interface WriteSuccess {
 }
 
 /**
+ * The paths a report's three documents occupy.
+ *
+ * Exported so the command can refuse a destination before reading anything: a prefix that
+ * lands on the run's own documents is not a place a report may be written, and discovering
+ * that after the read would mean the source was already open for a write.
+ */
+export function reportPathsOf(prefix: string): {
+  readonly json: string;
+  readonly markdown: string;
+  readonly html: string;
+} {
+  return {
+    json: `${prefix}${REPORT_FILES.json}`,
+    markdown: `${prefix}${REPORT_FILES.markdown}`,
+    html: `${prefix}${REPORT_FILES.html}`,
+  };
+}
+
+/**
+ * One thing a report reads and therefore may not overwrite.
+ *
+ * A path and whether it denotes a directory. Keeping the distinction explicit is what stops
+ * the two cases being conflated: a report's default destination is *inside* the run
+ * directory, which is correct, while a destination equal to one of the run's own documents is
+ * not.
+ */
+export interface EvidencePath {
+  readonly path: string;
+  readonly kind: 'file' | 'directory';
+}
+
+/**
+ * The destinations that would overwrite evidence this report reads.
+ *
+ * A report reads a run's `plan.json`, `index.json`, `records/*` and fixture, and (optionally)
+ * a dataset's `cases/`, `labels/` and `reviews/`. Every one of those is what the report
+ * describes, so writing over it would let an ostensibly read-only operation destroy the
+ * artifact it was reporting on. `--force` exists to regenerate a *report*, which is why the
+ * refusal applies even when it is set.
+ *
+ * A directory match is prefix-based, because a record is addressed by cell id and a report
+ * must not be able to land on `records/<cellId>.json` by choosing a clever prefix. A file
+ * match is exact: the run's own `plan.json` is protected, while `run/report.json` — the
+ * default destination — is not.
+ */
+export function destinationsInside(
+  paths: readonly string[],
+  evidence: readonly EvidencePath[],
+): readonly string[] {
+  return paths.filter((path) =>
+    evidence.some((entry) =>
+      entry.kind === 'directory'
+        ? path === entry.path || path.startsWith(`${entry.path}/`)
+        : path === entry.path,
+    ),
+  );
+}
+
+/**
  * Write the three documents beside one prefix.
  *
  * `prefix` is a path without an extension: `validation/review-quality/run-a/report`
  * produces `report.json`, `report.md` and `report.html`. The three are written together
  * because a reader who has the Markdown without the JSON cannot check a figure, and one
- * that failed midway would be worse than one that never started — so the existence check
- * covers all three before the first write.
+ * that failed midway would be worse than one that never started — so every check covers all
+ * three before the first write.
+ *
+ * `protectedDirectories` names the directories whose contents are evidence. A destination
+ * inside one is refused even with `force`, because `force` is permission to replace a report,
+ * not permission to overwrite the run it reports on.
  */
 export async function writeReport(parts: {
   readonly prefix: string;
   readonly report: EvaluationReport;
   readonly force: boolean;
+  readonly protectedEvidence?: readonly EvidencePath[];
 }): Promise<WriteSuccess | WriteConflict> {
   const rendered = renderReport(parts.report);
-  const paths = {
-    json: `${parts.prefix}${REPORT_FILES.json}`,
-    markdown: `${parts.prefix}${REPORT_FILES.markdown}`,
-    html: `${parts.prefix}${REPORT_FILES.html}`,
-  };
+  const paths = reportPathsOf(parts.prefix);
+  const collisions = destinationsInside(
+    [paths.json, paths.markdown, paths.html],
+    parts.protectedEvidence ?? [],
+  );
+  if (collisions.length > 0) {
+    return {
+      ok: false,
+      problems: collisions.map(
+        (path) =>
+          `${path} lies inside evidence this report reads; a report is never written over the run or dataset it describes`,
+      ),
+    };
+  }
   if (!parts.force) {
     const conflicts = await existing(paths);
     if (conflicts.length > 0) {

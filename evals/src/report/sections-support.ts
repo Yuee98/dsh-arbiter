@@ -41,7 +41,7 @@ export function stabilitySection(report: EvaluationReport): string {
           '',
         ]
       : [
-          `重复组：${String(stability.stableGroups)} 组稳定、${String(stability.unstableGroups)} 组不稳定，共覆盖 ${String(stability.withRepeats)} 个格子。`,
+          `重复组：${String(stability.stableGroups)} 组稳定、${String(stability.unstableGroups)} 组不稳定、${String(stability.unassessableGroups)} 组无法判定，共覆盖 ${String(stability.withRepeats)} 个格子。`,
           '',
           row([
             '案例',
@@ -62,7 +62,7 @@ export function stabilitySection(report: EvaluationReport): string {
               group.protocol,
               String(group.repeats),
               String(group.judged),
-              group.stable ? '是' : '否',
+              group.stable === null ? '无法判定' : group.stable ? '是' : '否',
               String(group.distinctAnswers),
               num(group.riskSpread),
               num(group.authorizationSpread),

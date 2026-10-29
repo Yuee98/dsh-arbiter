@@ -58,6 +58,7 @@ function rowOf(parts: {
 }): LabelRow {
   const label = parts.facts.labels.get(parts.caseId) ?? null;
   const known = parts.facts.cases.has(parts.caseId);
+  const contested = parts.facts.contestedCases.has(parts.caseId);
   if (label === null) {
     return {
       caseId: parts.caseId,
@@ -73,9 +74,18 @@ function rowOf(parts: {
     };
   }
   const target = label.label.target;
+  // A contested case is reported before gold, because a conflict means no decision can be
+  // read from the files at all.
+  const outcome = !known
+    ? 'case-absent'
+    : contested
+      ? 'authority-conflict'
+      : label.gold
+        ? 'gold'
+        : 'excluded';
   return {
     caseId: parts.caseId,
-    outcome: !known ? 'case-absent' : label.gold ? 'gold' : 'excluded',
+    outcome,
     reasons: [...label.reasons],
     status: target.status,
     reference: referenceOfLabel(target.behaviourReference),
@@ -86,6 +96,27 @@ function rowOf(parts: {
     decidedAt: target.decidedAt,
   };
 }
+
+/** How many distinct cases carry one label status. */
+function casesWithStatus(
+  cells: readonly CellFacts[],
+  status: CellFacts['labelStatus'],
+): number {
+  return new Set(
+    cells
+      .filter((cell) => cell.labelStatus === status)
+      .map((cell) => cell.caseId),
+  ).size;
+}
+
+/**
+ * The same figure, named for the case where it is about absence.
+ *
+ * `gold` and the two exclusion counts are the same measurement of different statuses; only
+ * the reading differs, so the alias exists to keep each call site honest rather than to
+ * duplicate the function.
+ */
+const casesWithoutReference = casesWithStatus;
 
 /** Count each exclusion reason once per label. */
 function exclusionsOf(
@@ -129,9 +160,20 @@ export function labelCoverageOf(parts: {
     executionDigest: parts.executionDigest,
     versions,
     cases: caseIds.length,
-    gold: rows.filter((row) => row.outcome === 'gold').length,
+    // `gold` is the number of cases this report could actually compare against, not the
+    // number the dataset marks approved. The difference is the whole point: a label approved
+    // for an input the run never submitted is gold to the dataset and useless here, and a
+    // table that reported it as gold would put a reference behind a number it never
+    // influenced. The rows below keep the dataset's own view, so both facts are visible.
+    gold: casesWithStatus(parts.cells, 'gold'),
     excluded: rows.filter((row) => row.outcome === 'excluded').length,
     missing: rows.filter((row) => row.outcome === 'missing').length,
+    // Counted separately from `excluded`, and derived from the *cells* rather than from
+    // the label rows: whether a label judges this run's material is a fact about the run's
+    // fingerprint, and the dataset cannot know it. These are the cases whose reference was
+    // withheld for that reason, so the number is also the size of the gap it creates.
+    inputMismatch: casesWithoutReference(parts.cells, 'input-mismatch'),
+    authorityConflict: casesWithoutReference(parts.cells, 'authority-conflict'),
     pending: rows.filter((row) => row.status === 'pending').length,
     disputed: rows.filter((row) => row.status === 'disputed').length,
     excludedByReason: exclusionsOf(rows),

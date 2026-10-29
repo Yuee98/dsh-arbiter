@@ -369,6 +369,8 @@ function labels(coverageOfLabels: LabelCoverage): string {
       ['金标案例', String(coverageOfLabels.gold)],
       ['被排除', String(coverageOfLabels.excluded)],
       ['缺标签', String(coverageOfLabels.missing)],
+      ['输入指纹不符（不用于比较）', String(coverageOfLabels.inputMismatch)],
+      ['裁决冲突（不用于比较）', String(coverageOfLabels.authorityConflict)],
       ['pending', String(coverageOfLabels.pending)],
       ['disputed', String(coverageOfLabels.disputed)],
     ]),
@@ -663,30 +665,43 @@ function attemptRow(attempt: AttemptUsageRow): string {
   );
 }
 
-/** One scope table. */
+/**
+ * One scope table, over all six buckets.
+ *
+ * The same rule as the Markdown table: each bucket carries its own coverage, so a scope with
+ * two attempts of which only one reported `inputTokens` cannot present that partial sum as
+ * complete. A scope with no sent attempt says so rather than showing zeroes for six buckets.
+ */
 function scopeTable(
   caption: string,
   key: string,
   scopes: readonly UsageScope[],
 ): string {
+  const rows = scopes.flatMap((scope) =>
+    scope.aggregate === null
+      ? [
+          [
+            escape(scope.key),
+            escape('（无已发送 attempt）'),
+            escape('未知'),
+            escape('0'),
+            escape('0'),
+            escape('否'),
+          ],
+        ]
+      : scope.fields.map((field) => [
+          escape(scope.key),
+          escape(field.field),
+          escape(num(field.total)),
+          escape(String(field.reported)),
+          escape(String(field.missing)),
+          escape(field.complete ? '是' : '否'),
+        ]),
+  );
   return table(
     caption,
-    [key, '格子', 'attempt', 'input', 'output', 'total', '完整'],
-    scopes.map((scope) => [
-      escape(scope.key),
-      escape(String(scope.cells)),
-      escape(String(scope.aggregate?.attempts ?? 0)),
-      escape(num(scope.aggregate?.totals.inputTokens.total ?? null)),
-      escape(num(scope.aggregate?.totals.outputTokens.total ?? null)),
-      escape(num(scope.aggregate?.totals.totalTokens.total ?? null)),
-      escape(
-        scope.aggregate === null
-          ? 'n/a'
-          : scope.aggregate.totals.totalTokens.complete
-            ? '是'
-            : '否',
-      ),
-    ]),
+    [key, '桶', '合计', '报告数', '缺失数', '该桶完整'],
+    rows,
   );
 }
 
@@ -811,7 +826,9 @@ function stability(report: EvaluationReport): string {
             escape(group.protocol),
             escape(String(group.repeats)),
             escape(String(group.judged)),
-            escape(group.stable ? '是' : '否'),
+            escape(
+              group.stable === null ? '无法判定' : group.stable ? '是' : '否',
+            ),
             escape(String(group.distinctAnswers)),
             escape(num(group.riskSpread)),
             escape(num(group.authorizationSpread)),
