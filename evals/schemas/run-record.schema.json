@@ -1,0 +1,398 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/run-record.schema.json",
+  "title": "Evals cell record",
+  "description": "One cell of one run, written once and never rewritten. A cell is one review of one case, through one target and one protocol, at one repeat index. The record holds what a reader needs to rebuild a report offline: the input fingerprint, the request the production renderer produced, every attempt with the complete response that adapter already masked, the public outcome, the usage under the shared mapping, and the durations. It holds no credential: masking happens in the production adapter, before this file exists. Cost is deliberately a status, never a number, because this runner does not price tokens and an unknown cost must not be written as zero.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "documentVersion",
+    "runId",
+    "cellId",
+    "createdAt",
+    "case",
+    "execution",
+    "entryPoint",
+    "target",
+    "material",
+    "status",
+    "stopReason",
+    "outcome",
+    "attempts",
+    "usage",
+    "cost",
+    "timing",
+    "versions",
+    "notes",
+    "abandonment"
+  ],
+  "properties": {
+    "documentVersion": {
+      "const": "eval-cell-record-v1"
+    },
+    "runId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "cellId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/cellId"
+    },
+    "createdAt": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/instant"
+    },
+    "case": {
+      "description": "The case this cell reviewed, identified by content rather than by position. The input hash is the same canonical digest a label is approved against, so a record and a label can be compared without re-reading the case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "familyId",
+        "split",
+        "provenanceSource",
+        "inputHash"
+      ],
+      "properties": {
+        "caseId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "familyId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "split": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/split"
+        },
+        "provenanceSource": {
+          "type": "string",
+          "enum": ["real", "reconstructed", "synthetic"]
+        },
+        "inputHash": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+        }
+      }
+    },
+    "execution": {
+      "description": "What this cell is, relative to the run. origin separates the plan's first pass from an independent repeat; a repeat is a separate cell and a separate review call, never a stored answer re-read as a new observation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "repeat", "transport"],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "enum": ["original", "repeat"]
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["offline", "live"]
+        }
+      }
+    },
+    "entryPoint": {
+      "description": "Which input chain produced this review. direct-service is the production reviewer called with material the runner assembled from the case; it is not the host session-log chain, and a report must not present it as host behaviour.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "materialChain", "detail"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["direct-service", "host-chain"]
+        },
+        "materialChain": {
+          "type": "string",
+          "enum": ["case-input", "session-log"]
+        },
+        "detail": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetId",
+        "provider",
+        "configuredModel",
+        "modelVersion",
+        "protocol",
+        "protocolName",
+        "responseModel",
+        "costTier"
+      ],
+      "properties": {
+        "targetId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "provider": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "configuredModel": {
+          "description": "The model the plan asked for. Kept even when no response arrived, because it is what the run intended rather than what it got.",
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "modelVersion": {
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["chat", "decision"]
+        },
+        "protocolName": {
+          "description": "The wire protocol version the production renderer stamped on the attempt. Null when no attempt ran.",
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseModel": {
+          "description": "The model the response body named, when it named one. Null means the body did not say, which is unknown rather than equal to the configured model.",
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costTier": {
+          "description": "The endpoint's configured tier. A classification of the route, not a price.",
+          "type": "string",
+          "enum": ["free", "paid", "unknown"]
+        }
+      }
+    },
+    "material": {
+      "description": "What the reviewer was given, and the fingerprints that identify it. Null only when no review was attempted, which the status explains.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/material"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "description": "reviewed means the production service returned an outcome, whatever that outcome was. The other values say the cell never produced one.",
+      "type": "string",
+      "enum": [
+        "reviewed",
+        "unsupported",
+        "cancelled",
+        "timeout",
+        "budget-exhausted",
+        "failed"
+      ]
+    },
+    "stopReason": {
+      "anyOf": [
+        {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outcome": {
+      "description": "The shared review contract's outcome, stored as the service returned it. A failure stays a failure: no score, verdict or threshold is derived here.",
+      "anyOf": [
+        {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/outcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attempts": {
+      "description": "Every actual model attempt, in order, as the production adapter reported it. A repair attempt is a real attempt and appears here beside the first one.",
+      "type": "array",
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/attempt"
+      }
+    },
+    "usage": {
+      "description": "The attempts' usage under the shared mapping, produced by the shared aggregate. Null when no attempt ran, which is not the same as a review that reported nothing.",
+      "anyOf": [
+        {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/usageAggregate"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cost": {
+      "description": "Cost is a status, not a number. This runner does not price tokens, and a zero here would read as a free call, which is a different fact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "amount", "currency", "reason"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not-computed", "not-applicable"]
+        },
+        "amount": {
+          "type": "null"
+        },
+        "currency": {
+          "type": "null"
+        },
+        "reason": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "durationMs"],
+      "properties": {
+        "startedAt": {
+          "description": "Epoch milliseconds, as the adapter records it. Not reformatted, so it matches production logs.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "versions": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/versions"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "abandonment": {
+      "description": "Present exactly when the runner ended this cell without the transport reporting an outcome: an outer timeout, or a cancellation while a request was outstanding. A dispatched cell that settled normally has no such member, so a reader can tell \"the provider answered\" from \"we stopped waiting\".",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["reservedAttempts", "reason"],
+      "properties": {
+        "reservedAttempts": {
+          "description": "How many attempts the run reserved for this cell before dispatching it. The transport may have sent up to this many and reported none, so this is the number a continuation must charge rather than the zero the attempt list shows.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "description": "Why the cell was abandoned, in the artifact's own words.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "definitions": {
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputHash",
+        "promptFingerprint",
+        "estimatedInputTokens",
+        "maxInputTokens",
+        "truncatedSegments",
+        "completenessStatus",
+        "blockingGaps",
+        "missing",
+        "notices"
+      ],
+      "properties": {
+        "inputHash": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+        },
+        "promptFingerprint": {
+          "description": "Digest of the exact text this protocol submits. Two cells with the same fingerprint sent the same request, which is what makes a repair comparable to its first attempt.",
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+        },
+        "estimatedInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "truncatedSegments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "completenessStatus": {
+          "type": "string",
+          "enum": ["complete", "incomplete", "insufficient"]
+        },
+        "blockingGaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "reason"],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notices": {
+          "description": "Non-blocking observations about this submission, copied from the production completeness report. They are input facts, never findings.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "kind", "reason"],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "known-empty",
+                  "unreadable",
+                  "truncated",
+                  "unrelated",
+                  "summarized"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

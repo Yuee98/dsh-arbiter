@@ -1,0 +1,280 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/run.schema.json",
+  "title": "Evals run index",
+  "description": "One bounded evaluation run: the frozen plan it executed, the dataset revision it read, the bounds it obeyed, and one entry per planned cell. The index is the run's mutable state; every cell's content is written once into an immutable record under records/ and referenced here, so an interrupted run can be continued without rewriting what it already produced. Reading a record needs no network and no model call, which is how a report is rebuilt offline. Terminology: a cell is one review of one case through one target (model) and one protocol; its repeat index makes independent repeats separate cells, so a repeat can never be mistaken for the same attempt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "documentVersion",
+    "runId",
+    "createdAt",
+    "updatedAt",
+    "status",
+    "plan",
+    "planHash",
+    "dataset",
+    "versions",
+    "transport",
+    "bounds",
+    "spent",
+    "cells",
+    "resumed",
+    "notes",
+    "fixtureDigest"
+  ],
+  "properties": {
+    "documentVersion": {
+      "const": "eval-run-index-v1"
+    },
+    "runId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "createdAt": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/instant"
+    },
+    "updatedAt": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/instant"
+    },
+    "status": {
+      "description": "complete means every planned cell reached a record; any other value says why the run stopped early, and the cells that never ran say it too.",
+      "type": "string",
+      "enum": [
+        "running",
+        "complete",
+        "cancelled",
+        "budget-exhausted",
+        "in-flight-timeout",
+        "failed"
+      ]
+    },
+    "plan": {
+      "description": "The resolved plan. Its caseIds are the list this run froze, not the split expression that produced them.",
+      "allOf": [
+        {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-plan.schema.json#/definitions/planBody"
+        },
+        {
+          "type": "object",
+          "required": ["caseIds"],
+          "properties": {
+            "caseIds": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "planHash": {
+      "description": "Canonical digest of the authored plan, so a continuation can prove the selection did not drift between attempts.",
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+    },
+    "dataset": {
+      "description": "The dataset revision this run read. The digest is the same summary the annotation tools print, so a run can be tied to the committed data it saw.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetId", "digest", "caseCount", "caseIds"],
+      "properties": {
+        "datasetId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "digest": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+        },
+        "caseCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "caseIds": {
+          "type": "array",
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          }
+        }
+      }
+    },
+    "versions": {
+      "description": "What produced this run. Two runs are comparable only when they agree on the contract, prompt and usage mapping, because those decide what a recorded number means.",
+      "allOf": [
+        {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/versions"
+        },
+        {
+          "type": "object",
+          "required": ["node"],
+          "properties": {
+            "node": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            }
+          }
+        }
+      ]
+    },
+    "transport": {
+      "description": "offline means every attempt went through the production adapter against a scripted socket; live means real provider calls. A report must never treat the first as model evidence.",
+      "type": "string",
+      "enum": ["offline", "live"]
+    },
+    "bounds": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/bounds"
+    },
+    "spent": {
+      "description": "What the run actually consumed, recomputed from the records rather than accumulated, so a continuation cannot double-count. A null count means nothing was reported, which is not the same as zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cellsStarted",
+        "cellsCompleted",
+        "cellsPlanned",
+        "attempts",
+        "estimatedInputTokens",
+        "reportedOutputTokens"
+      ],
+      "properties": {
+        "cellsStarted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cellsCompleted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cellsPlanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "estimatedInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reportedOutputTokens": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/nullableCount"
+        }
+      }
+    },
+    "cells": {
+      "description": "One entry per planned cell, in plan order. A cell that has not run yet is recorded as not-run, so the index always states the full plan rather than only the finished part.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/cellState"
+      }
+    },
+    "resumed": {
+      "description": "One entry per continuation, oldest first. A continuation adds records for missing cells and never rewrites an existing one.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "completedBefore", "plannedAfter"],
+        "properties": {
+          "at": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/instant"
+          },
+          "completedBefore": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plannedAfter": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fixtureDigest": {
+      "description": "The digest of the scripted socket this run replays, or null for a live run. The plan names a fixture path, and a path says nothing about contents: freezing the digest stops one run from combining responses produced by two different backends.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "cellState": {
+      "description": "The index's view of one cell. record names the immutable file holding its content; it is written once and never rewritten, which is what makes an interrupted run resumable without losing evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cellId",
+        "caseId",
+        "targetId",
+        "protocol",
+        "repeat",
+        "record",
+        "status",
+        "attempts",
+        "stopReason"
+      ],
+      "properties": {
+        "cellId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/cellId"
+        },
+        "caseId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "targetId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["chat", "decision"]
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "record": {
+          "description": "Path to this cell's record, relative to the run directory.",
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "reviewed",
+            "unsupported",
+            "cancelled",
+            "timeout",
+            "budget-exhausted",
+            "unresolvable",
+            "failed",
+            "not-run"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stopReason": {
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

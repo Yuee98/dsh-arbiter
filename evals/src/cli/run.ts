@@ -1,18 +1,26 @@
 /**
  * The evals command line's commands.
  *
- * Five commands, all offline:
+ * Five offline data commands and four run commands:
  *
  *   check-all  validate every dataset in the repository, plus the rubric snapshot
- *   check    validate one dataset and report problems, without writing anything
- *   summary  print what the committed labels and opinions add up to
- *   export   write a blank annotation document for a person to fill in
- *   import   turn a filled document back into committed label files
+ *   check      validate one dataset and report problems, without writing anything
+ *   summary    print what the committed labels and opinions add up to
+ *   export     write a blank annotation document for a person to fill in
+ *   import     turn a filled document back into committed label files
+ *   plan       expand a frozen run plan and report every cell it would run
+ *   run        dispatch a run plan; the only command that can reach a provider
+ *   resume     report, or continue, the cells a run has not recorded yet
+ *   show       read a finished run directory and print what it holds
  *
- * `check` is the one CI runs. The other three serve the annotation window: a person
- * exports a pack, decides the cases, and imports the result. Exporting never carries
- * a decision and importing never invents one, so neither command can move an answer
- * between the two sides.
+ * `check` is the one CI runs. The data commands serve the annotation window: a person
+ * exports a pack, decides the cases, and imports the result. Exporting never carries a
+ * decision and importing never invents one, so neither can move an answer between the
+ * two sides.
+ *
+ * The run commands are deliberately not part of any automatic path: `pnpm verify` and
+ * `pnpm check:evals` call `check-all` only. A real provider call happens when someone
+ * types `evals run`, and nothing schedules that for them.
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -34,12 +42,24 @@ import { checkSnapshot } from '../data/rubric.js';
 import type { RubricCheck } from '../data/rubric.js';
 import { compileCheckers } from '../data/schemas.js';
 import type { AnnotationDocument, RubricSnapshot } from '../data/types.js';
+import {
+  executeRun,
+  inspectResume,
+  planRun,
+  showRun,
+} from '../run/commands.js';
+import type { RunIo } from '../run/commands.js';
+import { isRunCommand, parseRunCommand, RUN_USAGE } from './run-commands.js';
 
 /** Where a command writes. Supplied so tests never capture real streams. */
 export interface CliIo {
   readonly root: string;
   readonly out: (line: string) => void;
   readonly err: (line: string) => void;
+  /** Reads one environment variable; a run's live credential is resolved through it. */
+  readonly env?: (name: string) => string | undefined;
+  /** The caller's lifetime, so a run can be cancelled by its invoker. */
+  readonly signal?: AbortSignal;
 }
 
 /** A parsed command line: one command, and its dataset and flags when it has them. */
@@ -52,10 +72,16 @@ export interface Command {
   readonly write: boolean;
 }
 
+/** The command line a caller ran, once a run command has been parsed. */
+export type ParsedCommand = Command | RunCommandLine;
+
+/** The run commands' own command line shape, re-exported for callers. */
+import type { RunCommandLine } from './run-commands.js';
+
 const USAGE = [
-  'usage: evals <command> [dataset] [options]',
+  'usage: evals <command> [argument] [options]',
   '',
-  'commands:',
+  'offline data commands:',
   '  check-all                              validate every dataset in the repository',
   '  check <dataset>                        validate cases, labels, reviews, manifest',
   '  summary <dataset>                      gold counts, exclusions, disagreements',
@@ -63,6 +89,8 @@ const USAGE = [
   '                                         write a blank annotation document',
   '  import <dataset> --fill <file> [--write]',
   '                                         check a filled document; --write stores labels',
+  '',
+  RUN_USAGE,
 ].join('\n');
 
 interface Flags {
@@ -98,11 +126,20 @@ function readFlags(rest: readonly string[]): Flags | string {
   return flags;
 }
 
-/** Split one argument list into a command, a dataset and its flags. */
-export function parseCommand(argv: readonly string[]): Command | string {
-  const [name, dataset, ...rest] = argv;
+/** Split one argument list into a command, its argument and its flags. */
+export function parseCommand(argv: readonly string[]): ParsedCommand | string {
+  const [name, first, ...rest] = argv;
   if (name === undefined) return USAGE;
   if (name === '--help' || name === 'help' || name === '-h') return USAGE;
+  if (isRunCommand(name)) {
+    // A run command is parsed by its own reader so it cannot inherit a dataset
+    // command's flags: `--out` on `run` would otherwise be accepted and ignored.
+    return parseRunCommand(
+      name,
+      [first, ...rest].filter((entry) => entry !== undefined),
+    );
+  }
+  const dataset = first;
   if (name === 'check-all') {
     if (dataset !== undefined) return `check-all takes no dataset\n\n${USAGE}`;
     return {
@@ -434,7 +471,13 @@ async function writeLabels(
   }
 }
 
-/** Run one command line and return the process exit code. */
+/**
+ * Run one command line and return the process exit code.
+ *
+ * A run command is dispatched with the same `io`, so its output goes wherever the
+ * caller's does and its exit code is its own: a run that stopped early exits non-zero,
+ * and a dry run that found nothing wrong exits zero without writing anything.
+ */
 export async function runCli(
   argv: readonly string[],
   io: CliIo,
@@ -443,6 +486,9 @@ export async function runCli(
   if (typeof command === 'string') {
     io.err(command);
     return 2;
+  }
+  if ('plan' in command) {
+    return runCommand(io, command);
   }
   switch (command.name) {
     case 'check-all':
@@ -455,5 +501,43 @@ export async function runCli(
       return exportPack(io, command);
     case 'import':
       return importPack(io, command);
+  }
+}
+
+/** Dispatch one run command with the caller's streams, environment and lifetime. */
+async function runCommand(io: CliIo, command: RunCommandLine): Promise<number> {
+  const runIo: RunIo = {
+    root: io.root,
+    out: io.out,
+    err: io.err,
+    ...(io.env === undefined ? {} : { env: io.env }),
+  };
+  switch (command.name) {
+    case 'plan':
+      return planRun(runIo, {
+        planPath: command.plan ?? '',
+        directory: command.dir,
+        resume: false,
+        dryRun: true,
+        signal: io.signal ?? new AbortController().signal,
+      });
+    case 'run':
+      return executeRun(runIo, {
+        planPath: command.plan ?? '',
+        directory: command.dir,
+        resume: command.resume,
+        dryRun: command.dryRun,
+        signal: io.signal ?? new AbortController().signal,
+      });
+    case 'resume':
+      return inspectResume(runIo, {
+        planPath: command.plan ?? '',
+        directory: command.dir,
+        resume: true,
+        dryRun: true,
+        signal: io.signal ?? new AbortController().signal,
+      });
+    case 'show':
+      return showRun(runIo, command.dir ?? '');
   }
 }

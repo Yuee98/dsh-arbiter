@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/run-plan.schema.json",
+  "title": "Evals run plan",
+  "description": "The frozen experiment: which dataset revision, which cases, which targets through which protocols, how many independent repeats, and the bounds the runner must obey. A plan is written before any review and hashed; a run records that hash so a continuation can prove it is finishing the same selection rather than a drifted one. Writing and checking a plan is offline: nothing here calls a model by itself, and only an explicit run command reaches a provider.",
+  "allOf": [
+    {
+      "$ref": "#/definitions/planBody"
+    }
+  ],
+  "definitions": {
+    "planBody": {
+      "description": "A plan's members. `caseIds` may be omitted on the authored document and is then resolved from `split` once, at run start; the run index stores the resolved list, which is what makes the selection frozen. Every other member is required, because a plan with an unstated bound is not a bound.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planVersion",
+        "datasetId",
+        "datasetPath",
+        "split",
+        "transport",
+        "protocols",
+        "targets",
+        "repeats",
+        "bounds",
+        "context",
+        "fixture",
+        "notes"
+      ],
+      "properties": {
+        "planVersion": {
+          "const": "eval-run-plan-v1"
+        },
+        "datasetId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "datasetPath": {
+          "description": "Repository-relative dataset directory, so a plan stays portable between checkouts holding the same revision.",
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "split": {
+          "description": "Which split this plan selects. A split selects whole families, so two plans over the same dataset with different splits share no case.",
+          "type": "string",
+          "enum": ["dev", "calibration", "holdout", "all"]
+        },
+        "caseIds": {
+          "description": "The cases to run. Omitted means the split decides, once, when the plan is resolved.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          }
+        },
+        "transport": {
+          "description": "offline replaces only the socket: the production renderer, parser, envelope rule, normalization and outcome mapping all still run. live is the same path against a real provider.",
+          "type": "string",
+          "enum": ["offline", "live"]
+        },
+        "protocols": {
+          "description": "The protocols this experiment asks for. A target that does not support one of them leaves that grid cell unsupported rather than inventing a request for it.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["chat", "decision"]
+          }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/target"
+          }
+        },
+        "repeats": {
+          "description": "Independent repeats of each case through each target and protocol. Each repeat is its own cell and its own review call, never a stored answer re-read as a second observation.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "bounds": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/bounds"
+        },
+        "context": {
+          "description": "The input budget the snapshot is trimmed to, kept apart from the run's own token bound.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxInputTokens"],
+          "properties": {
+            "maxInputTokens": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "fixture": {
+          "description": "Path to the scripted socket an offline plan replays, relative to the plan document. A live plan has none, and an offline plan without one cannot run: replaying nothing is not the same as replaying a refusal.",
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "offline"
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "properties": {
+              "fixture": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "live"
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "properties": {
+              "fixture": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

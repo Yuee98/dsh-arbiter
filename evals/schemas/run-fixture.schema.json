@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/run-fixture.schema.json",
+  "title": "Evals offline fixture",
+  "description": "The scripted socket an offline run replays. It is keyed by cell id, so a cell's answers cannot depend on how many cells ran before it, and it is deliberately explicit about what it does not say: a cell with no entry is not 'no answer', it is a fixture that cannot run that cell, and the runner reports it rather than inventing a refusal. The scripts use the production offline adapter's own vocabulary (text, provider failure, truncated stream, HTTP status plus body), so a fixture cannot express an outcome the adapter could not produce.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixtureVersion", "description", "cells", "notes"],
+  "properties": {
+    "fixtureVersion": {
+      "const": "eval-offline-fixture-v1"
+    },
+    "description": {
+      "description": "What this fixture is meant to demonstrate. It is read by a person, never by the runner.",
+      "type": "string"
+    },
+    "cells": {
+      "description": "Scripted answers per cell id. A chat cell lists its stream scripts in order; a decision cell lists its HTTP responses in order. Running past the end is an error rather than a repeat of the last answer, so a fixture cannot hide a repair loop that never terminated.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/cellScript"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "cellScript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chat", "decision"],
+      "properties": {
+        "chat": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/chatScript"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/response"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "usagePayload": {
+      "description": "A provider usage payload, exactly as a provider would send it. Kept opaque on purpose: the shape belongs to the provider, and the mapping that reads it is the shared one."
+    },
+    "chatScript": {
+      "description": "One scripted chat stream. text arrives and the production parser reads it; failure is the provider declaring its own failure; truncated is a stream that ends with no terminal finish, as a dropped connection does.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/usagePayload"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "code", "message"],
+          "properties": {
+            "kind": {
+              "const": "failure"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/usagePayload"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "truncated"
+            }
+          }
+        }
+      ]
+    },
+    "response": {
+      "description": "One scripted HTTP response. The body is a string so a non-JSON body, the case a real endpoint returns under stress, is expressible.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "body"],
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "body": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
