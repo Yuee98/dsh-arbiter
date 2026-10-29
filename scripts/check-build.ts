@@ -20,6 +20,7 @@ import * as reactDomClient from 'react-dom/client';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { publint } from 'publint';
 import { formatMessage } from 'publint/utils';
+import { evalsSpecifiers, forbiddenEntries } from './build/package-boundary.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-arbiter-build-'));
@@ -38,6 +39,40 @@ function run(command: string, args: string[], cwd = consumer): void {
 
 function runNode(args: string[]): void {
   run(process.execPath, args);
+}
+
+/** Run one command and return its stdout, failing if it does not succeed. */
+function runCapture(command: string, args: string[], cwd = consumer): string {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, CI: 'true' },
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, `${command} ${args.join(' ')} failed.`);
+  return result.stdout;
+}
+
+/**
+ * Every evals specifier a packaged module imports, as file/line pairs.
+ *
+ * Reading the emitted JavaScript rather than the source is what makes this a check
+ * on the artifact: a source-level scan could pass while a build step inlined an
+ * evals module.
+ */
+async function importFreeOfEvals(
+  packageRoot: string,
+): Promise<readonly string[]> {
+  const files = await readdir(join(packageRoot, 'lib'), { recursive: true });
+  const findings: string[] = [];
+  for (const file of files) {
+    if (!file.endsWith('.js') && !file.endsWith('.cjs')) continue;
+    const text = await readFile(join(packageRoot, 'lib', file), 'utf8');
+    for (const specifier of evalsSpecifiers(text)) {
+      findings.push(`${file}: ${specifier}`);
+    }
+  }
+  return findings;
 }
 
 interface LoadedClient {
@@ -209,6 +244,22 @@ try {
     if (Array.isArray(injectValue))
       assert.equal(injectValue.join(','), 'slots,locale');
   }
+  // The publishable file list is the whole contract for what a user installs, so an
+  // evals path reaching the tarball is a packaging defect rather than a documentation
+  // matter. This checks the actual tarball's file list, not the `files` field, so it
+  // cannot be satisfied by an intent that the packer ignores.
+  assert.deepEqual(
+    forbiddenEntries(runCapture('tar', ['tzf', tarball])),
+    [],
+    'The published tarball must not contain evals sources, schemas or data.',
+  );
+  const evalsReferences = await importFreeOfEvals(packageRoot);
+  assert.deepEqual(
+    evalsReferences,
+    [],
+    'Published modules must not import evals.',
+  );
+
   const patch = await readFile(join(packageRoot, 'cordis.patch.yml'), 'utf8');
   assert.match(patch, /name: dsh-arbiter/);
   const localeFiles = (
