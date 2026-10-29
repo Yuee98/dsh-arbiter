@@ -266,12 +266,36 @@ const SCORE_MEMBERS: ReadonlySet<string> = new Set([
 const MEMBER_PREFIX = /^(\s*"([^"]*)"\s*:\s*)/u;
 
 /**
+ * The members whose value must be a plain number.
+ *
+ * `confidence` is a bare number in the decision protocol. Anything else in that
+ * position is not a value this contract reads, so it cannot be retained.
+ */
+const NUMERIC_MEMBERS: ReadonlySet<string> = new Set(['confidence']);
+
+/** A JSON number, exactly. */
+const JSON_NUMBER = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
+/** A JSON string literal, exactly, including its quotes. */
+const JSON_STRING = /^"(?:[^"\\]|\\.)*"$/u;
+
+/**
  * Rebuild a verified score object, keeping only the members a score may carry.
  *
- * Rebuilding is what closes the hole an exemption leaves open. Keeping the
- * recognized members and replacing every other value means an extra member can
- * only ever be recorded as `[redacted]`, so a valid distribution beside a
- * credential-shaped `"value"` no longer protects the credential.
+ * Two separate jobs are done here, and skipping either one leaves a hole:
+ *
+ *   - **membership**: an unrecognized member's value becomes `[redacted]`, so a
+ *     forged answer cannot attach a credential beside a valid distribution;
+ *   - **content**: a *recognized* member is not automatically safe. `legend`
+ *     carries model-written descriptive text, so a provider (or something that
+ *     forged the answer) can put `Authorization: Bearer …` inside it. Every
+ *     retained value is therefore rescanned with the same authentication-header
+ *     rule before it goes back, and a numeric member that is not a number, or a
+ *     string member that is not a string, is replaced rather than trusted.
+ *
+ * The retained value's own masking runs with the object's span already removed
+ * from the text, so a credential inside `legend` cannot be protected by the
+ * object it is nested in.
  */
 function rebuildScoreObject(objectText: string): string {
   const kept: string[] = [];
@@ -279,14 +303,107 @@ function rebuildScoreObject(objectText: string): string {
     const match = MEMBER_PREFIX.exec(member);
     if (match === null) continue;
     const key = match[2] ?? '';
-    kept.push(
-      SCORE_MEMBERS.has(key) ? member.trim() : `${match[1] ?? ''}[redacted]`,
-    );
+    const prefix = match[1] ?? '';
+    if (!SCORE_MEMBERS.has(key)) {
+      kept.push(`${prefix}[redacted]`);
+      continue;
+    }
+    const value = member.slice(prefix.length).trim();
+    const shape = retainedShape(key, value);
+    kept.push(shape === null ? `${prefix}[redacted]` : `${prefix}${shape}`);
   }
   // A score object that lost every member keeps its verified type, so the record
   // still says what the provider claimed rather than becoming an empty object.
   if (kept.length === 0) kept.push('"type":"score"');
   return `{${kept.join(',')}}`;
+}
+
+/**
+ * The value to retain for one member, or null when it cannot be retained safely.
+ *
+ * A retained value is always passed through the authentication-header rule, so the
+ * answer's own text is held to the same boundary as the rest of the record. The
+ * declared shape still has to match what the member means: a `confidence` that is
+ * not a number, or a `legend` that is not a string or an object, is not this
+ * contract's answer and is dropped rather than stored.
+ */
+function retainedShape(key: string, value: string): string | null {
+  if (key === 'type') return value;
+  if (NUMERIC_MEMBERS.has(key)) {
+    if (!JSON_NUMBER.test(value)) return null;
+    return value;
+  }
+  if (key === 'score') {
+    if (!JSON_NUMBER.test(value)) return null;
+    return value;
+  }
+  if (key === 'probabilities') {
+    // A distribution object: its values are numbers keyed by level. Individual
+    // entries are checked rather than the whole text, so a non-numeric entry is
+    // what fails, not an incidentally unusual key order.
+    return distributionText(value);
+  }
+  // `legend` is descriptive text, or a map of level to description. The masking
+  // pass is what makes it safe to retain: it is scanned exactly like any other
+  // text in the record.
+  if (JSON_STRING.test(value)) return maskHeadersIn(value);
+  if (value.startsWith('{')) return objectText(value);
+  return null;
+}
+
+/** A probabilities object whose entries are all numbers, or null. */
+function distributionText(value: string): string | null {
+  if (!value.startsWith('{')) return null;
+  const body = value.slice(1, -1);
+  for (const entry of topLevelMemberChunks(body)) {
+    const match = MEMBER_PREFIX.exec(entry);
+    if (match === null) return null;
+    const number = entry.slice((match[1] ?? '').length).trim();
+    if (!JSON_NUMBER.test(number)) return null;
+  }
+  return objectText(value);
+}
+
+/**
+ * A JSON object's text with each of its values held to the header rule.
+ *
+ * The level keys are kept as written; only values are scanned, because that is
+ * where a description would carry a header.
+ */
+function objectText(value: string): string | null {
+  const body = value.slice(1, -1);
+  const kept: string[] = [];
+  for (const entry of topLevelMemberChunks(body)) {
+    const match = MEMBER_PREFIX.exec(entry);
+    if (match === null) return null;
+    const prefix = match[1] ?? '';
+    const inner = entry.slice(prefix.length).trim();
+    kept.push(
+      JSON_STRING.test(inner) || JSON_NUMBER.test(inner)
+        ? `${prefix}${maskHeadersIn(inner)}`
+        : `${prefix}[redacted]`,
+    );
+  }
+  return `{${kept.join(',')}}`;
+}
+
+/**
+ * Apply the authentication-header rule to a retained fragment.
+ *
+ * This is the same rule the whole document goes through; running it here as well is
+ * what stops a value that was protected from the outer pass by its enclosing object
+ * from being restored unscanned.
+ */
+function maskHeadersIn(fragment: string): string {
+  const pattern = new RegExp(
+    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?)(\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
+    'giu',
+  );
+  return fragment.replace(
+    pattern,
+    (match: string, field: string, separator: string, value: string) =>
+      isScoreLiteral(field, value) ? match : `${field}${separator}[redacted]`,
+  );
 }
 
 /**

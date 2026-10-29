@@ -1318,6 +1318,55 @@ describe('the score object is exempt while every header still masks', () => {
     expect(redactAuthHeaders(noted)).toContain('"confidence":0.9');
   });
 
+  test('a credential inside a retained score member is rescanned, not restored', () => {
+    // Round-3 hole: allowlisted members were restored verbatim, so a descriptive
+    // member could carry an actual authentication-header echo. Keeping the member
+    // is only safe if its *content* goes through the same rule.
+    const legendText =
+      '{"authorization":{"type":"score","probabilities":{"0":0,"9":1},"legend":"Authorization: Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(legendText)).not.toContain('PRIVATE_TOKEN');
+    // The distribution survives, so the answer the engine judged is still readable.
+    expect(redactAuthHeaders(legendText)).toContain(
+      '"probabilities":{"0":0,"9":1}',
+    );
+
+    // A legend map is scanned value by value.
+    const legendMap =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"legend":{"9":"Authorization: Bearer TOK"}}}';
+    expect(redactAuthHeaders(legendMap)).not.toContain('Bearer TOK');
+
+    // A declared number that is not a number is not this contract's answer.
+    const badConfidence =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":"Bearer TOK"}}';
+    expect(redactAuthHeaders(badConfidence)).not.toContain('Bearer TOK');
+    // A genuine numeric confidence is kept.
+    expect(
+      redactAuthHeaders(
+        '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":0.4}}',
+      ),
+    ).toContain('"confidence":0.4');
+  });
+
+  test('a score object with a credential-bearing legend masks end to end', async () => {
+    // The same shape through the production boundary, with no known credential.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"legend":"Authorization: Bearer sk-legend"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-legend');
+  });
+
   test('a verified score answer is exempt in both envelopes', () => {
     // The exemption has to keep working for the real answers, or the fix would
     // trade a security hole for the parseability defect it was introduced to fix.
