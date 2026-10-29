@@ -30,7 +30,7 @@ pnpm test:e2e:dsh                          # 真实隔离宿主，约 2 分钟
 
 ```sh
 pnpm test:unit          # tests/**/*.test.ts 中纯逻辑与工程约束
-pnpm test:integration   # tests/audit、suggestions、repair、unload、tests/integration
+pnpm test:integration   # tests/audit、suggestions、unload、tests/integration
 pnpm test:ui            # tests/client，RTL
 pnpm exec vitest run tests/rules.test.ts     # 单文件
 ```
@@ -148,7 +148,7 @@ DSH_E2E_VERSION=0.2.1-rc.3 pnpm test:e2e:dsh
 | 文件 | 职责 |
 |---|---|
 | `src/audit.ts` | `AuditStore` 门面 |
-| `src/audit/{schema,writer,queries,rows,retention,metadata,types}.ts` | 建表、写入、查询、行映射、30 天/1 GiB 清理 |
+| `src/audit/{schema,writer,queries,rows,retention,metadata,types}.ts` | 建表（无迁移链）、写入、查询、行映射、30 天/1 GiB 清理 |
 | `src/audit/call-list.ts` | **keyset 分页**（`ts DESC, call_id DESC`）+ 精简投影 |
 | `src/audit/verdict-sources.ts` | 恢复专用只读查询 |
 | `src/host/history.ts` | 三源裁决历史：内存 / 会话记录 / SQLite |

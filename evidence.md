@@ -708,7 +708,7 @@ DSH 原生 `plugin_manager` 热卸载与 `SIGKILL` 对照。
 | 项 | 结论 | 级别 |
 |---|---|---|
 | F1 记录写入 | 只走公开 `appendPluginRecord`；真实"写→关→退宿主→重启→重开"可加载、可读回，记录 `ignorable: true`；移走审计目录后仍恢复 | 正式插件运行确认 |
-| F1 旧记录兼容 | `src/repair.ts` 备份式定点修复，只改 `plugin:arbiter/*`、保留其他事件、幂等；5 个单测 | 单测 + 真实旧日志检查（0 处需修） |
+| F1 旧记录兼容 | `src/repair.ts` 备份式定点修复，只改 `plugin:arbiter/*`、保留其他事件、幂等；5 个单测（该工具已由 RQ-06 删除，本行保留当时证据） | 单测 + 真实旧日志检查（0 处需修） |
 | F2 auto 拒绝 | guarded／trusted／未启用三档在权限变化前失败，`preset/sandbox/approval` 零变化；`/permission workspace-write` 同值、`read-only`、`danger-full-access`、未知预设均回归 | 正式插件运行确认 |
 | F3 真实停用 | 插件页开关（`setPluginEnabled`）→ 路由 200→404，热停机；重新启用恢复。9s 审查与停用操作是否重叠不能由延迟结束后才写的请求日志确认 | 真实管理器基本操作确认；在途重叠待补测 |
 | F3 真实卸载 | 插件页「卸载」（`removeBundle`）→ 依赖删除、bundle 取消选择、404；重启后不复活；关闭会话可重开。12s 在途重叠需换正确开始信号补测 | 真实管理器基本操作确认；在途重叠待补测 |
