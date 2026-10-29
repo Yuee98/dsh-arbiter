@@ -17,9 +17,11 @@
  * - `refuse` — the file cannot be shown to be this plugin's audit database, so
  *   the whole run is blocked instead of deleting a file of unknown origin.
  *
- * A sidecar is decided *with* its database: deleting a `-wal` while keeping the
- * database it belongs to would discard committed rows, and an orphaned sidecar
- * cannot be shown to be anything at all.
+ * **A fact that could not be established is `refuse`, never `delete` and never a
+ * quiet `keep`.** An unreadable directory, an unreadable copy, a `calls` table
+ * with no `profile` column and a `.staging` file that is not a readable Arbiter
+ * copy all describe states where this tool does not know what it would destroy;
+ * each one blocks the run rather than producing a confident-looking empty plan.
  */
 import { createHash } from 'node:crypto';
 import {
@@ -33,7 +35,9 @@ import { join } from 'node:path';
 
 import type { DatabaseProbe, ValueCount } from './inspect.ts';
 import {
+  CURRENT_SCHEMA_VERSION,
   absentProbe,
+  currentVersionKnown,
   inspectDatabase,
   isDirectory,
   sha256OfFile,
@@ -94,15 +98,20 @@ export interface ResetTarget {
   readonly sha256: string | null;
   /** Structure read for a database or backup; `null` for sidecars and residue. */
   readonly probe: DatabaseProbe | null;
-  /** Tables and their row counts, for the before/after tally. */
-  readonly records: Readonly<Record<string, number>>;
+  /** Tables and their row counts, or `null` when they could not be read. */
+  readonly records: Readonly<Record<string, number>> | null;
 }
 
 /** The complete, confirmable plan. */
 export interface ResetPlan {
   /** The data directory the scope was resolved from. */
   readonly home: string;
-  /** `<home>/arbiter`. */
+  /**
+   * The canonical, symlink-free plugin directory this plan was built from.
+   *
+   * `applyPlan` revalidates this exact path before the first deletion, so a
+   * preview made against one directory cannot delete inside another.
+   */
   readonly directory: string;
   readonly directoryExists: boolean;
   readonly targets: readonly ResetTarget[];
@@ -116,7 +125,10 @@ export interface ResetPlan {
   readonly profiles: readonly ValueCount[];
   /** Projects whose rows live in the target databases. */
   readonly projects: readonly ValueCount[];
-  /** Digest of the target set: the token an apply must echo back. */
+  /**
+   * Digest binding the canonical directory, the authorization options and every
+   * deletion target's name, size and content.
+   */
   readonly planId: string;
   readonly deleteCount: number;
   readonly deleteBytes: number;
@@ -124,68 +136,39 @@ export interface ResetPlan {
   readonly keepCount: number;
 }
 
-/** Sum of every table's row count. */
-function totalRows(records: Readonly<Record<string, number>>): number {
-  return Object.values(records).reduce((sum, value) => sum + value, 0);
+/** Sum of every table's row count, or `null` when a count is unknown. */
+function totalRows(
+  records: Readonly<Record<string, number>> | null,
+): number | null {
+  if (records === null) return null;
+  const values = Object.values(records);
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  return values.reduce((sum, value) => sum + value, 0);
 }
 
-/**
- * Refusals that make any deletion unsafe, whichever files were found.
- *
- * These are about the *scope* rather than one file: a plugin directory that is a
- * link would let a name that looks like ours point outside the data directory.
- */
-export function scopeRefusals(home: string): readonly string[] {
-  if (!isDirectory(home))
-    return [
-      `the data directory ${home} does not exist or is not a directory; the reset scope cannot be verified`,
-    ];
-  let resolved: string;
-  try {
-    resolved = realpathSync(home);
-  } catch (error) {
-    return [
-      `the data directory ${home} could not be resolved to a real path: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    ];
-  }
-  // The scope is always applied to the resolved directory, so an operator who
-  // passes a symlinked path (macOS `/tmp`, a linked home) still gets the exact
-  // directory that was inspected rather than a name that could be repointed.
-  //
-  // A DSH profile directory is not a data directory. Pointing the tool at one
-  // must fail loudly rather than silently find nothing: an operator who aimed at
-  // the wrong level would otherwise read "nothing to delete" as "the old data is
-  // already gone".
-  if (existsSync(join(resolved, PROFILE_MARKER)))
-    return [
-      `${home} is a DSH profile directory, not a data directory; pass the data directory that contains ${DATA_DIRECTORY}/ so the scope covers exactly this plugin`,
-    ];
-  let pluginDirectory: string;
-  try {
-    pluginDirectory = realpathSync(join(resolved, DATA_DIRECTORY));
-  } catch {
-    // An absent plugin directory is a valid, empty scope: there is nothing here.
-    return [];
-  }
-  if (!isDirectory(pluginDirectory))
-    return [`${join(resolved, DATA_DIRECTORY)} is not a directory`];
-  if (pluginDirectory !== join(resolved, DATA_DIRECTORY))
-    return [
-      `${join(resolved, DATA_DIRECTORY)} resolves to ${pluginDirectory}; a linked plugin directory is refused so the scope stays inside the data directory`,
-    ];
-  return [];
+/** A row tally as text, refusing to print an unknown count as a number. */
+export function rowsText(
+  records: Readonly<Record<string, number>> | null,
+): string {
+  const total = totalRows(records);
+  return total === null
+    ? 'an unreadable number of row(s)'
+    : `${String(total)} row(s)`;
 }
 
-/** Whether the probe is an audit database this project could have written. */
-function ownershipRefusal(probe: DatabaseProbe): string | null {
+/** The shared ownership + readability refusal for a deletion candidate. */
+function deletionRefusal(probe: DatabaseProbe): string | null {
   if (probe.problem !== null) return probe.problem;
-  const absent = OWNERSHIP_TABLES.filter(
-    (table) => !probe.tables.includes(table),
-  );
-  if (absent.length === 0) return null;
-  return `it is not an Arbiter audit database: the ${absent.join(', ')} table(s) are missing`;
+  const tables = probe.tables;
+  if (tables === null) return 'its structure could not be read';
+  const absent = OWNERSHIP_TABLES.filter((table) => !tables.includes(table));
+  if (absent.length > 0)
+    return `it is not an Arbiter audit database: the ${absent.join(', ')} table(s) are missing`;
+  // A `calls` table without `profile` is not "no other profile affected": it is
+  // an attribution this tool cannot make, which blocks the allowlist check.
+  if (probe.profiles === null)
+    return 'the calls table has no profile column, so which profile these records belong to cannot be established';
+  return null;
 }
 
 /** A decision plus the sentence that justifies it. */
@@ -196,66 +179,48 @@ interface Decision {
 
 /** Scope choices the operator made before the plan was built. */
 export interface PlanOptions {
-  /**
-   * Whether a database that also holds rows in the *current* record format may
-   * be deleted.
-   *
-   * A structurally old database can still contain rows an interim build wrote
-   * with today's record contract (the mixed state the design names). Deleting it
-   * removes those rows too, so the default plan refuses and the operator has to
-   * say so explicitly: mixed state is never cleared indiscriminately.
-   */
-  readonly includeCurrentFormatRecords?: boolean;
   /** Profiles the reset is authorized for; any other profile blocks it. */
   readonly expectProfiles?: readonly string[];
 }
 
-/** Rows in a probe that carry the record contract this build writes. */
-function currentRows(probe: DatabaseProbe): number {
-  return probe.currentFormatRecords;
-}
-
-/** The mixed-state refusal, when the operator has not acknowledged it. */
-function mixedRefusal(
-  probe: DatabaseProbe,
-  options: PlanOptions,
-): string | null {
-  const current = currentRows(probe);
-  if (current === 0 || options.includeCurrentFormatRecords === true)
-    return null;
-  return `it also holds ${String(current)} row(s) written in the current record format, so deleting it would discard data the current contract produced; pass --include-current-format-records once those rows are confirmed disposable`;
+/** The mixed-state refusal shared by the database and its backups. */
+function mixedRefusal(probe: DatabaseProbe): string | null {
+  const current = probe.currentFormatRecords;
+  if (current === null)
+    return 'how many rows were written in the current record format could not be read';
+  if (current === 0) return null;
+  return `it also holds ${String(
+    current,
+  )} row(s) written in the current record format, and this reset only removes old test data — deleting it would discard data the current contract produced`;
 }
 
 /** The decision for the audit database itself. */
-function databaseDecision(
-  probe: DatabaseProbe,
-  options: PlanOptions,
-): Decision {
+function databaseDecision(probe: DatabaseProbe): Decision {
   switch (probe.kind) {
     case 'absent':
       return { action: 'keep', reason: 'the database does not exist' };
     case 'empty':
+      // An empty SQLite file proves nothing about who wrote it: "no tables" is as
+      // consistent with another tool's scratch file as with this plugin. The name
+      // is not evidence, so the file is refused rather than deleted.
       return {
-        action: 'delete',
+        action: 'refuse',
         reason:
-          'a SQLite file with no application table: it holds no audit history and this build refuses it',
+          'a SQLite file with no application table: it holds no audit history, but nothing proves it belongs to this plugin either',
       };
     case 'unsupported': {
-      const refusal = ownershipRefusal(probe) ?? mixedRefusal(probe, options);
+      const refusal = deletionRefusal(probe) ?? mixedRefusal(probe);
       if (refusal !== null) return { action: 'refuse', reason: refusal };
       const stamp =
         probe.version === null
           ? 'no schema stamp'
           : `schema ${String(probe.version)}`;
-      const mixed =
-        currentRows(probe) === 0
-          ? ''
-          : `, including ${String(currentRows(probe))} current-format row(s) the operator acknowledged`;
+      const tables = probe.tables?.length ?? 0;
       return {
         action: 'delete',
-        reason: `old Arbiter audit data (${stamp}; this build reads only the current structure) holding ${String(
-          probe.tables.length,
-        )} table(s) and ${String(totalRows(probe.records))} row(s)${mixed}`,
+        reason: `old Arbiter audit data (${stamp}; this build reads only the current structure: ${String(
+          CURRENT_SCHEMA_VERSION,
+        )}) holding ${String(tables)} table(s) and ${rowsText(probe.records)}`,
       };
     }
     case 'current':
@@ -282,23 +247,24 @@ function databaseDecision(
 }
 
 /** The decision for one migration backup. */
-function backupDecision(probe: DatabaseProbe, options: PlanOptions): Decision {
+function backupDecision(probe: DatabaseProbe): Decision {
   switch (probe.kind) {
     case 'absent':
       return { action: 'keep', reason: 'the file does not exist' };
     case 'empty':
       return {
-        action: 'delete',
-        reason: 'an empty migration backup: it holds no audit history',
+        action: 'refuse',
+        reason:
+          'a SQLite file with no application table: nothing proves it is a migration backup of this plugin',
       };
     case 'unsupported': {
-      const refusal = ownershipRefusal(probe) ?? mixedRefusal(probe, options);
+      const refusal = deletionRefusal(probe) ?? mixedRefusal(probe);
       if (refusal !== null) return { action: 'refuse', reason: refusal };
       return {
         action: 'delete',
         reason: `migration backup of a retired structure (schema ${String(
           probe.version,
-        )}) holding ${String(totalRows(probe.records))} row(s)`,
+        )}) holding ${rowsText(probe.records)}`,
       };
     }
     case 'current':
@@ -332,33 +298,65 @@ interface Entry {
   readonly isSymbolicLink: boolean;
 }
 
-/** The entries of the plugin's data directory, or none when it is absent. */
-function entriesOf(directory: string): readonly Entry[] {
+/** The result of listing the plugin directory. */
+type Listing =
+  | { readonly ok: true; readonly entries: readonly Entry[] }
+  | { readonly ok: false; readonly problem: string };
+
+/** `lstat` one path, or `null` when it cannot be inspected. */
+function factsOfEntry(
+  path: string,
+): { readonly isFile: boolean; readonly isSymbolicLink: boolean } | null {
+  try {
+    // `lstat` rather than `stat`: a symlink must be recognised as one, and
+    // following it would report the link as a file it is not.
+    const stats = lstatSync(path);
+    return { isFile: stats.isFile(), isSymbolicLink: stats.isSymbolicLink() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List the plugin directory, reporting a failure as a failure.
+ *
+ * An unreadable directory used to return an empty list, which the plan then
+ * printed as "nothing to delete" — the operator was told their old data was gone
+ * by a run that never saw the directory. Only a genuinely absent directory is an
+ * empty scope; every other failure is a refusal.
+ */
+function listDirectory(directory: string): Listing {
+  if (!existsSync(directory)) return { ok: true, entries: [] };
   let names: readonly string[];
   try {
     names = readdirSync(directory);
-  } catch {
-    return [];
+  } catch (error) {
+    return {
+      ok: false,
+      problem: `the plugin directory ${directory} could not be listed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
   const entries: Entry[] = [];
   for (const name of names) {
     const path = join(directory, name);
-    try {
-      // `lstat` rather than `stat`: a symlink must be recognised as one, and
-      // following it would report the link as a file it is not.
-      const stats = lstatSync(path, { throwIfNoEntry: false });
-      if (stats === undefined) continue;
-      entries.push({
-        name,
-        path,
-        isFile: stats.isFile(),
-        isSymbolicLink: stats.isSymbolicLink(),
-      });
-    } catch {
-      // An entry that vanished between listing and reading is simply not there.
-    }
+    const stats = factsOfEntry(path);
+    // A failed `lstat` for a listed name is not "absent": the entry exists and
+    // this tool cannot describe it, so the whole listing becomes a refusal.
+    if (stats === null)
+      return {
+        ok: false,
+        problem: `the directory entry ${path} could not be inspected, so the scope is incomplete`,
+      };
+    entries.push({
+      name,
+      path,
+      isFile: stats.isFile,
+      isSymbolicLink: stats.isSymbolicLink,
+    });
   }
-  return entries;
+  return { ok: true, entries };
 }
 
 /**
@@ -393,7 +391,7 @@ function plainTarget(
     bytes,
     sha256,
     probe: null,
-    records: {},
+    records: null,
   };
 }
 
@@ -417,6 +415,15 @@ function probedTarget(
   };
 }
 
+/** The size of a plain file, or `0` when it cannot be read. */
+function sizeOfPath(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
 /** A plain target for one entry, hashing it when the operator may inspect it. */
 function entryTarget(
   entry: Entry,
@@ -427,18 +434,12 @@ function entryTarget(
   const refusal = entryRefusal(entry);
   if (refusal !== null)
     return plainTarget(entry, group, 'refuse', refusal, 0, null);
-  let bytes: number;
-  try {
-    bytes = statSync(entry.path).size;
-  } catch {
-    bytes = 0;
-  }
   return plainTarget(
     entry,
     group,
     action,
     reason,
-    bytes,
+    sizeOfPath(entry.path),
     sha256OfFile(entry.path),
   );
 }
@@ -473,8 +474,19 @@ function sidecarTargets(
   return targets;
 }
 
-/** The digest an apply has to echo, over names, sizes and contents. */
-function digestOf(targets: readonly ResetTarget[]): string {
+/**
+ * The digest an apply has to echo.
+ *
+ * The canonical directory and the authorization options are part of it. Hashing
+ * only file identities would make two data directories holding byte-identical
+ * copies produce the same token, so a preview of one directory would authorize a
+ * deletion in the other.
+ */
+function digestOf(
+  directory: string,
+  options: PlanOptions,
+  targets: readonly ResetTarget[],
+): string {
   const lines = targets
     .filter((target) => target.action === 'delete')
     .map(
@@ -482,23 +494,69 @@ function digestOf(targets: readonly ResetTarget[]): string {
         `${target.name}\u0000${String(target.bytes)}\u0000${target.sha256 ?? 'none'}`,
     )
     .sort();
-  return createHash('sha256').update(lines.join('\n')).digest('hex');
+  const profiles = [...(options.expectProfiles ?? [])].sort().join(',');
+  return createHash('sha256')
+    .update(`directory\u0000${directory}\nprofiles\u0000${profiles}\n`)
+    .update(lines.join('\n'))
+    .digest('hex');
 }
 
 /** Sum of one value column across the databases a run deletes. */
 function sumValues(
   targets: readonly ResetTarget[],
-  pick: (probe: DatabaseProbe) => readonly ValueCount[],
+  pick: (probe: DatabaseProbe) => readonly ValueCount[] | null,
 ): readonly ValueCount[] {
   const tally = new Map<string, number>();
   for (const target of targets) {
     if (target.action !== 'delete' || target.probe === null) continue;
-    for (const item of pick(target.probe))
+    const values = pick(target.probe);
+    // A null reading is already a refusal reason on that target; it contributes
+    // no tally rather than being reported as "no profile affected".
+    if (values === null) continue;
+    for (const item of values)
       tally.set(item.value, (tally.get(item.value) ?? 0) + item.records);
   }
   return [...tally]
     .map(([value, records]) => ({ value, records }))
     .sort((left, right) => right.records - left.records);
+}
+
+/**
+ * Refusals for profiles outside the ones the operator authorized.
+ *
+ * Audit rows are shared per data directory, so one old database can hold this
+ * plugin's records for several DSH profiles. Deleting it removes all of them,
+ * which is why the operator has to name the profiles the deletion may cover: an
+ * unnamed profile is not silently included, and an unnameable one blocks the run.
+ */
+function unauthorizedProfiles(
+  targets: readonly ResetTarget[],
+  options: PlanOptions,
+): readonly string[] {
+  if (options.expectProfiles === undefined) return [];
+  const allowed = new Set(options.expectProfiles);
+  const refusals: string[] = [];
+  for (const target of targets) {
+    if (target.action !== 'delete' || target.probe === null) continue;
+    const values = target.probe.profiles;
+    if (values === null) {
+      refusals.push(
+        `${target.name}: which profile its records belong to cannot be established, so the authorized set cannot be checked`,
+      );
+      continue;
+    }
+    for (const item of values) {
+      if (allowed.has(item.value)) continue;
+      refusals.push(
+        `${target.name}: profile ${item.value} holds ${String(
+          item.records,
+        )} old record(s) but is not among the profiles the reset was authorized for (${[
+          ...allowed,
+        ].join(', ')}); name it with --profiles or exclude this data directory`,
+      );
+    }
+  }
+  return refusals;
 }
 
 /**
@@ -538,29 +596,154 @@ function blockedPlan(
 }
 
 /**
- * Refusals for profiles outside the ones the operator authorized.
+ * Refusals that make any deletion unsafe, whichever files were found.
  *
- * Audit rows are shared per data directory, so one old database can hold this
- * plugin's records for several DSH profiles. Deleting it removes all of them,
- * which is why the operator has to name the profiles the deletion may cover: an
- * unnamed profile is not silently included.
+ * These are about the *scope* rather than one file: a plugin directory that is a
+ * link would let a name that looks like ours point outside the data directory,
+ * and a data directory that is really a profile directory means the operator
+ * aimed at the wrong level.
  */
-function unauthorizedProfiles(
-  targets: readonly ResetTarget[],
-  options: PlanOptions,
-): readonly string[] {
-  if (options.expectProfiles === undefined) return [];
-  const allowed = new Set(options.expectProfiles);
-  const found = sumValues(
-    targets.filter((target) => target.action === 'delete'),
-    (probe) => probe.profiles,
-  );
-  return found
-    .filter((item) => !allowed.has(item.value))
-    .map(
-      (item) =>
-        `profile ${item.value} holds ${String(item.records)} old record(s) but is not among the profiles the reset was authorized for (${[...allowed].join(', ')}); name it with --profile or exclude this data directory`,
+export function scopeRefusals(home: string): readonly string[] {
+  if (!isDirectory(home))
+    return [
+      `the data directory ${home} does not exist or is not a directory; the reset scope cannot be verified`,
+    ];
+  let resolved: string;
+  try {
+    resolved = realpathSync(home);
+  } catch (error) {
+    return [
+      `the data directory ${home} could not be resolved to a real path: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+  if (existsSync(join(resolved, PROFILE_MARKER)))
+    return [
+      `${home} is a DSH profile directory, not a data directory; pass the data directory that contains ${DATA_DIRECTORY}/ so the scope covers exactly this plugin`,
+    ];
+  if (!currentVersionKnown())
+    return [
+      'the current audit structure version could not be determined from this build; refusing to classify any database as old',
+    ];
+  const pluginDirectory = join(resolved, DATA_DIRECTORY);
+  if (!existsSync(pluginDirectory)) return [];
+  if (!isDirectory(pluginDirectory))
+    return [`${pluginDirectory} is not a directory`];
+  let canonical: string;
+  try {
+    canonical = realpathSync(pluginDirectory);
+  } catch (error) {
+    return [
+      `${pluginDirectory} could not be resolved to a real path: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+  if (canonical !== pluginDirectory)
+    return [
+      `${pluginDirectory} resolves to ${canonical}; a linked plugin directory is refused so the scope stays inside the data directory`,
+    ];
+  return [];
+}
+
+/** The target for the audit database entry itself. */
+function databaseTarget(
+  entry: Entry | undefined,
+  directory: string,
+): ResetTarget {
+  if (entry === undefined)
+    return {
+      ...plainTarget(
+        {
+          name: DATABASE_NAME,
+          path: join(directory, DATABASE_NAME),
+          isFile: false,
+          isSymbolicLink: false,
+        },
+        'database',
+        'keep',
+        'the database does not exist',
+        0,
+        null,
+      ),
+      probe: absentProbe(),
+    };
+  const refusal = entryRefusal(entry);
+  if (refusal !== null)
+    return plainTarget(entry, 'database', 'refuse', refusal, 0, null);
+  const probe = inspectDatabase(entry.path, CURRENT_SCHEMA_VERSION);
+  return probedTarget(entry, 'database', probe, databaseDecision(probe));
+}
+
+/** The target for one migration backup entry. */
+function backupTarget(entry: Entry): ResetTarget {
+  const refusal = entryRefusal(entry);
+  if (refusal !== null)
+    return plainTarget(entry, 'backup', 'refuse', refusal, 0, null);
+  const probe = inspectDatabase(entry.path, CURRENT_SCHEMA_VERSION);
+  return probedTarget(entry, 'backup', probe, backupDecision(probe));
+}
+
+/**
+ * The target for one `.staging` residue.
+ *
+ * A staging file is the interrupted output of `VACUUM INTO`, which in practice
+ * means it is usually **truncated and unreadable**: the name is not evidence of
+ * anything by itself, and neither is a SQLite header, because any plugin's
+ * database can carry one.
+ *
+ * The rule is therefore the strictest one available: a residue is deleted only
+ * when the file is *readable* and *provably this plugin's* — the four ownership
+ * tables are present and the structure is retired. A residue that cannot be read
+ * (the ordinary truncated case) is refused rather than deleted. That leaves one
+ * manual cleanup step for a genuinely damaged leftover, which is the correct
+ * trade for a class whose only distinguishing feature is a file name.
+ */
+function residueTarget(entry: Entry): ResetTarget {
+  const refusal = entryRefusal(entry);
+  if (refusal !== null)
+    return plainTarget(entry, 'residue', 'refuse', refusal, 0, null);
+  const probe = inspectDatabase(entry.path, CURRENT_SCHEMA_VERSION);
+  const ownership = deletionRefusal(probe);
+  if (ownership !== null)
+    return entryTarget(
+      entry,
+      'residue',
+      'refuse',
+      `a residue is deleted only when it is a readable Arbiter copy of a retired structure, and here ${
+        ownership.startsWith('it') ? ownership : `this fails: ${ownership}`
+      }`,
     );
+  if (probe.kind === 'current' || probe.kind === 'newer')
+    return entryTarget(
+      entry,
+      'residue',
+      'keep',
+      'it holds a database in the current or a newer structure, so it is not an abandoned partial copy',
+    );
+  if (probe.kind !== 'unsupported')
+    return entryTarget(
+      entry,
+      'residue',
+      'refuse',
+      `a residue is deleted only when it holds a retired structure, and this file is classified ${probe.kind}`,
+    );
+  if ((probe.currentFormatRecords ?? 0) > 0)
+    return entryTarget(
+      entry,
+      'residue',
+      'refuse',
+      `it also holds ${String(
+        probe.currentFormatRecords,
+      )} row(s) written in the current record format`,
+    );
+  return entryTarget(
+    entry,
+    'residue',
+    'delete',
+    'partial migration backup left by the retired chain: a readable copy of a retired structure, holding no record this build can read',
+  );
 }
 
 /** Build the plan for one data directory. */
@@ -572,96 +755,32 @@ export function buildPlan(
   const refusals = scopeRefusals(home);
   if (refusals.length > 0) return blockedPlan(home, sessionLogs, refusals);
   const directory = join(realpathSync(home), DATA_DIRECTORY);
-  const exists = isDirectory(directory);
-  const entries = exists ? entriesOf(directory) : [];
+  const listing = listDirectory(directory);
+  if (!listing.ok) return blockedPlan(home, sessionLogs, [listing.problem]);
+  const entries = listing.entries;
   const targets: ResetTarget[] = [];
 
-  const databaseEntry = entries.find((entry) => entry.name === DATABASE_NAME);
-  const database: ResetTarget =
-    databaseEntry === undefined
-      ? {
-          ...plainTarget(
-            {
-              name: DATABASE_NAME,
-              path: join(directory, DATABASE_NAME),
-              isFile: false,
-              isSymbolicLink: false,
-            },
-            'database',
-            'keep',
-            'the database does not exist',
-            0,
-            null,
-          ),
-          probe: absentProbe(),
-        }
-      : databaseEntry.isSymbolicLink || !databaseEntry.isFile
-        ? (() => {
-            const refusal = entryRefusal(databaseEntry);
-            return plainTarget(
-              databaseEntry,
-              'database',
-              'refuse',
-              refusal ?? 'it is not a regular file',
-              0,
-              null,
-            );
-          })()
-        : (() => {
-            const probe = inspectDatabase(databaseEntry.path);
-            return probedTarget(
-              databaseEntry,
-              'database',
-              probe,
-              databaseDecision(probe, options),
-            );
-          })();
-  // The database target is reported even when the file is absent: "there is
-  // nothing here" is a finding the operator needs, not an omission.
+  const database = databaseTarget(
+    entries.find((entry) => entry.name === DATABASE_NAME),
+    directory,
+  );
   targets.push(database);
   targets.push(...sidecarTargets(entries, database));
-
   for (const entry of entries) {
     if (BACKUP_NAME.test(entry.name)) {
-      if (entryRefusal(entry) !== null || !entry.isFile) {
-        const refusal = entryRefusal(entry);
-        targets.push(
-          plainTarget(
-            entry,
-            'backup',
-            'refuse',
-            refusal ?? 'it is not a regular file',
-            0,
-            null,
-          ),
-        );
-        continue;
-      }
-      const probe = inspectDatabase(entry.path);
-      targets.push(
-        probedTarget(entry, 'backup', probe, backupDecision(probe, options)),
-      );
+      targets.push(backupTarget(entry));
       continue;
     }
-    if (RESIDUE_NAME.test(entry.name)) {
-      targets.push(
-        entryTarget(
-          entry,
-          'residue',
-          'delete',
-          'partial migration backup left by the retired chain: an incomplete copy by construction, never a readable database',
-        ),
-      );
-    }
+    if (RESIDUE_NAME.test(entry.name)) targets.push(residueTarget(entry));
   }
 
-  // A profile outside the authorized set blocks the whole run, because deleting
-  // the shared database would remove that profile's records as well. The targets
-  // themselves are marked so the printed plan does not claim a deletion it will
-  // not perform.
+  // A profile outside the authorized set blocks the run, because deleting the
+  // shared database would remove that profile's records too. The targets
+  // themselves are relabelled so the printed plan does not claim a deletion it
+  // will not perform.
   const unauthorized = unauthorizedProfiles(targets, options);
   const blockedReason =
-    'the database also holds old records for a profile outside the authorized set';
+    'it also holds old records for a profile outside the authorized set';
   const decided: readonly ResetTarget[] =
     unauthorized.length === 0
       ? targets
@@ -674,7 +793,7 @@ export function buildPlan(
   return {
     home,
     directory,
-    directoryExists: exists,
+    directoryExists: true,
     targets: decided,
     sessionLogs,
     exclusions: EXCLUSIONS,
@@ -686,13 +805,15 @@ export function buildPlan(
     ],
     profiles: sumValues(deleted, (probe) => probe.profiles),
     projects: sumValues(deleted, (probe) => probe.workspaces),
-    planId: digestOf(targets),
+    planId: digestOf(directory, options, decided),
     deleteCount: deleted.length,
     deleteBytes: deleted.reduce((sum, target) => sum + target.bytes, 0),
+    // An unreadable row count is already a refusal on that target, so a plan that
+    // reaches a deletion always has every count.
     deleteRecords: deleted.reduce(
-      (sum, target) => sum + totalRows(target.records),
+      (sum, target) => sum + (totalRows(target.records) ?? 0),
       0,
     ),
-    keepCount: targets.filter((target) => target.action === 'keep').length,
+    keepCount: decided.filter((target) => target.action === 'keep').length,
   };
 }

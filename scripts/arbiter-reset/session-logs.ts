@@ -26,6 +26,16 @@ const ARBITER_RECORD = /^plugin:arbiter\//u;
 /** How many bytes one read pulls from a log. */
 const CHUNK = 1 << 20;
 
+/**
+ * The default ceiling for scanning one log.
+ *
+ * A single session log is a whole conversation; the operator's real logs here are
+ * tens of megabytes. The ceiling is high enough to cover them and low enough that
+ * a stray multi-gigabyte file cannot turn the safety check into a reason to skip
+ * it. A log over the limit is reported as not scanned, never as empty.
+ */
+export const DEFAULT_SCAN_LIMIT = 64 * 1024 * 1024;
+
 /** One log's arbiter content, as the inventory reports it. */
 export interface SessionLogFinding {
   /** Absolute path. */
@@ -247,7 +257,8 @@ export function scanSessionLogs(
   const found: string[] = [];
   logFiles(root, root, 0, found);
   found.sort();
+  const limit = options.maxBytes ?? DEFAULT_SCAN_LIMIT;
   return found.map((path) =>
-    scanSessionLog(path, relative(root, path), options),
+    scanSessionLog(path, relative(root, path), { maxBytes: limit }),
   );
 }

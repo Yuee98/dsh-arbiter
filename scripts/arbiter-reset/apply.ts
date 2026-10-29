@@ -20,8 +20,14 @@
  * structure, which the plan keeps. "Safe to repeat" therefore comes from the
  * classification, not from a marker file.
  */
-import { statSync, unlinkSync } from 'node:fs';
-import { readdirSync } from 'node:fs';
+import {
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
+import { basename, dirname } from 'node:path';
 
 import { sha256OfFile } from './inspect.ts';
 import type { ResetPlan, ResetTarget } from './plan.ts';
@@ -33,7 +39,7 @@ export interface RemovedFile {
   readonly bytes: number;
   readonly sha256: string | null;
   /** Tables and rows that went with it, so the tally can be reconciled. */
-  readonly records: Readonly<Record<string, number>>;
+  readonly records: Readonly<Record<string, number>> | null;
 }
 
 /** One file the run declined to remove even though the plan named it. */
@@ -60,6 +66,14 @@ export interface ResetOutcome {
   readonly remaining: readonly string[];
 }
 
+/** The rows one removed file accounted for, treating an unknown tally as zero. */
+function rowsOf(file: RemovedFile): number {
+  // An unreadable tally is already a refusal on the target, so a file that was
+  // actually removed always has one; zero keeps the total finite regardless.
+  if (file.records === null) return 0;
+  return Object.values(file.records).reduce((a, b) => a + b, 0);
+}
+
 /** Totals for a partial run. */
 function totals(removed: readonly RemovedFile[]): {
   readonly bytes: number;
@@ -67,11 +81,7 @@ function totals(removed: readonly RemovedFile[]): {
 } {
   return {
     bytes: removed.reduce((sum, file) => sum + file.bytes, 0),
-    records: removed.reduce(
-      (sum, file) =>
-        sum + Object.values(file.records).reduce((a, b) => a + b, 0),
-      0,
-    ),
+    records: removed.reduce((sum, file) => sum + rowsOf(file), 0),
   };
 }
 
@@ -113,7 +123,7 @@ function driftOf(target: ResetTarget): string | null {
 }
 
 /** Remove one planned target, refusing anything that has drifted. */
-function removeOne(target: ResetTarget): Step {
+function removeOne(plan: ResetPlan, target: ResetTarget): Step {
   const removed: RemovedFile = {
     name: target.name,
     group: target.group,
@@ -121,7 +131,7 @@ function removeOne(target: ResetTarget): Step {
     sha256: target.sha256,
     records: target.records,
   };
-  const drift = driftOf(target);
+  const drift = targetDrift(plan, target) ?? driftOf(target);
   if (drift !== null) return { removed, problem: `${target.name}: ${drift}` };
   try {
     unlinkSync(target.path);
@@ -134,6 +144,73 @@ function removeOne(target: ResetTarget): Step {
     };
   }
   return { removed, problem: null };
+}
+
+/**
+ * Re-prove that the plan's directory is still the directory it was built from.
+ *
+ * A plan names absolute file paths, and a symbolic link swapped in for the
+ * directory between the preview and the apply would make every path resolve
+ * somewhere else while each file's own size and digest still matched — the
+ * deletion would land outside the verified scope. Revalidating the canonical
+ * real path immediately before the first unlink closes that window.
+ */
+function directoryDrift(plan: ResetPlan): string | null {
+  let canonical: string;
+  try {
+    canonical = realpathSync(plan.directory);
+  } catch (error) {
+    return `the plugin directory ${plan.directory} can no longer be resolved: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+  if (canonical !== plan.directory)
+    return `the plugin directory ${plan.directory} now resolves to ${canonical}; the plan was made for the resolved path`;
+  let stats;
+  try {
+    stats = lstatSync(plan.directory);
+  } catch {
+    return `the plugin directory ${plan.directory} no longer exists`;
+  }
+  if (stats.isSymbolicLink())
+    return `the plugin directory ${plan.directory} became a symlink since the plan was made`;
+  if (!stats.isDirectory())
+    return `the plugin directory ${plan.directory} is no longer a directory`;
+  return null;
+}
+
+/**
+ * Re-prove that one target is still a direct child of the planned directory.
+ *
+ * The name and parent are checked together so a plan cannot be redirected at a
+ * same-named file in another directory even if the plan object itself is stale.
+ */
+function targetDrift(plan: ResetPlan, target: ResetTarget): string | null {
+  const parent = dirname(target.path);
+  if (parent !== plan.directory)
+    return `the target is not inside ${plan.directory} any more`;
+  let canonicalParent: string;
+  try {
+    canonicalParent = realpathSync(parent);
+  } catch (error) {
+    return `the containing directory could not be resolved: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+  if (canonicalParent !== plan.directory)
+    return `the containing directory now resolves to ${canonicalParent}`;
+  if (basename(target.path) !== target.name)
+    return 'the target name does not match the plan';
+  let stats;
+  try {
+    stats = lstatSync(target.path);
+  } catch {
+    return 'the file is gone';
+  }
+  // A symlink that replaced the file must be refused, not followed: unlinking it
+  // would delete the link while the operator was told a file of data would go.
+  if (stats.isSymbolicLink()) return 'the path is now a symlink';
+  return null;
 }
 
 /** What is left in a directory, for the after-tally. */
@@ -182,6 +259,12 @@ function preflight(plan: ResetPlan, confirmation: string): ResetOutcome | null {
       plan.directory,
       'the confirmation token does not match this plan; re-run the preview and pass its planId',
     );
+  const drift = directoryDrift(plan);
+  if (drift !== null)
+    return nothing(
+      plan.directory,
+      `${drift}; re-run the preview against the current directory`,
+    );
   return null;
 }
 
@@ -201,7 +284,7 @@ export function applyPlan(plan: ResetPlan, confirmation: string): ResetOutcome {
   const skipped: SkippedFile[] = [];
   for (const target of plan.targets) {
     if (target.action !== 'delete') continue;
-    const step = removeOne(target);
+    const step = removeOne(plan, target);
     if (step.problem !== null) {
       skipped.push({ name: target.name, reason: step.problem });
       const partial = totals(removed);

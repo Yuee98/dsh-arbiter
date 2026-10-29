@@ -9,12 +9,8 @@
  * was, so the two records can be compared line by line.
  */
 import type { ResetOutcome } from './apply.ts';
+import { rowsText } from './plan.ts';
 import type { ResetPlan, ResetTarget } from './plan.ts';
-
-/** The rows one table set accounts for. */
-function rowsOf(target: ResetTarget): number {
-  return Object.values(target.records).reduce((sum, value) => sum + value, 0);
-}
 
 /** A byte count with thousands separators, for a report a human reads. */
 function bytes(value: number): string {
@@ -24,16 +20,20 @@ function bytes(value: number): string {
 /** The one-line summary of a target. */
 function targetLine(target: ResetTarget): string {
   const size = `${bytes(target.bytes)} B`;
-  const rows = rowsOf(target) === 0 ? '' : `, ${bytes(rowsOf(target))} row(s)`;
   const digest =
     target.sha256 === null
       ? 'no digest'
       : `sha256 ${target.sha256.slice(0, 12)}`;
-  const tables =
-    target.probe === null
+  const tables = target.probe?.tables;
+  const tableList =
+    tables === null || tables === undefined
       ? ''
-      : `, tables: ${target.probe.tables.length === 0 ? '(none)' : target.probe.tables.join(',')}`;
-  return `  ${target.action.toUpperCase().padEnd(6)} ${target.name} [${target.group}] ${size}${rows}${tables}, ${digest}`;
+      : `, tables: ${tables.length === 0 ? '(none)' : tables.join(',')}`;
+  // The row count is printed only where a structure was actually read: a sidecar
+  // or a refused residue has no tables of its own, and "unreadable rows" there
+  // would look like a failure rather than "not applicable".
+  const rows = target.probe === null ? '' : `, ${rowsText(target.records)}`;
+  return `  ${target.action.toUpperCase().padEnd(6)} ${target.name} [${target.group}] ${size}${rows}${tableList}, ${digest}`;
 }
 
 /** One section of the report, with an explicit "nothing here" line. */
@@ -91,11 +91,9 @@ function outcomeLines(outcome: ResetOutcome): readonly string[] {
     `  records removed: ${bytes(outcome.removedRecords)}`,
     ...outcome.removed.map(
       (file) =>
-        `  - ${file.name} [${file.group}]: ${bytes(file.bytes)} B, ${bytes(
-          Object.values(file.records).reduce((a, b) => a + b, 0),
-        )} row(s)${
-          file.sha256 === null ? '' : `, sha256 ${file.sha256.slice(0, 12)}`
-        }`,
+        `  - ${file.name} [${file.group}]: ${bytes(file.bytes)} B, ${rowsText(
+          file.records,
+        )}${file.sha256 === null ? '' : `, sha256 ${file.sha256.slice(0, 12)}`}`,
     ),
     ...outcome.skipped.map((file) => `  ! ${file.name}: ${file.reason}`),
     `  left in the directory: ${
@@ -109,7 +107,7 @@ function outcomeLines(outcome: ResetOutcome): readonly string[] {
 /** The whole report for a dry run. */
 export function renderPlan(plan: ResetPlan): string {
   const lines: readonly string[] = [
-    `Arbiter test-data reset — ${plan.directoryExists ? 'preview' : 'preview (no plugin directory)'}`,
+    `Arbiter test-data reset — ${plan.directoryExists ? 'preview (nothing was deleted)' : 'preview, no plugin directory (nothing was deleted)'}`,
     `data directory: ${plan.home}`,
     `plugin directory: ${plan.directory}`,
     `plan id: ${plan.planId === '' ? '(blocked)' : plan.planId}`,

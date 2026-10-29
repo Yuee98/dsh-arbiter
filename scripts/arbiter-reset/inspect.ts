@@ -9,11 +9,13 @@
  *    cannot open the file it is inspecting, so every structural read happens on
  *    a throwaway copy that is deleted before the function returns.
  *
- * 2. **The decision comes from the build, not from a version number.** The reset
- *    target is *exactly* the file the running build refuses as an unsupported
- *    structure, which `auditFileState` decides from the header stamp alone. A
- *    tool that hard-coded "version 3 is current" would silently start treating
- *    current data as old the next time that number moves.
+ * 2. **A fact that cannot be established is never guessed.** Every field below
+ *    is either read from the file or explicitly marked unknown, and an unknown
+ *    fact makes the caller refuse the file. The failure this prevents is not a
+ *    missing feature: a copy that could not be opened used to look exactly like a
+ *    database with no history, and a `calls` table without a `profile` column
+ *    used to look exactly like "no other profile is affected". Both answers
+ *    permitted a deletion that nothing had established was safe.
  */
 import { createHash } from 'node:crypto';
 import {
@@ -31,13 +33,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { RECORD_FORMAT, auditFileState } from '../../src/audit/schema.ts';
+import { RECORD_FORMAT, openAuditSchema } from '../../src/audit/schema.ts';
 
 /** The 16 bytes every SQLite 3 file starts with. */
 const SQLITE_MAGIC = 'SQLite format 3\u0000';
 
 /** Bytes read to recognise the file and its application version. */
 const HEADER_BYTES = 100;
+
+/** Byte offset of the application version in the SQLite header. */
+const HEADER_VERSION_OFFSET = 60;
 
 /** Bytes per read while hashing a file. */
 const HASH_CHUNK = 1 << 20;
@@ -57,7 +62,7 @@ export type DatabaseKind =
   | 'absent'
   /** Present, but not a SQLite database (or not a regular file). */
   | 'not-sqlite'
-  /** A SQLite file with no application table: nothing to preserve, nothing to delete. */
+  /** A SQLite file with no application table: nothing to preserve, nothing to prove. */
   | 'empty'
   /** A database this build refuses because its structure version is not current. */
   | 'unsupported'
@@ -77,20 +82,40 @@ export interface DatabaseProbe {
   readonly kind: DatabaseKind;
   readonly bytes: number;
   readonly sha256: string | null;
-  /** Structure version from the header, when the stamp is not the current one. */
+  /**
+   * Structure version from the main file header, when it is not the current one.
+   *
+   * This is the version the *header* claims. It is not necessarily the version
+   * SQLite would report once a WAL is applied — see `effectiveVersion`.
+   */
   readonly version: number | null;
-  /** Application tables the file actually has. */
-  readonly tables: readonly string[];
-  /** Row count per table, for the operator's before/after tally. */
-  readonly records: Readonly<Record<string, number>>;
-  /** Rows per `calls.profile`, so the plan can name the profiles affected. */
-  readonly profiles: readonly ValueCount[];
-  /** Rows per `calls.workspace`, so the plan can name the projects affected. */
-  readonly workspaces: readonly ValueCount[];
+  /**
+   * Structure version actually in force, read from the copy with its sidecars.
+   *
+   * `null` when the copy could not be read. A version committed only to the WAL
+   * is invisible in the main header, so a header-only reading would classify a
+   * newer database as old and delete it.
+   */
+  readonly effectiveVersion: number | null;
+  /** Application tables the file actually has, or `null` when unread. */
+  readonly tables: readonly string[] | null;
+  /** Row count per table, or `null` when unread. */
+  readonly records: Readonly<Record<string, number>> | null;
+  /**
+   * Rows per `calls.profile`, or `null` when the column does not exist.
+   *
+   * `null` means attribution is unknown, which is a different fact from an empty
+   * list: an empty list would claim nothing belongs to another profile.
+   */
+  readonly profiles: readonly ValueCount[] | null;
+  /** Rows per `calls.workspace`, or `null` when the column does not exist. */
+  readonly workspaces: readonly ValueCount[] | null;
   /** Rows in `calls` written in a record format this build cannot read. */
-  readonly foreignRecords: number;
+  readonly foreignRecords: number | null;
   /** Rows in `calls` written in the record format this build writes. */
-  readonly currentFormatRecords: number;
+  readonly currentFormatRecords: number | null;
+  /** Whether the `calls` table has a `profile` column at all. */
+  readonly hasProfileColumn: boolean;
   /** Why the structure could not be inspected, when the copy could not be read. */
   readonly problem: string | null;
 }
@@ -102,12 +127,14 @@ export function absentProbe(): DatabaseProbe {
     bytes: 0,
     sha256: null,
     version: null,
-    tables: [],
-    records: {},
-    profiles: [],
-    workspaces: [],
-    foreignRecords: 0,
-    currentFormatRecords: 0,
+    effectiveVersion: null,
+    tables: null,
+    records: null,
+    profiles: null,
+    workspaces: null,
+    foreignRecords: null,
+    currentFormatRecords: null,
+    hasProfileColumn: false,
     problem: null,
   };
 }
@@ -171,27 +198,49 @@ export function sha256OfFile(path: string): string | null {
   }
 }
 
-/** Whether the file starts with the SQLite magic, read without a connection. */
-function hasSqliteHeader(path: string): boolean {
+/** The header bytes of a file, or `null` when they cannot be read. */
+function headerOf(path: string): Buffer | null {
   const header = Buffer.alloc(HEADER_BYTES);
   let handle: number | null = null;
   try {
     handle = openSync(path, 'r');
     const read = readSync(handle, header, 0, HEADER_BYTES, 0);
-    return (
-      read > 0 && header.subarray(0, 16).toString('latin1') === SQLITE_MAGIC
-    );
+    return read >= HEADER_VERSION_OFFSET + 4 ? header : null;
   } catch {
-    return false;
+    return null;
   } finally {
     if (handle !== null) closeSync(handle);
   }
+}
+
+/** Whether the header bytes name a SQLite 3 database. */
+function isSqliteHeader(header: Buffer | null): boolean {
+  return (
+    header !== null &&
+    header.subarray(0, 16).toString('latin1') === SQLITE_MAGIC
+  );
+}
+
+/** The structure version the main file header claims. */
+export function headerVersion(path: string): number | null {
+  const header = headerOf(path);
+  if (!isSqliteHeader(header)) return null;
+  // Non-null: `isSqliteHeader` already required the header to be present.
+  return header === null ? null : header.readUInt32BE(HEADER_VERSION_OFFSET);
 }
 
 /** One column of a SQLite row, by name, without trusting the row's shape. */
 function fieldOf(row: unknown, name: string): unknown {
   if (row === null || typeof row !== 'object') return undefined;
   return Object.hasOwn(row, name) ? Reflect.get(row, name) : undefined;
+}
+
+/** A count as a number, or `null` when SQLite did not answer with one. */
+function countOf(row: unknown): number | null {
+  const count = fieldOf(row, 'count');
+  if (typeof count === 'number') return count;
+  if (typeof count === 'bigint') return Number(count);
+  return null;
 }
 
 /** The table names one SQLite file holds, ignoring SQLite's own tables. */
@@ -223,100 +272,119 @@ function isPlainTableName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
 }
 
-/** A count as a number, refusing to report a non-numeric result as zero. */
-function countOf(row: unknown): number {
-  const count = fieldOf(row, 'count');
-  if (typeof count === 'number') return count;
-  if (typeof count === 'bigint') return Number(count);
-  return Number.NaN;
-}
-
-/** Rows per table, plus the rows written in an unreadable record format. */
+/** Rows per table, or `null` when any table could not be counted. */
 function readRows(
   db: DatabaseSync,
   tables: readonly string[],
-): Pick<DatabaseProbe, 'records' | 'foreignRecords' | 'currentFormatRecords'> {
+): Readonly<Record<string, number>> | null {
   const records: Record<string, number> = {};
   for (const table of tables) {
-    if (!isPlainTableName(table)) continue;
-    records[table] = countOf(
+    if (!isPlainTableName(table)) return null;
+    const count = countOf(
       db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get(),
     );
+    if (count === null) return null;
+    records[table] = count;
   }
-  let foreignRecords = 0;
-  let currentFormatRecords = 0;
-  if (
-    tables.includes('calls') &&
-    hasColumn(db, 'calls', 'record_format_version')
-  ) {
-    foreignRecords = countOf(
-      db
-        .prepare(
-          'SELECT COUNT(*) AS count FROM calls WHERE record_format_version IS NULL OR record_format_version <> ?',
-        )
-        .get(RECORD_FORMAT),
-    );
-    currentFormatRecords = countOf(
-      db
-        .prepare(
-          'SELECT COUNT(*) AS count FROM calls WHERE record_format_version = ?',
-        )
-        .get(RECORD_FORMAT),
-    );
-  }
-  return { records, foreignRecords, currentFormatRecords };
+  return records;
 }
 
-/** Rows per value of one `calls` column, or none when the column is absent. */
+/** One count over `calls`, or `null` when it could not be read. */
+function countCalls(
+  db: DatabaseSync,
+  tables: readonly string[],
+  where: string,
+  parameters: readonly (string | number)[] = [],
+): number | null {
+  if (!tables.includes('calls')) return 0;
+  try {
+    return countOf(
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM calls WHERE ${where}`)
+        .get(...parameters),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Rows per value of one `calls` column, or `null` when it cannot be attributed. */
 function groupBy(
   db: DatabaseSync,
   tables: readonly string[],
   column: string,
-): readonly ValueCount[] {
-  if (!tables.includes('calls') || !hasColumn(db, 'calls', column)) return [];
-  const rows: readonly unknown[] = db
-    .prepare(
-      `SELECT "${column}" AS value, COUNT(*) AS count FROM calls GROUP BY "${column}" ORDER BY count DESC`,
-    )
-    .all();
-  const counts: ValueCount[] = [];
-  for (const row of rows) {
-    const value = fieldOf(row, 'value');
-    counts.push({
-      value: typeof value === 'string' ? value : '(none)',
-      records: countOf(row),
-    });
+): readonly ValueCount[] | null {
+  if (!tables.includes('calls')) return [];
+  if (!hasColumn(db, 'calls', column)) return null;
+  try {
+    const rows: readonly unknown[] = db
+      .prepare(
+        `SELECT "${column}" AS value, COUNT(*) AS count FROM calls GROUP BY "${column}" ORDER BY count DESC`,
+      )
+      .all();
+    const counts: ValueCount[] = [];
+    for (const row of rows) {
+      const value = fieldOf(row, 'value');
+      const records = countOf(row);
+      if (records === null) return null;
+      counts.push({
+        value: typeof value === 'string' ? value : '(none)',
+        records,
+      });
+    }
+    return counts;
+  } catch {
+    return null;
   }
-  return counts;
 }
 
 /** What a copy of the file says about its structure. */
 interface StructureRead {
-  readonly tables: readonly string[];
-  readonly records: Readonly<Record<string, number>>;
-  readonly profiles: readonly ValueCount[];
-  readonly workspaces: readonly ValueCount[];
-  readonly foreignRecords: number;
-  readonly currentFormatRecords: number;
+  readonly effectiveVersion: number | null;
+  readonly tables: readonly string[] | null;
+  readonly records: Readonly<Record<string, number>> | null;
+  readonly profiles: readonly ValueCount[] | null;
+  readonly workspaces: readonly ValueCount[] | null;
+  readonly foreignRecords: number | null;
+  readonly currentFormatRecords: number | null;
+  readonly hasProfileColumn: boolean;
   readonly problem: string | null;
 }
 
 const UNREADABLE: StructureRead = {
-  tables: [],
-  records: {},
-  profiles: [],
-  workspaces: [],
-  foreignRecords: 0,
-  currentFormatRecords: 0,
+  effectiveVersion: null,
+  tables: null,
+  records: null,
+  profiles: null,
+  workspaces: null,
+  foreignRecords: null,
+  currentFormatRecords: null,
+  hasProfileColumn: false,
   problem: null,
 };
+
+/** The effective `PRAGMA user_version` of one open database. */
+function userVersionOf(db: DatabaseSync): number | null {
+  try {
+    const row: unknown = db.prepare('PRAGMA user_version').get();
+    const value = fieldOf(row, 'user_version');
+    if (typeof value === 'number') return value;
+    if (typeof value === 'bigint') return Number(value);
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Read one database's structure from a disposable copy.
  *
  * The sidecars are copied alongside it because a database whose DDL or rows
  * landed only in the WAL would otherwise look empty on a copy made from the main
- * file alone — the same reason the build's own refusal probe copies them.
+ * file alone. The copy also decides the **effective** structure version: a
+ * `PRAGMA user_version` committed inside an uncheckpointed WAL never reaches the
+ * main header, so the header alone cannot say whether this file is current, old
+ * or newer.
  */
 function readStructureCopy(path: string): StructureRead {
   const staging = mkdtempSync(join(tmpdir(), 'arbiter-reset-inspect-'));
@@ -329,12 +397,29 @@ function readStructureCopy(path: string): StructureRead {
     }
     const db = new DatabaseSync(copy);
     try {
+      const effectiveVersion = userVersionOf(db);
       const tables = tableNames(db);
+      const hasProfileColumn =
+        tables.includes('calls') && hasColumn(db, 'calls', 'profile');
       return {
+        effectiveVersion,
         tables,
-        ...readRows(db, tables),
+        records: readRows(db, tables),
         profiles: groupBy(db, tables, 'profile'),
         workspaces: groupBy(db, tables, 'workspace'),
+        foreignRecords: countCalls(
+          db,
+          tables,
+          'record_format_version IS NULL OR record_format_version <> ?',
+          [RECORD_FORMAT],
+        ),
+        currentFormatRecords: countCalls(
+          db,
+          tables,
+          'record_format_version = ?',
+          [RECORD_FORMAT],
+        ),
+        hasProfileColumn,
         problem: null,
       };
     } finally {
@@ -355,13 +440,53 @@ function readStructureCopy(path: string): StructureRead {
 }
 
 /**
+ * Decide the kind of file from the version that is actually in force.
+ *
+ * Both readings matter. The header decides what an unreadable copy must be
+ * treated as; the effective version decides what a readable copy is. A
+ * disagreement between them is not resolved in favour of either: the file is
+ * reported as unreadable, because one of the two readings is wrong and this tool
+ * must not pick which.
+ */
+function kindOf(
+  headerVersionValue: number,
+  read: StructureRead,
+  currentVersion: number,
+): { readonly kind: DatabaseKind; readonly problem: string | null } {
+  if (read.problem !== null)
+    return { kind: 'unsupported', problem: read.problem };
+  const effective = read.effectiveVersion;
+  if (effective === null)
+    return {
+      kind: 'unsupported',
+      problem: 'the effective schema version could not be read from the copy',
+    };
+  if (effective !== headerVersionValue)
+    return {
+      kind: 'unsupported',
+      problem: `the main file header declares schema ${String(
+        headerVersionValue,
+      )} but the effective version with its log is ${String(
+        effective,
+      )}; this tool does not decide which reading is right`,
+    };
+  if (effective > currentVersion) return { kind: 'newer', problem: null };
+  if (effective !== currentVersion)
+    return { kind: 'unsupported', problem: null };
+  return { kind: 'current', problem: null };
+}
+
+/**
  * Inspect one candidate file.
  *
- * Reading the header decides what the file is; a database is opened only as a
- * copy, and a newer build's file is not read out at all — this build does not
- * know what its structure means, so even counting its rows would be a guess.
+ * Reading the header decides whether the name may be treated as a database at
+ * all; the structure then comes only from a copy, and a file whose effective
+ * version disagrees with its header is left for a human.
  */
-export function inspectDatabase(path: string): DatabaseProbe {
+export function inspectDatabase(
+  path: string,
+  currentVersion: number,
+): DatabaseProbe {
   const stats = factsOf(path, true);
   if (stats === null) return absentProbe();
   const bytes = stats.size;
@@ -375,7 +500,7 @@ export function inspectDatabase(path: string): DatabaseProbe {
       problem: 'the path is not a regular file',
     };
   }
-  if (!hasSqliteHeader(path)) {
+  if (!isSqliteHeader(headerOf(path))) {
     return {
       ...absentProbe(),
       kind: 'not-sqlite',
@@ -384,53 +509,79 @@ export function inspectDatabase(path: string): DatabaseProbe {
       problem: 'the file does not start with the SQLite header',
     };
   }
-  const state = auditFileState(path);
-  switch (state.kind) {
-    case 'newer':
-      return {
-        ...absentProbe(),
-        kind: 'newer',
-        bytes,
-        sha256,
-        version: state.version,
-      };
-    case 'current':
-      return {
-        kind: 'current',
-        bytes,
-        sha256,
-        version: null,
-        ...readStructureCopy(path),
-      };
-    case 'unsupported': {
-      const read = readStructureCopy(path);
-      // `unsupported` is decided by the stamp; a SQLite file with no application
-      // table is a leftover, not a history to delete.
-      if (read.problem === null && read.tables.length === 0)
-        return {
-          kind: 'empty',
-          bytes,
-          sha256,
-          version: state.version,
-          ...read,
-        };
-      return {
-        kind: 'unsupported',
-        bytes,
-        sha256,
-        version: state.version,
-        ...read,
-      };
-    }
-    case 'new':
-      // The header probe only reports `new` for a missing or short file, and the
-      // magic check above already excluded both.
-      return {
-        ...absentProbe(),
-        kind: 'not-sqlite',
-        bytes,
-        sha256,
-        problem: 'the file is too short to hold a SQLite header',
-      };
+  const header = headerVersion(path);
+  if (header === null) {
+    return {
+      ...absentProbe(),
+      kind: 'not-sqlite',
+      bytes,
+      sha256,
+      problem: 'the schema stamp could not be read from the header',
+    };
   }
+  const read = readStructureCopy(path);
+  const { kind, problem } = kindOf(header, read, currentVersion);
+  // A file with a current-or-older stamp that holds no application table is a
+  // leftover rather than a history — but only the copy proves that, and an
+  // unreadable copy keeps the file in the refused class.
+  if (
+    problem === null &&
+    (kind === 'unsupported' || kind === 'current') &&
+    read.tables !== null &&
+    read.tables.length === 0
+  )
+    return {
+      kind: 'empty',
+      bytes,
+      sha256,
+      version: header,
+      ...read,
+    };
+  return {
+    kind,
+    bytes,
+    sha256,
+    version: header,
+    ...read,
+    problem,
+  };
+}
+
+/**
+ * The structure version this build creates and reads.
+ *
+ * Discovered by letting the build create one database in a temporary directory
+ * and reading the stamp it wrote, rather than restating the number here. A reset
+ * tool with its own copy of `3` would keep calling today's structure "old" the
+ * next time that number moves, and the mistake would only surface as deleted
+ * current data.
+ *
+ * `0` means discovery failed. No real stamped file carries `0`, so every
+ * database is then classified as a mismatch and refused: an unknown current
+ * version must never authorize a deletion.
+ */
+export const CURRENT_SCHEMA_VERSION: number = discoverCurrentVersion();
+
+/** Discover the current structure version from one database this build creates. */
+function discoverCurrentVersion(): number {
+  const staging = mkdtempSync(join(tmpdir(), 'arbiter-reset-version-'));
+  try {
+    const probe = join(staging, 'arbiter.db');
+    const db = new DatabaseSync(probe);
+    try {
+      openAuditSchema(db);
+    } finally {
+      db.close();
+    }
+    return headerVersion(probe) ?? 0;
+  } catch {
+    return 0;
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+/** Whether the current structure version is known at all. */
+export function currentVersionKnown(): boolean {
+  return CURRENT_SCHEMA_VERSION > 0;
 }

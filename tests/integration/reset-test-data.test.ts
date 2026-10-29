@@ -19,6 +19,8 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -369,7 +371,13 @@ describe('apply', () => {
     writeOldDatabase(join(directory, 'arbiter.db'));
     writeOldDatabase(join(directory, 'arbiter.db.backup-v1'), { version: 1 });
     writeOldDatabase(join(directory, 'arbiter.db.backup-v2'), { version: 2 });
-    writeFileSync(join(directory, 'arbiter.db.backup-v2.staging'), 'partial');
+    // A residue is deleted only when it is a readable copy of a retired
+    // structure; a truncated one is refused (covered separately), so this fixture
+    // is a complete old database under the residue name.
+    copyFileSync(
+      join(directory, 'arbiter.db.backup-v2'),
+      join(directory, 'arbiter.db.backup-v2.staging'),
+    );
     // Files this reset must not touch: a live database under another name, an
     // unrelated note, the recovery copies and another plugin's directory.
     writeCurrentDatabase(join(directory, 'other.db'));
@@ -466,6 +474,72 @@ describe('apply', () => {
     expect(readFileSync(database)).toEqual(changed);
   });
 
+  test('refuses a staging file that cannot be proven to be this plugin copy', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    // The name alone is not evidence: an unrelated file that happens to be
+    // called this is not a backup residue of this project.
+    const staged = join(directory, 'arbiter.db.backup-v3.staging');
+    writeFileSync(staged, 'notes');
+
+    const plan = buildPlan(home);
+    const residue = plan.targets.find(
+      (target) => target.name === 'arbiter.db.backup-v3.staging',
+    );
+    expect(residue?.action).toBe('refuse');
+    expect(residue?.reason).toContain(
+      'a residue is deleted only when it is a readable Arbiter copy',
+    );
+    expect(
+      plan.refusals.some((line) => line.includes('backup-v3.staging')),
+    ).toBe(true);
+    expect(existsSync(staged)).toBe(true);
+  });
+
+  test('refuses a truncated staging file rather than guessing from its name', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    // The ordinary shape of an interrupted `VACUUM INTO`: a SQLite header with a
+    // truncated body. It cannot be read, so nothing proves it is this plugin's.
+    const staged = join(directory, 'arbiter.db.backup-v3.staging');
+    writeFileSync(
+      staged,
+      readFileSync(join(directory, 'arbiter.db')).subarray(0, 4096),
+    );
+
+    const plan = buildPlan(home);
+    const residue = plan.targets.find(
+      (target) => target.name === 'arbiter.db.backup-v3.staging',
+    );
+    expect(residue?.action).toBe('refuse');
+
+    // The refused residue blocks the whole run, including the old database.
+    const applied = run(['--home', home, '--apply', plan.planId]);
+    expect(applied.code).toBe(1);
+    expect(existsSync(join(directory, 'arbiter.db'))).toBe(true);
+    expect(existsSync(staged)).toBe(true);
+  });
+
+  test('keeps a current-structure database parked under a residue name', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    // A current database under the residue name is not an abandoned partial
+    // copy, so the name must not make it deletable.
+    const parked = join(directory, 'arbiter.db.backup-v4.staging');
+    writeCurrentDatabase(parked);
+
+    const plan = buildPlan(home);
+    const residue = plan.targets.find(
+      (target) => target.name === 'arbiter.db.backup-v4.staging',
+    );
+    expect(residue?.action).toBe('keep');
+    expect(residue?.reason).toContain('current or a newer structure');
+    expect(existsSync(parked)).toBe(true);
+  });
+
   test('stops at a file that vanished mid-run and reports the partial result', async () => {
     const home = await makeHome();
     const directory = pluginDir(home);
@@ -484,6 +558,181 @@ describe('apply', () => {
     expect(outcome.removedBytes).toBeGreaterThan(0);
     expect(existsSync(join(directory, 'arbiter.db'))).toBe(false);
     expect(existsSync(join(directory, 'arbiter.db.backup-v2'))).toBe(false);
+  });
+});
+
+describe('fail-closed inspection', () => {
+  test('refuses a database whose effective version is only in the WAL', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    mkdirSync(directory, { recursive: true });
+    // The main header says schema 2 while the version was raised to 99 inside an
+    // uncheckpointed WAL. Reading only the header would classify a newer build's
+    // database as old data and delete it.
+    //
+    // The state has to be *copied* into place: closing the writer checkpoints the
+    // WAL, which would quietly move the version back into the header and make
+    // the fixture prove nothing.
+    const writer = await makeHome();
+    const live = join(writer, 'arbiter.db');
+    const db = new DatabaseSync(live);
+    db.exec(OWNED_DDL);
+    insertCall(db, 'wal-version');
+    db.exec('PRAGMA user_version = 2');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA wal_autocheckpoint = 0');
+    db.exec('PRAGMA user_version = 99');
+    for (const suffix of ['', '-wal', '-shm'])
+      if (existsSync(`${live}${suffix}`))
+        copyFileSync(
+          `${live}${suffix}`,
+          join(directory, `arbiter.db${suffix}`),
+        );
+    db.close();
+
+    const plan = buildPlan(home);
+    const target = plan.targets[0];
+    expect(target?.probe?.version).toBe(2);
+    expect(target?.probe?.effectiveVersion).toBe(99);
+    // The disagreement is refused instead of resolved in favour of either read.
+    expect(target?.action).toBe('refuse');
+    expect(target?.reason).toContain('does not decide which reading is right');
+    expect(plan.deleteCount).toBe(0);
+  });
+
+  test('binds the confirmation token to the data directory', async () => {
+    const first = await makeHome();
+    const second = await makeHome();
+    // Byte-identical copies in two data directories: the same files, sizes and
+    // digests. Only the directory differs, and the token has to differ with it.
+    const source = join(pluginDir(first), 'arbiter.db');
+    writeOldDatabase(source);
+    mkdirSync(pluginDir(second), { recursive: true });
+    copyFileSync(source, join(pluginDir(second), 'arbiter.db'));
+    const before = treeDigest(second);
+
+    const firstPlan = buildPlan(first);
+    const secondPlan = buildPlan(second);
+    expect(firstPlan.planId).not.toBe(secondPlan.planId);
+
+    // A token from the first directory cannot authorize a deletion in the second.
+    const outcome = applyPlan(secondPlan, firstPlan.planId);
+    expect(outcome.applied).toBe(false);
+    expect(outcome.reason).toContain('confirmation token does not match');
+    expect(existsSync(join(pluginDir(second), 'arbiter.db'))).toBe(true);
+    expect(treeDigest(second)).toBe(before);
+  });
+
+  test('refuses a database whose calls cannot be attributed to a profile', async () => {
+    const home = await makeHome();
+    const database = join(pluginDir(home), 'arbiter.db');
+    mkdirSync(pluginDir(home), { recursive: true });
+    // The ownership tables are all present, but this `calls` table has no
+    // `profile` column. "No profile names found" must not read as "no other
+    // profile is affected".
+    const db = new DatabaseSync(database);
+    db.exec(`CREATE TABLE calls (
+        call_id TEXT PRIMARY KEY, ts INTEGER, workspace TEXT,
+        record_format_version INTEGER NOT NULL, result TEXT);
+      CREATE TABLE stages (id INTEGER PRIMARY KEY);
+      CREATE TABLE model_calls (id TEXT PRIMARY KEY);
+      CREATE TABLE config_snapshots (snapshot_id TEXT PRIMARY KEY);
+      PRAGMA user_version = 2;`);
+    db.prepare('INSERT INTO calls VALUES (?,?,?,?,?)').run(
+      'no-profile',
+      Date.now(),
+      '/tmp',
+      1,
+      'review-allow',
+    );
+    db.close();
+    const before = treeDigest(home);
+
+    const refused = run(['--home', home, '--profiles', 'gate']);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toContain('profile');
+    expect(refused.out).toContain('cannot be established');
+    expect(existsSync(database)).toBe(true);
+    expect(treeDigest(home)).toBe(before);
+  });
+
+  test('refuses when the plugin directory is swapped for a symlink after the preview', async () => {
+    const home = await makeHome();
+    const outside = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    const plan = buildPlan(home);
+
+    // The whole directory is replaced by a link to a directory holding
+    // byte-identical targets. Every file's path, size and digest still match the
+    // plan, so only re-proving the directory's identity can catch it.
+    const decoy = join(outside, 'arbiter');
+    writeOldDatabase(join(decoy, 'arbiter.db'));
+    rmSync(directory, { recursive: true, force: true });
+    symlinkSync(decoy, directory);
+    const outsideBefore = treeDigest(decoy);
+
+    const outcome = applyPlan(plan, plan.planId);
+    expect(outcome.applied).toBe(false);
+    expect(outcome.reason).toContain('now resolves to');
+    expect(existsSync(join(decoy, 'arbiter.db'))).toBe(true);
+    expect(treeDigest(decoy)).toBe(outsideBefore);
+  });
+
+  test('refuses a target replaced by a symlink after the preview', async () => {
+    const home = await makeHome();
+    const outside = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    const plan = buildPlan(home);
+
+    // The file itself is swapped for a link to an identical copy elsewhere.
+    // Unlinking it would remove the link, not the data the operator was shown.
+    const decoyFile = join(outside, 'decoy.db');
+    copyFileSync(join(directory, 'arbiter.db'), decoyFile);
+    rmSync(join(directory, 'arbiter.db'));
+    symlinkSync(decoyFile, join(directory, 'arbiter.db'));
+
+    const outcome = applyPlan(plan, plan.planId);
+    expect(outcome.applied).toBe(false);
+    expect(outcome.reason).toContain('now a symlink');
+    expect(existsSync(decoyFile)).toBe(true);
+  });
+
+  test('refuses when the plugin directory cannot be listed', async () => {
+    const home = await makeHome();
+    const directory = pluginDir(home);
+    writeOldDatabase(join(directory, 'arbiter.db'));
+    // A directory that can be stat'ed but not read is not an empty scope: the
+    // old data may be right there and this run never saw it.
+    chmodSync(directory, 0o000);
+    const plan = buildPlan(home);
+    chmodSync(directory, 0o755);
+
+    expect(plan.directoryExists).toBe(false);
+    expect(plan.refusals[0]).toContain('could not be listed');
+    expect(plan.deleteCount).toBe(0);
+    expect(existsSync(join(directory, 'arbiter.db'))).toBe(true);
+  });
+
+  test('refuses an empty SQLite file rather than assuming it is this plugin', async () => {
+    const home = await makeHome();
+    const database = join(pluginDir(home), 'arbiter.db');
+    mkdirSync(pluginDir(home), { recursive: true });
+    // A stamped SQLite file with no application table proves nothing about who
+    // wrote it, so the name is not accepted as evidence.
+    const db = new DatabaseSync(database);
+    db.exec('PRAGMA user_version = 2');
+    db.close();
+    const before = treeDigest(home);
+
+    const plan = buildPlan(home);
+    expect(plan.targets[0]?.action).toBe('refuse');
+    expect(plan.targets[0]?.reason).toContain('nothing proves it belongs');
+    const applied = run(['--home', home, '--apply', plan.planId]);
+    expect(applied.code).toBe(1);
+    expect(existsSync(database)).toBe(true);
+    expect(treeDigest(home)).toBe(before);
   });
 });
 
@@ -599,7 +848,7 @@ describe('refusals', () => {
     expect(allowed.out).toContain('DELETE arbiter.db');
   });
 
-  test('refuses a structurally old database that also holds current-format rows', async () => {
+  test('always refuses a structurally old database that also holds current-format rows', async () => {
     const home = await makeHome();
     const database = join(pluginDir(home), 'arbiter.db');
     writeOldDatabase(database, { currentFormatRows: 2 });
@@ -608,14 +857,22 @@ describe('refusals', () => {
     const refused = run(['--home', home]);
     expect(refused.code).toBe(1);
     expect(refused.out).toContain('current record format');
+    expect(refused.out).toContain('REFUSE arbiter.db');
     expect(existsSync(database)).toBe(true);
     expect(treeDigest(home)).toBe(before);
 
-    // The operator can acknowledge the mixed state explicitly; the reason then
-    // records that those rows went with it.
-    const allowed = run(['--home', home, '--include-current-format-records']);
-    expect(allowed.code).toBe(0);
-    expect(allowed.out).toContain('operator acknowledged');
+    // There is no flag that widens this. The reset's authority covers old test
+    // data, not rows the current contract produced, so a CLI switch cannot turn
+    // mixed state into an authorized deletion — the invocation is rejected
+    // outright rather than quietly honoured.
+    const overridden = run([
+      '--home',
+      home,
+      '--include-current-format-records',
+    ]);
+    expect(overridden.code).toBe(2);
+    expect(existsSync(database)).toBe(true);
+    expect(treeDigest(home)).toBe(before);
   });
 });
 

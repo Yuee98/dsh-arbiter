@@ -38,8 +38,6 @@ export interface Options {
   readonly apply: string | null;
   /** Profiles the reset is authorized for. */
   readonly profiles: readonly string[] | null;
-  /** Whether rows in the current record format may go with the old database. */
-  readonly includeCurrentFormatRecords: boolean;
   /** Whether to scan host session logs for this plugin's records. */
   readonly scanLogs: boolean;
 }
@@ -47,10 +45,12 @@ export interface Options {
 /** The usage text, so a wrong invocation explains itself. */
 const USAGE = `usage:
   arbiter-reset-test-data.ts --home <dsh-data-dir> [--profiles a,b] [--scan-logs]
-  arbiter-reset-test-data.ts --home <dsh-data-dir> --apply <planId> [--profiles a,b] [--include-current-format-records]
+  arbiter-reset-test-data.ts --home <dsh-data-dir> --apply <planId> [--profiles a,b]
 
 Without --apply nothing is deleted. --home is the DSH data directory (the one
-that contains arbiter/), not a profile directory.`;
+that contains arbiter/), not a profile directory. A database that also holds
+rows in the current record format is always refused: this tool removes old test
+data only.`;
 
 /** Read one option's value, refusing a flag that has none. */
 function valueOf(args: readonly string[], name: string): string | null {
@@ -83,13 +83,7 @@ function rejectUnknown(
 
 /** Parse the command line. Throws a usage message rather than guessing. */
 export function parseArgs(args: readonly string[]): Options {
-  const known = [
-    '--home',
-    '--apply',
-    '--profiles',
-    '--include-current-format-records',
-    '--scan-logs',
-  ];
+  const known = ['--home', '--apply', '--profiles', '--scan-logs'];
   rejectUnknown(known, args);
   const home = valueOf(args, '--home');
   if (home === null) throw new Error(`--home is required\n${USAGE}`);
@@ -104,9 +98,6 @@ export function parseArgs(args: readonly string[]): Options {
             .split(',')
             .map((entry) => entry.trim())
             .filter((entry) => entry !== ''),
-    includeCurrentFormatRecords: args.includes(
-      '--include-current-format-records',
-    ),
     scanLogs: args.includes('--scan-logs'),
   };
 }
@@ -140,7 +131,6 @@ export function main(
   const sessionLogs = readLogs(options);
   const plan = buildPlan(options.home, sessionLogs, {
     ...(options.profiles === null ? {} : { expectProfiles: options.profiles }),
-    includeCurrentFormatRecords: options.includeCurrentFormatRecords,
   });
   if (options.apply === null) {
     write(renderPlan(plan));
