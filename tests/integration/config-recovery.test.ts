@@ -1,17 +1,17 @@
 /**
- * Recovery-copy compatibility for converted legacy rules.
+ * Recovery-copy identity and continuity for the current configuration format.
  *
- * The effective configuration always holds canonical rules, even when the profile
- * document used the legacy format. Two paths have to read that representation
- * back without treating it as a legacy document:
+ * The effective configuration is always canonical rules. Two paths have to read
+ * that representation back:
  *
- *   1. the UI saves a draft built from the effective configuration, so a user who
- *      changes an unrelated setting on a legacy document must still be able to
- *      save;
- *   2. the recovery copy (`last-good`) is written from the effective
- *      configuration and re-parsed on a cold start.
+ *   1. the UI saves a draft built from the effective configuration, so a change to
+ *      an unrelated setting must not invalidate the rules;
+ *   2. the recovery copy (`last-good`) is written from the effective configuration
+ *      and re-parsed on a cold start.
  *
- * Both are exercised here against the real host and a real SQLite audit store.
+ * Both are exercised here against the real host and a real SQLite audit store. A
+ * copy that declares a retired format is refused rather than read as this one,
+ * because the reading it fell back to could be the wider connective.
  */
 
 import {
@@ -33,9 +33,11 @@ import { initializeHost } from '../../src/host/runtime.js';
 import { createStubContext, stubEditor } from '../helpers/host-stub.js';
 import type { HostEnvironment } from '../../src/host/types.js';
 
-const LEGACY_RULE = {
+const RULE = {
   id: 'keep-me',
-  match: { node: 'command', kind: 'regex', pattern: '^gh pr view(?: .*)?$' },
+  conditions: [
+    { target: 'command', kind: 'regex', pattern: '^gh pr view(?: .*)?$' },
+  ],
   verdict: 'allow',
 };
 
@@ -55,7 +57,6 @@ interface Harness {
   readonly home: string;
   readonly host: HostEnvironment;
   readonly documentPath: string;
-  readonly restart: (config: unknown) => Harness;
 }
 
 async function createHarness(config: unknown): Promise<Harness> {
@@ -79,18 +80,12 @@ async function createHarness(config: unknown): Promise<Harness> {
   disposers.push(() => {
     for (const dispose of parts.disposers) dispose();
   });
-  const build = (host: HostEnvironment): Harness => ({
-    home,
-    host,
-    documentPath,
-    restart: (next: unknown) => build(initializeHost(parts.ctx, next)),
-  });
-  return build(initializeHost(parts.ctx, config));
+  return { home, host: initializeHost(parts.ctx, config), documentPath };
 }
 
-describe('converted legacy rules survive a round trip', () => {
-  test('a legacy document loads as canonical rules and stays savable', async () => {
-    const harness = await createHarness({ rules: [LEGACY_RULE] });
+describe('a saved document survives the round trip', () => {
+  test('a document loads as canonical rules and stays savable', async () => {
+    const harness = await createHarness({ rules: [RULE] });
     expect(harness.host.runtime.config.rules).toHaveLength(1);
     expect(harness.host.runtime.config.rules[0]?.conditions).toEqual([
       { target: 'command', kind: 'regex', pattern: '^gh pr view(?: .*)?$' },
@@ -119,20 +114,19 @@ describe('converted legacy rules survive a round trip', () => {
     expect(response.status).toBe(200);
   });
 
-  test('the recovery copy of a converted document is restorable', async () => {
-    const harness = await createHarness({ rules: [LEGACY_RULE] });
+  test('the recovery copy of a document is restorable', async () => {
+    const harness = await createHarness({ rules: [RULE] });
     const lastGood = join(harness.home, 'arbiter', 'last-good');
     const entries = await readdir(lastGood);
     expect(entries).toHaveLength(1);
     const record: unknown = JSON.parse(
       await readFile(join(lastGood, entries[0] ?? ''), 'utf8'),
     );
-    // The copy declares the canonical format this build writes while remembering
-    // that the running configuration was implicit.
+    // The copy declares the format this build writes while remembering that the
+    // running configuration declared nothing.
     expect(record).toMatchObject({
       format: 'arbiter-config-v3',
       sourceFormatExplicit: false,
-      sourceFormat: null,
     });
     const stored: unknown =
       record !== null && typeof record === 'object'
@@ -150,15 +144,10 @@ describe('converted legacy rules survive a round trip', () => {
   });
 
   test.each([
-    { name: 'implicit', document: { enabled: false }, explicit: false },
+    { name: 'undeclared', document: { enabled: false }, explicit: false },
     {
-      name: 'explicit v1',
-      document: { format: 'arbiter-config-v1', enabled: false },
-      explicit: true,
-    },
-    {
-      name: 'explicit v2',
-      document: { format: 'arbiter-config-v2', enabled: false },
+      name: 'declared',
+      document: { format: 'arbiter-config-v3', enabled: false },
       explicit: true,
     },
   ])(
@@ -170,29 +159,10 @@ describe('converted legacy rules survive a round trip', () => {
       const formatBefore = before.format;
       expect(harness.host.runtime.configFormatExplicit).toBe(explicit);
 
-      // Cold start: no runtime for this profile, so only the copy can answer.
-      vi.resetModules();
-      const fresh = await import('../../src/host/runtime.js');
-      const parts = createStubContext({
-        profileContext: {
-          home: harness.home,
-          dir: join(harness.home, 'profiles', 'recovery'),
-          name: 'recovery',
-        },
-        sandboxPolicy: { defaultMode: 'workspace-write' },
-        approval: { request: () => Promise.resolve('unavailable') },
-        permissionPresets: { registerAuto: () => () => undefined },
-        connection: { fetch: { register: () => () => undefined } },
-      });
-      disposers.push(() => {
-        for (const dispose of parts.disposers) dispose();
-      });
-      const host = fresh.initializeHost(parts.ctx, {
-        format: 'arbiter-config-v9',
-      });
+      const host = await coldStart(harness.home);
       const after = host.runtime.config;
-      // The declared format is part of the content, so recovery restores the same
-      // identity rather than a canonical-looking rewrite of it.
+      // The declaration is part of the content, so recovery restores the same
+      // identity rather than forcing one.
       expect(after.format).toBe(formatBefore);
       expect(configHash(after)).toBe(hashBefore);
       expect(host.runtime.configFormatExplicit).toBe(explicit);
@@ -200,29 +170,10 @@ describe('converted legacy rules survive a round trip', () => {
     },
   );
 
-  test('a cold start recovers converted rules rather than falling back', async () => {
-    const harness = await createHarness({ rules: [LEGACY_RULE] });
-    // A cold start has no runtime for this profile yet. Resetting the module
-    // registry gives a fresh runtime map while keeping the same temp home, so the
-    // host must fall back to the recovery copy instead of the in-memory config.
-    vi.resetModules();
-    const fresh = await import('../../src/host/runtime.js');
-    const parts = createStubContext({
-      profileContext: {
-        home: harness.home,
-        dir: join(harness.home, 'profiles', 'recovery'),
-        name: 'recovery',
-      },
-      sandboxPolicy: { defaultMode: 'workspace-write' },
-      approval: { request: () => Promise.resolve('unavailable') },
-      permissionPresets: { registerAuto: () => () => undefined },
-      connection: { fetch: { register: () => () => undefined } },
-    });
-    disposers.push(() => {
-      for (const dispose of parts.disposers) dispose();
-    });
+  test('a cold start recovers the rules rather than falling back', async () => {
+    const harness = await createHarness({ rules: [RULE] });
     // The profile document is unreadable, so the host must use the copy.
-    const host = fresh.initializeHost(parts.ctx, {
+    const host = await coldStart(harness.home, {
       rules: [
         {
           id: 'broken',
@@ -241,14 +192,14 @@ describe('converted legacy rules survive a round trip', () => {
 });
 
 /**
- * The v3 connective across the recovery boundary.
+ * The rule connective across the recovery boundary.
  *
- * Recovery is where a wider reading could come back silently, so the copy's own
- * declaration decides the parser and a broken v3 copy is refused rather than
- * reinterpreted.
+ * Recovery is where a wider reading could come back silently, so a broken copy is
+ * refused rather than reinterpreted, and a copy that is not in this build's format
+ * is not a fallback candidate at all.
  */
-describe('v3 recovery around the rule connective', () => {
-  const V3_RULE = {
+describe('recovery around the rule connective', () => {
+  const CONJUNCTION = {
     id: 'push-to-dev',
     combine: 'all',
     conditions: [
@@ -263,10 +214,10 @@ describe('v3 recovery around the rule connective', () => {
     verdict: 'allow',
   };
 
-  test('a v3 copy recovers with its connective intact after a cold start', async () => {
+  test('a copy recovers with its connective intact after a cold start', async () => {
     const harness = await createHarness({
       format: 'arbiter-config-v3',
-      rules: [V3_RULE],
+      rules: [CONJUNCTION],
     });
     const host = await coldStart(harness.home);
     const recovered = host.runtime.config.rules[0];
@@ -274,68 +225,36 @@ describe('v3 recovery around the rule connective', () => {
     expect(recovered?.id).toBe('push-to-dev');
   });
 
-  test('a copy written by the previous release recovers as the alternative reading', async () => {
-    // A v3 build always writes a v3 wrapper, so one produced from a v2 source
-    // document proves nothing about reading an *old* copy. Construct the shape
-    // the previous release actually left on disk: a v2 wrapper holding canonical
-    // rules that carry no connective yet.
+  test('a copy declaring a retired format is refused, not read as this one', async () => {
     const harness = await createHarness({
-      format: 'arbiter-config-v2',
-      rules: [
-        {
-          id: 'multi-or',
-          conditions: [
-            { target: 'command', kind: 'exact', pattern: 'a' },
-            { target: 'command', kind: 'exact', pattern: 'b' },
-          ],
-          verdict: 'deny',
-        },
-      ],
+      format: 'arbiter-config-v3',
+      rules: [CONJUNCTION],
     });
     const directory = join(harness.home, 'arbiter', 'last-good');
     const [entry] = await readdir(directory);
     if (entry === undefined) throw new Error('no recovery copy was written');
-    await writeFile(
-      join(directory, entry),
-      JSON.stringify({
-        format: 'arbiter-config-v2',
-        sourceFormatExplicit: true,
-        sourceFormat: 'arbiter-config-v2',
-        config: {
-          ...harness.host.runtime.config,
-          format: 'arbiter-config-v2',
-          rules: [
-            {
-              id: 'multi-or',
-              conditions: [
-                { target: 'command', kind: 'exact', pattern: 'a' },
-                { target: 'command', kind: 'exact', pattern: 'b' },
-              ],
-              verdict: 'deny',
-            },
-          ],
-        },
-      }),
-      'utf8',
-    );
+    const path = join(directory, entry);
+    const record: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (record === null || typeof record !== 'object')
+      throw new TypeError('the copy must be an object');
+    // Rewrite the wrapper the way a copy produced by a build that still knew the
+    // retired format would look: a declaration this build no longer reads.
+    Reflect.set(record, 'format', 'arbiter-config-v2');
+    await writeFile(path, JSON.stringify(record), 'utf8');
 
     const host = await coldStart(harness.home);
-    const recovered = host.runtime.config.rules[0];
-    expect(recovered?.id).toBe('multi-or');
-    expect(recovered?.combine).toBe('any');
-    expect(recovered?.conditions).toHaveLength(2);
-    // The declaration the copy ran with comes back, not a v3 rewrite of it.
-    expect(host.runtime.config.format).toBe('arbiter-config-v2');
+    // The copy cannot be read at all, so nothing is recovered from it. Falling back
+    // to it under another reading could resurrect "either condition".
+    expect(host.runtime.config.rules).toEqual([]);
   });
 
-  test('a v3 copy whose connective is broken is refused, not read as v2', async () => {
+  test('a copy whose connective is broken is refused, not guessed', async () => {
     const harness = await createHarness({
       format: 'arbiter-config-v3',
-      rules: [V3_RULE],
+      rules: [CONJUNCTION],
     });
     const directory = join(harness.home, 'arbiter', 'last-good');
-    const entries = await readdir(directory);
-    const [entry] = entries;
+    const [entry] = await readdir(directory);
     if (entry === undefined) throw new Error('no recovery copy was written');
     const path = join(directory, entry);
     const record: unknown = JSON.parse(await readFile(path, 'utf8'));
@@ -355,9 +274,9 @@ describe('v3 recovery around the rule connective', () => {
     Reflect.deleteProperty(rule, 'combine');
     await writeFile(path, JSON.stringify(record), 'utf8');
 
-    const host = await coldStart(harness.home, { format: 'arbiter-config-v9' });
-    // The copy cannot be trusted, so it is not used. Reading it as v2 would
-    // resurrect the rule as "either condition", the wider direction.
+    const host = await coldStart(harness.home);
+    // The copy cannot be trusted, so it is not used. Guessing "any" would
+    // resurrect the rule as either condition, the wider direction.
     expect(host.runtime.config.rules).toEqual([]);
   });
 });
@@ -367,7 +286,8 @@ describe('v3 recovery around the rule connective', () => {
  *
  * Resetting the module registry gives a fresh runtime map while keeping the same
  * temporary home; without it the in-memory configuration of the previous host
- * would mask whatever the copy says.
+ * would mask whatever the copy says. The document is invalid by default, so the
+ * copy is the only candidate.
  */
 async function coldStart(
   home: string,

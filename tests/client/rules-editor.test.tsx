@@ -49,7 +49,7 @@ function savedBody() {
     effectiveRevision: 'effective-2',
     configSnapshotId: 'snapshot-2',
     activationRecorded: true,
-    configFormat: 'arbiter-config-v2',
+    configFormat: 'arbiter-config-v3',
     configFormatExplicit: true,
     auditError: null,
     warnings: [],

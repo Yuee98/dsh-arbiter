@@ -299,7 +299,7 @@ async function runOneCall(
  * by its `command` argument through a JSONPath selector rather than a legacy
  * `node`/`kind` prefix pattern.
  */
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 function denyCommandRule(id: string): Record<string, unknown> {
   return {

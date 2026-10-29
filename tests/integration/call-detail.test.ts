@@ -190,7 +190,7 @@ function baseConfig(
   reviewerType: 'chat' | 'decision' = 'chat',
 ): Record<string, unknown> {
   return {
-    format: 'arbiter-config-v2',
+    format: 'arbiter-config-v3',
     rules: [
       {
         id: 'no-rm',

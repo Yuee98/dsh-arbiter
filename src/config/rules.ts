@@ -225,34 +225,25 @@ function parsePattern(
  * Unknown keys a document supplied, reported instead of silently dropped.
  *
  * A misspelled `combine` is the dangerous case: the rule keeps its declared
- * alternative semantics while the author believes they narrowed it. `strict`
- * turns the finding into an error (v3, a format written by this build) and
- * leaves it a warning for an older format whose documents were already valid.
+ * alternative semantics while the author believes they narrowed it. There is no
+ * format left whose documents were already valid with a key this build ignores, so
+ * every one of these is an error.
  */
 function reportUnknownKeys(
   value: Record<string, unknown>,
   known: readonly string[],
   path: string,
   errors: ConfigError[],
-  warnings: ConfigWarning[],
-  strict: boolean,
   code: string,
 ): void {
   for (const key of Object.keys(value)) {
     if (known.includes(key)) continue;
-    const issue = {
+    errors.push({
       path: `${path}.${key}`,
-      message: strict
-        ? `unknown field "${key}"`
-        : `unknown field "${key}"; it is ignored and the rule keeps its declared meaning`,
+      message: `unknown field "${key}"`,
       code,
       params: { field: key },
-    };
-    // A declared v3 document is written by this build, so a stray key means the
-    // author intended something this build does not do. A v2 document that
-    // already loaded stays valid; the finding is reported, not enforced.
-    if (strict) errors.push(issue);
-    else warnings.push(issue);
+    });
   }
 }
 
@@ -268,6 +259,16 @@ const RULE_FIELDS = [
   'hint',
 ] as const;
 
+/**
+ * The retired single-condition rule shape.
+ *
+ * Both retired formats wrote one `match` object per rule. Refusing it by name is
+ * the difference between "this build dropped the format" and a stack of findings
+ * about a missing `conditions` field: the operator has to rewrite the rule, and
+ * nothing here converts it.
+ */
+const RETIRED_RULE_FIELD = 'match';
+
 const CONDITION_FIELDS = [
   'target',
   'kind',
@@ -281,8 +282,6 @@ function parseCondition(
   value: unknown,
   path: string,
   errors: ConfigError[],
-  warnings: ConfigWarning[],
-  strict: boolean,
 ): RuleCondition | null {
   if (!isRecord(value)) {
     errors.push({ path, message: 'must be an object', code: 'type.object' });
@@ -293,8 +292,6 @@ function parseCondition(
     CONDITION_FIELDS,
     path,
     errors,
-    warnings,
-    strict,
     'rule.unknown-field',
   );
   const target = enumField(
@@ -399,39 +396,29 @@ function rejectForeignFields(
     });
 }
 
-export interface ParseRuleOptions {
-  /**
-   * Whether the document declared a format this build writes.
-   *
-   * A strict document turns an unknown key and a missing `combine` into errors;
-   * a v1/v2 document was already valid, so those become warnings and its rules
-   * are canonicalized to the alternative semantics it was written with.
-   */
-  readonly strict: boolean;
-  /** Collected alongside errors; warnings never reject a document. */
-  readonly warnings: ConfigWarning[];
-}
-
 export function parseRule(
   value: unknown,
   index: number,
   errors: ConfigError[],
-  options: ParseRuleOptions,
 ): CommandRule | null {
   const path = `rules[${String(index)}]`;
   if (!isRecord(value)) {
     errors.push({ path, message: 'must be an object', code: 'type.object' });
     return null;
   }
-  reportUnknownKeys(
-    value,
-    RULE_FIELDS,
-    path,
-    errors,
-    options.warnings,
-    options.strict,
-    'rule.unknown-field',
-  );
+  if (value[RETIRED_RULE_FIELD] !== undefined) {
+    // The rule keeps its old shape rather than being converted: a prefix-matching
+    // (`regex`), negation-capable (`glob`) or selector-based rule has no provable
+    // equivalent in this model, and both directions of a wrong guess are dangerous.
+    errors.push({
+      path,
+      message: `"${RETIRED_RULE_FIELD}" belongs to a retired rule format; rewrite the rule with "conditions"`,
+      code: 'rule.format-retired',
+      params: { field: RETIRED_RULE_FIELD },
+    });
+    return null;
+  }
+  reportUnknownKeys(value, RULE_FIELDS, path, errors, 'rule.unknown-field');
   const id = optionalString(value['id'], `${path}.id`, errors)?.trim() ?? '';
   if (id.length === 0)
     errors.push({
@@ -462,8 +449,6 @@ export function parseRule(
       condition,
       `${path}.conditions[${String(conditionIndex)}]`,
       errors,
-      options.warnings,
-      options.strict,
     );
     if (parsed !== null) conditions.push(parsed);
   });
@@ -480,7 +465,6 @@ export function parseRule(
   const combine = resolveCombine(value['combine'], rawConditions.length, {
     path: `${path}.combine`,
     errors,
-    strict: options.strict,
   });
   return {
     id,
@@ -498,12 +482,11 @@ export function parseRule(
 /**
  * Read the rule-level connective.
  *
- * A document written by this build must state it whenever the choice actually
- * matters, because the two readings differ in the safe direction: `any` is
- * wider. An older document never stated it and meant `any`, so asking for it
- * there would reject files that were valid when they were written. A single
- * condition keeps it optional everywhere — both values judge identically — but a
- * supplied value is preserved rather than replaced by the default.
+ * It is required whenever the choice actually matters, because the two readings
+ * differ in the safe direction: `any` is wider, so guessing it would silently turn
+ * a conjunction into a disjunction. A single condition keeps it optional — both
+ * values judge identically — but a supplied value is preserved rather than
+ * replaced by the default.
  */
 function resolveCombine(
   value: unknown,
@@ -511,7 +494,6 @@ function resolveCombine(
   context: {
     readonly path: string;
     readonly errors: ConfigError[];
-    readonly strict: boolean;
   },
 ): RuleCombine {
   if (value !== undefined) {
@@ -525,13 +507,12 @@ function resolveCombine(
     return conditionCount > 1 ? 'any' : 'all';
   }
   if (conditionCount > 1) {
-    if (context.strict)
-      context.errors.push({
-        path: context.path,
-        message:
-          'a rule with several conditions must state "combine": "all" or "any"',
-        code: 'rule.combine-required',
-      });
+    context.errors.push({
+      path: context.path,
+      message:
+        'a rule with several conditions must state "combine": "all" or "any"',
+      code: 'rule.combine-required',
+    });
     return 'any';
   }
   return 'all';

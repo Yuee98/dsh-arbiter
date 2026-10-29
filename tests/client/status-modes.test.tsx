@@ -151,7 +151,7 @@ describe('approval-mode settings', () => {
           effectiveRevision: 'effective-2',
           configSnapshotId: 'snapshot-2',
           activationRecorded: true,
-          configFormat: 'arbiter-config-v1',
+          configFormat: 'arbiter-config-v3',
           configFormatExplicit: false,
           auditError: null,
           warnings: [],

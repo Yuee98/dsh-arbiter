@@ -145,7 +145,7 @@ async function startHost(
     },
   };
   const configured = {
-    format: 'arbiter-config-v2',
+    format: 'arbiter-config-v3',
     rules: [],
     audit: DEFAULT_CONFIG.audit,
   };

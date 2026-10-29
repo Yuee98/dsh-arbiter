@@ -35,7 +35,7 @@ import type { ContextLike, FetchRouteLike } from '../../src/host/types.js';
 import type { ToolExecutionLike } from '../../src/host/types.js';
 import { createStubContext, stubEditor } from '../helpers/host-stub.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 const PRODUCTION_RULE = {
   id: 'block-production-deploy',
@@ -301,7 +301,7 @@ function gateVerdict(decision: { readonly kind: string }): string {
   return decision.kind;
 }
 
-const SHELL_FORMAT = 'arbiter-config-v2';
+const SHELL_FORMAT = 'arbiter-config-v3';
 
 /** One shell allow, so the gate and the tester must agree on the same text. */
 const SHELL_ALLOW = {
@@ -318,6 +318,9 @@ const SHELL_ALLOW = {
 
 const NESTED_ALLOW = {
   id: 'both-commands',
+  // Each command node is covered by whichever condition names it, so the rule
+  // states the alternative reading explicitly (it is required, not inferred).
+  combine: 'any',
   conditions: [
     { target: 'command', kind: 'exact', pattern: 'echo hi' },
     { target: 'command', kind: 'exact', pattern: 'echo $(date)' },

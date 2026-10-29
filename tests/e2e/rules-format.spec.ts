@@ -2,11 +2,11 @@ import { test, expect } from './fixtures.js';
 import type { DshHost } from './dsh/host.js';
 
 /**
- * The canonical rule format through the real, pinned DSH host.
+ * The current rule format through the real, pinned DSH host.
  *
  * Two things are proven here, without a model request:
  *
- *  1. a profile document that declares `arbiter-config-v2` loads, and the plugin
+ *  1. a profile document that declares `arbiter-config-v3` loads, and the plugin
  *     exposes its tool-argument rule through the real `/api/arbiter/state` route;
  *  2. the real rule tester answers the same tool call the same way the plugin's
  *     rule layer does. The decision itself is produced by the shared evaluator, so
@@ -29,7 +29,7 @@ const PRODUCTION_RULE = {
 };
 
 /** The profile config the fixture would seed for this case. */
-const CONFIG = { format: 'arbiter-config-v2', rules: [PRODUCTION_RULE] };
+const CONFIG = { format: 'arbiter-config-v3', rules: [PRODUCTION_RULE] };
 
 interface ToolTestResult {
   readonly path: string;
@@ -105,11 +105,11 @@ async function runToolTest(
   return result;
 }
 
-test.describe('canonical rule format in the real host', () => {
+test.describe('current rule format in the real host', () => {
   test.use({ arbiterConfig: CONFIG });
 
   test(
-    'a v2 tool-argument rule loads and the tester agrees on both values',
+    'a declared tool-argument rule loads and the tester agrees on both values',
     { tag: '@smoke' },
     async ({ dshPage, dsh }) => {
       const pageErrors: string[] = [];
@@ -121,7 +121,7 @@ test.describe('canonical rule format in the real host', () => {
       expect(state.status).toBe(200);
       const payload: unknown = await state.json();
       expect(payload).toMatchObject({
-        configFormat: 'arbiter-config-v2',
+        configFormat: 'arbiter-config-v3',
         configFormatExplicit: true,
         invalidConfigError: null,
       });

@@ -155,7 +155,7 @@ describe('typed browser response boundaries', () => {
             id: 'r1',
             verdict: 'allow',
             enabled: 'false',
-            match: { node: 'command', kind: 'exact', pattern: 'pwd' },
+            conditions: [{ target: 'command', kind: 'exact', pattern: 'pwd' }],
           },
         ],
       },

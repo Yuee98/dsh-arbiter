@@ -21,7 +21,7 @@ import type { ContextLike } from '../../src/host/types.js';
  * tool only records whether it was reached.
  */
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 const PRODUCTION_RULE = {
   id: 'block-production-deploy',

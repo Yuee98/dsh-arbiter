@@ -9,7 +9,7 @@ export function effectiveState(): StateResponse {
     sourceConfig: null,
     effectiveRevision: 'effective-1',
     configSnapshotId: 'snapshot-1',
-    configFormat: 'arbiter-config-v1',
+    configFormat: 'arbiter-config-v3',
     configFormatExplicit: false,
     fileRevision: 'file-1',
     documentPath: '/isolated/profile/cordis.patch.yml',

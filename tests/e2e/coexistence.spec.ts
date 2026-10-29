@@ -414,7 +414,7 @@ test('another approval listener warns without blocking and its guard stays separ
     testInfo.outputPath('coexist-third-party'),
     {
       arbiterRowConfig: {
-        format: 'arbiter-config-v2',
+        format: 'arbiter-config-v3',
         rules: [
           {
             id: 'allow-marker',

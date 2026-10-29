@@ -7,7 +7,7 @@
   "effectiveRevision": "Effective revision {revision}",
   "snapshot": "Content snapshot {snapshot}",
   "format": "Format {format}",
-  "formatImplicit": " (not declared, keeps the old prefix semantics)",
+  "formatImplicit": " (no format declared)",
   "unsavedDraft": " · unsaved draft",
   "validate": "Validate draft",
   "reload": "Reload",
@@ -32,7 +32,8 @@
     "configFormat": "Invalid configuration format: {error}",
     "configFormatUnknown": "Unknown configuration format; the file was not loaded.",
     "configFormatDeclaration": "format must be a nonempty string.",
-    "configFormatImplicit": "format is not declared, so rules keep the old prefix semantics of {format}.",
+    "configFormatRetired": "The configuration format \"{format}\" was retired; this build reads only {current} and does not convert old rules.",
+    "ruleFormatRetired": "The rule still uses the retired single-condition \"{field}\" shape; rewrite it with conditions.",
     "typeString": "Must be a string.",
     "typeBoolean": "Must be a boolean.",
     "typeNumber": "Must be a finite number.",
@@ -70,8 +71,6 @@
     "ruleNameEmpty": "The custom name must not be empty.",
     "ruleToolsEmpty": "The tool scope must not be an empty list.",
     "ruleToolEmpty": "A name in the tool scope must not be empty.",
-    "ruleFormatMismatch": "\"{field}\" requires format {format}, which this document does not declare.",
-    "ruleNotConvertible": "The old rule \"{id}\" cannot be proven equivalent and was not converted automatically: {reason}",
     "ruleCombineRequired": "A rule with several conditions must state how they combine (combine: all or any).",
     "ruleUnknownField": "Unknown field \"{field}\": it has no effect, and the rule keeps the meaning it declares."
   }

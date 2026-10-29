@@ -29,7 +29,7 @@ import type { DshHost } from './dsh/host.js';
 import { waitForSession, type LoggedSession } from './dsh/session-log.js';
 import { startNewSession } from './dsh/ui.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 /**
  * Wait until one recorded model request contains `predicate`.
