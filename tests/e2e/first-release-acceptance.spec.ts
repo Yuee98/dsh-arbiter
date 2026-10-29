@@ -438,6 +438,13 @@ test('one session is configured, enabled, denied, reviewed and recovered', async
     await row
       .getByRole('textbox', { name: '工具', exact: true })
       .pressSequentially('bash');
+    // The deny pattern below is a RE2 expression, and the editor's ordinary
+    // default is an exact whole-value match. Selecting the kind explicitly is
+    // what makes this journey deny the probe command: an exact pattern would be
+    // saved as that literal text and the call would no longer be refused.
+    await row
+      .getByRole('combobox', { name: '匹配方式', exact: true })
+      .selectOption('regex');
     await row
       .getByRole('textbox', { name: '表达式', exact: true })
       .pressSequentially(DENY_RULE.conditions[0]?.pattern ?? '');

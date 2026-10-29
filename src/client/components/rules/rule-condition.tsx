@@ -20,6 +20,16 @@ const TARGETS: readonly RuleTarget[] = [
   'tool',
   'argument',
 ];
+
+/** The option label each target already renders, reused by the field note. */
+const TARGET_LABEL_KEYS: Readonly<Record<RuleTarget, string>> = {
+  command: 'rules.targetOption.command',
+  file_redirect: 'rules.targetOption.fileRedirect',
+  variable_assignment: 'rules.targetOption.variableAssignment',
+  tool: 'rules.targetOption.tool',
+  argument: 'rules.targetOption.argument',
+};
+
 const KINDS: readonly RuleKind[] = ['exact', 'regex', 'glob'];
 const VALUE_TYPES = ['string', 'number', 'boolean', 'null'] as const;
 
@@ -67,6 +77,7 @@ export function RuleConditionEditor(props: {
       aria-label={t('rules.conditionIndex', { index: props.index + 1 })}
       className="arb:flex arb:flex-col arb:gap-2 arb:rounded-md arb:border arb:border-border-subtle arb:p-2.5"
     >
+      <ConditionFieldNote condition={condition} />
       <div className="arb:flex arb:flex-wrap arb:gap-2.5">
         <div className="arb:flex arb:w-36 arb:flex-col arb:gap-1">
           <span className="arb:text-[11.5px] arb:text-secondary">
@@ -89,9 +100,13 @@ export function RuleConditionEditor(props: {
               }
               onChange((next) => {
                 next.target = value;
-                if (patternText(next.pattern).length === 0) {
-                  next.kind = value === 'argument' ? 'exact' : 'regex';
-                }
+                // Switching what a condition looks at must not also change how
+                // it compares. Reverting a blank condition to RE2 would widen an
+                // `exact` tool name such as `deploy.prod` into a pattern that
+                // also matches `deployXprod` — an authorization the user never
+                // expressed. An explicitly chosen regex or glob is likewise left
+                // alone; only the non-argument cleanup below rewrites a pattern,
+                // and an `argument` target keeps whatever was typed.
                 if (value !== 'argument') {
                   next.pattern = patternText(next.pattern);
                   delete next.path;
@@ -220,6 +235,39 @@ export function RuleConditionEditor(props: {
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Which value this condition actually checks.
+ *
+ * A command or tool condition compares one whole value, so saying "no field
+ * selected" is a fact about its reach rather than a missing setting. An argument
+ * condition compares whatever its JSONPath selects, so the selector itself is
+ * the field and is worth repeating outside the input.
+ */
+function ConditionFieldNote(props: {
+  readonly condition: MutableRuleCondition;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  const { condition } = props;
+  const path = condition.path?.trim() ?? '';
+  return (
+    <p
+      role="note"
+      data-condition-field={
+        condition.target === 'argument' ? path || 'unset' : 'whole'
+      }
+      className="arb:m-0 arb:text-[11.5px] arb:text-tertiary"
+    >
+      {condition.target === 'argument'
+        ? path.length === 0
+          ? t('rules.conditionFieldUnsetPath')
+          : t('rules.conditionFieldPath', { path })
+        : t('rules.conditionFieldWhole', {
+            target: t(TARGET_LABEL_KEYS[condition.target]),
+          })}
+    </p>
   );
 }
 

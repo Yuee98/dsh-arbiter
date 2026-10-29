@@ -44,6 +44,21 @@ export const VERDICT_LABEL_KEY: Readonly<Record<RuleVerdictValue, string>> = {
   allow: 'rules.verdictOption.allow',
 };
 
+/**
+ * What each verdict actually does, in engine terms.
+ *
+ * The option labels stay short; this is the sentence that separates "no model at
+ * all" (`deny`, `force-ask`, a covering `allow`) from "always the model"
+ * (`force-review`), which is the distinction a plain editor otherwise hides.
+ */
+export const VERDICT_BEHAVIOR_KEY: Readonly<Record<RuleVerdictValue, string>> =
+  {
+    deny: 'rules.behaviorOption.deny',
+    'force-ask': 'rules.behaviorOption.forceAsk',
+    'force-review': 'rules.behaviorOption.forceReview',
+    allow: 'rules.behaviorOption.allow',
+  };
+
 /** The fixed display order: deny, force-ask, force-review, allow. */
 export const VERDICT_ORDER: readonly RuleVerdictValue[] = [
   'deny',
@@ -53,16 +68,26 @@ export const VERDICT_ORDER: readonly RuleVerdictValue[] = [
 ];
 
 /**
+ * The whole-config precedence, in the order the evaluator applies it.
+ *
+ * `review(default)` is the fallback path rather than a configurable verdict, so
+ * it is spelled here without a locale option key.
+ */
+export const PRIORITY_ENTRIES = [
+  ...VERDICT_ORDER.map((verdict) => ({ kind: 'rule' as const, verdict })),
+  { kind: 'fallback' as const },
+];
+
+/**
  * The default condition for a target.
  *
- * A new command condition is a whole-value RE2 expression; a tool-argument
- * condition defaults to an exact match because the selected JSON value keeps
- * its own type.
+ * A new condition is an exact whole-value match for every target. Exact is the
+ * one kind whose meaning a reader can predict without knowing the matching
+ * dialect, so it is what the ordinary editor starts from; RE2 and glob stay
+ * available as the advanced choice.
  */
 export function defaultCondition(target: RuleTarget = 'command') {
-  return target === 'argument'
-    ? { target, kind: 'exact' as const, pattern: '' }
-    : { target, kind: 'regex' as const, pattern: '' };
+  return { target, kind: 'exact' as const, pattern: '' };
 }
 
 /** The JSON spelling of a typed pattern, for display and editing. */
@@ -297,6 +322,58 @@ function conditionSummary(condition: RuleCondition, t: Translate): string {
   return condition.caseSensitive === false
     ? t('rules.summaryIgnoreCase', { text: base })
     : base;
+}
+
+/**
+ * What a rule's scope actually limits, and whether it limits anything.
+ *
+ * An empty scope is not "no scope" in the sense of "nothing applies": it means
+ * the rule applies to every tool and every agent. The editor says that out loud,
+ * because a reader who assumes the opposite would think a broad rule is narrow.
+ */
+export interface ScopeView {
+  readonly kind: 'unscoped' | 'scoped';
+  readonly tools: readonly string[];
+  readonly agents: readonly string[];
+}
+
+export function scopeView(rule: DraftRule): ScopeView {
+  const tools = [...(rule.scope?.tools ?? [])];
+  const agents = [...(rule.scope?.agents ?? [])];
+  return {
+    kind: tools.length === 0 && agents.length === 0 ? 'unscoped' : 'scoped',
+    tools,
+    agents,
+  };
+}
+
+/** The scope sentence: an explicit "no limit" or the entries that do limit it. */
+export function scopeLabel(view: ScopeView, t: Translate): string {
+  if (view.kind === 'unscoped') return t('rules.scopeUnscoped');
+  const parts: string[] = [];
+  if (view.tools.length > 0)
+    parts.push(t('rules.scopeTools', { tools: view.tools.join(', ') }));
+  if (view.agents.length > 0)
+    parts.push(t('rules.scopeAgents', { agents: view.agents.join(', ') }));
+  return t('rules.scopeLimited', { scope: parts.join(' · ') });
+}
+
+/**
+ * Whether a condition uses anything beyond the ordinary exact match.
+ *
+ * This is a labelling question, not a storage one: JSONPath selection, RE2 and
+ * glob, multi-value mode and case folding all live in the same condition model,
+ * so the editor can point at them without a second document shape.
+ */
+export function isAdvancedCondition(
+  condition: DraftRule['conditions'][number],
+): boolean {
+  return (
+    condition.kind !== 'exact' ||
+    condition.target === 'argument' ||
+    condition.caseSensitive === false ||
+    condition.multi !== undefined
+  );
 }
 
 /** The scope part of the summary: tools and agents, in that order. */

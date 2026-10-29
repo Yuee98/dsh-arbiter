@@ -89,7 +89,7 @@ function conditionGroups(id: string): readonly HTMLElement[] {
 }
 
 describe('rule list header and inline editing', () => {
-  test('a new rule is enabled, force-review and defaults to a RE2 command', async () => {
+  test('a new rule is enabled, force-review and starts from an exact command match', async () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
@@ -104,9 +104,14 @@ describe('rule list header and inline editing', () => {
     expect(
       within(row(id)).getByRole('combobox', { name: '匹配对象' }),
     ).toHaveValue('command');
+    // The ordinary entry point starts from the one kind whose meaning needs no
+    // knowledge of a matching dialect; RE2 and glob stay one choice away.
     expect(
       within(row(id)).getByRole('combobox', { name: '匹配方式' }),
-    ).toHaveValue('regex');
+    ).toHaveValue('exact');
+    // A command condition compares the whole value, so no field is limited and
+    // the editor says that rather than leaving it to be inferred.
+    expect(within(row(id)).getByText(/未限定字段/)).toBeInTheDocument();
     // The inline body never repeats the header's switch or verdict control.
     expect(
       within(screen.getByRole('region', { name: '匹配条件' })).queryByRole(
@@ -190,7 +195,10 @@ describe('rule list header and inline editing', () => {
     const name = within(row(id)).getByRole('textbox', { name: '显示名称' });
 
     // With no custom name the placeholder is the automatic summary.
-    expect(name).toHaveAttribute('placeholder', expect.stringContaining('RE2'));
+    expect(name).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('精确匹配'),
+    );
     await user.type(name, '只读查询');
     expect(name).toHaveValue('只读查询');
     // The row's name input carries the custom name; the summary stays a title.
@@ -231,6 +239,12 @@ describe('rule list header and inline editing', () => {
     baseHandlers();
     const user = await openRules();
     const id = await addRule(user);
+    // RE2 is the advanced choice now that the ordinary default is exact, so
+    // choosing it is an explicit step rather than something to infer.
+    await user.selectOptions(
+      within(row(id)).getByRole('combobox', { name: '匹配方式' }),
+      'regex',
+    );
     const pattern = within(row(id)).getByRole('textbox', { name: '表达式' });
     // Anchors, escapes and quantifiers are ordinary text to this field.
     await user.type(pattern, '^gh pr (view|list)\\s+\\d+$');
@@ -1574,8 +1588,7 @@ describe('condition combining', () => {
   });
 
   test('one structural target alone does not raise the limitation note', async () => {
-    const { id } = await twoConditions();
-    // Two command conditions are judged node by node, so there is no statement to
+    const { id } = await twoConditions(); // Two command conditions are judged node by node, so there is no statement to
     // be confused about.
     expect(within(row(id)).queryByText(/可能来自不同的语句/)).toBeNull();
   });
@@ -1796,5 +1809,216 @@ describe('source warnings after a save', () => {
     });
     // Active element safely fell back to surviving button
     expect(screen.getByRole('button', { name: '校验草稿' })).toHaveFocus();
+  });
+});
+
+describe('plain-form scope, field and behavior explanation', () => {
+  test('an unscoped rule says so, and a scoped one names what limits it', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+
+    // Leaving both scope fields blank means "every tool and every agent"; the
+    // sentence is what stops an empty pair of inputs from reading as "nothing".
+    expect(within(row(id)).getByText(/未限定范围/)).toBeInTheDocument();
+
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '工具' }),
+      'bash',
+    );
+    await user.tab();
+    expect(within(row(id)).getByText(/限定范围：工具 bash/)).toBeVisible();
+    expect(within(row(id)).queryByText(/^未限定范围/)).toBeNull();
+
+    // Clearing the field returns to the explicit "no limit" statement.
+    await user.clear(within(row(id)).getByRole('textbox', { name: '工具' }));
+    await user.tab();
+    expect(within(row(id)).getByText(/未限定范围/)).toBeVisible();
+  });
+
+  test('each behavior states what it does, and the layers are named once', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+
+    // A new rule is force-review, so the sentence must say the model always runs.
+    expect(within(row(id)).getByText(/始终模型审查/)).toBeVisible();
+    // The division of labor is stated where a behavior is chosen.
+    expect(
+      within(row(id)).getByText(/确定性规则只强制最终处理路径/),
+    ).toBeVisible();
+
+    for (const [verdict, sentence] of [
+      ['deny', /禁止（直接拒绝/],
+      ['force-ask', /每次人工/],
+      ['allow', /免模型审查/],
+    ] as const) {
+      await user.selectOptions(
+        within(row(id)).getByRole('combobox', { name: /^行为/ }),
+        verdict,
+      );
+      expect(within(row(id)).getByText(sentence)).toBeVisible();
+    }
+  });
+
+  test('the review hint moved into a collapsed advanced section and still saves', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+
+    // The hint is optional and only steers the reviewer, so it is not part of
+    // the ordinary match form; being inside `<details>` keeps it one click away.
+    const hint = within(row(id)).getByRole('textbox', {
+      name: '审查关注点（hint）',
+    });
+    // Collapsed by default, so the ordinary form stays about matching; the
+    // control is still reachable in one click for a rule that needs it.
+    expect(hint).not.toBeVisible();
+    await user.click(within(row(id)).getByText('高级选项'));
+    expect(hint).toBeVisible();
+    await user.type(hint, '确认目标环境');
+    // An empty hint never affects forced review; the editor says so.
+    expect(within(row(id)).getByText(/留空不影响强制审查/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: { rules: [{ id, hint: '确认目标环境' }] },
+    });
+  });
+
+  test('an argument condition shows the field it selects; a command one shows none', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    const [condition] = conditionGroups(id);
+    if (condition === undefined) throw new Error('missing condition');
+
+    // A command condition compares the whole value.
+    expect(within(condition).getByText(/未限定字段/)).toBeInTheDocument();
+
+    await user.selectOptions(
+      within(condition).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    // Without a selector the condition silently matches nothing, so the state
+    // is stated rather than left as an empty input.
+    expect(within(condition).getByText(/不会匹配任何值/)).toBeVisible();
+
+    // Brackets are user-event syntax, so the selector is pasted as typed.
+    const jsonPath = within(condition).getByRole('textbox', {
+      name: 'JSONPath',
+    });
+    await user.click(jsonPath);
+    await user.paste('$.environments[*]');
+    expect(
+      within(condition).getByText(/JSONPath \$\.environments\[\*\]/),
+    ).toBeVisible();
+  });
+
+  test('a second condition keeps the default "all" and explains it', async () => {
+    baseHandlers();
+    const user = await openRules();
+    const id = await addRule(user);
+    expect(within(row(id)).queryByText(/默认“全部满足”/)).toBeNull();
+    await user.click(within(row(id)).getByRole('button', { name: '添加条件' }));
+    expect(
+      within(row(id)).getByRole('radio', { name: '全部满足' }),
+    ).toBeChecked();
+    expect(within(row(id)).getByText(/默认“全部满足”/)).toBeVisible();
+  });
+
+  test('a plain form builds a narrow force-review exception inside a wide allow', async () => {
+    baseHandlers();
+    const user = await openRules();
+
+    // The wide allow: every bash call is released by an exact command match the
+    // user only has to copy from what they already type.
+    const allow = await addRule(user);
+    await user.selectOptions(
+      within(row(allow)).getByRole('combobox', { name: /^行为/ }),
+      'allow',
+    );
+    await user.type(
+      within(row(allow)).getByRole('textbox', { name: '表达式' }),
+      'gh pr view 42',
+    );
+
+    // The narrow exception: a tool-argument condition on the deploy target, set
+    // to force-review, which outranks the allow without touching it.
+    const exception = await addRule(user);
+    await user.selectOptions(
+      within(row(exception)).getByRole('combobox', { name: /^行为/ }),
+      'force-review',
+    );
+    const [condition] = conditionGroups(exception);
+    if (condition === undefined) throw new Error('missing condition');
+    await user.selectOptions(
+      within(condition).getByRole('combobox', { name: '匹配对象' }),
+      'argument',
+    );
+    await user.type(
+      within(condition).getByRole('textbox', { name: 'JSONPath' }),
+      '$.environment',
+    );
+    await user.type(
+      within(condition).getByRole('textbox', { name: '表达式' }),
+      'production',
+    );
+
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    expect(saved[0]).toMatchObject({
+      config: {
+        rules: [
+          {
+            id: allow,
+            verdict: 'allow',
+            conditions: [
+              { target: 'command', kind: 'exact', pattern: 'gh pr view 42' },
+            ],
+          },
+          {
+            id: exception,
+            verdict: 'force-review',
+            conditions: [
+              {
+                target: 'argument',
+                path: '$.environment',
+                kind: 'exact',
+                pattern: 'production',
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test('saving never requires running the tester first', async () => {
+    let tests = 0;
+    baseHandlers();
+    server.use(
+      http.post('*/api/arbiter/test', () => {
+        tests += 1;
+        return HttpResponse.json({ ok: true, results: [] });
+      }),
+    );
+    const user = await openRules();
+    const id = await addRule(user);
+    await user.type(
+      within(row(id)).getByRole('textbox', { name: '表达式' }),
+      'gh pr view 42',
+    );
+    await user.click(screen.getByRole('button', { name: '保存并应用' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    // A save is not gated on a test run: the draft is the only input it needs.
+    expect(tests).toBe(0);
   });
 });

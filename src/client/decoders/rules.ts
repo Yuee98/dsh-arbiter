@@ -77,6 +77,11 @@ function conditionResult(value: unknown): RuleConditionResult {
     ...(reason === undefined ? {} : { reason }),
     ...(path === undefined ? {} : { path }),
     ...(multi === undefined ? {} : { multi }),
+    // The condition's matched text is what the coverage view may attribute to a
+    // command, so it has to survive decoding like the values do.
+    ...(source['matchedValue'] === undefined
+      ? {}
+      : { matchedValue: field(source, 'matchedValue', text) }),
     ...(source['values'] === undefined
       ? {}
       : { values: field(source, 'values', valueList) }),

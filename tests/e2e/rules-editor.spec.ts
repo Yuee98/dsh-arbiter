@@ -105,13 +105,17 @@ test.describe('rule editing in the real host', () => {
       await expect(row.getByRole('combobox', { name: /^行为/ })).toHaveValue(
         'force-review',
       );
-      // The inline body is open for the new rule.
+      // The inline body is open for the new rule, and the ordinary default is an
+      // exact whole-command match; RE2 is an explicit advanced choice.
       await expect(
         row.getByRole('combobox', { name: '匹配方式', exact: true }),
-      ).toHaveValue('regex');
+      ).toHaveValue('exact');
       await expect(
         row.getByRole('textbox', { name: '表达式', exact: true }),
       ).toBeVisible();
+      // The scope is unset, which applies to every tool and agent; the editor
+      // states that instead of leaving it to be inferred from empty inputs.
+      await expect(row.getByText(/未限定范围/)).toBeVisible();
 
       // Edit with the keyboard only: the name, the scope and the expression.
       await row
@@ -120,6 +124,11 @@ test.describe('rule editing in the real host', () => {
       await row
         .getByRole('textbox', { name: '工具', exact: true })
         .pressSequentially('bash, deploy');
+      // This scenario exercises an expression, so it selects the advanced kind
+      // explicitly rather than relying on a default it no longer has.
+      await row
+        .getByRole('combobox', { name: '匹配方式', exact: true })
+        .selectOption('regex');
       await row
         .getByRole('textbox', { name: '表达式', exact: true })
         .pressSequentially('gh pr view(?: .*)?');
