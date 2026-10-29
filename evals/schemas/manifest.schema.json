@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/manifest.schema.json",
+  "title": "Evals dataset manifest",
+  "description": "A dataset's table of contents: the versions its labels were made under, the families that own a split, and the case ids it expects to find. Splits are assigned per family so a variant of one case can never straddle a boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["datasetId", "versions", "families", "cases"],
+  "properties": {
+    "datasetId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "description": { "type": "string" },
+    "versions": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["familyId", "split"],
+        "properties": {
+          "familyId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "split": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/split"
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "familyId"],
+        "properties": {
+          "caseId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "familyId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          }
+        }
+      }
+    }
+  }
+}

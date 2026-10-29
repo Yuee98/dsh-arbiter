@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/case.schema.json",
+  "title": "Evals review case",
+  "description": "One reviewable input plus its provenance. A case never carries expected scores, so a runner that reads only cases cannot leak an answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["caseId", "familyId", "split", "provenance", "input"],
+  "properties": {
+    "caseId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "familyId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "split": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/split"
+    },
+    "provenance": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/provenance"
+    },
+    "input": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/reviewInput"
+    },
+    "notes": { "type": "string" }
+  }
+}

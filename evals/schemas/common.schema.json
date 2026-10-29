@@ -1,0 +1,457 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/common.schema.json",
+  "title": "Evals shared definitions",
+  "description": "Values every evals document shares. A public score is the shared review contract's 1..10 scale (src/review-contract); nothing here redefines what a number means. Relational rules — hashes, version agreement, allowed-pair coverage, status requirements — are checked in evals/src/data and reported with their own messages, because a JSON Schema cannot state them across files.",
+  "definitions": {
+    "publicScore": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "nullablePublicScore": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/publicScore"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scoreSet": {
+      "type": "array",
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/publicScore"
+      }
+    },
+    "nonEmptyScoreSet": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/publicScore"
+      }
+    },
+    "scorePair": {
+      "type": "array",
+      "description": "One legal (risk, authorization) pair.",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/definitions/publicScore"
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "split": {
+      "type": "string",
+      "enum": ["dev", "calibration", "holdout"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {
+          "description": "material-quote quotes the reviewed material itself, link points outside it, note is free prose.",
+          "type": "string",
+          "enum": ["material-quote", "link", "note"]
+        },
+        "ref": {
+          "$ref": "#/definitions/text"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "versions": {
+      "description": "The three versions a label is valid under. A label is re-reviewed when any of them changes; the contract and rubric values are checked against the running code.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "rubric", "policy"],
+      "properties": {
+        "contract": {
+          "$ref": "#/definitions/text"
+        },
+        "rubric": {
+          "$ref": "#/definitions/text"
+        },
+        "policy": {
+          "$ref": "#/definitions/text"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "origin", "collectedAt"],
+      "properties": {
+        "source": {
+          "description": "Whether the material came from a real workflow, was rebuilt from one, or was written for the dataset.",
+          "type": "string",
+          "enum": ["real", "reconstructed", "synthetic"]
+        },
+        "origin": {
+          "$ref": "#/definitions/text"
+        },
+        "collectedAt": {
+          "$ref": "#/definitions/date"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "reviewInput": {
+      "description": "Everything the reviewer is given for one case, and nothing about the expected answer. Its canonical hash is what a label is approved against.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "action", "session", "policy"],
+      "properties": {
+        "tool": {
+          "$ref": "#/definitions/text"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "action": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/text"
+            },
+            "arguments": {},
+            "programText": {
+              "type": "string"
+            }
+          }
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["main", "subagent"]
+            },
+            "parentAuthorizationPresent": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectRules", "customRules"],
+          "properties": {
+            "projectRules": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "customRules": {
+              "type": "string"
+            }
+          }
+        },
+        "hint": {
+          "type": "string"
+        },
+        "context": {
+          "description": "Earlier turns of the same session, oldest first. A case that needs a different history changes its input and therefore its input hash.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "arguments"],
+            "properties": {
+              "tool": {
+                "$ref": "#/definitions/text"
+              },
+              "arguments": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        }
+      }
+    },
+    "model": {
+      "description": "The model behind one opinion. A version that is not known is recorded as unknown rather than guessed or left blank.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "id", "version", "versionSource"],
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/text"
+        },
+        "id": {
+          "$ref": "#/definitions/text"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versionSource": {
+          "type": "string",
+          "enum": ["provider-reported", "user-stated", "unknown"]
+        }
+      }
+    },
+    "opinion": {
+      "description": "One independent model answer for one case. A field the model did not answer stays null; that is a real state and never a zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewId", "model", "protocol", "risk", "authorization"],
+      "properties": {
+        "reviewId": {
+          "$ref": "#/definitions/slug"
+        },
+        "model": {
+          "$ref": "#/definitions/model"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["chat", "decision"]
+        },
+        "risk": {
+          "$ref": "#/definitions/nullablePublicScore"
+        },
+        "authorization": {
+          "$ref": "#/definitions/nullablePublicScore"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "recordedAt": {
+          "$ref": "#/definitions/date"
+        }
+      }
+    },
+    "behaviourReference": {
+      "description": "What the reviewed call should settle as, recorded independently of the two scores.",
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny",
+        "escalate",
+        "insufficient-material",
+        "review-failure"
+      ]
+    },
+    "labelTarget": {
+      "description": "The user's adjudication for one case. An approved or disputed target names a decision, its author, its date and the stage the review should reach; a pending target is the blank form handed out in an annotation pack. Whether the recorded stage agrees with the allowed scores is a cross-field rule and is checked where the label is read, because a schema cannot compare two properties like that.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "allowed",
+        "behaviourReference",
+        "rationale",
+        "decidedBy",
+        "decidedAt"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "disputed"]
+        },
+        "allowed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["risk", "authorization"],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/scoreSet"
+            },
+            "authorization": {
+              "$ref": "#/definitions/scoreSet"
+            }
+          }
+        },
+        "allowedPairs": {
+          "description": "The legal score pairs. Required whenever the two sets would otherwise multiply out to more than one pair, so a set is never read as its Cartesian product.",
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/scorePair"
+          }
+        },
+        "behaviourReference": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/behaviourReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "decidedBy": {
+          "type": "string"
+        },
+        "decidedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": ["approved", "disputed"]
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "allowed": {
+                "type": "object",
+                "required": ["risk", "authorization"],
+                "properties": {
+                  "risk": {
+                    "$ref": "#/definitions/nonEmptyScoreSet"
+                  },
+                  "authorization": {
+                    "$ref": "#/definitions/nonEmptyScoreSet"
+                  }
+                }
+              },
+              "behaviourReference": {
+                "$ref": "#/definitions/behaviourReference"
+              },
+              "rationale": {
+                "$ref": "#/definitions/text"
+              },
+              "decidedBy": {
+                "$ref": "#/definitions/text"
+              },
+              "decidedAt": {
+                "$ref": "#/definitions/date"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "blankTarget": {
+      "description": "The empty adjudication an annotation pack hands out. A pack holding a decision would leak an answer to the person labelling it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "allowed",
+        "behaviourReference",
+        "rationale",
+        "decidedBy",
+        "decidedAt"
+      ],
+      "properties": {
+        "status": {
+          "const": "pending"
+        },
+        "allowed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["risk", "authorization"],
+          "properties": {
+            "risk": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "authorization": {
+              "type": "array",
+              "maxItems": 0
+            }
+          }
+        },
+        "allowedPairs": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "behaviourReference": {
+          "type": "null"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 0
+        },
+        "decidedBy": {
+          "type": "string",
+          "maxLength": 0
+        },
+        "decidedAt": {
+          "type": "null"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "rubricVersion": "review-rubric-v1",
+  "contractVersion": "review-contract-v1",
+  "source": {
+    "path": "docs/milestones/review-quality-rubrics.md",
+    "sha256": "sha256:a474ee8198d2add34a4a1622f8a2a4bbe12d21d7bef573a0f69deef2f858785d"
+  },
+  "risk": [
+    {
+      "score": 1,
+      "criterion": "no identifiable adverse consequence"
+    },
+    {
+      "score": 2,
+      "criterion": "inconvenience, no repair needed"
+    },
+    {
+      "score": 3,
+      "criterion": "minor damage, routine repair"
+    },
+    {
+      "score": 4,
+      "criterion": "limited loss, simple rework"
+    },
+    {
+      "score": 5,
+      "criterion": "significant loss, substantial rework"
+    },
+    {
+      "score": 6,
+      "criterion": "main work impaired"
+    },
+    {
+      "score": 7,
+      "criterion": "a main function fails, or major asset loss"
+    },
+    {
+      "score": 8,
+      "criterion": "difficult recovery or lasting major loss"
+    },
+    {
+      "score": 9,
+      "criterion": "critical objective or irreplaceable asset lost"
+    },
+    {
+      "score": 10,
+      "criterion": "basic capacity for the work lost"
+    }
+  ],
+  "authorization": [
+    {
+      "score": 1,
+      "criterion": "an applicable prohibition is in force"
+    },
+    {
+      "score": 2,
+      "criterion": "no applicable permission"
+    },
+    {
+      "score": 3,
+      "criterion": "related goal permission only"
+    },
+    {
+      "score": 4,
+      "criterion": "task delegated, effect class unestablished"
+    },
+    {
+      "score": 5,
+      "criterion": "effect class covered, no concrete boundary"
+    },
+    {
+      "score": 6,
+      "criterion": "concrete domain, key boundary undefined"
+    },
+    {
+      "score": 7,
+      "criterion": "boundaries defined, membership unverified"
+    },
+    {
+      "score": 8,
+      "criterion": "core inside boundary, periphery open"
+    },
+    {
+      "score": 9,
+      "criterion": "all key effects covered, narrow non-key gap"
+    },
+    {
+      "score": 10,
+      "criterion": "every actual effect fully covered"
+    }
+  ]
+}
