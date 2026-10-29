@@ -1408,6 +1408,30 @@ describe('the score object is exempt while every header still masks', () => {
     expect(redactAuthHeaders(legit)).toBe(legit);
   });
 
+  test('a value that only looks like an internal token is not exempt', () => {
+    // The token is an implementation detail; provider text must not be able to claim
+    // the exemption by imitating it. Chat text is decoded before it reaches here, so
+    // JSON's ban on literal NULs is not a defence.
+    const forged = 'Authorization: \u0000score:0\u0000Bearer PRIVATE_TOKEN';
+    expect(redactAuthHeaders(forged)).not.toContain('PRIVATE_TOKEN');
+  });
+
+  test('a replacement pattern in provider text is restored literally', () => {
+    // `String.replace` with a string replacement interprets `$&`, `$'` and `` $` ``
+    // in the *replacement*, so provider text carrying one would be rewritten into
+    // the token or into surrounding response text. The audited answer must survive
+    // byte for byte when nothing needed masking.
+    const patterns = ['literal $& text', "a $' b $` c", 'x $$ y', 'cost: $100'];
+    for (const legend of patterns) {
+      const input = JSON.stringify({
+        authorization: { type: 'score', probabilities: { '9': 1 }, legend },
+      });
+      const masked = redactAuthHeaders(input);
+      expect(() => JSON.parse(masked) as unknown).not.toThrow();
+      expect(masked).toContain(JSON.stringify(legend).slice(1, -1));
+    }
+  });
+
   test('a credential in a rejected member key masks end to end', async () => {
     // Codex P1 on head d53e25b: this shape kept the key verbatim.
     const result = await review({

@@ -137,6 +137,7 @@ export function redactAuthHeaders(text: string): string {
   // fragment. Each verified object becomes an opaque token, the remaining text is
   // masked normally, and the rebuilt objects are restored afterwards.
   const { masked, restored } = extractScoreObjects(text);
+  const issuedTokens = new Set(restored.map(([token]) => token));
   // One pass over the field name and separator, then the whole value: a quoted
   // value (JSON double quotes, a JS object dump with single quotes, backticks)
   // or everything up to a structural terminator. The unquoted branch must
@@ -149,16 +150,24 @@ export function redactAuthHeaders(text: string): string {
   const redacted = masked.replace(
     pattern,
     (match: string, field: string, separator: string, value: string) =>
-      // A verified score object became a token here; it is already rebuilt and
-      // must survive this pass so it can be restored intact. A numeric literal is
-      // a chat answer's band. Everything else is masked, which is what keeps a
+      // A verified score object became a token here; it is already rebuilt and must
+      // survive this pass so it can be restored intact. Only a token this pass
+      // actually produced is exempt: matching the prefix alone would let provider
+      // text that merely *looks* like a token (`Authorization: \0score:0\0Bearer …`)
+      // skip masking, and chat text is decoded before it arrives, so JSON's ban on
+      // literal NULs does not protect this boundary. A numeric literal is a chat
+      // answer's band. Everything else is masked, which is what keeps a
       // credential-shaped value hidden whatever field carries it.
-      value.startsWith(SCORE_TOKEN_PREFIX) || isScoreLiteral(field, value)
+      issuedTokens.has(value) || isScoreLiteral(field, value)
         ? match
         : `${field}${separator}[redacted]`,
   );
+  // The callback form is required: a string replacement would interpret `$&`,
+  // `$'` and `` $` `` inside the provider's own text, replacing them with the token
+  // or with surrounding response text and corrupting an answer that needed no
+  // masking at all.
   return restored.reduce(
-    (current, [token, object]) => current.replace(token, object),
+    (current, [token, object]) => current.replace(token, () => object),
     redacted,
   );
 }
