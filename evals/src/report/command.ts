@@ -164,11 +164,13 @@ function protectedEvidenceOf(parts: {
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
   ];
-  if (parts.observation.dataset.status !== 'joined') return evidence;
   // The dataset's location is resolved the same way the read resolved it, whichever source
-  // named it. Protecting only an explicit `--dataset` left the CLI's own default — the path
-  // the run recorded — readable and writable at once, and that is the case that matters most
-  // because it is the one a person actually invokes.
+  // named it — and whether or not it was readable. A damaged dataset is exactly when
+  // protection matters most: reporting must stay possible so the damage can be seen, while the
+  // documents that are still intact must not be overwritten by the report describing them.
+  // Gating on a successful join left every path unprotected as soon as one document was
+  // corrupt, so a `--force` write could destroy a valid case file because the manifest was the
+  // broken one.
   const base = datasetPathOf(
     parts.settings.dataset,
     parts.observation.artifact,

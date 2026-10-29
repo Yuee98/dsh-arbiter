@@ -1344,3 +1344,109 @@ describe('RQ11-B10: monotonicity compares within one system', () => {
     });
   });
 });
+
+describe('RQ11-B07 (round 3): a damaged dataset is still protected', () => {
+  it('refuses to overwrite an intact case when the manifest is unreadable', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const original = await committedCase('read-named-source-file');
+      // A dataset whose case file is valid and whose manifest is not. Reporting on this
+      // dataset must still be possible — that is how a person discovers the damage — so the
+      // status is `unreadable` rather than a refusal. The intact case is still evidence.
+      const dataset = await datasetOf(created, {
+        cases: [],
+        labels: [],
+        name: 'damaged',
+      });
+      await created.write(
+        'damaged/cases/read-named-source-file.json',
+        original,
+      );
+      await created.write('damaged/manifest.json', { datasetId: 'broken' });
+      const casePath = join(dataset, 'cases/read-named-source-file.json');
+      const before = await readFile(casePath, 'utf8');
+
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: casePath.replace(/\.json$/u, ''),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      expect(await readFile(casePath, 'utf8')).toBe(before);
+    });
+  });
+
+  it('still reports a damaged dataset, because that is how the damage is seen', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const original = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: [],
+        labels: [],
+        name: 'damaged',
+      });
+      await created.write(
+        'damaged/cases/read-named-source-file.json',
+        original,
+      );
+      await created.write('damaged/manifest.json', { datasetId: 'broken' });
+      const out: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: (line) => out.push(line),
+          err: () => undefined,
+        },
+        {
+          directory,
+          // The default destination inside the run directory stays allowed.
+          output: null,
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(code).toBe(0);
+      // The damage is reported as a note rather than failing the report, and the run's own
+      // evidence is still described.
+      expect(out.join('\n')).toContain(
+        'cells 1 planned, 1 recorded, 0 missing',
+      );
+    });
+  });
+
+  it('exempts an explicit "no dataset" from protection entirely', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: () => undefined,
+        },
+        {
+          directory,
+          output: join(created.path, 'elsewhere/report'),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(code).toBe(0);
+    });
+  });
+});
