@@ -83,15 +83,44 @@ export interface CacheSlot {
  * cache anything. What it *can* do is send a cold request and then a run of requests
  * whose prefix never changes, and read the provider's own cache counts back through the
  * production usage mapping. Counts a provider does not report stay unknown.
+ *
+ * The workload is described by the two things it is built from, not only by labels:
+ * `baseCaseId` supplies the material every request shares, and `changedActionCaseIds`
+ * supplies the actions the changed-action slots submit, in order. `expandCache` renders
+ * each request from them, so the prefix and the action change are measured rather than
+ * described.
  */
 export interface CacheWorkload {
   readonly prefix: string;
   readonly changing: string;
+  /**
+   * The case whose policy, environment, authorization and history every request shares.
+   *
+   * The cold request submits this case's own action; a changed-action slot submits the
+   * action of the case it names while keeping this case's prefix.
+   */
+  readonly baseCaseId: string;
+  /**
+   * The actions the changed-action slots submit, one per slot repeat, in order.
+   *
+   * Listed explicitly rather than derived from a split, so raising a slot's `repeats`
+   * cannot quietly reuse an action: a workload asking for more actions than it names is
+   * refused.
+   */
+  readonly changedActionCaseIds: readonly string[];
   readonly sequence: readonly CacheSlot[];
   readonly reading: string;
 }
 
-/** The ceilings this experiment may spend. */
+/**
+ * The ceilings this experiment may spend.
+ *
+ * `maxRequests` bounds every request, repairs included; `maxInputTokensTotal` bounds the
+ * measured input; `maxRepairRetries` is per cell. The experiment's own request count is
+ * compared with the *run* bounds too (`bounds.maxAttempts`, `bounds.maxInputTokens`),
+ * because those are what one bounded run enforces: a matrix needing more dispatches than
+ * a run allows is not a plan, whatever its own ceiling says.
+ */
 export interface ExperimentBudget {
   readonly maxRequests: number;
   readonly maxInputTokensTotal: number;

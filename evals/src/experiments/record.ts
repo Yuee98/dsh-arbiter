@@ -16,6 +16,7 @@
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import prettier from 'prettier';
 import { dirname, resolve } from 'node:path';
 
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
@@ -30,8 +31,15 @@ import {
 import { digestOf } from '../data/hash.js';
 
 import { definitionProblems, resolveCandidates } from './inspect.js';
-import { RECORD_VERSION } from './commands.js';
+import {
+  budgetProblemsOf,
+  expandCacheWorkload,
+  RECORD_VERSION,
+  requiredRequests,
+} from './commands.js';
 import type { ExperimentIo } from './commands.js';
+import { cacheProblems } from './cache.js';
+import type { CacheExpansion } from './cache.js';
 import { loadCases, loadDefinition } from './load.js';
 import { expandMatrix } from './matrix.js';
 import type { ExpandedMatrix } from './matrix.js';
@@ -81,13 +89,41 @@ export interface ExperimentRecord {
   readonly repeats: number;
   readonly candidates: readonly RecordedCandidate[];
   readonly ladder: ExperimentDefinition['ladder'];
-  readonly cache: ExperimentDefinition['cache'];
+  /**
+   * The cache workload, with the requests it expands to.
+   *
+   * The definition's own description is kept verbatim, and the expansion is recorded
+   * beside it so a reader can see the requests the labels became: their case ids, their
+   * roles and their measured input. Nothing here claims a cache hit.
+   */
+  readonly cache: ExperimentDefinition['cache'] & {
+    readonly expanded: readonly {
+      readonly cellId: string;
+      readonly role: string;
+      readonly baseCaseId: string;
+      readonly actionCaseId: string;
+      readonly protocol: string;
+      readonly repeat: number;
+      readonly estimatedInputTokens: number;
+      readonly stablePrefixFingerprint: string | null;
+      readonly sameAsMatrixCell: string | null;
+    }[];
+    readonly requests: number;
+    /** Requests that submit a matrix cell's exact bytes; recorded, never subtracted. */
+    readonly byteIdenticalToMatrix: number;
+  };
   readonly bounds: ExperimentDefinition['bounds'];
   readonly budget: ExperimentDefinition['budget'];
   /** What the matrix measured, not what a run spent. */
   readonly measured: {
     readonly cells: number;
     readonly estimatedInputTokens: number;
+    /** The cache workload's own measured input, distinct from the matrix's. */
+    readonly cacheInputTokens: number;
+    /** The requests the whole experiment needs, repairs included. */
+    readonly requiredRequests: number;
+    /** Whether one run's attempt ceiling covers those requests. */
+    readonly fitsOneRun: boolean;
   };
   readonly nonGoals: readonly string[];
   /**
@@ -105,12 +141,13 @@ export interface BuiltRecord {
   readonly matrix: ExpandedMatrix;
 }
 
-/** Build the record for one definition and its measured matrix. */
+/** Build the record for one definition, its measured matrix and its cache workload. */
 export function buildRecord(parts: {
   readonly definition: ExperimentDefinition;
   readonly definitionText: string;
   readonly cases: readonly string[];
   readonly matrix: ExpandedMatrix;
+  readonly cache: CacheExpansion;
 }): BuiltRecord {
   const { definition, matrix } = parts;
   const cellsByCandidate = new Map(
@@ -156,12 +193,32 @@ export function buildRecord(parts: {
       repeats: definition.repeats,
       candidates,
       ladder: definition.ladder,
-      cache: definition.cache,
+      cache: {
+        ...definition.cache,
+        expanded: parts.cache.cells.map((cell) => ({
+          cellId: cell.cellId,
+          role: cell.role,
+          baseCaseId: cell.baseCaseId,
+          actionCaseId: cell.actionCaseId,
+          protocol: cell.protocol,
+          repeat: cell.repeat,
+          estimatedInputTokens: cell.estimatedInputTokens,
+          stablePrefixFingerprint: cell.stablePrefixFingerprint,
+          sameAsMatrixCell: cell.sameAsMatrixCell,
+        })),
+        requests: parts.cache.requests,
+        byteIdenticalToMatrix: parts.cache.byteIdenticalToMatrix,
+      },
       bounds: definition.bounds,
       budget: definition.budget,
       measured: {
         cells: matrix.cells,
         estimatedInputTokens: matrix.estimatedInputTokens,
+        cacheInputTokens: parts.cache.estimatedInputTokens,
+        requiredRequests: requiredRequests(definition, matrix, parts.cache),
+        fitsOneRun:
+          requiredRequests(definition, matrix, parts.cache) <=
+          definition.bounds.maxAttempts,
       },
       nonGoals: [...definition.nonGoals],
       status:
@@ -208,7 +265,22 @@ export async function recordExperiment(
     repeats: loaded.definition.repeats,
     maxInputTokens: loaded.definition.bounds.maxInputTokens,
   });
-  const problems = definitionProblems(loaded.definition);
+  const cache = expandCacheWorkload(loaded.definition, cases.cases, matrix);
+  if (cache === null) {
+    io.err(
+      `problem the cache workload's base case ${loaded.definition.cache.baseCaseId} is not one this experiment selects`,
+    );
+    return 1;
+  }
+  const problems = [
+    ...definitionProblems(loaded.definition),
+    ...cacheProblems({
+      expansion: cache,
+      definition: loaded.definition.cache,
+      bounds: loaded.definition.bounds,
+    }),
+    ...budgetProblemsOf(loaded.definition, matrix, cache),
+  ];
   if (problems.length > 0) {
     for (const problem of problems) io.err(`problem ${problem}`);
     return 1;
@@ -218,12 +290,20 @@ export async function recordExperiment(
     definitionText: await readFile(loaded.path, 'utf8'),
     cases: cases.cases.map((entry) => entry.caseId),
     matrix,
+    cache,
   });
   const target = resolve(io.root, out);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, `${JSON.stringify(built.record, null, 2)}\n`, 'utf8');
+  // Formatted before it is written, the way the generated CSS is: the record is a
+  // committed document a person reads and reviews, and `format:check` runs over it. A
+  // serialized blob would make the artifact's diff about quoting rather than about what
+  // the experiment fixed.
+  const text = await prettier.format(JSON.stringify(built.record), {
+    filepath: target,
+  });
+  await writeFile(target, text, 'utf8');
   io.out(
-    `wrote ${out}: ${String(built.record.candidates.length)} candidates, ${String(built.record.measured.cells)} cells measured, nothing sent`,
+    `wrote ${out}: ${String(built.record.candidates.length)} candidates, ${String(built.record.measured.cells)} cells and ${String(built.record.cache.requests)} cache request(s) measured, nothing sent`,
   );
   return 0;
 }

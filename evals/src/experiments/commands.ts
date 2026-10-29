@@ -9,8 +9,9 @@
  *               the ladder, the cache workload and the measured budget
  *
  * `plan` is the dry run the issue asks for: it renders every cell with the production
- * renderer and reports the measured input estimate, so an operator can see the cost and
- * each candidate's difference before anything is sent. It writes nothing.
+ * renderer *and* every request of the cache workload, and reports the measured input
+ * estimate, so an operator can see the cost and each candidate's difference before
+ * anything is sent. It writes nothing.
  *
  * `record` is the artifact that fixes the experiment: candidate ids, the probe
  * definition, the `unknown` representation and the ceilings. It is committed, so a later
@@ -29,8 +30,12 @@ import {
 } from '../../../src/reviewer/variant.js';
 import type { ReviewVariant } from '../../../src/reviewer/variant.js';
 
+import type { ReviewCase } from '../data/types.js';
+
 import { resolveCandidates } from './inspect.js';
 import { loadCases, loadDefinition, unknownCaseIds } from './load.js';
+import { expandCache, cacheProblems } from './cache.js';
+import type { CacheExpansion } from './cache.js';
 import { expandMatrix } from './matrix.js';
 import type { ExpandedMatrix } from './matrix.js';
 import { EXPERIMENT_VERSION } from './types.js';
@@ -60,9 +65,11 @@ export interface ExpandedDefinition {
   readonly definition: ExperimentDefinition;
   readonly cases: readonly { readonly caseId: string }[];
   readonly matrix: ExpandedMatrix;
+  /** The cache workload, expanded against the first candidate and protocol. */
+  readonly cache: CacheExpansion;
 }
 
-/** Expand one definition, measuring every cell it would send. */
+/** Expand one definition, measuring every cell and cache request it would send. */
 export async function expandDefinition(
   io: ExperimentIo,
   path: string,
@@ -83,17 +90,73 @@ export async function expandDefinition(
       ],
     };
   }
+  const candidates = resolveCandidates(loaded.definition);
   const matrix = expandMatrix({
-    candidates: resolveCandidates(loaded.definition),
+    candidates,
     cases: cases.cases,
     protocols: loaded.definition.protocols,
     repeats: loaded.definition.repeats,
     maxInputTokens: loaded.definition.bounds.maxInputTokens,
   });
+  const cache = expandCacheWorkload(loaded.definition, cases.cases, matrix);
+  if (cache === null) {
+    return {
+      ok: false,
+      problems: [
+        `the cache workload's base case ${loaded.definition.cache.baseCaseId} is not one this experiment selects`,
+      ],
+    };
+  }
   return {
     ok: true,
-    expanded: { definition: loaded.definition, cases: cases.cases, matrix },
+    expanded: {
+      definition: loaded.definition,
+      cases: cases.cases,
+      matrix,
+      cache,
+    },
   };
+}
+
+/**
+ * Expand the cache workload against the first candidate and the first protocol.
+ *
+ * One candidate and one protocol is the workload as the definition describes it: a cold
+ * request, a reuse and a changed action, not a second matrix. The candidate is the first
+ * declared one (production, which validation requires to exist), so the measured cost is
+ * the baseline's rather than a variant's.
+ */
+export function expandCacheWorkload(
+  definition: ExperimentDefinition,
+  cases: readonly ReviewCase[],
+  matrix: ExpandedMatrix,
+): CacheExpansion | null {
+  const candidate = resolveCandidates(definition)[0];
+  const protocol = definition.protocols[0];
+  if (candidate === undefined || protocol === undefined) return null;
+  const base = cases.find(
+    (entry) => entry.caseId === definition.cache.baseCaseId,
+  );
+  if (base === undefined) return null;
+  const matrixCells = matrix.candidates.flatMap((entry) =>
+    entry.cells.map((cell) => ({
+      cellId: cell.cellId,
+      candidateId: cell.candidateId,
+      protocol: cell.protocol,
+      caseId: cell.caseId,
+      promptFingerprint: cell.promptFingerprint,
+    })),
+  );
+  return expandCache({
+    candidate,
+    cases,
+    protocol,
+    baseCaseId: definition.cache.baseCaseId,
+    sequence: definition.cache.sequence,
+    changedActionCaseIds: definition.cache.changedActionCaseIds,
+    maxInputTokens: definition.bounds.maxInputTokens,
+    matrixCells,
+  });
 }
 
 /**
@@ -113,7 +176,7 @@ export async function planExperiment(
     for (const problem of expanded.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const { definition, cases, matrix } = expanded.expanded;
+  const { definition, cases, matrix, cache } = expanded.expanded;
   io.out(
     `experiment ${definition.experimentId} (${EXPERIMENT_VERSION}): ${String(cases.length)} cases, ${String(definition.candidates.length)} candidates, protocols ${definition.protocols.join('+')}, repeats ${String(definition.repeats)}`,
   );
@@ -133,17 +196,34 @@ export async function planExperiment(
       `ladder ${step.stepId}: ${step.from} -> ${variantAxesText(step.axes)} (changes ${step.changes.join('+')})`,
     );
   }
-  for (const slot of definition.cache.sequence) {
-    io.out(`cache ${slot.role} x${String(slot.repeats)}`);
-  }
+  printCache(io, definition, cache);
   io.out(
-    `budget maxRequests ${String(definition.budget.maxRequests)} measured ${String(matrix.cells)}; maxInputTokensTotal ${String(definition.budget.maxInputTokensTotal)} measured ${String(matrix.estimatedInputTokens)}`,
+    `budget maxRequests ${String(definition.budget.maxRequests)} measured ${String(requiredRequests(definition, matrix, cache))} (matrix ${String(matrix.cells)} + cache ${String(cache.requests)}); maxInputTokensTotal ${String(definition.budget.maxInputTokensTotal)} measured ${String(matrix.estimatedInputTokens + cache.estimatedInputTokens)}`,
   );
-  const problems = budgetProblemsOf(definition, matrix);
+  const problems = budgetProblemsOf(definition, matrix, cache);
   for (const problem of problems) io.err(`problem ${problem}`);
   if (problems.length > 0) return 1;
   io.out('dry run only: nothing was sent and nothing was written');
   return 0;
+}
+
+/** Print the expanded cache workload, one line per request and one for its shape. */
+function printCache(
+  io: ExperimentIo,
+  definition: ExperimentDefinition,
+  cache: CacheExpansion,
+): void {
+  for (const cell of cache.cells) {
+    io.out(
+      `cache ${cell.role} r${String(cell.repeat)} ${cell.actionCaseId} ${cell.protocol}: ${String(cell.estimatedInputTokens)} estimated input tokens, prefix ${cell.stablePrefixFingerprint?.slice(0, 12) ?? 'none'}, action ${cell.actionFingerprint.slice(0, 12)}${cell.sameAsMatrixCell === null ? '' : ` (same request as ${cell.sameAsMatrixCell})`}`,
+    );
+  }
+  io.out(
+    `cache requests ${String(cache.requests)}, byte-identical to a matrix cell ${String(cache.byteIdenticalToMatrix)}, estimated input tokens ${String(cache.estimatedInputTokens)}, stable prefixes ${String(new Set(cache.cells.map((cell) => cell.stablePrefixFingerprint)).size)}`,
+  );
+  for (const slot of definition.cache.sequence) {
+    io.out(`cache slot ${slot.role} x${String(slot.repeats)}`);
+  }
 }
 
 /** The axes a variant changes from production, or `none`. */
@@ -159,20 +239,56 @@ function variantAxesText(
   return `${axes.prompt}/${axes.scale}/${axes.history}/${axes.structure}`;
 }
 
-/** Why a measured matrix does not fit its declared budget. */
+/**
+ * The requests the experiment must be able to make.
+ *
+ * Every matrix cell and every cache request is charged: whether a cache request repeats a
+ * matrix cell's bytes is a fact about an execution, not a discount the plan can claim.
+ * Repairs are charged per cell, because the run's retry allowance is what turns a request
+ * count into a spend ceiling.
+ */
+export function requiredRequests(
+  definition: ExperimentDefinition,
+  matrix: ExpandedMatrix,
+  cache: CacheExpansion,
+): number {
+  return (
+    matrix.cells +
+    cache.requests +
+    definition.budget.maxRepairRetries * matrix.cells
+  );
+}
+
+/**
+ * Why a measured experiment does not fit its declared budget or its run bounds.
+ *
+ * Three separate ceilings have to agree, and each failure has its own message because
+ * each needs a different correction:
+ *
+ *   - `budget.maxRequests` bounds every request, repairs included;
+ *   - `budget.maxInputTokensTotal` bounds the measured total;
+ *   - `bounds.maxAttempts` bounds the attempts of **one bounded run**, so a matrix that
+ *     needs more dispatches than that has to be partitioned into runs rather than sent
+ *     as one;
+ *   - `bounds.maxInputTokens` bounds a single request, so a cell measured above it is one
+ *     the runner would refuse rather than send.
+ */
 export function budgetProblemsOf(
   definition: ExperimentDefinition,
   matrix: ExpandedMatrix,
+  cache: CacheExpansion,
 ): readonly string[] {
   const problems: string[] = [];
-  if (matrix.cells > definition.budget.maxRequests) {
+  const requests = requiredRequests(definition, matrix, cache);
+  const tokens = matrix.estimatedInputTokens + cache.estimatedInputTokens;
+  if (requests > definition.budget.maxRequests) {
     problems.push(
-      `the matrix needs ${String(matrix.cells)} request(s) but maxRequests is ${String(definition.budget.maxRequests)}`,
+      `the experiment needs ${String(requests)} request(s) but maxRequests is ${String(definition.budget.maxRequests)}`,
     );
   }
-  if (matrix.estimatedInputTokens > definition.budget.maxInputTokensTotal) {
+  if (tokens > definition.budget.maxInputTokensTotal) {
     problems.push(
-      `the matrix measures ${String(matrix.estimatedInputTokens)} input tokens but maxInputTokensTotal is ${String(definition.budget.maxInputTokensTotal)}; the matrix is frozen, so the ceiling has to move or the matrix has to shrink deliberately`,
+      `the experiment measures ${String(tokens)} input tokens but maxInputTokensTotal is ${String(definition.budget.maxInputTokensTotal)}; the matrix is frozen, so the ceiling has to move or the matrix has to shrink deliberately`,
     );
   }
   if (
@@ -180,6 +296,50 @@ export function budgetProblemsOf(
   ) {
     problems.push(
       `one cell may use ${String(definition.bounds.maxInputTokens)} input tokens, which exceeds the experiment's whole budget of ${String(definition.budget.maxInputTokensTotal)}`,
+    );
+  }
+  problems.push(...boundProblems(definition, matrix, cache));
+  return problems;
+}
+
+/**
+ * Why the experiment cannot be executed under the bounds it declares.
+ *
+ * Two ceilings belong to the *run* rather than to the experiment (`RunBounds` from the
+ * reused RQ-10 contract): `maxAttempts` bounds the attempts of one bounded run, reserved
+ * before each dispatch, and `maxInputTokens` bounds a single request. A matrix larger than
+ * the first is a plan no run could finish, and a cell measured above the second is one the
+ * runner would refuse rather than send — so both are checked against what was measured
+ * rather than against what the definition hoped.
+ *
+ * A variant render is measured too, not only production's: candidate B's extra question
+ * and answer format live in the system message, so a variant can exceed a per-request
+ * ceiling that production fits. The `OVER_BUDGET` flag production sets is checked as well,
+ * because a cell the production budget already refused must not be counted as sendable.
+ */
+function boundProblems(
+  definition: ExperimentDefinition,
+  matrix: ExpandedMatrix,
+  cache: CacheExpansion,
+): readonly string[] {
+  const problems: string[] = [];
+  const bounds = definition.bounds;
+  for (const cell of matrix.candidates.flatMap((entry) => entry.cells)) {
+    if (cell.estimatedInputTokens > bounds.maxInputTokens) {
+      problems.push(
+        `cell ${cell.cellId} measures ${String(cell.estimatedInputTokens)} input tokens against a per-request ceiling of ${String(bounds.maxInputTokens)}; the run would refuse it rather than send it`,
+      );
+    }
+    if (cell.overBudget) {
+      problems.push(
+        `cell ${cell.cellId} is marked OVER_BUDGET by the production budget, so it cannot be assembled within the per-request ceiling of ${String(bounds.maxInputTokens)} input tokens`,
+      );
+    }
+  }
+  const requests = requiredRequests(definition, matrix, cache);
+  if (requests > bounds.maxAttempts) {
+    problems.push(
+      `the experiment needs ${String(requests)} attempt(s) across ${String(matrix.cells)} cell(s) but one run's maxAttempts is ${String(bounds.maxAttempts)}; the run bound has to cover the matrix, repairs included, or the experiment has to shrink`,
     );
   }
   return problems;
@@ -222,11 +382,18 @@ export async function checkExperiments(io: ExperimentIo): Promise<number> {
       for (const problem of expanded.problems) io.err(`problem ${problem}`);
       continue;
     }
-    const { definition, matrix } = expanded.expanded;
+    const { definition, matrix, cache } = expanded.expanded;
     io.out(
-      `${path}: ${definition.experimentId}, ${String(definition.candidates.length)} candidates, ${String(matrix.cells)} cells, ${String(matrix.estimatedInputTokens)} estimated input tokens`,
+      `${path}: ${definition.experimentId}, ${String(definition.candidates.length)} candidates, ${String(matrix.cells)} cells, ${String(cache.requests)} cache request(s), ${String(matrix.estimatedInputTokens + cache.estimatedInputTokens)} estimated input tokens`,
     );
-    for (const problem of budgetProblemsOf(definition, matrix)) {
+    for (const problem of [
+      ...cacheProblems({
+        expansion: cache,
+        definition: definition.cache,
+        bounds: definition.bounds,
+      }),
+      ...budgetProblemsOf(definition, matrix, cache),
+    ]) {
       failed += 1;
       io.err(`problem ${problem}`);
     }

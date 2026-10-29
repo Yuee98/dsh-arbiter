@@ -11,6 +11,9 @@
  * This is possible offline because rendering is pure: it reads a snapshot built from a
  * committed case and produces text. No model is called, no network is touched, and no
  * run directory is written.
+ *
+ * The cache workload (`cache.ts`) expands through the same three seams exported here, so
+ * a matrix cell and a cache request cannot be measured by two different rules.
  */
 
 import { estimateTokenCount } from 'tokenx';
@@ -24,11 +27,23 @@ import {
   renderVariantDecisionRequest,
 } from '../../../src/reviewer/prompt.js';
 import type { ProbeReading } from '../../../src/reviewer/probe.js';
+import type { ReviewVariant } from '../../../src/reviewer/variant.js';
+import type { ReviewSnapshot } from '../../../src/types.js';
 
 import { caseMaterial } from '../run/material.js';
 import type { RunProtocol } from '../run/types.js';
 
 import type { ResolvedCandidate } from './inspect.js';
+
+/**
+ * The action boundary in each layout, as the layout itself spells it.
+ *
+ * The cache workload cuts a rendered request at this boundary, and both markers are the
+ * layout's own text rather than something this module adds: the production layout emits
+ * `PENDING_ACTION` as a block label, and the compact layout emits it as a member name.
+ * A second, experiment-only marker would be a third layout to keep in step.
+ */
+const ACTION_MARKERS = ['\nPENDING_ACTION\n', '\n  "pending_action":'];
 
 /** One expanded cell, with the request it would send measured. */
 export interface ExperimentCell {
@@ -47,6 +62,14 @@ export interface ExperimentCell {
    * what lets a dry run prove a variant actually differed instead of assuming it did.
    */
   readonly promptFingerprint: string;
+  /**
+   * Whether the production budget marked this request as over its own input bound.
+   *
+   * A cell whose snapshot carries `OVER_BUDGET` is one the run could not assemble within
+   * the declared per-request ceiling. It is measured and reported rather than counted as
+   * sendable, because charging it would budget a request the runner must refuse.
+   */
+  readonly overBudget: boolean;
 }
 
 /** One candidate's share of the matrix. */
@@ -64,6 +87,156 @@ export interface ExpandedMatrix {
   readonly candidates: readonly CandidateExpansion[];
   readonly cells: number;
   readonly estimatedInputTokens: number;
+  /** Cells the production budget refused, which no run could send. */
+  readonly overBudgetCells: number;
+}
+
+/**
+ * The material one (case, protocol, bound) yields, built once per expansion.
+ *
+ * `caseMaterial` runs the production trim, which renders both payloads until the budget
+ * block is stable — by far the most expensive step, and one that depends only on (case,
+ * protocol, limit). Every candidate and every repeat of a case shares it. Caching it is
+ * what keeps a full-matrix dry run inside one test's time limit without changing a
+ * measured number: the value is the same one a fresh call produces.
+ */
+export type MaterialCache = Map<string, ReturnType<typeof caseMaterial>>;
+
+/** One case's production material, from the cache when this expansion already built it. */
+export function materialFor(
+  cache: MaterialCache,
+  parts: {
+    readonly caseEntry: ReviewCase;
+    readonly protocol: RunProtocol;
+    readonly maxInputTokens: number;
+  },
+): ReturnType<typeof caseMaterial> {
+  const key = `${parts.caseEntry.caseId}\u0000${parts.protocol}\u0000${String(parts.maxInputTokens)}`;
+  const found = cache.get(key);
+  if (found !== undefined) return found;
+  const built = caseMaterial(parts.caseEntry, parts.protocol, {
+    maxInputTokens: parts.maxInputTokens,
+  });
+  cache.set(key, built);
+  return built;
+}
+
+/**
+ * A rendered request under one variant, with the production budget's verdict on it.
+ *
+ * Both variants are reproduced as a discriminated union rather than widened to `unknown`:
+ * a chat request and a decision request have different payload fields, and a reader that
+ * had to assert which one it held could read the wrong one.
+ */
+export type RenderedVariant =
+  | {
+      readonly protocol: 'chat';
+      readonly request: ReturnType<typeof renderVariantChatRequest>;
+      readonly overBudget: boolean;
+    }
+  | {
+      readonly protocol: 'decision';
+      readonly request: ReturnType<typeof renderVariantDecisionRequest>;
+      readonly overBudget: boolean;
+    };
+
+/**
+ * Render one snapshot under one variant.
+ *
+ * The production renderer is injected by name rather than re-implemented, so a
+ * full-layout candidate submits the production bytes rather than a copy that happens to
+ * look the same.
+ */
+export function renderFor(parts: {
+  readonly snapshot: ReviewSnapshot;
+  readonly variant: ReviewVariant;
+  readonly protocol: RunProtocol;
+}): RenderedVariant {
+  const overBudget =
+    parts.snapshot.budget.truncatedSegments.includes('OVER_BUDGET');
+  return parts.protocol === 'chat'
+    ? {
+        protocol: 'chat',
+        request: renderVariantChatRequest(
+          parts.snapshot,
+          parts.variant,
+          renderMaterial,
+        ),
+        overBudget,
+      }
+    : {
+        protocol: 'decision',
+        request: renderVariantDecisionRequest(
+          parts.snapshot,
+          parts.variant,
+          renderMaterial,
+        ),
+        overBudget,
+      };
+}
+
+/** The submitted material text of a rendered request. */
+export function materialTextOf(rendered: RenderedVariant): string {
+  return rendered.protocol === 'chat'
+    ? rendered.request.user
+    : rendered.request.state;
+}
+
+/**
+ * Split submitted material into the stable prefix and the action region.
+ *
+ * The cut is the production layout's own block boundary. A layout that does not submit
+ * the production block order has no locatable boundary and yields `null`, which the cache
+ * workload reports rather than guessing: cutting at an offset would compare two different
+ * things and call the comparison a prefix.
+ */
+export function splitAtAction(
+  material: string,
+): { readonly prefix: string; readonly action: string } | null {
+  // The last occurrence: the action block is the final region before the completeness
+  // report, and `PENDING_ACTION` cannot appear as evidence text ahead of it without the
+  // layout having already emitted its block label.
+  const indices = ACTION_MARKERS.map((marker) =>
+    material.lastIndexOf(marker),
+  ).filter((index) => index >= 0);
+  const index = Math.max(...indices);
+  if (!Number.isFinite(index) || index < 0) return null;
+  const start = index + 1;
+  return { prefix: material.slice(0, start), action: material.slice(start) };
+}
+
+/** One rendered, measured request: what a cell or a cache request records. */
+export interface MeasuredRequest {
+  readonly request: RenderedVariant['request'];
+  readonly material: string;
+  readonly estimatedInputTokens: number;
+  readonly promptFingerprint: string;
+  readonly overBudget: boolean;
+}
+
+/** Render and measure one snapshot under one variant and protocol. */
+export function measuredOf(
+  parts: { readonly snapshot: ReviewSnapshot },
+  rest: {
+    readonly variant: ReviewVariant;
+    readonly protocol: RunProtocol;
+  },
+): MeasuredRequest {
+  const rendered = renderFor({
+    snapshot: parts.snapshot,
+    variant: rest.variant,
+    protocol: rest.protocol,
+  });
+  return {
+    request: rendered.request,
+    estimatedInputTokens: rendered.request.estimatedInputTokens,
+    promptFingerprint: digestOf({
+      protocol: rest.protocol,
+      request: rendered.request,
+    }),
+    material: materialTextOf(rendered),
+    overBudget: rendered.overBudget,
+  };
 }
 
 /** The cell id of one (case, candidate, protocol, repeat). */
@@ -94,24 +267,20 @@ export function measureCell(parts: {
   readonly protocol: RunProtocol;
   readonly repeat: number;
   readonly maxInputTokens: number;
+  readonly materials?: MaterialCache;
 }): ExperimentCell {
-  const material = caseMaterial(parts.caseEntry, parts.protocol, {
-    maxInputTokens: parts.maxInputTokens,
-  });
-  // The production renderer itself, so a full-layout candidate submits the production
-  // bytes rather than a copy that happens to look the same.
-  const request =
-    parts.protocol === 'chat'
-      ? renderVariantChatRequest(
-          material.snapshot,
-          parts.candidate.variant,
-          renderMaterial,
-        )
-      : renderVariantDecisionRequest(
-          material.snapshot,
-          parts.candidate.variant,
-          renderMaterial,
-        );
+  const material = materialFor(
+    parts.materials ?? new Map<string, ReturnType<typeof caseMaterial>>(),
+    {
+      caseEntry: parts.caseEntry,
+      protocol: parts.protocol,
+      maxInputTokens: parts.maxInputTokens,
+    },
+  );
+  const measured = measuredOf(
+    { snapshot: material.snapshot },
+    { variant: parts.candidate.variant, protocol: parts.protocol },
+  );
   return {
     cellId: experimentCellId({
       caseId: parts.caseEntry.caseId,
@@ -124,8 +293,9 @@ export function measureCell(parts: {
     variantId: parts.candidate.variant.variantId,
     protocol: parts.protocol,
     repeat: parts.repeat,
-    estimatedInputTokens: request.estimatedInputTokens,
-    promptFingerprint: digestOf({ protocol: parts.protocol, request }),
+    estimatedInputTokens: measured.estimatedInputTokens,
+    promptFingerprint: measured.promptFingerprint,
+    overBudget: measured.overBudget,
   };
 }
 
@@ -136,6 +306,7 @@ function expandCandidate(parts: {
   readonly protocols: readonly RunProtocol[];
   readonly repeats: number;
   readonly maxInputTokens: number;
+  readonly materials: MaterialCache;
 }): CandidateExpansion {
   const cells: ExperimentCell[] = [];
   for (const caseEntry of parts.cases) {
@@ -148,6 +319,7 @@ function expandCandidate(parts: {
             protocol,
             repeat,
             maxInputTokens: parts.maxInputTokens,
+            materials: parts.materials,
           }),
         );
       }
@@ -172,6 +344,9 @@ export function expandMatrix(parts: {
   readonly repeats: number;
   readonly maxInputTokens: number;
 }): ExpandedMatrix {
+  // One material cache for the whole expansion: a case and protocol are composed once,
+  // whatever the number of candidates and repeats measuring them.
+  const materials: MaterialCache = new Map();
   const candidates = parts.candidates.map((candidate) =>
     expandCandidate({
       candidate,
@@ -179,15 +354,18 @@ export function expandMatrix(parts: {
       protocols: parts.protocols,
       repeats: parts.repeats,
       maxInputTokens: parts.maxInputTokens,
+      materials,
     }),
   );
+  const cells = candidates.flatMap((entry) => entry.cells);
   return {
     candidates,
-    cells: candidates.reduce((sum, entry) => sum + entry.cells.length, 0),
+    cells: cells.length,
     estimatedInputTokens: candidates.reduce(
       (sum, entry) => sum + entry.estimatedInputTokens,
       0,
     ),
+    overBudgetCells: cells.filter((cell) => cell.overBudget).length,
   };
 }
 

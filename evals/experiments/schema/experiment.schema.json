@@ -150,7 +150,14 @@
       "description": "The cache workload: a cold request, then requests that keep a stable prefix and change only the action. What a provider caches is a measurement, so the layout is stated as a hypothesis and the reading is taken from the production usage mapping.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["prefix", "changing", "sequence", "reading"],
+      "required": [
+        "prefix",
+        "changing",
+        "baseCaseId",
+        "changedActionCaseIds",
+        "sequence",
+        "reading"
+      ],
       "properties": {
         "prefix": {
           "type": "string",
@@ -159,6 +166,21 @@
         "changing": {
           "type": "string",
           "minLength": 1
+        },
+        "baseCaseId": {
+          "description": "The case whose policy, environment, authorization and turn history every request in the workload shares. The cold request submits this case's own action; a changed-action slot submits its own case's action over this prefix.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._~-]{0,179}$"
+        },
+        "changedActionCaseIds": {
+          "description": "The cases whose actions the changed-action slots submit, one per slot repeat, in order. Listed rather than derived so that raising a slot's repeats adds real requests and requires real actions.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._~-]{0,179}$"
+          }
         },
         "sequence": {
           "type": "array",

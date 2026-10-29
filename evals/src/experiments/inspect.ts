@@ -223,7 +223,9 @@ function probeProblems(definition: ExperimentDefinition): readonly string[] {
  *
  * The request ceiling is compared against the matrix's own lower bound here, before any
  * provider is chosen, because a plan that cannot fit its own repeats is a plan that
- * would stop halfway and call that a boundary.
+ * would stop halfway and call that a boundary. The cache workload is checked the same
+ * way and from the definition alone: its slots have to name the actions they submit, so
+ * raising a slot's repeats cannot quietly reuse one.
  */
 function budgetProblems(definition: ExperimentDefinition): readonly string[] {
   const problems: string[] = [];
@@ -244,23 +246,60 @@ function budgetProblems(definition: ExperimentDefinition): readonly string[] {
       `budget maxRequests ${String(budget.maxRequests)} cannot cover the matrix's ${String(minimum)} minimum cell(s)`,
     );
   }
-  const cacheRequests = definition.cache.sequence.reduce(
-    (sum, slot) => sum + slot.repeats,
-    0,
-  );
-  if (!definition.cache.sequence.some((slot) => slot.role === 'cold')) {
+  problems.push(...cacheSlotProblems(definition));
+  return problems;
+}
+
+/**
+ * Why the cache sequence cannot be expanded into the workload it names.
+ *
+ * All of this is decidable without a case, so it is reported at load rather than left to
+ * the expansion: a cold request, a re-use, and enough named actions for the slots that
+ * need them.
+ */
+function cacheSlotProblems(
+  definition: ExperimentDefinition,
+): readonly string[] {
+  const problems: string[] = [];
+  const { sequence, changedActionCaseIds, baseCaseId } = definition.cache;
+  if (!sequence.some((slot) => slot.role === 'cold')) {
     problems.push(
       'the cache workload names no cold request; a warm-only sequence cannot show what the cache did',
     );
   }
-  if (cacheRequests < 2) {
+  if (!sequence.some((slot) => slot.role !== 'cold')) {
+    problems.push(
+      'the cache workload names only cold requests; nothing would be re-used',
+    );
+  }
+  if (sequence.reduce((sum, slot) => sum + slot.repeats, 0) < 2) {
     problems.push(
       'the cache workload needs at least a cold request and one re-use to measure anything',
     );
   }
-  if (!definition.cache.sequence.some((slot) => slot.role !== 'cold')) {
+  const cold = sequence.filter((slot) => slot.role === 'cold');
+  if (cold.length > 1) {
     problems.push(
-      'the cache workload names only cold requests; nothing would be re-used',
+      `the cache workload names ${String(cold.length)} cold request(s); a workload with more than one has no single prefix to re-use`,
+    );
+  }
+  if (changedActionCaseIds.includes(baseCaseId)) {
+    problems.push(
+      `the cache workload names ${baseCaseId} as both its base case and a changed action, so the change would be invisible in the action region`,
+    );
+  }
+  const unique = new Set(changedActionCaseIds);
+  if (unique.size !== changedActionCaseIds.length) {
+    problems.push(
+      'the cache workload declares the same changed action more than once; two slots submitting one action cannot show that a change was made',
+    );
+  }
+  const asked = sequence
+    .filter((slot) => slot.role === 'changed-action')
+    .reduce((sum, slot) => sum + slot.repeats, 0);
+  if (asked > changedActionCaseIds.length) {
+    problems.push(
+      `the cache workload asks for ${String(asked)} changed action(s) but declares ${String(changedActionCaseIds.length)}; a slot's repeats add real requests and need real actions`,
     );
   }
   return problems;
