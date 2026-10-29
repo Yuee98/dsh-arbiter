@@ -327,7 +327,12 @@ function RuleTestForm(props: {
             {
               tool: built.sample.tool,
               args: built.sample.args,
-              ...(cwd.trim().length === 0 ? {} : { cwd: cwd.trim() }),
+              // The directory is an evaluation input, not display text: a
+              // relative redirect resolves against it, and a directory name may
+              // legitimately end in whitespace. Trimming would evaluate a
+              // different call from the one on screen, so only an empty field is
+              // omitted (the host then falls back to its own cwd).
+              ...(cwd.length === 0 ? {} : { cwd }),
             },
           ],
           rules: props.draft.rules,

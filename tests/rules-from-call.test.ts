@@ -398,6 +398,47 @@ describe('a call whose arguments are not an object', () => {
   });
 });
 
+describe('the recorded directory is part of the evaluation input', () => {
+  // A directory name may end in whitespace, and a relative target resolves
+  // against it, so trimming the recorded cwd is not cosmetic: these two paths
+  // are different, and a rule may cover exactly one of them.
+  const REDIRECT_DENY: readonly CommandRule[] = [
+    {
+      id: 'deny-secret',
+      verdict: 'deny',
+      conditions: [
+        {
+          target: 'file_redirect',
+          kind: 'exact',
+          pattern: '/srv/app /secret.txt',
+        },
+      ],
+    },
+  ];
+
+  function redirectPath(cwd: string): string {
+    const evaluation = evaluateCall({
+      rules: REDIRECT_DENY,
+      tool: 'bash',
+      arguments: { command: 'echo x > secret.txt' },
+      identity: 'main',
+      workspaceRoot: cwd,
+      cwd,
+      parentAuthorizationPresent: null,
+      historyTruncated: false,
+      overlapsDeniedEffect: false,
+    });
+    return evaluation.path.kind === 'rule'
+      ? evaluation.path.verdict
+      : `review(default):${evaluation.path.reason}`;
+  }
+
+  it('resolves to different paths with and without the trailing space', () => {
+    expect(redirectPath('/srv/app ')).toBe('deny');
+    expect(redirectPath('/srv/app')).toBe('review(default):no-match');
+  });
+});
+
 describe('the recorded sample a draft carries for the tester', () => {
   it('replays the call as its recorded argument object and context', () => {
     const recorded = source('deploy', DEPLOY_ARGS, {

@@ -593,6 +593,50 @@ describe('creating a rule draft from a recorded call', () => {
     expect(conclusion).toHaveAttribute('data-arbiter-test-rule-state', 'match');
   });
 
+  test('a recorded directory is submitted verbatim, not trimmed', async () => {
+    // A POSIX directory name may end in whitespace, and a relative redirect
+    // resolves against it: `/workspace ` + `secret.txt` is a different path from
+    // `/workspace` + `secret.txt`. Trimming would evaluate a different call.
+    baseHandlers();
+    const cwd = '/srv/app ';
+    server.use(
+      http.get('*/api/arbiter/log', () => {
+        const body = detailBody();
+        return HttpResponse.json({
+          ok: true,
+          detail: {
+            ...body.detail,
+            overview: { ...body.detail.overview, cwd },
+          },
+        });
+      }),
+    );
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const dialog = await openDraftDialog(user);
+
+    const submitted = new Promise<unknown>((resolve) => {
+      server.events.on('request:start', ({ request: started }) => {
+        if (!started.url.includes('/api/arbiter/test')) return;
+        started
+          .clone()
+          .json()
+          .then((value: unknown) => {
+            resolve(value);
+          })
+          .catch(() => undefined);
+      });
+    });
+    await user.click(
+      within(dialog).getByRole('button', { name: '生成草稿并测试' }),
+    );
+    const tester = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(within(tester).getByLabelText('工作目录')).toHaveValue(cwd);
+    await user.click(within(tester).getByRole('button', { name: '运行测试' }));
+
+    expect(submittedCwd(await submitted)).toBe(cwd);
+  });
+
   test('a call without stored input offers no draft and says so', async () => {
     baseHandlers();
     server.use(
@@ -619,6 +663,14 @@ describe('creating a rule draft from a recorded call', () => {
     ).toBeNull();
   });
 });
+
+/** The `cwd` one submitted tester body carried, read without casting. */
+function submittedCwd(body: unknown): unknown {
+  const record = isRecord(body) ? body : {};
+  const samples = Array.isArray(record['samples']) ? record['samples'] : [];
+  const first = isRecord(samples[0]) ? samples[0] : {};
+  return first['cwd'];
+}
 
 /** Whether a checkbox role element is checked, without casting it. */
 function isChecked(element: HTMLElement): boolean {
