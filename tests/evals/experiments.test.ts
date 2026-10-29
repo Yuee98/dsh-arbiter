@@ -26,6 +26,12 @@ import {
   planExperiment,
 } from '../../evals/src/experiments/commands.js';
 import type { ExperimentIo } from '../../evals/src/experiments/commands.js';
+import {
+  budgetProblemsOf,
+  requiredRequests,
+} from '../../evals/src/experiments/commands.js';
+import { cacheProblems } from '../../evals/src/experiments/cache.js';
+import { splitAtAction } from '../../evals/src/experiments/matrix.js';
 import { definitionProblems } from '../../evals/src/experiments/inspect.js';
 import type { ExperimentCell } from '../../evals/src/experiments/matrix.js';
 import {
@@ -52,6 +58,47 @@ import {
 
 /** The committed definition, relative to the repository root. */
 const DEFINITION_PATH = 'evals/experiments/rq14-matrix.json';
+
+/**
+ * The dry run's output, computed once for the whole file.
+ *
+ * Expanding the committed matrix renders every cell of every candidate, which measures
+ * about 1.3 s here and several times that on a hosted runner. A test that only reads the
+ * report must not re-render the matrix for its own assertions: six tests each doing so is
+ * what made hosted unit runs exceed the 5 s per-test limit. The lazy promise keeps one
+ * expansion for all of them and still fails loudly if it fails.
+ */
+let planReport: Promise<{
+  readonly lines: string[];
+  readonly problems: string[];
+}> | null = null;
+
+function planReportOnce(): Promise<{
+  readonly lines: string[];
+  readonly problems: string[];
+}> {
+  planReport ??= (async () => {
+    const io = recorder();
+    const status = await planExperiment(io, DEFINITION_PATH);
+    return {
+      lines: [...io.lines, `status ${String(status)}`],
+      problems: io.problems,
+    };
+  })();
+  return planReport;
+}
+
+/** The expanded committed matrix, computed once for the whole file. */
+let committedExpansion: Promise<
+  Awaited<ReturnType<typeof expandDefinition>>
+> | null = null;
+
+function expansionOnce(): Promise<
+  Awaited<ReturnType<typeof expandDefinition>>
+> {
+  committedExpansion ??= expandDefinition(QUIET, DEFINITION_PATH);
+  return committedExpansion;
+}
 
 /** A buffer that captures what a command printed. */
 function recorder(): ExperimentIo & {
@@ -319,20 +366,23 @@ describe('the checks a schema cannot state', () => {
     const definition = await committedDefinition();
     const budget = mutate(definition.budget);
     budget.maxRequests = 1;
-    budget.maxRepairRetries = 99;
+    budget.maxRepairRetries = definition.bounds.maxAttempts + 1;
     const problems = definitionProblems(definition).join('\n');
     expect(problems).toContain('cannot cover the matrix');
+    // The repair allowance is compared with the run's own ceiling, not with a number
+    // this module keeps: a retry budget above it could never be spent.
     expect(problems).toContain('exceeds the run');
   });
 });
 
 describe('the dry run', () => {
   test('measures every cell without writing anything', async () => {
-    const io = recorder();
-    const status = await planExperiment(io, DEFINITION_PATH);
-    expect(status).toBe(0);
-    expect(io.problems).toEqual([]);
-    const printed = io.lines.join('\n');
+    const report = await planReportOnce();
+    // No problems, and the run's own status printed as zero: "wrote nothing" is a claim
+    // about the command's exit code as much as about the filesystem.
+    expect(report.problems).toEqual([]);
+    const printed = report.lines.join('\n');
+    expect(printed).toContain('status 0');
     // Every candidate is measured, not merely listed.
     for (const id of ['A', 'B', 'C1', 'C2', 'C3', 'C4']) {
       expect(printed).toContain(`candidate ${id} `);
@@ -347,7 +397,7 @@ describe('the dry run', () => {
   });
 
   test('measures a difference for every candidate that differs', async () => {
-    const expanded = await expandDefinition(QUIET, DEFINITION_PATH);
+    const expanded = await expansionOnce();
     expect(expanded.ok).toBe(true);
     if (!expanded.ok) return;
     const cellsOf = new Map(
@@ -370,9 +420,7 @@ describe('the dry run', () => {
   });
 
   test('reports each candidate’s difference from production', async () => {
-    const io = recorder();
-    await planExperiment(io, DEFINITION_PATH);
-    const printed = io.lines.join('\n');
+    const printed = (await planReportOnce()).lines.join('\n');
     expect(printed).toContain(
       'candidate A rq14/no-probe.complete.current-turn.full',
     );
@@ -424,6 +472,221 @@ describe('the dry run', () => {
     expect(await checkExperiments(io)).toBe(0);
     expect(io.lines.join('\n')).toContain('rq14-matrix.json');
     expect(io.lines.join('\n')).toContain('estimated input tokens');
+  });
+});
+
+describe('the cache workload is a measured sequence', () => {
+  test('expands to the requests its labels name', async () => {
+    const expanded = await expansionOnce();
+    expect(expanded.ok).toBe(true);
+    if (!expanded.ok) return;
+    const { cache, definition } = expanded.expanded;
+    // Four slots are four requests: a label that expanded to nothing would be a
+    // description rather than a workload.
+    expect(cache.requests).toBe(
+      definition.cache.sequence.reduce((sum, slot) => sum + slot.repeats, 0),
+    );
+    expect(cache.cells).toHaveLength(cache.requests);
+    // Each request names the case its action came from.
+    expect(cache.cells.map((cell) => cell.role)).toEqual([
+      'cold',
+      'stable-prefix',
+      'stable-prefix',
+      'changed-action',
+      'changed-action',
+    ]);
+    for (const cell of cache.cells) {
+      expect(cell.actionCaseId.length).toBeGreaterThan(0);
+      expect(cell.estimatedInputTokens).toBeGreaterThan(0);
+    }
+    // A re-use submits the base case's own action; only a changed slot names another.
+    expect(
+      cache.cells
+        .filter((cell) => cell.role !== 'changed-action')
+        .map((cell) => cell.actionCaseId),
+    ).toEqual(
+      cache.cells
+        .filter((cell) => cell.role !== 'changed-action')
+        .map(() => definition.cache.baseCaseId),
+    );
+    expect(
+      cache.cells
+        .filter((cell) => cell.role === 'changed-action')
+        .map((cell) => cell.actionCaseId),
+    ).toEqual([...definition.cache.changedActionCaseIds]);
+  });
+
+  test('proves the stable prefix is one byte-identical region', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const prefixes = new Set(
+      expanded.expanded.cache.cells.map((cell) => cell.stablePrefixFingerprint),
+    );
+    // One prefix, established by measuring the rendered requests: that is the claim a
+    // provider's prefix cache would depend on.
+    expect(prefixes.size).toBe(1);
+    expect([...prefixes][0]).not.toBeNull();
+  });
+
+  test('proves each changed action really changes the action region', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { cache } = expanded.expanded;
+    const [cold] = cache.cells;
+    if (cold === undefined) throw new Error('no cold request');
+    const changed = cache.cells.filter(
+      (cell) => cell.role === 'changed-action',
+    );
+    const reused = cache.cells.filter((cell) => cell.role !== 'changed-action');
+    expect(changed.length).toBeGreaterThan(0);
+    for (const cell of changed) {
+      expect(cell.actionFingerprint).not.toBe(cold.actionFingerprint);
+    }
+    // A non-changed slot re-submits the very same action, so only the changed ones move.
+    for (const cell of reused) {
+      expect(cell.actionFingerprint).toBe(cold.actionFingerprint);
+    }
+    expect(new Set(changed.map((cell) => cell.actionFingerprint)).size).toBe(
+      changed.length,
+    );
+  });
+
+  test('finds the action boundary in every layout, not only production’s', async () => {
+    // The split is what turns a request into "prefix" and "action", so it has to work on
+    // the layout the candidate under test actually submits. A split that only knew the
+    // production block label would report every compact candidate as unmeasurable.
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition } = expanded.expanded;
+    const compact = definition.candidates.filter((entry) =>
+      entry.axes.structure.startsWith('compact'),
+    );
+    expect(compact.length).toBeGreaterThan(0);
+    // Both layouts are named by the committed matrix; the expansion above proved the
+    // production one splits, and the compact member form is checked directly here.
+    expect(
+      splitAtAction(
+        'POLICY_AND_GUIDANCE\n{}\n\n{\n  "pending_action": {\n    "name": "bash"\n  }\n}',
+      ),
+    ).not.toBeNull();
+    expect(
+      splitAtAction(
+        'POLICY_AND_GUIDANCE\n{}\n\nPENDING_ACTION\n{\n  "name": "bash"\n}',
+      ),
+    ).not.toBeNull();
+    // A material with neither boundary is reported, never guessed at.
+    expect(splitAtAction('nothing that looks like a layout')).toBeNull();
+  });
+
+  test('counts the workload in the budget instead of describing it', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition, matrix, cache } = expanded.expanded;
+    // The request ceiling has to cover the cache workload too: raising its repeats adds
+    // real requests, so the number the check compares has to move with them.
+    const before = requiredRequests(definition, matrix, cache);
+    const doubled = {
+      ...cache,
+      requests: cache.requests * 2,
+      estimatedInputTokens: cache.estimatedInputTokens * 2,
+    };
+    expect(requiredRequests(definition, matrix, doubled)).toBe(
+      before + cache.requests,
+    );
+    // Every request is charged, including the ones whose bytes a matrix cell already
+    // sends: whether an earlier dispatch happened is an execution fact, not a discount.
+    expect(before).toBe(
+      matrix.cells +
+        cache.requests +
+        definition.budget.maxRepairRetries * matrix.cells,
+    );
+  });
+
+  test('refuses a workload whose repeats outrun the actions it names', () => {
+    const check = async (): Promise<readonly string[]> => {
+      const expanded = await expansionOnce();
+      if (!expanded.ok)
+        throw new Error('the committed definition did not expand');
+      const { definition, cache } = expanded.expanded;
+      return cacheProblems({
+        expansion: cache,
+        definition: {
+          ...definition.cache,
+          sequence: definition.cache.sequence.map((slot) =>
+            slot.role === 'changed-action' ? { ...slot, repeats: 9 } : slot,
+          ),
+        },
+        bounds: definition.bounds,
+      });
+    };
+    return check().then((problems) => {
+      expect(problems.join('\n')).toContain('changed action');
+    });
+  });
+
+  test('refuses a workload whose actions are all identical', () => {
+    const check = async (): Promise<readonly string[]> => {
+      const expanded = await expansionOnce();
+      if (!expanded.ok)
+        throw new Error('the committed definition did not expand');
+      const { definition, cache } = expanded.expanded;
+      const [first] = definition.cache.changedActionCaseIds;
+      if (first === undefined) throw new Error('no changed action');
+      return cacheProblems({
+        expansion: cache,
+        definition: {
+          ...definition.cache,
+          changedActionCaseIds: [first, first],
+        },
+        bounds: definition.bounds,
+      });
+    };
+    return check().then((problems) => {
+      expect(problems.join('\n')).toContain('same changed action');
+    });
+  });
+});
+
+describe('the budget respects the bounds it reuses', () => {
+  test('refuses a matrix one run could not finish', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition, matrix, cache } = expanded.expanded;
+    const problems = budgetProblemsOf(
+      { ...definition, bounds: { ...definition.bounds, maxAttempts: 24 } },
+      matrix,
+      cache,
+    );
+    // `maxAttempts` is the run ceiling from the reused RQ-10 contract; a plan needing
+    // more dispatches than it is a plan no single run could execute.
+    expect(problems.join('\n')).toContain('maxAttempts');
+    expect(problems.join('\n')).toContain('one run');
+  });
+
+  test('refuses a request measured above the per-request ceiling', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition, matrix, cache } = expanded.expanded;
+    const problems = budgetProblemsOf(
+      // A ceiling below every measured cell: each one is over its own bound.
+      { ...definition, bounds: { ...definition.bounds, maxInputTokens: 1 } },
+      matrix,
+      cache,
+    );
+    expect(problems.join('\n')).toContain('per-request ceiling');
+    // It names the measured value and the cell, so the report is checkable.
+    expect(problems.join('\n')).toContain('measures');
+  });
+
+  test('passes the committed definition under both its ceilings', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition, matrix, cache } = expanded.expanded;
+    expect(budgetProblemsOf(definition, matrix, cache)).toEqual([]);
+    // And the run bound really does cover what was measured.
+    expect(requiredRequests(definition, matrix, cache)).toBeLessThanOrEqual(
+      definition.bounds.maxAttempts,
+    );
   });
 });
 
@@ -483,7 +746,7 @@ describe('the committed record', () => {
 
 describe('the candidate fingerprints', () => {
   test('differ wherever a candidate differs, so a diff is observable', async () => {
-    const expanded = await expandDefinition(QUIET, DEFINITION_PATH);
+    const expanded = await expansionOnce();
     expect(expanded.ok).toBe(true);
     if (!expanded.ok) return;
     const byCandidate = new Map(
