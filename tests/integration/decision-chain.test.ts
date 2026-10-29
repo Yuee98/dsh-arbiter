@@ -447,7 +447,8 @@ describe('mode equivalence on the real gate', () => {
       // …so the ending is a cancellation, never a denial the agent would read as
       // "the review refused you".
       expect(decision.kind).toBe('cancel');
-      expect(await storedTrace('m-prepare')).not.toContain('fallback-deny');
+      // Nothing is stored, so the chain cannot show a denial either.
+      expect(await traceOrNull('m-prepare')).toBeNull();
     } finally {
       harness.dispose();
     }
@@ -507,6 +508,77 @@ describe('mode equivalence on the real gate', () => {
       harness.dispose();
     }
   });
+
+  test(
+    'a rule verdict is not written when the call was cancelled',
+    { timeout: 20_000 },
+    async () => {
+      // `prepare()` awaits the working directory, so a cancellation can arrive before
+      // any rule runs. The deterministic branches (`deny`, `allow`) settle directly
+      // and never pass through the guarded fallback, so without a check here a
+      // cancelled call was stored as an ordinary deny — a prior verdict for a call
+      // nobody refused, plus a breaker increment.
+      const session = makeSession('m-deny-cancel');
+      let release: (() => void) | undefined;
+      const harness = createHarness({
+        sessions: [session],
+        llm: chatAnswer({ risk: 2, authorization: 9 }),
+        modes: { main: 'ask', subagent: 'no-ask' },
+        workingDirectory: {
+          ensure: () =>
+            // The first call is held so the cancellation can arrive inside
+            // preparation; later calls resolve immediately so the control runs.
+            release === undefined
+              ? new Promise<string>((resolve) => {
+                  release = () => {
+                    resolve(process.cwd());
+                  };
+                })
+              : Promise.resolve(process.cwd()),
+        },
+      });
+      try {
+        harness.apply({
+          rules: [
+            {
+              id: 'deny-echo',
+              match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
+              verdict: 'deny',
+            },
+          ],
+        });
+        const controller = new AbortController();
+        const pending = harness.gate(
+          call(session, 'm-deny-cancel', controller.signal),
+          allowNext,
+        );
+        for (
+          let attempt = 0;
+          attempt < 100 && release === undefined;
+          attempt += 1
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        // Cancel inside preparation, then let the rule path be reached.
+        controller.abort();
+        release?.();
+        const decision = await pending;
+        expect(decision.kind).toBe('cancel');
+        // Nothing is stored: no rule verdict, so no prior verdict and no breaker.
+        expect(await traceOrNull('m-deny-cancel')).toBeNull();
+        // The same rule without a cancellation still denies, so the difference is the
+        // cancellation and not the rule.
+        const control = await harness.gate(
+          call(session, 'm-deny-control'),
+          allowNext,
+        );
+        expect(control.kind).toBe('deny');
+        expect(await storedTrace('m-deny-control')).toEqual(['deny']);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
 
   test('strict turns a human-required review into fallback-deny', async () => {
     const session = makeSession('m-escalate');

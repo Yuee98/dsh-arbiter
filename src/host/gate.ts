@@ -199,6 +199,13 @@ export class CallGate {
         active: runtime.active,
       });
       const call = await this.prepare(exec, agent);
+      // Preparation awaits: the working directory, the history window and the
+      // call's own material are all gathered in there. A cancellation that arrived
+      // during those awaits is answered here, before any verdict — otherwise a
+      // matched `deny`/`allow` rule would settle a call nobody cancelled, storing a
+      // prior verdict and moving the session's denial breaker. A cancellation is
+      // not a judgement, so it must not become one.
+      if (isAborted(exec.signal)) return { kind: 'cancel' };
       const ruleResult = await this.applyRule(call);
       return ruleResult ?? (await this.review(call));
     } finally {
@@ -557,6 +564,13 @@ export class CallGate {
         prepareError = error instanceof Error ? error.message : String(error);
       }
     }
+    // Snapshot assembly awaits the host for the call's own material, so a
+    // cancellation can arrive in there. The pre-request exits below settle a real
+    // outcome, and settling one for a cancelled call would record a judgement that
+    // was never made — most visibly turning a cancellation into the escalation code
+    // of a snapshot failure. Checked before the exits, not after, because those
+    // exits are precisely what writes the record.
+    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
     const early = preRequestExit(this.host, {
       breakerOpen,
       bundle,
@@ -622,6 +636,13 @@ export class CallGate {
     call: PreparedCall,
     reviewed: Reviewed,
   ): Promise<PreToolDecision> {
+    // Every pre-request exit lands here, and `finalize` is what writes the record.
+    // A cancellation that arrived while the snapshot was being assembled therefore
+    // has to be answered at this boundary too: settling an outcome here would store
+    // a judgement for a call that was already gone. Only the pre-request paths reach
+    // this method — a review that got as far as the model is settled by
+    // `cancelledReview`, which keeps the attempts that were actually made.
+    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
     const { runtime } = this.host;
     // The response keeps the protocol that produced it (it was parsed before it
     // reached here), while the decision itself uses the configuration effective
