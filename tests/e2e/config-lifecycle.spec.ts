@@ -187,7 +187,7 @@ test.describe('configuration lifecycle', () => {
         reviewer: { type: 'chat', chat: { provider: 'session' } },
         audit: { retentionDays: 30, retentionBytes: 1024 ** 3 },
       });
-      expect(state.configFormat).toBe('arbiter-config-v1');
+      expect(state.configFormat).toBe('arbiter-config-v3');
       expect(state.configFormatExplicit).toBe(false);
       // First install records exactly one startup activation.
       expect(
@@ -205,7 +205,7 @@ test.describe('configuration lifecycle', () => {
         plugin.getByText(`内容快照 ${state.configSnapshotId}`),
       ).toBeVisible();
       await expect(
-        plugin.getByText(/格式 arbiter-config-v1（未声明，沿用旧前缀语义）/),
+        plugin.getByText(/格式 arbiter-config-v3（未声明格式）/),
       ).toBeVisible();
       // Loading the page alone must not change the effective revision.
       expect((await readState(dsh)).effectiveRevision).toBe(

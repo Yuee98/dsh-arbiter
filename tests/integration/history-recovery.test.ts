@@ -738,7 +738,9 @@ function denyRuleConfig(
         {
           id: 'deny-build',
           enabled: true,
-          match: { node: 'command', kind: 'exact', pattern: 'rm -rf build' },
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'rm -rf build' },
+          ],
           verdict: 'deny',
         },
         // A probe is forced through the reviewer without being denied, so it
@@ -747,7 +749,9 @@ function denyRuleConfig(
         {
           id: 'review-probe',
           enabled: true,
-          match: { node: 'command', kind: 'exact', pattern: 'echo probe' },
+          conditions: [
+            { target: 'command', kind: 'exact', pattern: 'echo probe' },
+          ],
           verdict: 'force-review',
           hint: 'probe',
         },

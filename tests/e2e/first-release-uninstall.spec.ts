@@ -21,7 +21,7 @@ import { createCaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
 import { waitForSession } from './dsh/session-log.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 /** Open the isolated host with its own bootstrap cookie. */
 async function openHost(page: Page, host: DshHost): Promise<void> {

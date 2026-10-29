@@ -268,11 +268,13 @@ const ALLOW_ECHO = {
   rules: [
     {
       id: 'allow-echo',
-      match: {
-        node: 'command' as const,
-        kind: 'exact' as const,
-        pattern: 'echo hi',
-      },
+      conditions: [
+        {
+          target: 'command' as const,
+          kind: 'exact' as const,
+          pattern: 'echo hi',
+        },
+      ],
       verdict: 'allow' as const,
     },
   ],

@@ -51,6 +51,7 @@ const ASK_DEPLOY = {
  */
 const TWO_CONDITIONS = {
   id: 'two-conditions',
+  combine: 'any',
   name: '双条件',
   scope: { tools: ['deploy'] },
   conditions: [
@@ -73,7 +74,7 @@ const TWO_CONDITIONS = {
 };
 
 const CONFIG = {
-  format: 'arbiter-config-v2',
+  format: 'arbiter-config-v3',
   rules: [ALLOW_TEST, ASK_DEPLOY, TWO_CONDITIONS],
 };
 

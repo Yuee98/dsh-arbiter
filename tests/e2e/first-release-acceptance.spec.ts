@@ -33,7 +33,7 @@ import {
   type LoggedSession,
 } from './dsh/session-log.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 /** The deny rule the journey installs through the real editor. */
 const DENY_RULE = {

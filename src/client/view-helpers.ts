@@ -46,28 +46,32 @@ export function formatTime(ts: number): string {
 }
 
 /**
- * The canonical rule format id.
+ * The one format id this build reads, mirrored for the browser bundle.
  *
- * A draft holds the canonical rule structure. Saving rules therefore has to
- * declare that format: without it the document would be read as the legacy
- * format and its `conditions` rules rejected — including when the user only
- * changed an unrelated setting on a document that still used the old rules.
- * A draft without rules keeps whatever the document declared, so an explicit
- * declaration still round-trips unchanged.
+ * Server code cannot be imported here, so the id is repeated; a drift is caught by
+ * behaviour rather than by this comment, because a draft carrying the wrong
+ * declaration is rejected by the save path's format check.
  */
-const CANONICAL_FORMAT = 'arbiter-config-v3';
+export const DRAFT_FORMAT = 'arbiter-config-v3';
 
+/**
+ * A draft of the effective configuration.
+ *
+ * The draft declares the current format whenever it carries rules, so a saved
+ * document states the rule model it was written for. A draft without rules keeps
+ * whatever the document declared, so an explicit declaration still round-trips
+ * unchanged.
+ */
 export function cloneDraft(config: ArbiterConfig): Draft {
   const copy = structuredClone(config);
   return {
     ...copy,
-    ...(copy.rules.length === 0 ? {} : { format: CANONICAL_FORMAT }),
+    ...(copy.rules.length === 0 ? {} : { format: DRAFT_FORMAT }),
     rules: copy.rules.map((rule) => ({
       ...rule,
-      // A rule parsed from a v1/v2 document carries the normalized connective the
-      // host derived, so nothing has to be invented here. Keeping the spread means
-      // a rule without one would still be written without one, and the server
-      // would reject rather than guess.
+      // The rule already carries its own connective; the spread keeps it. A rule
+      // that somehow lost it would still be written without one, and the server
+      // rejects rather than guesses.
       conditions: rule.conditions.map((condition) => ({ ...condition })),
       ...(rule.scope === undefined
         ? {}

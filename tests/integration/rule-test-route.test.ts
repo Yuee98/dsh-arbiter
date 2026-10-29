@@ -30,7 +30,7 @@ import { evaluateCall } from '../../src/rules/match.js';
 import type { CommandRule, RulePath } from '../../src/types.js';
 import { createStubContext, stubEditor } from '../helpers/host-stub.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 let root: string;
 

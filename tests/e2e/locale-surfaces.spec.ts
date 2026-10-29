@@ -36,7 +36,7 @@ import enCallDetail from '../../locale/en/callDetail.json' with { type: 'json' }
 import zhDenials from '../../locale/zh/denials.json' with { type: 'json' };
 import enDenials from '../../locale/en/denials.json' with { type: 'json' };
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 /** A declared route with no server behind it: the probe fails, fast and free. */
 const MODEL_GROUPS = [

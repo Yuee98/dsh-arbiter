@@ -10,6 +10,7 @@
 import type { RuleCondition, RuleKind, RuleTarget } from '../../../types.js';
 import type { Translate } from '../../i18n.js';
 import type { ConfigIssueView } from '../../view-issues.js';
+import { DRAFT_FORMAT } from '../../view-helpers.js';
 import type { Draft, DraftRule } from '../../view-types.js';
 
 export type MutableRuleCondition = Draft['rules'][number]['conditions'][number];
@@ -174,7 +175,7 @@ export function duplicateRule(
   return {
     id: nextRuleId(rules),
     // The connective is part of what the rule says, so a copy keeps it. Omitting
-    // it would leave a multi-condition copy without one, which v3 rejects at save
+    // it would leave a multi-condition copy without one, which the parser rejects
     // time, and the editor would meanwhile show the default instead of the
     // source's choice.
     combine: rule.combine ?? (rule.conditions.length > 1 ? 'any' : 'all'),
@@ -458,14 +459,11 @@ export function ruleFieldLabel(field: string): string {
   return field.replace(/^conditions\[(\d+)\]\./u, '');
 }
 
-/** The canonical declaration a canonical rule needs in its document. */
-export const CANONICAL_FORMAT = 'arbiter-config-v3';
-
 /** Append a rule to the draft and declare the format its structure requires. */
 export function addRule(draft: Draft): DraftRule {
   const rule = createRule(draft.rules);
   draft.rules.push(rule);
-  draft.format = CANONICAL_FORMAT;
+  draft.format = DRAFT_FORMAT;
   return rule;
 }
 
@@ -477,7 +475,7 @@ export function addRule(draft: Draft): DraftRule {
  */
 export function adoptRule(draft: Draft, rule: DraftRule): void {
   draft.rules.push(rule);
-  draft.format = CANONICAL_FORMAT;
+  draft.format = DRAFT_FORMAT;
 }
 
 /** Insert a copy right after its source, disabled, with a fresh id. */
@@ -485,7 +483,7 @@ export function addDuplicate(draft: Draft, source: DraftRule): DraftRule {
   const copy = duplicateRule(source, draft.rules);
   const index = draft.rules.findIndex((rule) => rule.id === source.id);
   draft.rules.splice(index < 0 ? draft.rules.length : index + 1, 0, copy);
-  draft.format = CANONICAL_FORMAT;
+  draft.format = DRAFT_FORMAT;
   return copy;
 }
 

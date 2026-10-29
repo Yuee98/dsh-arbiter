@@ -7,7 +7,7 @@
   "effectiveRevision": "生效修订 {revision}",
   "snapshot": "内容快照 {snapshot}",
   "format": "格式 {format}",
-  "formatImplicit": "（未声明，沿用旧前缀语义）",
+  "formatImplicit": "（未声明格式）",
   "unsavedDraft": " · 有未保存草稿",
   "validate": "校验草稿",
   "reload": "重新读取",
@@ -32,7 +32,8 @@
     "configFormat": "配置格式无效：{error}",
     "configFormatUnknown": "未知的配置格式，未加载该文件。",
     "configFormatDeclaration": "format 必须是非空字符串。",
-    "configFormatImplicit": "未声明 format，规则沿用 {format} 的旧前缀语义。",
+    "configFormatRetired": "该配置格式「{format}」已退役，当前版本只读取 {current}，不会转换旧规则。",
+    "ruleFormatRetired": "该规则仍使用已退役的单条件「{field}」写法，请改用 conditions。",
     "typeString": "必须是字符串。",
     "typeBoolean": "必须是布尔值。",
     "typeNumber": "必须是有限数字。",
@@ -70,8 +71,6 @@
     "ruleNameEmpty": "自定义名称不能为空。",
     "ruleToolsEmpty": "工具范围不能是空列表。",
     "ruleToolEmpty": "工具范围中的名称不能为空。",
-    "ruleFormatMismatch": "「{field}」需要格式 {format}，当前文档的格式不接受它。",
-    "ruleNotConvertible": "旧规则「{id}」无法证明等价，未自动转换：{reason}",
     "ruleCombineRequired": "规则有多条条件时必须声明条件组合方式（combine：all 或 any）。",
     "ruleUnknownField": "未知字段「{field}」：该字段不会生效，规则仍按声明的含义执行。"
   }

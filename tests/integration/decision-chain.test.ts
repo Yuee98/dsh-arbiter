@@ -476,7 +476,9 @@ describe('mode equivalence on the real gate', () => {
         rules: [
           {
             id: 'must-ask',
-            match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
+            conditions: [
+              { target: 'command', kind: 'exact', pattern: 'echo hi' },
+            ],
             verdict: 'force-ask',
           },
         ],
@@ -542,7 +544,9 @@ describe('mode equivalence on the real gate', () => {
           rules: [
             {
               id: 'deny-echo',
-              match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
+              conditions: [
+                { target: 'command', kind: 'exact', pattern: 'echo hi' },
+              ],
               verdict: 'deny',
             },
           ],
@@ -1063,7 +1067,9 @@ describe('the configuration one stage actually used', () => {
         rules: [
           {
             id: 'deny-echo',
-            match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
+            conditions: [
+              { target: 'command', kind: 'exact', pattern: 'echo hi' },
+            ],
             verdict: 'deny',
           },
         ],

@@ -404,8 +404,8 @@ user:
 | 同一目标的合取 | 必须由同一个节点同时满足 | 否则 `[命令 glob "git *", 命令 regex ".*--force"]` 会命中 `git status && rm --force`，覆盖再把两个节点都算作已覆盖，整条命令被误放 |
 | 工具条件的整调用覆盖 | `all` 规则含结构条件时，工具条件只作匹配前提 | 否则 `all(tool=bash, command="echo hi")` 会放行 `echo hi; rm -rf /tmp/victim`，结构条件形同虚设 |
 | 调用级与语句级 | 采用调用级合取，限制写入契约与界面提示 | 语句关联需要 `Subject` 的父子关系，属于另一项能力，另行立项 |
-| 格式 | 新增 `arbiter-config-v3` | 旧解析器会静默忽略不认识的字段，在 v2 里加字段会让“用户以为收窄、实际未变”变成无声事故 |
-| 未知键 | v3 报错；v1／v2 只警告 | 旧文档在写入时是合法的，收紧会使其突然失效；v3 是新格式，可以要求精确 |
+| 格式 | 只保留 `arbiter-config-v3` | 旧解析器会静默忽略不认识的字段，在 v2 里加字段会让“用户以为收窄、实际未变”变成无声事故；v1／v2 与 `match` 写法已由 RQ-05（#69）删除，不做迁移 |
+| 未知键 | 一律报错 | 本版不再接受“写入时曾经合法”的旧文档，故没有需要靠告警保持可加载的对象 |
 
 **实现证据**：`tests/rules.test.ts` 的“condition combining”组覆盖同节点合取、缺节点、三态与工具覆盖；`tests/integration/rule-agreement.test.ts` 覆盖真实 gate、测试区一致性与历史合取证据；`tests/client/rules-editor.test.tsx` 覆盖连接词控件、保留与跨目标提示。
 

@@ -893,11 +893,9 @@ function arbiterConfig(): Record<string, unknown> {
       {
         id: 'e2e-deny-build',
         enabled: true,
-        match: {
-          node: 'command',
-          kind: 'exact',
-          pattern: 'rm -rf build',
-        },
+        conditions: [
+          { target: 'command', kind: 'exact', pattern: 'rm -rf build' },
+        ],
         verdict: 'deny',
       },
     ],

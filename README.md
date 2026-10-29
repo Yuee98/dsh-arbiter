@@ -91,7 +91,7 @@
 **版本与迁移说明**
 
 - 安装前确认宿主版本与 `tests/e2e/runtime/package.json` 一致；需要新版本时先走独立的 DSH 升级 PR（三平台 smoke + 人工审核），不要在安装或发布时临时换版本。
-- 从早期开发版升级到本版：**配置格式无需手工迁移**。新增 `arbiter-config-v3`（规则级 `combine`）；`arbiter-config-v2` 与 `arbiter-config-v1` 的读取规则未变，未声明 `format` 的旧文档继续按旧前缀语义解析。第一次在界面上保存配置后，文档声明写为 v3，多条件规则写成 `combine: "any"`，因此行为与升级前一致；单条件规则写成 `combine: "all"`，两种取值对单条件判定相同。会话记录 `plugin:arbiter/admission`／`plugin:arbiter/decision` 与审计库 `$DSH_HOME/arbiter/arbiter.db` 的结构均未变，无需迁移或重建。
+- 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。规则格式只保留 `arbiter-config-v3`；仍声明 `arbiter-config-v1`／`arbiter-config-v2`，或仍在使用单条件 `match` 写法的规则，都会被拒绝加载（宿主保留上一份生效配置，原文件不被改写），并在配置页给出“该写法已退役、请改用 `conditions`”的中文提示。改写**不是机械换字段**：每条旧 `match` 都要人工重新核对匹配范围与语义后写成一条 `conditions`（旧 `regex` 按前缀搜索、旧 `glob` 保留取反与 extglob、旧选择器会字符串化数字与布尔，这些在当前整值匹配与类型化 JSONPath 下不能直接照搬表达式）；多条件规则必须显式写出 `combine`（`all` 或 `any`），本版不再按条件数推断。会话记录 `plugin:arbiter/admission`／`plugin:arbiter/decision` 与审计库 `$DSH_HOME/arbiter/arbiter.db` 的结构均未变，无需迁移或重建。
 - 唯一可见变化：宿主语言为英文时，界面由「中文回退」变为**英文**（本轮补齐了 `locale/en/` 全部 705 个 key）。这是预期变化，不是回归。
 
 1. 从 shipped Web 模板创建隔离 profile（本机 CLI 入口见下方说明）：

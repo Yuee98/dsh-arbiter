@@ -222,7 +222,7 @@ describe('prototype page after panel extraction', () => {
           effectiveRevision: 'effective-2',
           configSnapshotId: 'snapshot-2',
           activationRecorded: true,
-          configFormat: 'arbiter-config-v1',
+          configFormat: 'arbiter-config-v3',
           configFormatExplicit: false,
           auditError: null,
           warnings: [],
@@ -365,8 +365,8 @@ test('an explicitly declared format survives decode, draft and the actual save r
     http.get('*/api/arbiter/state', () =>
       HttpResponse.json({
         ...effectiveState(),
-        config: { ...effectiveState().config, format: 'arbiter-config-v1' },
-        configFormat: 'arbiter-config-v1',
+        config: { ...effectiveState().config, format: 'arbiter-config-v3' },
+        configFormat: 'arbiter-config-v3',
         configFormatExplicit: true,
       }),
     ),
@@ -384,7 +384,7 @@ test('an explicitly declared format survives decode, draft and the actual save r
         effectiveRevision: 'effective-1',
         configSnapshotId: 'snapshot-1',
         activationRecorded: false,
-        configFormat: 'arbiter-config-v1',
+        configFormat: 'arbiter-config-v3',
         configFormatExplicit: true,
         auditError: null,
         warnings: [],
@@ -402,16 +402,16 @@ test('an explicitly declared format survives decode, draft and the actual save r
   for (const body of bodies) {
     expect(body).toMatchObject({
       config: {
-        format: 'arbiter-config-v1',
+        format: 'arbiter-config-v3',
         modes: { main: 'no-ask' },
       },
     });
   }
 });
 
-test('editing a legacy document saves canonical rules instead of failing', async () => {
+test('an undeclared document saves with an explicit declaration', async () => {
   const bodies: unknown[] = [];
-  const legacyRule = {
+  const savedRule = {
     id: 'keep-me',
     conditions: [
       { target: 'command', kind: 'regex', pattern: 'gh pr view(?: .*)?' },
@@ -422,9 +422,9 @@ test('editing a legacy document saves canonical rules instead of failing', async
     http.get('*/api/arbiter/state', () =>
       HttpResponse.json({
         ...effectiveState(),
-        config: { ...effectiveState().config, rules: [legacyRule] },
-        // The profile still holds a legacy document with no format declared.
-        configFormat: 'arbiter-config-v1',
+        config: { ...effectiveState().config, rules: [savedRule] },
+        // The profile document declares no format of its own.
+        configFormat: 'arbiter-config-v3',
         configFormatExplicit: false,
       }),
     ),
@@ -438,7 +438,7 @@ test('editing a legacy document saves canonical rules instead of failing', async
         effectiveRevision: 'effective-2',
         configSnapshotId: 'snapshot-2',
         activationRecorded: true,
-        configFormat: 'arbiter-config-v2',
+        configFormat: 'arbiter-config-v3',
         configFormatExplicit: true,
         auditError: null,
         warnings: [],
@@ -453,8 +453,8 @@ test('editing a legacy document saves canonical rules instead of failing', async
   await waitFor(() => {
     expect(bodies).toHaveLength(1);
   });
-  // Saving canonical rules requires the declaration this build writes, otherwise
-  // the document would be re-read as an older format and lose the connective.
+  // A draft that carries rules states the format it was written for, so the saved
+  // document names the rule model rather than relying on the reading of absence.
   expect(bodies[0]).toMatchObject({
     config: { format: 'arbiter-config-v3', modes: { main: 'no-ask' } },
   });

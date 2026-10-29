@@ -34,11 +34,10 @@ export interface RuleDraftResult {
  * rule in isolation would both miss that conflict and renumber every later rule
  * to index 0, so the page would point at the wrong condition.
  *
- * A draft is canonical by definition, so it is declared as the canonical format
- * instead of being parsed as an undeclared (legacy) document. Parsing it as
- * legacy would silently drop every draft rule that uses the new model and let the
- * tester fall back to the effective configuration — exactly the disagreement
- * between the tester and the real gate this issue has to remove.
+ * A draft is declared as the current format rather than submitted without one.
+ * Both are read the same way now, but the declaration keeps the request explicit:
+ * the tester must validate the draft with the rule model the gate will apply, and
+ * an explicit document cannot be mistaken for a file written by another build.
  *
  * An invalid draft is reported with its concrete errors rather than filtered:
  * silently testing fewer rules than the user asked for would be worse than a

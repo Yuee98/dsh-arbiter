@@ -30,7 +30,7 @@ function actions(
       }
       effectiveRevision="eff-3"
       snapshotId="cfg-abc123"
-      format="arbiter-config-v1"
+      format="arbiter-config-v3"
       formatExplicit={overrides.formatExplicit ?? false}
       documentPath="/project/cordis.yml"
       dirty={overrides.dirty ?? true}
@@ -57,17 +57,17 @@ describe('configuration actions', () => {
     expect(screen.getByText('生效修订 eff-3')).toBeVisible();
     expect(screen.getByText('内容快照 cfg-abc123')).toBeVisible();
     expect(
-      screen.getByText(/格式 arbiter-config-v1（未声明，沿用旧前缀语义）/),
-    ).toHaveAttribute('data-arbiter-config-format', 'arbiter-config-v1');
+      screen.getByText(/格式 arbiter-config-v3（未声明格式）/),
+    ).toHaveAttribute('data-arbiter-config-format', 'arbiter-config-v3');
     expect(screen.getByText(/\/project\/cordis\.yml/)).toBeVisible();
     expect(group.getByRole('button', { name: '保存并应用' })).toBeEnabled();
   });
 
-  test('declared formats are not marked as the implicit legacy document', () => {
+  test('a declared format is not marked as undeclared', () => {
     const { ui } = actions({ formatExplicit: true });
     renderClient(ui);
-    expect(screen.getByText('格式 arbiter-config-v1')).toBeVisible();
-    expect(screen.queryByText(/沿用旧前缀语义/)).toBeNull();
+    expect(screen.getByText('格式 arbiter-config-v3')).toBeVisible();
+    expect(screen.queryByText(/未声明格式/)).toBeNull();
   });
 
   test('an unreadable file revision explains why saving is unavailable', () => {

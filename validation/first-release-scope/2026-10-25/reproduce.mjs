@@ -50,7 +50,7 @@ try {
   // The document states the canonical shape explicitly, so these cases exercise
   // the release behaviour rather than legacy conversion.
   const seededRule = { id: 'keep-me', conditions: [{ target: 'command', kind: 'regex', pattern: 'gh pr view(?: .*)?' }], verdict: 'allow' };
-  const configured = { format: 'arbiter-config-v2', rules: [seededRule], audit: DEFAULT_CONFIG.audit };
+  const configured = { format: 'arbiter-config-v3', rules: [seededRule], audit: DEFAULT_CONFIG.audit };
 
   // Historical rows must survive the scope change: one audited call and one
   // pending candidate written before the plugin starts.

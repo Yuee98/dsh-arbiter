@@ -28,7 +28,7 @@ import {
   guidanceRegistration,
 } from '../../src/host/guidance.js';
 
-const FORMAT = 'arbiter-config-v2';
+const FORMAT = 'arbiter-config-v3';
 
 /** Distinctive fragments of the guidance, stable across rewording. */
 const PARENT_MARKER = 'relay the answer with the original words';

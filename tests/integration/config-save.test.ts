@@ -160,7 +160,7 @@ describe('first install and reload activation', () => {
         reviewer: { type: 'chat', chat: { provider: 'session' } },
         audit: { retentionDays: 30, retentionBytes: 1024 ** 3 },
       });
-      expect(state['configFormat']).toBe('arbiter-config-v1');
+      expect(state['configFormat']).toBe('arbiter-config-v3');
       expect(state['configFormatExplicit']).toBe(false);
       expect(state['invalidConfigError']).toBeNull();
       expect(state['configSnapshotId']).toMatch(/^cfg-/);

@@ -2,17 +2,10 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, test } from 'vitest';
 
-import {
-  DEFAULT_CONFIG,
-  parseConfig,
-  parseDocument,
-  registerConfigFormat,
-  registeredConfigFormats,
-} from '../src/config.js';
+import { DEFAULT_CONFIG, parseConfig, parseDocument } from '../src/config.js';
 import type { LocaleTree } from '../src/client/i18n/catalog.js';
 import { flattenCatalog } from '../src/client/i18n/catalog.js';
 import { issueKey } from '../src/client/view-issues.js';
-import { evaluateCall } from '../src/rules/match.js';
 
 describe('configuration', () => {
   test('defaults are complete and valid', () => {
@@ -29,7 +22,7 @@ describe('configuration', () => {
     // canonical model matches the whole value, so an unanchored expression is a
     // legal and deliberately narrower pattern.
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       enabled: false,
       rules: [
         {
@@ -46,7 +39,7 @@ describe('configuration', () => {
 
   test('rejects an invalid regex without dropping the rest of the configuration', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       enabled: false,
       rules: [
         {
@@ -238,7 +231,7 @@ describe('configuration', () => {
 
   test('warns about a broad allow shadowed by force-review', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'relay-trust',
@@ -267,7 +260,7 @@ describe('configuration', () => {
 
   test('a tool condition matches the tool name itself', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'any',
@@ -352,348 +345,10 @@ describe('first install defaults', () => {
   });
 });
 
-describe('configuration format identification', () => {
-  test('an undeclared document keeps the legacy format and warns only when rules exist', () => {
-    const empty = parseConfig({ enabled: false });
-    expect(empty.config.format).toBeUndefined();
-    expect(empty.warnings.some((warning) => warning.path === 'format')).toBe(
-      false,
-    );
-
-    const withRules = parseConfig({
-      rules: [
-        {
-          id: 'legacy-prefix',
-          match: {
-            node: 'command',
-            kind: 'regex',
-            pattern: '^gh pr view(?: .*)?$',
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(withRules.errors).toEqual([]);
-    expect(withRules.config.format).toBeUndefined();
-    expect(withRules.warnings.map((warning) => warning.path)).toContain(
-      'format',
-    );
-    expect(
-      withRules.warnings.some((warning) => warning.message.includes('legacy')),
-    ).toBe(true);
-  });
-
-  test('a declared format is preserved in the normalized content', () => {
-    const parsed = parseConfig({ format: 'arbiter-config-v1', enabled: false });
-    expect(parsed.errors).toEqual([]);
-    expect(parsed.config.format).toBe('arbiter-config-v1');
-    expect(parsed.warnings).toEqual([]);
-  });
-
-  test('an unknown or malformed format is rejected instead of reinterpreted', () => {
-    const unknown = parseConfig({ format: 'arbiter-config-v9' });
-    expect(unknown.errors).toEqual([
-      {
-        path: 'format',
-        message:
-          'unknown configuration format "arbiter-config-v9"; supported: arbiter-config-v1, arbiter-config-v2, arbiter-config-v3',
-        code: 'config.format-unknown',
-      },
-    ]);
-    expect(unknown.config).toBe(DEFAULT_CONFIG);
-
-    const malformed = parseConfig({ format: '' });
-    expect(malformed.errors.map((error) => error.path)).toEqual(['format']);
-  });
-
-  test('every registered format is advertised and validated', () => {
-    expect(registeredConfigFormats()).toEqual([
-      'arbiter-config-v1',
-      'arbiter-config-v2',
-      'arbiter-config-v3',
-    ]);
-    const v2 = parseConfig({ format: 'arbiter-config-v2', enabled: false });
-    expect(v2.errors).toEqual([]);
-    expect(v2.config.format).toBe('arbiter-config-v2');
-    expect(v2.config.enabled).toBe(false);
-  });
-
-  test('a canonical rule inside a v1 document is rejected, not reinterpreted', () => {
-    // Accepting it would give an undeclared document the canonical semantics the
-    // explicit format registry exists to prevent.
-    const canonical = {
-      id: 'mixed',
-      conditions: [{ target: 'command', kind: 'exact', pattern: 'echo hi' }],
-      verdict: 'allow',
-    };
-    for (const document of [
-      { format: 'arbiter-config-v1', rules: [canonical] },
-      { rules: [canonical] },
-    ]) {
-      const parsed = parseConfig(document);
-      expect(parsed.errors).toEqual([
-        expect.objectContaining({
-          path: 'rules[0]',
-          code: 'rule.format-mismatch',
-        }),
-      ]);
-    }
-  });
-
-  test('a canonical-only key in a legacy rule is rejected, not dropped', () => {
-    // Dropping `scope` would silently widen an allow to every tool.
-    const scoped = parseConfig({
-      rules: [
-        {
-          id: 'widened',
-          match: { node: 'command', kind: 'exact', pattern: 'echo hi' },
-          scope: { tools: ['bash'] },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(scoped.errors.map((error) => [error.path, error.code])).toEqual([
-      ['rules[0]', 'rule.format-mismatch'],
-    ]);
-    expect(scoped.errors[0]?.params?.['field']).toBe('scope');
-    expect(scoped.config.rules).toEqual([]);
-
-    const conditional = parseConfig({
-      rules: [
-        {
-          id: 'conditional',
-          match: {
-            node: 'command',
-            kind: 'exact',
-            pattern: 'echo hi',
-            caseSensitive: false,
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(
-      conditional.errors.map((error) => [error.code, error.params?.['field']]),
-    ).toEqual([['rule.format-mismatch', 'match.caseSensitive']]);
-  });
-
-  test('a v2 document rejects a legacy match rule', () => {
-    const parsed = parseConfig({
-      format: 'arbiter-config-v2',
-      rules: [
-        {
-          id: 'legacy',
-          match: { node: 'command', kind: 'regex', pattern: '^gh pr view' },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([
-      expect.objectContaining({
-        path: 'rules[0].conditions',
-        code: 'rule.conditions-empty',
-      }),
-    ]);
-  });
-
-  test('a later format can register its own parser and validation', () => {
-    const unregister = registerConfigFormat({
-      id: 'arbiter-config-test',
-      parse: () => ({
-        config: { ...DEFAULT_CONFIG, enabled: false },
-        errors: [{ path: 'rules[0]', message: 'complete matching required' }],
-        warnings: [],
-      }),
-    });
-    try {
-      expect(registeredConfigFormats()).toContain('arbiter-config-test');
-      const parsed = parseConfig({ format: 'arbiter-config-test' });
-      expect(parsed.errors).toEqual([
-        { path: 'rules[0]', message: 'complete matching required' },
-      ]);
-      expect(parsed.config.enabled).toBe(false);
-      // The registry is explicit: an unregistered id stays an error.
-      expect(
-        parseConfig({ format: 'arbiter-config-missing' }).errors,
-      ).toHaveLength(1);
-      expect(() =>
-        registerConfigFormat({
-          id: 'arbiter-config-test',
-          parse: () => ({
-            config: DEFAULT_CONFIG,
-            errors: [],
-            warnings: [],
-          }),
-        }),
-      ).toThrow(/already registered/);
-    } finally {
-      unregister();
-    }
-    expect(registeredConfigFormats()).not.toContain('arbiter-config-test');
-  });
-
-  test('a provably equivalent legacy rule is converted', () => {
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'prefix',
-          match: {
-            node: 'command',
-            kind: 'regex',
-            pattern: '^gh pr view(?: .*)?$',
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([]);
-    expect(parsed.config.rules).toHaveLength(1);
-    expect(parsed.config.rules[0]?.conditions).toEqual([
-      { target: 'command', kind: 'regex', pattern: '^gh pr view(?: .*)?$' },
-    ]);
-    const evaluated = evaluateCall({
-      rules: parsed.config.rules,
-      tool: 'bash',
-      arguments: { command: 'gh pr view 42 --comments' },
-      identity: 'main',
-      workspaceRoot: '/workspace',
-      cwd: '/workspace',
-      parentAuthorizationPresent: null,
-      historyTruncated: false,
-      overlapsDeniedEffect: false,
-    });
-    expect(evaluated.path).toMatchObject({ kind: 'rule', verdict: 'allow' });
-  });
-
-  test('an unanchored legacy regex is rejected, not reinterpreted', () => {
-    // Prefix search under v1 is not whole-value matching under v2, and a deny
-    // rule silently narrowed would lose its protection.
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'prefix',
-          match: { node: 'command', kind: 'regex', pattern: '^gh pr view' },
-          verdict: 'deny',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([
-      expect.objectContaining({
-        path: 'rules[0]',
-        code: 'rule.not-convertible',
-      }),
-    ]);
-  });
-
-  test('a top-level alternation cannot be proven whole-value', () => {
-    // `^safe|bad$` matched `dangerbad` under prefix search but not whole-value.
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'alternation',
-          match: { node: 'command', kind: 'regex', pattern: '^safe|bad$' },
-          verdict: 'deny',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([
-      expect.objectContaining({ code: 'rule.not-convertible' }),
-    ]);
-  });
-
-  test('a multiline legacy regex is rejected', () => {
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'multiline',
-          match: { node: 'command', kind: 'regex', pattern: '(?m)^a$' },
-          verdict: 'deny',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([
-      expect.objectContaining({ code: 'rule.not-convertible' }),
-    ]);
-  });
-
-  test('a legacy tool name keeps its literal-versus-glob meaning', () => {
-    // v1 compiled `match.tool` as a glob only when it contained `*`; every other
-    // value (including one with `?`) was a literal equality check.
-    const literal = parseConfig({
-      rules: [
-        {
-          id: 'literal-tool',
-          match: {
-            node: 'tool',
-            kind: 'exact',
-            pattern: 'read',
-            tool: 'deploy?prod',
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(literal.errors).toEqual([]);
-    expect(literal.config.rules[0]?.scope).toEqual({ tools: ['deploy?prod'] });
-
-    const glob = parseConfig({
-      rules: [
-        {
-          id: 'glob-tool',
-          match: {
-            node: 'tool',
-            kind: 'exact',
-            pattern: 'read',
-            tool: 'mcp.*',
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(glob.errors).toEqual([]);
-    expect(glob.config.rules[0]?.scope).toEqual({ tools: ['mcp.*'] });
-  });
-
-  test('a legacy negated tool scope is rejected', () => {
-    // v1 left negation enabled, so `!prod` matched every tool except prod; the
-    // canonical scope would read it literally, which is a different rule.
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'negated-tool',
-          match: {
-            node: 'tool',
-            kind: 'exact',
-            pattern: 'read',
-            tool: '!prod',
-          },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([
-      expect.objectContaining({ code: 'rule.not-convertible' }),
-    ]);
-  });
-
-  test('an alternation inside a group stays convertible', () => {
-    const parsed = parseConfig({
-      rules: [
-        {
-          id: 'grouped',
-          match: { node: 'command', kind: 'regex', pattern: '^(?:a|b)$' },
-          verdict: 'allow',
-        },
-      ],
-    });
-    expect(parsed.errors).toEqual([]);
-  });
-});
-
 describe('strict validation of supplied fields', () => {
   test('a wrong-typed security field is an error, never a permissive default', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       enabled: 'false',
       rules: [
         {
@@ -755,7 +410,7 @@ describe('strict validation of supplied fields', () => {
 
   test('a malformed rule cannot turn into an active or broader allow', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'bad-scope',
@@ -774,7 +429,7 @@ describe('strict validation of supplied fields', () => {
 
   test('an unknown verdict is an error, never a permissive allow', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'typo',
@@ -792,7 +447,7 @@ describe('strict validation of supplied fields', () => {
 
   test('a disabled rule is still validated', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'disabled',
@@ -809,7 +464,7 @@ describe('strict validation of supplied fields', () => {
 
   test('a dropped rule does not shift the paths of later errors', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         // Dropped during parsing: no conditions at all.
         { id: 'dropped', verdict: 'allow' },
@@ -829,7 +484,7 @@ describe('strict validation of supplied fields', () => {
 
   test('an exact null pattern is preserved instead of becoming an empty string', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'null-value',
@@ -851,7 +506,7 @@ describe('strict validation of supplied fields', () => {
 
   test('duplicate rule ids are rejected', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'twice',
@@ -876,26 +531,6 @@ describe('strict validation of supplied fields', () => {
     expect(issue?.code).toBe('type.boolean');
     expect(issue?.message).toBe('must be a boolean');
     expect(issue?.path).toBe('enabled');
-  });
-});
-
-describe('format round-trip through a save payload', () => {
-  test('an explicit format survives normalization and content identity', () => {
-    const declared = parseConfig({
-      format: 'arbiter-config-v1',
-      enabled: false,
-    });
-    const implicit = parseConfig({ enabled: false });
-    expect(declared.config.format).toBe('arbiter-config-v1');
-    expect(implicit.config.format).toBeUndefined();
-    // The declaration is part of the content, so the two documents differ.
-    expect(JSON.stringify(declared.config)).not.toBe(
-      JSON.stringify(implicit.config),
-    );
-    // Re-parsing the saved normalized content keeps the declaration.
-    const roundTripped = parseConfig(declared.config);
-    expect(roundTripped.config.format).toBe('arbiter-config-v1');
-    expect(roundTripped.errors).toEqual([]);
   });
 });
 
@@ -948,7 +583,7 @@ describe('malformed parent objects', () => {
 });
 
 describe('rule compiler issues carry localized parameters', () => {
-  test('an unanchored legacy regex reports a stable reason code', () => {
+  test('a retired rule shape reports a stable reason code', () => {
     const parsed = parseConfig({
       rules: [
         {
@@ -959,15 +594,15 @@ describe('rule compiler issues carry localized parameters', () => {
       ],
     });
     const issue = parsed.errors.find((error) => error.path === 'rules[0]');
-    expect(issue?.code).toBe('rule.not-convertible');
-    expect(issue?.params).toMatchObject({ id: 'unanchored' });
+    expect(issue?.code).toBe('rule.format-retired');
+    expect(issue?.params).toMatchObject({ field: 'match' });
     // The developer sentence stays available for logs and unknown reasons.
-    expect(issue?.message).toContain('cannot be converted');
+    expect(issue?.message).toContain('retired rule format');
   });
 
   test('an invalid regex reports its own stable code', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'broken',
@@ -983,7 +618,7 @@ describe('rule compiler issues carry localized parameters', () => {
 
   test('a duplicate id reports the duplicated identifier', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'same',
@@ -1005,7 +640,7 @@ describe('rule compiler issues carry localized parameters', () => {
 
   test('a shadowing warning is localizable by code', () => {
     const parsed = parseConfig({
-      format: 'arbiter-config-v2',
+      format: 'arbiter-config-v3',
       rules: [
         {
           id: 'relay-trust',

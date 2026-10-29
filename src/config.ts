@@ -5,51 +5,25 @@
  * projects it into a complete effective configuration and reports errors; the
  * host keeps the last effective configuration when a candidate is invalid.
  *
- * Documents may declare `format`. Identification is explicit and shared by the
- * UI save path and external file replacement; an unknown format is an error
- * rather than a silent reinterpretation with newer matching semantics.
+ * One document format exists. A declaration naming a retired or unknown format is
+ * an error rather than a silent reinterpretation with newer matching semantics,
+ * and a rule still written in the retired `match` shape is refused by name.
  */
 
 import type {
   ArbiterConfig,
   ApprovalMode,
   ConfigParseResult,
-  ConfigWarning,
 } from './types.js';
 import { DEFAULT_CONFIG } from './config/defaults.js';
 import { isRecord } from './config/values.js';
-import { parseConfigV1 } from './config/v1.js';
-import { parseConfigV2 } from './config/v2.js';
-import { parseConfigV3 } from './config/v3.js';
+import { parseConfigDocument } from './config/document.js';
 import {
   CONFIG_FORMAT_FIELD,
-  CONFIG_FORMAT_V1,
-  CONFIG_FORMAT_V2,
   CONFIG_FORMAT_V3,
   identifyConfigFormat,
-  registerConfigFormat,
 } from './config/format.js';
 export { DEFAULT_CONFIG } from './config/defaults.js';
-export {
-  registerConfigFormat,
-  registeredConfigFormats,
-} from './config/format.js';
-
-registerConfigFormat({
-  id: CONFIG_FORMAT_V1,
-  legacy: true,
-  parse: parseConfigV1,
-});
-
-registerConfigFormat({
-  id: CONFIG_FORMAT_V2,
-  parse: parseConfigV2,
-});
-
-registerConfigFormat({
-  id: CONFIG_FORMAT_V3,
-  parse: parseConfigV3,
-});
 
 /**
  * Validate a configuration document that must exist.
@@ -89,41 +63,35 @@ export function parseDocument(raw: unknown): ConfigParseResult {
 
 function parseDocumentRecord(raw: Record<string, unknown>): ConfigParseResult {
   const format = identifyConfigFormat(raw);
-  if (format.handler === null) {
+  if (format.error !== null) {
+    // The declaration is judged before anything else: findings produced by this
+    // build's rule model would bury the one sentence that says why the file was
+    // not read at all.
     return {
       config: DEFAULT_CONFIG,
       errors: [
         {
           path: CONFIG_FORMAT_FIELD,
-          message: format.error ?? 'configuration format is invalid',
+          message: format.error,
           code: format.code ?? 'config.format',
+          ...(format.params === undefined ? {} : { params: format.params }),
         },
       ],
       warnings: [],
     };
   }
 
-  const parsed = format.handler.parse(raw);
+  const parsed = parseConfigDocument(raw);
   // Keep an explicit declaration in the normalized content so content identity
-  // distinguishes a declared format from the implicit legacy document, and a
-  // UI save round-trips the same declaration instead of dropping it.
-  const config: ArbiterConfig =
-    format.explicit && format.id !== null
-      ? { ...parsed.config, format: format.id }
-      : parsed.config;
-  const warnings: ConfigWarning[] = [...parsed.warnings];
-  if (!format.explicit && config.rules.length > 0) {
-    warnings.push({
-      path: CONFIG_FORMAT_FIELD,
-      message: `no "${CONFIG_FORMAT_FIELD}" is declared; legacy rules keep the prefix semantics of "${format.handler.id}" and are converted only where equivalence is provable`,
-      code: 'config.format-implicit',
-      params: { format: format.handler.id },
-    });
-  }
+  // distinguishes a declared document from one that leaves the field out, and a UI
+  // save round-trips the same declaration instead of dropping it.
+  const config: ArbiterConfig = format.explicit
+    ? { ...parsed.config, format: CONFIG_FORMAT_V3 }
+    : parsed.config;
   return {
     config,
     errors: parsed.errors,
-    warnings,
+    warnings: parsed.warnings,
   };
 }
 
