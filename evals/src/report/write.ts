@@ -236,14 +236,12 @@ function resolvedEvidence(entry: EvidencePath): string | null {
  *   - a destination whose own name is new but whose directory is a link. Resolving the parent
  *     is enough, and it is what makes `--out alias/report` compare equal to the real directory.
  *
- * Resolution can fail, and failure is a third answer rather than a silent "outside". A cyclic
- * link, or a chain longer than `MAX_LINK_HOPS`, leaves a path the operating system can still
- * follow: a 34-link chain is perfectly writable, and treating the point where this walk gave up
- * as proof the destination is harmless would let the write land inside protected evidence. So
- * the caller is told resolution failed, and a containment check refuses what it cannot resolve.
+ * Resolution can fail, and failure is a third answer rather than a silent "outside": the
+ * operating system can still follow a chain this walk gave up on, so a caller must not read
+ * "could not resolve" as "not evidence".
  */
 function resolvePath(path: string): ResolvedPath {
-  return resolveWithCycleGuard(path, new Set<string>(), 0);
+  return resolveWithChain(path, new Set<string>(), 0);
 }
 
 /** A path this module could resolve, or the reason it could not. */
@@ -254,14 +252,26 @@ type ResolvedPath =
 /** How many link hops a destination may take before it is treated as unresolvable. */
 const MAX_LINK_HOPS = 32;
 
-/** The resolver's body, carrying the visited set and hop count across one traversal. */
-function resolveWithCycleGuard(
+/**
+ * Resolve one path, tracking the chain of links currently being followed.
+ *
+ * The chain holds only the *ancestors on this link path*, not every directory traversed. That
+ * distinction is what makes cycle detection correct in both directions:
+ *
+ *   - a genuine cycle revisits a path that is still on the chain, so it is caught;
+ *   - resolving a parent is not a link hop at all. It walks towards the root, so it always
+ *     terminates, and it gets a fresh chain. Sharing one set across the whole traversal made a
+ *     common parent look like a cycle: `D/cases` linking to a not-yet-created `D/cases-target`
+ *     re-entered `D`, was reported as self-referential, and left the protected path
+ *     unresolvable — which then skipped protection and allowed the write.
+ */
+function resolveWithChain(
   path: string,
-  visited: Set<string>,
+  chain: ReadonlySet<string>,
   hops: number,
 ): ResolvedPath {
   const normalised = normalize(path);
-  if (visited.has(normalised)) {
+  if (chain.has(normalised)) {
     return { ok: false, reason: `${normalised} links back to itself` };
   }
   if (hops > MAX_LINK_HOPS) {
@@ -270,7 +280,6 @@ function resolveWithCycleGuard(
       reason: `${normalised} needs more than ${String(MAX_LINK_HOPS)} link hops`,
     };
   }
-  visited.add(normalised);
   try {
     return { ok: true, path: normalize(realpathSync(normalised)) };
   } catch {
@@ -278,10 +287,12 @@ function resolveWithCycleGuard(
   }
   const parent = dirname(normalised);
   const leaf = basename(normalised);
+  // A parent is one step closer to the root, so it terminates on its own and starts a fresh
+  // chain. Passing this chain down is the defect described above.
   const resolvedParent =
     parent === normalised
-      ? { ok: true as const, path: normalised }
-      : resolveWithCycleGuard(parent, visited, hops);
+      ? ({ ok: true as const, path: normalised } satisfies ResolvedPath)
+      : resolveWithChain(parent, new Set<string>(), hops);
   if (!resolvedParent.ok) return resolvedParent;
   const candidate = join(resolvedParent.path, leaf);
   const target = linkTargetOf(candidate);
@@ -289,7 +300,9 @@ function resolveWithCycleGuard(
   const absolute = isAbsolute(target)
     ? target
     : resolve(resolvedParent.path, target);
-  return resolveWithCycleGuard(absolute, visited, hops + 1);
+  const nextChain = new Set(chain);
+  nextChain.add(normalised);
+  return resolveWithChain(absolute, nextChain, hops + 1);
 }
 
 /**

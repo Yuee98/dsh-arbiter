@@ -1975,3 +1975,127 @@ describe('Codex review: a long link chain cannot reach evidence unresolvable', (
     });
   });
 });
+
+describe('Codex review: revisiting a parent is not a cycle', () => {
+  it('still protects a cases directory linked to a not-yet-created sibling', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+        name: 'aliased',
+      });
+      const { symlink, rm } = await import('node:fs/promises');
+      // `cases` points at a sibling directory that does not exist yet. Resolving the protected
+      // path therefore re-enters the dataset directory, which an ancestor-wide visited set
+      // mistook for a self-reference — leaving the protected path unresolvable, silently
+      // skipped, and the write permitted.
+      await rm(join(dataset, 'cases'), { recursive: true, force: true });
+      await symlink('cases-target', join(dataset, 'cases'));
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(dataset, 'cases-target/injected'),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      // Nothing was created in the directory the alias names.
+      await expect(
+        readFile(join(dataset, 'cases-target/injected.json'), 'utf8'),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('does not let that alias weaken the long-chain refusal', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+        name: 'aliased',
+      });
+      const { symlink, rm } = await import('node:fs/promises');
+      await rm(join(dataset, 'cases'), { recursive: true, force: true });
+      await symlink('cases-target', join(dataset, 'cases'));
+      const links = join(created.path, 'chain');
+      await created.dir('chain');
+      const total = 34;
+      for (let index = 0; index < total; index += 1) {
+        const next =
+          index === total - 1
+            ? join(dataset, 'cases-target/injected.json')
+            : join(links, `l${String(index + 1)}.json`);
+        await symlink(next, join(links, `l${String(index)}.json`));
+      }
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(links, 'l0'),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      await expect(
+        readFile(join(dataset, 'cases-target/injected.json'), 'utf8'),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('still detects a genuine self-referential link', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+        name: 'cyclic',
+      });
+      const { symlink, rm } = await import('node:fs/promises');
+      await rm(join(dataset, 'cases'), { recursive: true, force: true });
+      // A real cycle: `cases` resolves to itself.
+      await symlink('cases', join(dataset, 'cases'));
+      const out: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: (line) => out.push(line),
+          err: () => undefined,
+        },
+        {
+          directory,
+          // Ordinary destination: the guard must not fail closed on the evidence side, or a
+          // damaged dataset would become unreportable.
+          output: null,
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain(
+        'cells 1 planned, 1 recorded, 0 missing',
+      );
+    });
+  });
+});
