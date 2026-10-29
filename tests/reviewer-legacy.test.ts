@@ -5,18 +5,32 @@ import {
 } from './helpers/decision-captures.js';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
+import { renderUser } from '../src/reviewer/legacy/prompt.js';
 import {
-  renderUser,
   extractJsonObject,
   parseChatText,
   parseDecisionResponse,
   signalsFromChat,
-  runChatReviewer,
-  runDecisionReviewer,
-} from '../src/reviewer.js';
+} from '../src/reviewer/legacy/signals.js';
+import { runChatReviewer } from '../src/reviewer/legacy/chat.js';
+import { runDecisionReviewer } from '../src/reviewer/legacy/decision.js';
 import { decideReview } from '../src/policy.js';
 import type { ReviewSnapshot } from '../src/types.js';
-import type { StreamOptionsLike } from '../src/reviewer/chat.js';
+import type { StreamOptionsLike } from '../src/reviewer/llm.js';
+
+/**
+ * The reviewer adapters the current gate calls, frozen for one purpose: until
+ * RQ-04 switches the entry point, these are still what production runs, so their
+ * transport behaviour (repair, timeout, masking, envelope) must keep working and
+ * must keep being tested.
+ *
+ * What these cases do *not* assert is new-scale meaning. Their answers are the
+ * six-member, `authorized`-keyed shape the retired contract asked for, and the
+ * captured provider bodies are envelope evidence. New-scale scoring, the two
+ * score answers and the shared outcome live in `tests/reviewer.test.ts`, which
+ * drives the new service. When RQ-04 removes these modules, this file goes with
+ * them.
+ */
 
 const thresholds = DEFAULT_CONFIG.policy.normal;
 

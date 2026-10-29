@@ -36,6 +36,21 @@ export function redact(text: string, secrets: readonly string[]): string {
 const AUTH_FIELD =
   'authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|access_token|refresh_token';
 
+/**
+ * The exact spelling of this contract's authorization score member.
+ *
+ * `authorization` names both an HTTP header and one of the two public bands, and
+ * the two spellings are distinguishable: the score member appears in a JSON object
+ * as a lowercase, double-quoted key, while a header is written bare
+ * (`Authorization: …`, `authorization=…`) or with its own capitalized name. So the
+ * exemption requires this exact spelling, case included — a bare or capitalized
+ * `Authorization` is a header whatever its value looks like.
+ */
+const SCORE_FIELD = /^"authorization"$/u;
+
+/** A JSON numeric literal, unquoted. */
+const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
 export function redactAuthHeaders(text: string): string {
   // One pass over the field name and separator, then the whole value: a quoted
   // value (JSON double quotes, a JS object dump with single quotes, backticks)
@@ -43,13 +58,27 @@ export function redactAuthHeaders(text: string): string {
   // consume spaces too, because an auth scheme is only the prefix — stopping at
   // the first space would leave the credential itself in place.
   const pattern = new RegExp(
-    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
+    `((?:"|')?(?:${AUTH_FIELD})(?:"|')?)(\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
     'giu',
   );
   return text.replace(
     pattern,
-    (_match, prefix: string) => `${prefix}[redacted]`,
+    (match: string, field: string, separator: string, value: string) =>
+      isScoreLiteral(field, value) ? match : `${field}${separator}[redacted]`,
   );
+}
+
+/**
+ * Whether this field/value pair is the public authorization score.
+ *
+ * Both conditions are narrow on purpose: the key must be the exact JSON spelling
+ * this contract's answer uses, and the value must be an unquoted number. Every
+ * other auth-looking field masks whatever it holds, including a numeric-only
+ * value, because a host-owned chat credential has no value available to match and
+ * the structural pass is the only thing standing between it and the record.
+ */
+function isScoreLiteral(field: string, value: string): boolean {
+  return SCORE_FIELD.test(field.trim()) && NUMERIC_LITERAL.test(value.trim());
 }
 
 /**

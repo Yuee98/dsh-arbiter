@@ -1,14 +1,9 @@
-import type {
-  ArbiterConfig,
-  ModelAttemptRecord,
-  ReviewSignals,
-  ReviewSnapshot,
-} from '../types.js';
-import type { LlmLike } from './chat.js';
-import { runChatReviewer } from './chat.js';
-import { runDecisionReviewer } from './decision.js';
-import { renderRequest, renderUser } from './prompt.js';
-import { redact, redactAuthHeaders, redactValue } from './redact.js';
+import type { ArbiterConfig, ReviewSnapshot } from '../types.js';
+import type { ReviewOutcome } from '../review-contract/types.js';
+import type { AttemptFailureKind, ReviewAttempt } from './attempt.js';
+import { review, type DecisionBackend, type ChatBackend } from './service.js';
+import type { LlmLike } from './llm.js';
+import { CHAT_PROTOCOL, DECISION_PROTOCOL } from './contract.js';
 
 /**
  * The fixed synthetic probe input.
@@ -149,7 +144,15 @@ export type ProbeResult =
       readonly durationMs: number;
       /** Format repairs needed before the answer satisfied the parser. */
       readonly repairs: number;
-      readonly signals: ReviewSignals;
+      /**
+       * The shared contract's outcome, not a verdict.
+       *
+       * A probe that passes has a scored review, because the probe's own material
+       * is available by construction; an insufficient-material outcome would mean
+       * the probe submitted something it should not, so it is reported rather
+       * than hidden.
+       */
+      readonly outcome: ReviewOutcome;
       readonly attempts: readonly ProbeAttempt[];
     }
   | {
@@ -172,7 +175,7 @@ export interface ProbeOptions {
   /** The policy section as it stands when the button is pressed. */
   readonly config: ArbiterConfig;
   readonly llm: LlmLike | undefined;
-  /** Same lookup-only seam the decision backend takes. */
+  /** Same lookup-only seam the decision transport takes. */
   readonly credentials:
     | {
         resolve(ref: string): Promise<{ readonly value: string } | undefined>;
@@ -211,26 +214,24 @@ function elapsed(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
 }
 
-function protocolOf(backend: 'chat' | 'decision'): string {
-  return backend === 'chat' ? 'arbiter-chat-json-v1' : 'arbiter-decision-v1';
-}
-
-function attemptOf(
-  record: ModelAttemptRecord,
-  secrets: readonly string[],
-): ProbeAttempt {
-  const clean = (text: string): string =>
-    redact(redactAuthHeaders(text), secrets);
+/**
+ * The connection test's view of one attempt.
+ *
+ * The record arrives already masked: `review()` applies the masking boundary to
+ * every attempt, including the credential the transport reported sending. Masking
+ * it a second time here would be one more place the rule has to be right, so this
+ * projection only selects and renames fields.
+ */
+function attemptOf(record: ReviewAttempt): ProbeAttempt {
   return {
     attempt: record.attempt,
     backend: record.backend,
     protocol: record.protocol,
     durationMs: record.durationMs,
-    request: redactValue(record.request, secrets),
-    responseText:
-      record.responseText === null ? null : clean(record.responseText),
-    parsed: redactValue(record.parsed, secrets),
-    error: record.error === null ? null : clean(record.error),
+    request: record.request,
+    responseText: record.responseText,
+    parsed: record.parsed,
+    error: record.error,
   };
 }
 
@@ -238,16 +239,10 @@ interface FailureEvidence {
   readonly attempts: readonly ProbeAttempt[];
   readonly error: string;
   readonly httpStatus: number | null;
+  /** Why the last attempt failed, as the adapter recorded it. */
+  readonly failureKind: AttemptFailureKind | null;
 }
 
-/**
- * Identify the stage a failed probe stopped at.
- *
- * The adapter's shape carries the evidence: an attempt with no response text
- * never got an answer, one with an `HTTP <status>` error got a refusal, and one
- * with text but an error reached the parser. Credential resolution happens before
- * any attempt, which is why a named reference with no attempts is that case.
- */
 /** The stage an HTTP rejection names, or null when it names none. */
 function httpFailure(httpStatus: number | null): ProbeFailure | null {
   if (httpStatus === 401 || httpStatus === 403) return 'unauthorized';
@@ -283,12 +278,12 @@ function providerFailure(error: string): ProbeFailure | null {
  *
  * The adapter's shape carries the evidence: an attempt with no response text
  * never got an answer, one with an `HTTP <status>` error got a refusal, and one
- * with text but an error reached the parser. Credential resolution happens
- * before any attempt, which is why a named reference with no attempts is that
- * case. Everything unrecognized is `unknown`, never a guessed cause.
+ * with text but an error reached the parser. Credential resolution happens before
+ * any attempt, which is why a named reference with no attempts is that case.
+ * Everything unrecognized is `unknown`, never a guessed cause.
  */
 function classify(evidence: FailureEvidence): ProbeFailure {
-  const { attempts, error, httpStatus } = evidence;
+  const { attempts, error, httpStatus, failureKind } = evidence;
   if (
     /credential .*is not configured|credential lookup failed|no api key|MISSING_CREDENTIAL/iu.test(
       error,
@@ -301,6 +296,11 @@ function classify(evidence: FailureEvidence): ProbeFailure {
   if (/timed?\s?out|timeout/iu.test(error)) return 'timed-out';
   const byProvider = providerFailure(error);
   if (byProvider !== null) return byProvider;
+  // A provider that declared its own failure is not a network fault, even when it
+  // wrote no machine-readable code. This runs before the no-response heuristic,
+  // which would otherwise read "no text arrived" as a connectivity problem; the
+  // concrete status, timeout and credential classifications above still win.
+  if (failureKind === 'provider-refusal') return 'unavailable';
   const transport = attempts.find(
     (entry) => entry.responseText === null && entry.error !== null,
   );
@@ -309,9 +309,17 @@ function classify(evidence: FailureEvidence): ProbeFailure {
       ? 'timed-out'
       : 'network';
   }
+  // The adapter's own record decides what arrived, rather than inferring it from
+  // the text: an HTTP 200 with `success:false` carries a complete body, so a
+  // "there was text" test would report a provider outage as a malformed answer.
+  if (failureKind === 'unreadable-answer') {
+    // Text arrived and never satisfied the parser: the one case the format
+    // repair exists to fix.
+    return 'invalid-output';
+  }
   if (attempts.some((entry) => entry.responseText !== null)) {
-    // Text arrived but never satisfied the parser: a contract failure, and the
-    // one case the format repair exists to fix.
+    // No adapter verdict recorded it, but an answer did arrive; the parser is the
+    // only thing that could have rejected it.
     return 'invalid-output';
   }
   return 'unknown';
@@ -346,6 +354,36 @@ function failedResult(
   };
 }
 
+/**
+ * The protocol name of the draft's backend.
+ *
+ * The probe runs the production request, so this names the production contract
+ * and not a probe-only variant: a pass through this value means the same request
+ * a normal review would send satisfied the same parser.
+ */
+function protocolOf(backend: 'chat' | 'decision'): string {
+  return backend === 'chat' ? CHAT_PROTOCOL : DECISION_PROTOCOL;
+}
+
+function passedResult(
+  config: ArbiterConfig,
+  startedAt: number,
+  outcome: ReviewOutcome,
+  repairs: number,
+  attempts: readonly ProbeAttempt[],
+): ProbeResult {
+  return {
+    status: 'passed',
+    backend: config.reviewer.type,
+    model: probeModel(config),
+    protocol: attempts[0]?.protocol ?? protocolOf(config.reviewer.type),
+    durationMs: elapsed(startedAt),
+    repairs,
+    outcome,
+    attempts,
+  };
+}
+
 async function runChat(
   options: ProbeOptions,
   startedAt: number,
@@ -359,39 +397,39 @@ async function runChat(
   if (llm === undefined) {
     return failedResult(config, startedAt, 'unavailable', []);
   }
-  const request = renderRequest(PROBE_SNAPSHOT);
+  const backend: ChatBackend = {
+    kind: 'chat',
+    transport: {
+      llm,
+      // No session: the probe names an explicit route, and a synthetic probe
+      // must never borrow the caller's request header.
+      chat: config.reviewer.chat,
+      signal,
+    },
+  };
   try {
-    const result = await runChatReviewer(
-      {
-        llm,
-        // No session: the probe names an explicit route, and a synthetic probe
-        // must never borrow the caller's request header.
-        chat: config.reviewer.chat,
-        thresholds: config.policy.normal,
-        signal,
-      },
-      PROBE_SNAPSHOT,
-      request,
-      PROBE_SNAPSHOT.callId,
-    );
-    const attempts = result.attempts.map((record) => attemptOf(record, []));
-    if (result.ok) {
+    const result = await review({
+      snapshot: PROBE_SNAPSHOT,
+      callId: PROBE_SNAPSHOT.callId,
+      signal,
+      backend,
+    });
+    const attempts = result.attempts.map((record) => attemptOf(record));
+    if (result.outcome.status === 'scored') {
       // A cancel that raced the answer still wins: the user ended this run and
       // must not be shown a pass they cancelled.
       if (callerCancelled(signal)) {
         return failedResult(config, startedAt, 'cancelled', attempts);
       }
-      return {
-        status: 'passed',
-        backend: 'chat',
-        model: probeModel(config),
-        protocol: attempts[0]?.protocol ?? protocolOf('chat'),
-        durationMs: elapsed(startedAt),
-        repairs: result.signals.repairs,
-        signals: result.signals,
+      return passedResult(
+        config,
+        startedAt,
+        result.outcome,
+        repairsOf(result.attempts),
         attempts,
-      };
+      );
     }
+    const error = outcomeError(result.outcome);
     return failedResult(
       config,
       startedAt,
@@ -399,8 +437,9 @@ async function runChat(
         ? 'cancelled'
         : classify({
             attempts,
-            error: result.error,
+            error,
             httpStatus: httpStatusOf(attempts),
+            failureKind: lastFailureKind(result.attempts),
           }),
       attempts,
     );
@@ -414,10 +453,31 @@ async function runChat(
   }
 }
 
+/** The last attempt's recorded failure kind, which is what ended this run. */
+function lastFailureKind(
+  attempts: readonly ReviewAttempt[],
+): AttemptFailureKind | null {
+  return attempts.at(-1)?.failureKind ?? null;
+}
+
+/** How many attempts were format repairs: every attempt after the first that read. */
+function repairsOf(attempts: readonly ReviewAttempt[]): number {
+  return Math.max(0, attempts.length - 1);
+}
+
+/** The sentence an outcome's failure carries, for stage classification. */
+function outcomeError(outcome: ReviewOutcome): string {
+  return outcome.status === 'review-failure'
+    ? outcome.reason
+    : outcome.status === 'insufficient-material'
+      ? outcome.reason
+      : '';
+}
+
 /**
  * Resolve the decision credential once, naming the stage when it fails.
  *
- * The value is returned so the adapter can send exactly it and the result can
+ * The value is returned so the transport can send exactly it and the result can
  * redact exactly it. A caller cancellation during the lookup wins over a
  * credential verdict, because the user ended the run.
  */
@@ -451,52 +511,45 @@ async function runDecision(
   startedAt: number,
 ): Promise<ProbeResult> {
   const { config, credentials, fetch, signal } = options;
-  const request = {
-    user: renderUser(PROBE_SNAPSHOT),
-    estimatedInputTokens: 0,
-  };
   const resolved = await decisionSecret(options);
   if (resolved.kind === 'failed') {
     return failedResult(config, startedAt, resolved.failure, []);
   }
   const { secret } = resolved;
-  const secrets = secret === undefined ? [] : [secret];
+  const backend: DecisionBackend = {
+    kind: 'decision',
+    transport: {
+      fetch,
+      credentials,
+      // The value resolved above is the one this run sends, which is also the one
+      // the service masks out of every attempt it returns.
+      ...(secret === undefined
+        ? {}
+        : { preResolvedCredential: { value: secret } }),
+      decision: config.reviewer.decision,
+      signal,
+    },
+  };
   try {
-    const result = await runDecisionReviewer(
-      {
-        fetch,
-        credentials,
-        // The value resolved above is the one this run sends, so the secret that
-        // authenticates the request is exactly the one redacted from its answer.
-        ...(secret === undefined
-          ? {}
-          : { preResolvedCredential: { value: secret } }),
-        decision: config.reviewer.decision,
-        thresholds: config.policy.normal,
-        signal,
-      },
-      PROBE_SNAPSHOT,
-      request,
-      PROBE_SNAPSHOT.callId,
-    );
-    const attempts = result.attempts.map((record) =>
-      attemptOf(record, secrets),
-    );
-    if (result.ok) {
+    const result = await review({
+      snapshot: PROBE_SNAPSHOT,
+      callId: PROBE_SNAPSHOT.callId,
+      signal,
+      backend,
+    });
+    const attempts = result.attempts.map((record) => attemptOf(record));
+    if (result.outcome.status === 'scored') {
       if (callerCancelled(signal)) {
         return failedResult(config, startedAt, 'cancelled', attempts);
       }
-      return {
-        status: 'passed',
-        backend: 'decision',
-        model: probeModel(config),
-        protocol: protocolOf('decision'),
-        durationMs: elapsed(startedAt),
+      return passedResult(
+        config,
+        startedAt,
+        result.outcome,
         // The decision protocol has no repair loop; it reports one attempt.
-        repairs: 0,
-        signals: result.signals,
+        0,
         attempts,
-      };
+      );
     }
     return failedResult(
       config,
@@ -505,8 +558,9 @@ async function runDecision(
         ? 'cancelled'
         : classify({
             attempts,
-            error: redact(result.error, secrets),
+            error: outcomeError(result.outcome),
             httpStatus: httpStatusOf(attempts),
+            failureKind: lastFailureKind(result.attempts),
           }),
       attempts,
     );
@@ -523,12 +577,12 @@ async function runDecision(
 /**
  * Run one Reviewer connection test.
  *
- * The probe calls the production adapters with their production parsers, so a
- * pass means "this backend answered in the contracted format" — never "the
- * action would be allowed". It reads nothing but the passed draft and never
- * writes configuration, audit rows, statistics, breaker state or approval
- * history. Each attempt keeps the adapter's own timeout; the probe adds no
- * outer deadline, because that would cut a legitimate format repair short.
+ * The probe calls the production reviewer service with its production renderer and
+ * parser, so a pass means "this backend answered in the contracted format" —
+ * never "the action would be allowed". It reads nothing but the passed draft and
+ * never writes configuration, audit rows, statistics, breaker state or approval
+ * history. Each attempt keeps the adapter's own timeout; the probe adds no outer
+ * deadline, because that would cut a legitimate format repair short.
  */
 export async function runReviewerProbe(
   options: ProbeOptions,

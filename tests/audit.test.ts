@@ -17,7 +17,7 @@ import { AuditStore, fingerprintOf, type CallRecord } from '../src/audit.js';
 import type { CallAnchor, CallFilter } from '../src/audit/types.js';
 import { templateIdOf } from '../src/audit/metadata.js';
 import { PROBE_SNAPSHOT } from '../src/reviewer/diagnostic.js';
-import { runDecisionReviewer } from '../src/reviewer/decision.js';
+import { runDecisionReviewer } from '../src/reviewer/legacy/decision.js';
 import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewSignals, TraceStage } from '../src/types.js';

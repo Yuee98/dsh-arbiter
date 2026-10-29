@@ -1,158 +1,66 @@
-import { templateIdOf } from '../audit/metadata.js';
-import type {
-  ChatReviewerConfig,
-  ModelAttemptRecord,
-  ModelResult,
-  PolicyThresholds,
-  ReviewSnapshot,
-} from '../types.js';
-import { parseChatText, signalsFromChat } from './signals.js';
+/**
+ * The chat transport: one review's attempts through the host's LLM service.
+ *
+ * This module moves bytes and nothing else. It renders nothing (the request
+ * arrives rendered), scores nothing (the caller reads the answer through the
+ * shared contract) and decides nothing. Two behaviours are its own:
+ *
+ *   - a format failure is repaired, a transport failure is not. Re-asking fixes
+ *     "the JSON was malformed"; it cannot fix "the provider refused", and
+ *     retrying the second spends money to learn nothing.
+ *   - an attempt keeps whatever the provider reported, including on a failure,
+ *     because a refused request was still billed.
+ *
+ * The per-attempt timeout is the adapter's own outcome, kept apart from the
+ * caller's lifetime: reporting a timeout as a caller cancellation would tell the
+ * operator the wrong thing.
+ */
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+import type { ChatReviewerConfig } from '../types.js';
+import {
+  attemptIdOf,
+  type AttemptFailureKind,
+  type ReviewAttempt,
+} from './attempt.js';
+import {
+  ChatStreamError,
+  chatRoute,
+  collectChatText,
+  type ChatRoute,
+  type LlmLike,
+  type SessionLike,
+  type StreamOptionsLike,
+} from './llm.js';
+import { normalizeUsage } from './usage.js';
+import { CHAT_PROTOCOL } from './contract.js';
+import type { ChatRequest } from './prompt.js';
+import { readChatAnswer, type ParsedAnswer } from './signals.js';
 
-export interface StreamOptionsLike {
-  readonly provider: string;
-  readonly model: string;
-  readonly system: string;
-  readonly messages: readonly {
-    readonly role: 'user';
-    readonly content: readonly {
-      readonly type: 'text';
-      readonly text: string;
-    }[];
-  }[];
-  readonly temperature?: number;
-  readonly maxTokens?: number;
-  /**
-   * Adapter-owned reasoning effort for this exact request.
-   *
-   * Omitted entirely when the caller has no opinion, because the host then
-   * falls back to its own chain (`reasoningEffort ?? defaults.reasoningEffort
-   * ?? thinking === "disabled" ? "off" : "high"`). Sending an explicit value
-   * would silently override a deployment's choice.
-   */
-  readonly reasoningEffort?: string;
-  readonly signal?: AbortSignal;
-}
-
-/** One provider route the host's LLM runtime currently serves. */
-export interface LlmProviderLike {
-  readonly id: string;
-  readonly name: string;
-}
-
-/** One model an adapter advertises for its provider route. */
-export interface LlmModelLike {
-  readonly provider: string;
-  readonly id: string;
-  readonly name: string;
-  readonly description?: string;
-}
-
-export interface LlmLike {
-  stream(options: StreamOptionsLike): AsyncIterable<Record<string, unknown>>;
-  /**
-   * The read-only directory used by host model selectors.
-   *
-   * Both members are optional because a reviewer only needs `stream`: the
-   * configuration page degrades to "no directory" instead of assuming every
-   * composition exposes a catalog.
-   */
-  listProviders?(): readonly LlmProviderLike[];
-  listModels?(provider: string): Promise<readonly LlmModelLike[]>;
-}
-
-interface SessionLike {
-  requestHeader?():
-    | {
-        readonly config: { readonly provider: string; readonly model: string };
-      }
-    | undefined;
-}
-
-export async function collectChatText(
-  stream: AsyncIterable<Record<string, unknown>>,
-): Promise<{ readonly text: string; readonly usage: unknown }> {
-  let text = '';
-  let usage: unknown = null;
-  let finished = false;
-  for await (const chunk of stream) {
-    const type = chunk['type'];
-    if (type === 'text-delta' && typeof chunk['text'] === 'string') {
-      text += chunk['text'];
-      continue;
-    }
-    if (type === 'usage') {
-      usage = chunk['usage'] ?? null;
-      continue;
-    }
-    if (type === 'finish') {
-      finished = true;
-      const reason = chunk['reason'];
-      if (isRecord(reason) && reason['kind'] !== 'stop') {
-        const failure = isRecord(reason['failure']) ? reason['failure'] : {};
-        const code = typeof failure['code'] === 'string' ? failure['code'] : '';
-        const message =
-          typeof failure['message'] === 'string' ? failure['message'] : '';
-        throw new Error(
-          `reviewer ended with ${String(reason['kind'])} ${code}: ${message}`,
-        );
-      }
-    }
-  }
-  if (!finished) throw new Error('reviewer emitted no terminal finish');
-  if (text.trim().length === 0) throw new Error('reviewer returned no text');
-  return { text, usage };
-}
-
-function chatRoute(
-  config: ChatReviewerConfig,
-  session: SessionLike | undefined,
-): {
-  readonly provider: string;
-  readonly model: string;
-} {
-  if (config.provider === 'session') {
-    const header = session?.requestHeader?.();
-    if (
-      header === undefined ||
-      header.config.provider.length === 0 ||
-      header.config.model.length === 0
-    ) {
-      throw new Error(
-        'no complete session request header; cannot use chat.provider "session"',
-      );
-    }
-    return { provider: header.config.provider, model: header.config.model };
-  }
-  if (config.provider.length === 0 || config.model.length === 0) {
-    throw new Error('chat reviewer requires provider and model');
-  }
-  return { provider: config.provider, model: config.model };
-}
-
-export interface ChatRunContext {
+export interface ChatTransportContext {
   readonly llm: LlmLike;
   readonly session?: SessionLike;
   readonly chat: ChatReviewerConfig;
-  readonly thresholds: PolicyThresholds;
   readonly signal: AbortSignal;
-  /**
-   * Reasoning effort to request, or undefined to inherit the host's default.
-   *
-   * This is a capability, not a policy: nothing in the shipped configuration
-   * sets it yet. Closing thinking is only safe once measurements show the
-   * verdicts hold, so the default path stays "ask the host".
-   */
+  /** Omitted to inherit the host's own chain; see {@link StreamOptionsLike}. */
   readonly reasoningEffort?: string;
 }
 
-interface ChatRequest {
-  readonly system: string;
-  readonly user: string;
-  readonly estimatedInputTokens: number;
+/** One review's chat outcome: the attempts made and the answer that read. */
+export interface ChatTransportResult {
+  readonly attempts: readonly ReviewAttempt[];
+  /** The first answer that satisfied the contract, or null when none did. */
+  readonly answer: (ParsedAnswer & { readonly ok: true }) | null;
+  /**
+   * The last unreadable answer, which may still hold one readable field.
+   *
+   * Kept so a failed review can report which half the reviewer got right instead
+   * of collapsing every failure into "no score".
+   */
+  readonly rejection: (ParsedAnswer & { readonly ok: false }) | null;
+  /** Why no attempt produced a usable answer, when none did. */
+  readonly error: string | null;
+  /** No chat credential is known here; the host's LLM service owns it. */
+  readonly secrets: readonly string[];
 }
 
 function chatMessages(
@@ -177,49 +85,18 @@ function chatMessages(
   ];
 }
 
-function chatAttemptBase(
-  callId: string,
-  attempt: number,
-  route: { readonly provider: string; readonly model: string },
-  request: ChatRequest,
-  messages: StreamOptionsLike['messages'],
-  startedAt: number,
-): Omit<ModelAttemptRecord, 'responseText' | 'parsed' | 'error' | 'usage'> {
-  return {
-    requestId: `${callId}:model:${String(attempt + 1)}`,
-    callId,
-    attempt: attempt + 1,
-    backend: 'chat',
-    protocol: 'arbiter-chat-json-v1',
-    request: {
-      provider: route.provider,
-      model: route.model,
-      system: request.system,
-      messages,
-    },
-    // The system message *is* the reusable template. Its content identity lets
-    // the audit record point at one immutable row instead of storing a copy per
-    // attempt, and a later policy edit creates a new row rather than rewriting
-    // what this decision was rendered from.
-    templateId: templateIdOf(request.system),
-    startedAt,
-    durationMs: Date.now() - startedAt,
-    estimatedInputTokens: request.estimatedInputTokens,
-  };
-}
-
 /**
- * The one place a request leaves this adapter.
+ * The options for one attempt.
  *
  * `reasoningEffort` is added only when the caller supplied one: the key must be
  * absent, not `undefined`, because the host falls back to its own chain when it
  * is missing and would otherwise treat an explicit value as a decision.
  */
 function streamOptions(
-  route: { readonly provider: string; readonly model: string },
+  route: ChatRoute,
   request: ChatRequest,
   messages: StreamOptionsLike['messages'],
-  ctx: ChatRunContext,
+  ctx: ChatTransportContext,
   signal: AbortSignal,
 ): StreamOptionsLike {
   const base: StreamOptionsLike = {
@@ -236,62 +113,95 @@ function streamOptions(
     : { ...base, reasoningEffort: ctx.reasoningEffort };
 }
 
-export async function runChatReviewer(
-  ctx: ChatRunContext,
-  _snapshot: ReviewSnapshot,
+/** The attempt record for one stream, successful or not. */
+function attemptRecord(options: {
+  readonly callId: string;
+  readonly attempt: number;
+  readonly route: ChatRoute;
+  readonly request: ChatRequest;
+  readonly messages: StreamOptionsLike['messages'];
+  readonly startedAt: number;
+  readonly responseText: string | null;
+  readonly parsed: unknown;
+  readonly error: string | null;
+  readonly failureKind: AttemptFailureKind | null;
+  readonly rawUsage: unknown;
+}): ReviewAttempt {
+  return {
+    attemptId: attemptIdOf(options.callId, options.attempt + 1),
+    callId: options.callId,
+    attempt: options.attempt + 1,
+    backend: 'chat',
+    protocol: CHAT_PROTOCOL,
+    request: {
+      provider: options.route.provider,
+      model: options.route.model,
+      system: options.request.system,
+      messages: options.messages,
+    },
+    responseText: options.responseText,
+    parsed: options.parsed,
+    error: options.error,
+    failureKind: options.failureKind,
+    startedAt: options.startedAt,
+    durationMs: Date.now() - options.startedAt,
+    estimatedInputTokens: options.request.estimatedInputTokens,
+    rawUsage: options.rawUsage,
+    normalizedUsage: normalizeUsage('chat', options.rawUsage),
+  };
+}
+
+/** The transport outcome when the route itself cannot be resolved. */
+function routeFailure(error: string): ChatTransportResult {
+  return { attempts: [], answer: null, rejection: null, error, secrets: [] };
+}
+
+export async function runChatTransport(
+  ctx: ChatTransportContext,
   request: ChatRequest,
   callId: string,
-): Promise<ModelResult> {
-  const attempts: ModelAttemptRecord[] = [];
-  let route: { provider: string; model: string };
+): Promise<ChatTransportResult> {
+  let route: ChatRoute;
   try {
     route = chatRoute(ctx.chat, ctx.session);
   } catch (error) {
-    return {
-      ok: false,
-      kind: 'review-failure',
-      error: error instanceof Error ? error.message : String(error),
-      attempts,
-    };
+    return routeFailure(error instanceof Error ? error.message : String(error));
   }
 
+  const attempts: ReviewAttempt[] = [];
   let repair: string | null = null;
+  let rejection: (ParsedAnswer & { readonly ok: false }) | null = null;
   const maxAttempts = 1 + ctx.chat.maxRepairRetries;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
     const messages = chatMessages(request.user, repair);
-    // Keep the attempt timer separate from the caller's lifetime: a timeout is
-    // this adapter's own outcome, and reporting it as a caller cancellation
-    // would tell the operator the wrong thing.
     const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
     const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
     const options = streamOptions(route, request, messages, ctx, attemptSignal);
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
-      const parsed = parseChatText(collected.text);
-      const record: ModelAttemptRecord = {
-        ...chatAttemptBase(
+      const answer = readChatAnswer(collected.text);
+      attempts.push(
+        attemptRecord({
           callId,
           attempt,
           route,
           request,
           messages,
           startedAt,
-        ),
-        responseText: collected.text,
-        parsed: parsed.ok ? parsed.raw : null,
-        error: parsed.ok ? null : (parsed.error ?? null),
-        usage: collected.usage,
-      };
-      attempts.push(record);
-      if (parsed.ok && parsed.raw !== undefined) {
-        return {
-          ok: true,
-          signals: signalsFromChat(parsed.raw, attempt),
-          attempts,
-        };
+          responseText: collected.text,
+          parsed: answer.ok ? answer.raw : null,
+          error: answer.ok ? null : answer.error,
+          // An answer arrived; only its shape failed the contract.
+          failureKind: answer.ok ? null : 'unreadable-answer',
+          rawUsage: collected.usage,
+        }),
+      );
+      if (answer.ok) {
+        return { attempts, answer, rejection: null, error: null, secrets: [] };
       }
-      repair = parsed.error ?? 'invalid reviewer output';
+      repair = answer.error;
+      rejection = answer;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // A provider may abort for its own reasons, so the timer's own state — not
@@ -300,28 +210,36 @@ export async function runChatReviewer(
         attemptTimeout.aborted && !ctx.signal.aborted
           ? `reviewer request timed out after ${String(ctx.chat.timeoutMs)}ms`
           : message;
-      attempts.push({
-        ...chatAttemptBase(
+      attempts.push(
+        attemptRecord({
           callId,
           attempt,
           route,
           request,
           messages,
           startedAt,
-        ),
-        responseText: null,
-        parsed: null,
-        error: failure,
-        usage: null,
-      });
-      // Provider failures are not retried; only format/schema repair is.
-      return { ok: false, kind: 'review-failure', error: failure, attempts };
+          responseText: null,
+          parsed: null,
+          error: failure,
+          // A stream that failed is a transport outcome unless the provider
+          // declared the failure itself, which `ChatStreamError` records.
+          failureKind:
+            error instanceof ChatStreamError ? error.kind : 'transport',
+          // A provider that fails its own call may still have reported usage
+          // before doing so, and a billed failure is exactly the attempt an
+          // operator needs to see. Nothing else about the failure is reused.
+          rawUsage: error instanceof ChatStreamError ? error.usage : null,
+        }),
+      );
+      // Provider failures are not retried; only format failures are.
+      return { attempts, answer: null, rejection, error: failure, secrets: [] };
     }
   }
   return {
-    ok: false,
-    kind: 'review-failure',
-    error: `reviewer output remained invalid after ${String(maxAttempts)} attempts: ${repair ?? 'unknown error'}`,
     attempts,
+    answer: null,
+    rejection,
+    error: `reviewer output remained invalid after ${String(maxAttempts)} attempts: ${repair ?? 'unknown error'}`,
+    secrets: [],
   };
 }

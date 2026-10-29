@@ -1,266 +1,284 @@
+/**
+ * Reading an answer back into the shared contract's two scores.
+ *
+ * Both protocols converge here: chat answers with two public integers, decision
+ * with two native distributions. Neither adapter interprets the numbers — the
+ * contract's readers do, and they are the same readers the engine and the evals
+ * tooling use. This module only decides whether an answer is *well formed*, so an
+ * unreadable answer is reported as such instead of being handed on as a score.
+ *
+ * Two distinctions are load-bearing:
+ *
+ *   - a format failure and a transport failure are different. A well-formed JSON
+ *     object holding a bad band is a format failure that a chat repair can fix; a
+ *     stream that never finished is a transport failure that no repair touches.
+ *   - a refusal is not an answer. `success: false` decides on its own, even when
+ *     the payload also carries complete answers, because a provider that reports
+ *     failure is still forming its answer.
+ */
+
+import type {
+  ChatScores,
+  DecisionScores,
+  ProtocolScores,
+  ScoreFailure,
+  ScoreTrail,
+} from '../review-contract/types.js';
 import {
-  bandFromPublic,
+  bandFromNative,
   chatScore,
   distributionToPublic,
   validateNativeDistribution,
-  weightedBand,
 } from '../review-contract/normalize.js';
-import type { PolicyThresholds, ReviewSignals } from '../types.js';
+import { decisionAnswers } from './envelope.js';
+import { extractJsonObject } from './json.js';
 
-export interface RawChatSignals {
-  readonly risk: number;
-  readonly authorized: number;
-  readonly secrets: boolean;
-  readonly destructive: boolean;
-  readonly egress: boolean;
-  readonly bulk: boolean;
+/** The two answer members, in the order the prompt states them. */
+const CHAT_MEMBERS = ['risk', 'authorization'] as const;
+
+/** A well-formed answer, or the reason it is not one. */
+export type ParsedAnswer =
+  | {
+      readonly ok: true;
+      readonly scores: ProtocolScores;
+      /** The provider's answer object, exactly as received. */
+      readonly raw: unknown;
+    }
+  | {
+      readonly ok: false;
+      /** One sentence naming the violated rule, never the submitted text. */
+      readonly error: string;
+      /** Structured failures, when a field could be named. */
+      readonly failures: readonly ScoreFailure[];
+      /**
+       * The half that did read, when only one field failed.
+       *
+       * This is diagnostic evidence and never a verdict: it lets a reader tell
+       * "the reviewer was confused about one field" from "the transport broke",
+       * which is exactly the distinction the shared outcome's `diagnostic` field
+       * exists for. The trails are built by the contract's own readers, so a
+       * partial read cannot disagree with a complete one about what a number means.
+       */
+      readonly partial: PartialTrails;
+    };
+
+/** A per-field partial read, in the shared outcome's own trail shape. */
+export interface PartialTrails {
+  readonly risk: ScoreTrail | null;
+  readonly authorization: ScoreTrail | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function extractJsonObject(text: string): string {
-  const trimmed = text.trim();
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/u.exec(trimmed);
-  const candidate = fenced?.[1]?.trim() ?? trimmed;
-  const start = candidate.indexOf('{');
-  const end = candidate.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return candidate;
-  return candidate.slice(start, end + 1);
-}
-
 /**
- * The shared risk-category boundary: `low` is 1–3 for both backends
- * (`docs/reviewer.md#design-5-5`). It is a semantic definition, not a tuning
- * knob — a configurable version of it would let an advanced setting redefine
- * what a risk level means and desynchronize the two protocols' authorization
- * classes.
+ * A chat answer: exactly two public integers.
+ *
+ * The member set is checked as well as the values. A model that adds a field is
+ * not answering the question that was asked, and accepting the extra field would
+ * let an arbitrary observation slip into a record whose shape the contract fixed.
  */
-const LOW_RISK_MAX = 3;
-
-/** A chat answer's public scale runs 1..10; see `docs/milestones`. */
-function isScore(value: unknown): value is number {
-  return chatScore(value).ok;
-}
-
-export function validateChatObject(value: unknown): {
-  readonly ok: boolean;
-  readonly raw?: RawChatSignals;
-  readonly error?: string;
-} {
-  if (!isRecord(value))
-    return { ok: false, error: 'reviewer output must be one JSON object' };
-  const keys = Object.keys(value).sort();
-  const expected = [
-    'authorized',
-    'bulk',
-    'destructive',
-    'egress',
-    'risk',
-    'secrets',
-  ];
-  if (
-    keys.length !== expected.length ||
-    keys.some((key, index) => key !== expected[index])
-  ) {
-    return {
-      ok: false,
-      error: `reviewer output must contain exactly ${expected.join(', ')}; received ${keys.join(', ')}`,
-    };
-  }
-  const risk = value['risk'];
-  const authorized = value['authorized'];
-  if (!isScore(risk)) {
-    return { ok: false, error: 'risk must be an integer from 1 through 10' };
-  }
-  if (!isScore(authorized)) {
-    return {
-      ok: false,
-      error: 'authorized must be an integer from 1 through 10',
-    };
-  }
-  for (const probe of ['secrets', 'destructive', 'egress', 'bulk'] as const) {
-    if (typeof value[probe] !== 'boolean') {
-      return { ok: false, error: `${probe} must be a boolean` };
-    }
-  }
-  const raw: RawChatSignals = {
-    risk,
-    authorized,
-    secrets: value['secrets'] === true,
-    destructive: value['destructive'] === true,
-    egress: value['egress'] === true,
-    bulk: value['bulk'] === true,
-  };
-  // Risk and the probes are independent facts under the shared rubric: a
-  // high-consequence action need not destroy data or read credentials, and a
-  // negligible one may still lose disposable data. Cross-field implication was an
-  // earlier contract's rule and would now reject legal classifications, so each
-  // probe is validated for its own type only.
-  return { ok: true, raw };
-}
-
-export function parseChatText(
-  text: string,
-): ReturnType<typeof validateChatObject> {
+export function readChatAnswer(text: string): ParsedAnswer {
   let value: unknown;
   try {
     value = JSON.parse(extractJsonObject(text));
-  } catch (error) {
+  } catch {
+    // The library message quotes the input, which is model output and may echo
+    // the material it was given; the fact of the failure is all a record needs.
     return {
       ok: false,
-      error: `reviewer output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      error: 'reviewer output is not valid JSON',
+      failures: [],
+      partial: NO_PARTIAL,
     };
   }
-  return validateChatObject(value);
-}
-
-export function signalsFromChat(
-  raw: RawChatSignals,
-  repairs: number,
-): ReviewSignals {
-  const riskClass = raw.risk <= 3 ? 'low' : raw.risk <= 8 ? 'medium' : 'high';
-  const authClass =
-    raw.authorized >= 8 ? 'explicit' : raw.authorized >= 5 ? 'implied' : 'none';
-  return {
-    riskDist: null,
-    riskPoint: raw.risk,
-    riskScore: null,
-    riskClass,
-    authDist: null,
-    authPoint: raw.authorized,
-    authClass,
-    secrets: raw.secrets,
-    destructive: raw.destructive,
-    egress: raw.egress,
-    bulk: raw.bulk,
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      error: 'reviewer output must be one JSON object',
+      failures: [],
+      partial: NO_PARTIAL,
+    };
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== CHAT_MEMBERS.length ||
+    [...CHAT_MEMBERS].sort().some((key, index) => key !== keys[index])
+  ) {
+    return {
+      ok: false,
+      error: `reviewer output must contain exactly ${CHAT_MEMBERS.join(', ')}; received ${keys.join(', ') || '(none)'}`,
+      failures: [],
+      partial: NO_PARTIAL,
+    };
+  }
+  const failures: ScoreFailure[] = [];
+  const read = {
+    risk: chatScore(value['risk']),
+    authorization: chatScore(value['authorization']),
+  };
+  for (const field of CHAT_MEMBERS) {
+    const attempt = read[field];
+    if (attempt.ok) continue;
+    failures.push({ field, reason: attempt.reason, detail: attempt.detail });
+  }
+  if (failures.length > 0 || !read.risk.ok || !read.authorization.ok) {
+    return {
+      ok: false,
+      error: failures
+        .map((failure) => `${failure.field} ${failure.detail}`)
+        .join('; '),
+      failures,
+      // The field that read its band is kept as a trail; the failed half is null.
+      partial: {
+        risk: read.risk.ok ? pointTrail(read.risk.score) : null,
+        authorization: read.authorization.ok
+          ? pointTrail(read.authorization.score)
+          : null,
+      },
+    };
+  }
+  const scores: ChatScores = {
     source: 'chat',
-    repairs,
+    risk: read.risk.score,
+    authorization: read.authorization.score,
   };
+  return { ok: true, scores, raw: value };
 }
 
 /**
- * One decision score field, read strictly and mapped by N0.
+ * A decision answer: two score answers, each carrying a probability object.
  *
- * The protocol answers with a distribution over its ten native levels (0..9). The
- * contract validates that distribution and derives the public band, so this adapter
- * holds no second copy of the rule. Nothing is repaired: a distribution that does
- * not sum to one, names level 10, or holds a bad probability is a failed read, and
- * an unreadable answer never becomes a score.
+ * The probabilities are passed on unvalidated on purpose. Their strict
+ * validation — ten canonical native levels, finite non-negative values, a total
+ * of one — lives in the contract's N0 reader, so a distribution that the contract
+ * rejects is reported there with its own failure class instead of being rejected
+ * twice under two sets of rules.
  */
-function scoreAnswer(
-  answers: Record<string, unknown>,
-  name: 'risk' | 'authorized',
-): { dist: Record<string, number>; score: number } | string {
-  const value = answers[name];
-  if (!isRecord(value)) return `missing ${name} answer`;
-  const native = validateNativeDistribution(value['probabilities']);
-  if (!native.ok) {
-    // The reason class is safe to report: it names the violated rule, never the
-    // reviewer's values.
-    return `${name} answer has no valid probability distribution (${native.reason}: ${native.detail})`;
+export function readDecisionAnswer(parsedBody: unknown): ParsedAnswer {
+  if (!isRecord(parsedBody)) {
+    return {
+      ok: false,
+      error: 'decision response is not a JSON object',
+      failures: [],
+      partial: NO_PARTIAL,
+    };
   }
-  // The audit keeps the distribution on the public scale, because the engine reads
-  // public bands; the native form stays available in the attempt's own record.
-  const dist = distributionToPublic(native.value);
-  return {
-    dist,
-    score: weightedBand(native.value),
+  const answers = decisionAnswers(parsedBody);
+  if (answers === undefined) {
+    return {
+      ok: false,
+      error: 'decision response has no answers',
+      failures: [],
+      partial: NO_PARTIAL,
+    };
+  }
+  // Both fields are read before either verdict is reported, so one bad answer
+  // cannot hide whether the other one arrived — the valid half is exactly what a
+  // reader needs to classify the failure.
+  const risk = probabilitiesOf(answers, 'risk');
+  const authorization = probabilitiesOf(answers, 'authorization');
+  const problems = [risk, authorization].filter(
+    (entry): entry is string => typeof entry === 'string',
+  );
+  if (
+    problems.length > 0 ||
+    typeof risk === 'string' ||
+    typeof authorization === 'string'
+  ) {
+    return {
+      ok: false,
+      error: problems.join('; '),
+      failures: [],
+      // A partial trail is only built for a field whose distribution the contract
+      // actually accepts. Without that check an empty or sparse object would
+      // reach `bandFromNative`, whose totality fallback would report the highest
+      // band — inventing an A10 out of material N0 rejected.
+      partial: {
+        risk: typeof risk === 'string' ? null : validatedTrail(risk, 'risk'),
+        authorization:
+          typeof authorization === 'string'
+            ? null
+            : validatedTrail(authorization, 'authorization'),
+      },
+    };
+  }
+  const scores: DecisionScores = {
+    source: 'decision',
+    risk,
+    authorization,
   };
+  return { ok: true, scores, raw: answers };
 }
 
-function noul(
-  answers: Record<string, unknown>,
-  name: string,
-): boolean | string {
-  const value = answers[name];
-  if (!isRecord(value)) return `missing ${name} answer`;
-  const raw = value['noul'];
-  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 1) {
-    return `${name} answer has no valid noul probability`;
+/** No field of this answer could be read at all. */
+const NO_PARTIAL: PartialTrails = { risk: null, authorization: null };
+
+/** A chat point as a trail. */
+function pointTrail(score: number): ScoreTrail {
+  const legal = chatScore(score);
+  if (!legal.ok) {
+    throw new RangeError(
+      `a validated chat score cannot be illegal: ${legal.reason}`,
+    );
   }
-  return raw >= 0.5;
+  return { native: null, published: null, point: score, score: legal.score };
 }
 
 /**
- * Where a decision response keeps its answers.
+ * A trail for a distribution the contract accepts, or null when it does not.
  *
- * Two placements exist among the supported endpoints, and they are not
- * alternatives for the same vendor — they belong to different envelopes:
- *
- *   Cloudflare edge   { result: { model, answers, usage }, success, errors, messages }
- *   native endpoints  { model, answers, usage }
- *
- * The object is taken whole rather than unpacked here so the caller can also
- * read the sibling `usage` from the same payload. An earlier version looked for
- * `result.response`, a key no documented endpoint produces; it existed only in
- * this file's test fixture, which is how the mismatch stayed invisible.
+ * The partial diagnostic must not be a second, looser reader: it validates through
+ * the same N0 validator the scored path uses, so a field the contract rejects
+ * stays null here exactly as it would there.
  */
-export function decisionAnswers(
-  body: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const candidates = [
-    isRecord(body['result']) && isRecord(body['result']['answers'])
-      ? body['result']['answers']
-      : undefined,
-    isRecord(body['answers']) ? body['answers'] : undefined,
-  ];
-  return candidates.find((candidate) => candidate !== undefined);
+function validatedTrail(
+  native: Record<string, number>,
+  rule: 'risk' | 'authorization',
+): ScoreTrail | null {
+  return validateNativeDistribution(native).ok
+    ? distributionTrail(native, rule)
+    : null;
 }
 
-export function parseDecisionResponse(
-  body: unknown,
-  _thresholds: PolicyThresholds,
-):
-  | { readonly ok: true; readonly signals: ReviewSignals }
-  | { readonly ok: false; readonly error: string } {
-  if (!isRecord(body))
-    return { ok: false, error: 'decision response is not a JSON object' };
-  const answers = decisionAnswers(body);
-  if (answers === undefined)
-    return { ok: false, error: 'decision response has no risk answer' };
-
-  const risk = scoreAnswer(answers, 'risk');
-  if (typeof risk === 'string') return { ok: false, error: risk };
-  const auth = scoreAnswer(answers, 'authorized');
-  if (typeof auth === 'string') return { ok: false, error: auth };
-  const secrets = noul(answers, 'secrets');
-  if (typeof secrets === 'string') return { ok: false, error: secrets };
-  const destructive = noul(answers, 'destructive');
-  if (typeof destructive === 'string') return { ok: false, error: destructive };
-  const egress = noul(answers, 'egress');
-  if (typeof egress === 'string') return { ok: false, error: egress };
-  const bulk = noul(answers, 'bulk');
-  if (typeof bulk === 'string') return { ok: false, error: bulk };
-
-  // The classes are derived from the public band the distribution reaches, not
-  // from a probability tail: a legacy tail test can label an effective prohibition
-  // as an ordinary `none`, and the two mean different things now. Every 0..10 tail
-  // the older rules read is still available in `risk.dist`/`auth.dist`.
-  const riskBand = bandFromPublic(risk.dist, 'risk');
-  const authBand = bandFromPublic(auth.dist, 'authorization');
-  const riskClass =
-    riskBand <= LOW_RISK_MAX ? 'low' : riskBand >= 9 ? 'high' : 'medium';
-  const authClass =
-    authBand >= 8 ? 'explicit' : authBand >= 5 ? 'implied' : 'none';
-
+/**
+ * A native distribution as a trail.
+ *
+ * Only a validated distribution reaches here; see {@link validatedTrail}.
+ */
+function distributionTrail(
+  native: Record<string, number>,
+  rule: 'risk' | 'authorization',
+): ScoreTrail {
   return {
-    ok: true,
-    signals: {
-      riskDist: risk.dist,
-      riskPoint: null,
-      riskScore: risk.score,
-      riskClass,
-      authDist: auth.dist,
-      authPoint: null,
-      authClass,
-      secrets,
-      destructive,
-      egress,
-      bulk,
-      source: 'decision',
-      repairs: 0,
-    },
+    native,
+    published: distributionToPublic(native),
+    point: null,
+    score: bandFromNative(native, rule),
   };
+}
+
+/** One answer's probability object, or why it is not one. */
+function probabilitiesOf(
+  answers: Record<string, unknown>,
+  name: 'risk' | 'authorization',
+): Record<string, number> | string {
+  const answer = answers[name];
+  if (!isRecord(answer)) return `missing ${name} answer`;
+  const probabilities = answer['probabilities'];
+  if (!isRecord(probabilities)) {
+    return `${name} answer has no probability object`;
+  }
+  // Only numbers reach the contract reader; a string or null is a malformed
+  // answer rather than a probability the reader should be asked to reject, so
+  // it is refused here with a message that names the rule it broke.
+  const counts: Record<string, number> = {};
+  for (const [level, raw] of Object.entries(probabilities)) {
+    if (typeof raw !== 'number') {
+      return `${name} answer has a non-numeric probability`;
+    }
+    counts[level] = raw;
+  }
+  return counts;
 }
