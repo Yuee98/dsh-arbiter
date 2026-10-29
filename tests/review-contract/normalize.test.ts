@@ -27,8 +27,10 @@ import {
   readProtocolScores,
   SUM_TOLERANCE,
   validateNativeDistribution,
+  verdictFor,
   weightedBand,
 } from '../../src/review-contract/index.js';
+import { score } from '../helpers/score.js';
 
 /** A native distribution with the given non-zero levels. */
 function dist(
@@ -130,6 +132,57 @@ describe('N0 medians', () => {
   });
 });
 
+describe('exact-half arithmetic', () => {
+  // Adding float probabilities in order can turn an exact decimal half into
+  // 0.5000000000000001 or 0.49999999999999994. N0 exists to distinguish "at least
+  // half" from "more than half", so the accumulation is done in integer units at
+  // protocol precision and these cases must land exactly on the boundary.
+  test('an accumulation just above half is not treated as more than half', () => {
+    const distribution = dist({
+      '0': 0.1398,
+      '1': 0.3385,
+      '2': 0.0217,
+      '9': 0.5,
+    });
+    // In floating point F(2) evaluates to 0.5000000000000001, which a naive
+    // `> 0.5` would accept as decisive.
+    expect(0.1398 + 0.3385 + 0.0217).toBeGreaterThan(0.5);
+    // Risk needs *more* than half, so it does not stop at band 3.
+    expect(bandFromNative(distribution, 'risk')).toBe(10);
+    // Authorization accepts half, so it does stop there.
+    expect(bandFromNative(distribution, 'authorization')).toBe(3);
+  });
+
+  test('an accumulation just below half is still half for authorization', () => {
+    const distribution = dist({
+      '3': 0.0586,
+      '4': 0.1725,
+      '5': 0.2689,
+      '9': 0.5,
+    });
+    // In floating point F(5) evaluates to 0.49999999999999994.
+    expect(0.0586 + 0.1725 + 0.2689).toBeLessThan(0.5);
+    // Authorization reaches the boundary inclusively, so band 6 is selected.
+    expect(bandFromNative(distribution, 'authorization')).toBe(6);
+    // Risk does not, so it continues to the top band.
+    expect(bandFromNative(distribution, 'risk')).toBe(10);
+  });
+
+  test('the matrix verdict follows the corrected band', () => {
+    // The first distribution with A8 is an allow if risk is 3 and an escalation if
+    // risk is 10, which is exactly the decision the float error would have flipped.
+    const riskHalf = dist({ '0': 0.1398, '1': 0.3385, '2': 0.0217, '9': 0.5 });
+    const auth = dist({ '7': 1 });
+    const risk = bandFromNative(riskHalf, 'risk');
+    const authorization = bandFromNative(auth, 'authorization');
+    expect(risk).toBe(10);
+    expect(authorization).toBe(8);
+    expect(verdictFor(score(risk), score(authorization))).toBe(
+      'review-escalate',
+    );
+  });
+});
+
 describe('distribution validation', () => {
   test('accepts a legal native distribution', () => {
     const result = validateNativeDistribution(dist({ '3': 0.25, '9': 0.75 }));
@@ -158,22 +211,39 @@ describe('distribution validation', () => {
       'probability-sum-not-one',
     ],
     ['only zero mass', dist({}), 'probability-sum-not-one'],
-    ['a negative probability', { '0': -0.1, '9': 1.1 }, 'probability-negative'],
+    // The value checks use a complete key set, so the failure they report is the
+    // value's own and not the missing-level one.
+    [
+      'a negative probability',
+      dist({ '0': -0.1, '9': 1.1 }),
+      'probability-negative',
+    ],
     [
       'a non-finite probability',
-      { '0': Number.NaN, '9': 1 },
+      dist({ '0': Number.NaN }),
       'probability-not-finite',
     ],
     [
       'an infinite probability',
-      { '0': Number.POSITIVE_INFINITY },
+      dist({ '0': Number.POSITIVE_INFINITY }),
       'probability-not-finite',
     ],
-    ['a string probability', { '0': '0.5' }, 'probability-not-finite'],
+    [
+      'a string probability',
+      { ...dist({}), '0': '0.5' },
+      'probability-not-finite',
+    ],
+    // A wrong key fails as a bad level rather than as an incomplete set, because
+    // the key itself is what cannot be read.
     ['a level of ten', { '10': 1 }, 'level-out-of-range'],
     ['a negative level', { '-1': 1 }, 'level-out-of-range'],
     ['a fractional level', { '1.5': 1 }, 'level-out-of-range'],
     ['a non-numeric level', { risk: 1 }, 'level-out-of-range'],
+    ['a lone out-of-range key', { '10': 1 }, 'level-out-of-range'],
+    // Canonical spelling matters: "00" and "0" both convert to level zero, so a
+    // distribution holding both would address one level twice.
+    ['an aliased level key', { '0': 0.6, '00': 0.4 }, 'level-out-of-range'],
+    ['a padded level key', { '01': 0.5, '1': 0.5 }, 'level-out-of-range'],
   ])('rejects %s', (_name, value, reason) => {
     const result = validateNativeDistribution(value);
     expect(result.ok).toBe(false);
@@ -194,25 +264,42 @@ describe('distribution validation', () => {
   test('the legacy eleven-level shape is rejected, not folded', () => {
     // The pre-change protocol could answer 0..10. Folding 10 onto 9 would invent a
     // probability the reviewer never gave, so the whole answer fails instead.
-    const legacy = { '0': 0, '10': 1 };
+    const legacy = { ...dist({ '0': 0 }), '10': 1 };
     const result = validateNativeDistribution(legacy);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected a rejection');
     expect(result.reason).toBe('level-out-of-range');
   });
 
-  test('a missing level is not filled in', () => {
-    // 0.6 does not total one, and the missing mass is *not* silently assigned to a
-    // level: the read fails rather than producing a confident-looking score.
-    const partial = { '0': 0.6 };
-    const result = validateNativeDistribution(partial);
+  test('a missing level is rejected even when the given values total one', () => {
+    // This is the case a sum check alone cannot catch: nine levels whose own mass
+    // already reaches one. The tenth level is simply unaccounted for, and treating
+    // that as zero would report a distribution the reviewer did not give.
+    const nineLevels: Record<string, number> = {};
+    for (let level = 0; level <= 8; level += 1) {
+      nineLevels[String(level)] = level === 0 ? 1 : 0;
+    }
+    expect(Object.keys(nineLevels)).toHaveLength(9);
+    const result = validateNativeDistribution(nineLevels);
     expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toBe('level-set-incomplete');
+  });
+
+  test('a sparse distribution is rejected even when it sums to one', () => {
+    // {"0": 1} totals one, so a sum-only validator would accept it and silently
+    // treat nine unreported levels as zero.
+    const sparse = { '0': 1 };
+    const result = validateNativeDistribution(sparse);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toBe('level-set-incomplete');
   });
 
   test('an arbitrary positive total is not re-weighted into a legal distribution', () => {
     // 3:1 is a *ratio*, not a distribution. Dividing by its total would produce a
     // plausible answer out of a malformed one.
-    const ratio = { '0': 3, '9': 1 };
+    const ratio = dist({ '0': 3, '9': 1 });
     expect(validateNativeDistribution(ratio).ok).toBe(false);
   });
 

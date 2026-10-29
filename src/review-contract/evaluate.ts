@@ -38,6 +38,9 @@ export function evaluateReview(evaluation: ReviewEvaluation): ReviewOutcome {
       status: 'review-failure',
       failures: read.failures,
       reason: summarizeFailures(read.failures),
+      // A partial read is evidence, never a verdict: the valid half is kept so a
+      // person can tell a confused reviewer from a broken transport.
+      diagnostic: read.diagnostic,
     };
   }
   const material = evaluation.material ?? { status: 'available' };
@@ -81,6 +84,9 @@ export function reviewFailure(error: string): ReviewFailureOutcome {
     status: 'review-failure',
     failures: [],
     reason: error,
+    // A call-level failure produced no answer at all, so there is nothing partial
+    // to keep.
+    diagnostic: null,
   };
 }
 

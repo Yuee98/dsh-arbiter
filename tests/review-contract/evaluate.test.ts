@@ -141,8 +141,8 @@ describe('review failure', () => {
     const outcome = evaluateReview({
       scores: {
         source: 'decision',
-        risk: { '10': 1 },
-        authorization: { '0': 0.5 },
+        risk: { ...dist({}), '10': 1 },
+        authorization: dist({ '0': 0.5 }),
       },
     });
     expect(outcome.status).toBe('review-failure');
@@ -186,6 +186,56 @@ describe('review failure', () => {
 
   test('an empty failure list still reads as a failure', () => {
     expect(summarizeFailures([])).toContain('no usable score');
+  });
+});
+
+describe('partial reads stay diagnostic', () => {
+  test('the valid field survives while the other fails', () => {
+    // One score can be legitimate while the other is not. Keeping the valid half
+    // is what lets a reader tell "the reviewer was confused" from "the transport
+    // broke", and it is the requirement the plan review recorded as P04.
+    const outcome = evaluateReview({
+      scores: {
+        source: 'decision',
+        risk: dist({ '4': 1 }),
+        authorization: { ...dist({}), '10': 1 },
+      },
+    });
+    expect(outcome.status).toBe('review-failure');
+    if (outcome.status !== 'review-failure')
+      throw new Error('expected a failure');
+    // The valid risk answer is retained as a distribution trail on the public
+    // scale, with the band it reaches.
+    expect(outcome.diagnostic?.risk?.score).toBe(5);
+    expect(outcome.diagnostic?.risk?.native).not.toBeNull();
+    expect(outcome.diagnostic?.risk?.published).not.toBeNull();
+    // The invalid field has no diagnostic, because there was nothing to read.
+    expect(outcome.diagnostic?.authorization).toBeNull();
+    // And none of this becomes a verdict or a score.
+    expect(outcome).not.toHaveProperty('verdict');
+    expect(outcome).not.toHaveProperty('risk');
+    expect(outcome).not.toHaveProperty('authorization');
+  });
+
+  test('a chat partial read keeps the valid point value', () => {
+    const outcome = evaluateReview({
+      scores: { source: 'chat', risk: 6, authorization: 0 },
+    });
+    expect(outcome.status).toBe('review-failure');
+    if (outcome.status !== 'review-failure')
+      throw new Error('expected a failure');
+    expect(outcome.diagnostic?.risk).toEqual({
+      native: null,
+      published: null,
+      point: 6,
+      score: 6,
+    });
+    expect(outcome.diagnostic?.authorization).toBeNull();
+  });
+
+  test('a call-level failure has no diagnostic at all', () => {
+    // Nothing was answered, so there is no partial evidence to keep.
+    expect(reviewFailure('timed out').diagnostic).toBeNull();
   });
 });
 

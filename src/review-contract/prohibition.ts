@@ -14,7 +14,11 @@
  */
 
 import type { PublicScore, ScoreDistribution } from './types.js';
-import { bandFromPublic, chatScore, SUM_TOLERANCE } from './normalize.js';
+import {
+  bandFromPublic,
+  chatScore,
+  validatePublicDistribution,
+} from './normalize.js';
 
 /** The authorization level one answer states, or why it states none. */
 export type AuthorizationLevel =
@@ -72,52 +76,4 @@ export function authorizationLevel(
 export function isProhibited(input: AuthorizationInput): boolean {
   const level = authorizationLevel(input);
   return level.ok && level.score === 1;
-}
-
-/**
- * The public-scale counterpart of the contract's native validator.
- *
- * `ReviewSignals.authDist` is published on 1..10, so the same strict checks apply to
- * that numbering: integer public levels, finite non-negative mass, a non-zero total
- * and a total within protocol rounding of one. It is a separate check rather than a
- * key remap so an adapter cannot quietly hand native keys to this path.
- */
-function validatePublicDistribution(
-  value: unknown,
-):
-  | { readonly ok: true; readonly value: ScoreDistribution }
-  | { readonly ok: false; readonly detail: string } {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      ok: false,
-      detail: 'the authorization distribution is not an object',
-    };
-  }
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return { ok: false, detail: 'the authorization distribution is empty' };
-  }
-  let total = 0;
-  let nonZero = 0;
-  for (const [key, raw] of entries) {
-    const level = Number(key);
-    if (!Number.isInteger(level) || level < 1 || level > 10) {
-      return { ok: false, detail: `level "${key}" is outside 1..10` };
-    }
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
-      return { ok: false, detail: `level ${key} holds no usable probability` };
-    }
-    total += raw;
-    if (raw > 0) nonZero += 1;
-  }
-  if (nonZero === 0) {
-    return { ok: false, detail: 'every level holds zero mass' };
-  }
-  if (Math.abs(total - 1) > SUM_TOLERANCE) {
-    return {
-      ok: false,
-      detail: `total is ${total.toFixed(6)}, which is not 1 within ${String(SUM_TOLERANCE)}`,
-    };
-  }
-  return { ok: true, value: { ...value } };
 }

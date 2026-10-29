@@ -49,6 +49,7 @@ export type ProtocolScores = ChatScores | DecisionScores;
 export type ScoreFailureReason =
   | 'not-an-object'
   | 'level-out-of-range'
+  | 'level-set-incomplete'
   | 'probability-not-finite'
   | 'probability-negative'
   | 'probability-sum-not-one'
@@ -126,6 +127,18 @@ export interface ReviewFailureOutcome {
   readonly status: 'review-failure';
   readonly failures: readonly ScoreFailure[];
   readonly reason: string;
+  /**
+   * Whatever of the answer could still be read, kept for diagnosis only.
+   *
+   * One field can be valid while the other is not, and that valid half is often
+   * what lets a person tell "the reviewer was confused" apart from "the transport
+   * was broken". It never becomes a verdict: no score, verdict or threshold is
+   * derived from a partial read.
+   */
+  readonly diagnostic: {
+    readonly risk: ScoreTrail | null;
+    readonly authorization: ScoreTrail | null;
+  } | null;
 }
 
 /** Everything one review can produce before it is settled. */

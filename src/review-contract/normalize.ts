@@ -74,49 +74,128 @@ export function chatScore(value: unknown):
   return { ok: true, score: value };
 }
 
+/** How many decimal places a protocol probability may carry. */
+const PROBABILITY_DECIMALS = 6;
+
+/**
+ * The integer a decimal probability represents, at protocol precision.
+ *
+ * Comparing and summing floating-point probabilities directly is not sound for
+ * this contract: ten values that sum to one exactly in decimal can accumulate to
+ * 0.5000000000000001 or 0.49999999999999994, and N0's whole point is the
+ * difference between "at least half" and "more than half". Scaling to integers at
+ * the protocol's own precision keeps that distinction exact, so an answer that
+ * really is half is treated as half.
+ */
+export function toUnits(probability: number): number {
+  return Math.round(probability * 10 ** PROBABILITY_DECIMALS);
+}
+
+/** One half, in the same units. */
+export const HALF_UNITS = 5 * 10 ** (PROBABILITY_DECIMALS - 1);
+
 /**
  * What went wrong with one decision field, or that nothing did.
  *
+ * Every distribution must carry exactly the ten canonical levels "0".."9". A
+ * sparse object is not a shorter distribution: its missing mass has not been
+ * reported as anything, so accepting it would invent a total. Non-canonical
+ * spellings such as "00" are rejected for a sharper reason — two keys can name
+ * the same level, and re-keying them onto the public scale would overwrite one
+ * probability with the other and silently lose mass.
+ *
  * The whole distribution is checked before any score is derived, so a rejected
- * field never leaves a partially-read score behind.
+ * field never leaves a partially-read score behind. Messages name the field and a
+ * rule class only; they never echo submitted text, which may be a credential the
+ * provider copied out of its own prompt.
  */
 export function validateNativeDistribution(
   value: unknown,
 ): Either<ScoreDistribution> {
+  return validateDistribution(value, 0, NATIVE_MAX, nativeKeyOf);
+}
+
+/**
+ * The public-scale counterpart of the native validator.
+ *
+ * `ReviewSignals` publishes distributions on 1..10, so the same completeness and
+ * canonical-key rules apply there. It is a separate function rather than a key
+ * remap so an adapter cannot quietly hand native keys to the public path.
+ */
+export function validatePublicDistribution(
+  value: unknown,
+): Either<ScoreDistribution> {
+  return validateDistribution(value, 1, 10, publicKeyOf);
+}
+
+/** The canonical key for one level in the given numbering. */
+function nativeKeyOf(level: number): string | null {
+  return level >= 0 && level <= NATIVE_MAX ? String(level) : null;
+}
+
+function publicKeyOf(level: number): string | null {
+  return level >= 1 && level <= 10 ? String(level) : null;
+}
+
+function validateDistribution(
+  value: unknown,
+  base: 0 | 1,
+  highest: number,
+  canonicalKey: (level: number) => string | null,
+): Either<ScoreDistribution> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return fail(
-      'not-an-object',
-      `expected an object, received ${describe(value)}`,
-    );
+    return fail('not-an-object', 'expected an object of probabilities');
   }
   const entries = Object.entries(value);
+  const keyProblem = checkKeys(entries, base, highest, canonicalKey);
+  if (keyProblem !== null) return keyProblem;
+  return checkProbabilities(entries);
+}
+
+/**
+ * Whether the submitted key set is exactly the canonical one.
+ *
+ * Two separate failures live here, and they are different facts: a key that cannot
+ * name a level at all, and a key set that names fewer levels than the scale has.
+ */
+function checkKeys(
+  entries: readonly (readonly [string, unknown])[],
+  base: 0 | 1,
+  highest: number,
+  canonicalKey: (level: number) => string | null,
+): Either<ScoreDistribution> | null {
   if (entries.length === 0) {
-    return fail('not-an-object', 'expected at least one level, received none');
+    return fail('not-an-object', 'expected ten levels, received none');
   }
+  for (const [key] of entries) {
+    const level = Number(key);
+    if (!Number.isInteger(level) || canonicalKey(level) !== key) {
+      return fail('level-out-of-range', 'a key is not a canonical level');
+    }
+  }
+  const expected = highest - base + 1;
+  return entries.length === expected
+    ? null
+    : fail(
+        'level-set-incomplete',
+        `expected ${String(expected)} canonical levels, received ${String(entries.length)}`,
+      );
+}
+
+/** Every value is a finite, non-negative probability and the total is one. */
+function checkProbabilities(
+  entries: readonly (readonly [string, unknown])[],
+): Either<ScoreDistribution> {
+  const record: Record<string, number> = {};
   let total = 0;
   let nonZero = 0;
   for (const [key, raw] of entries) {
-    const level = Number(key);
-    if (!Number.isInteger(level) || level < 0 || level > NATIVE_MAX) {
-      return fail(
-        'level-out-of-range',
-        `level "${key}" is outside 0..${String(NATIVE_MAX)}`,
-      );
-    }
-    if (typeof raw !== 'number') {
-      return fail(
-        'probability-not-finite',
-        `level ${key} holds ${describe(raw)} rather than a probability`,
-      );
-    }
-    if (!Number.isFinite(raw)) {
-      return fail('probability-not-finite', `level ${key} is not finite`);
-    }
-    if (raw < 0) {
-      return fail('probability-negative', `level ${key} is negative`);
-    }
-    total += raw;
-    if (raw > 0) nonZero += 1;
+    const checked = readProbability(raw);
+    if (typeof checked === 'string') return failProbability(checked, key);
+    record[key] = checked;
+    if (checked === 0) continue;
+    total += checked;
+    nonZero += 1;
   }
   if (nonZero === 0) {
     return fail('probability-sum-not-one', 'every level holds zero mass');
@@ -127,7 +206,32 @@ export function validateNativeDistribution(
       `total is ${total.toFixed(6)}, which is not 1 within ${String(SUM_TOLERANCE)}`,
     );
   }
-  return { ok: true, value: { ...value } };
+  return { ok: true, value: record };
+}
+
+/** One level's value, or the class of problem it has. */
+function readProbability(
+  raw: unknown,
+): number | 'not-a-number' | 'not-finite' | 'negative' {
+  if (typeof raw !== 'number') return 'not-a-number';
+  if (!Number.isFinite(raw)) return 'not-finite';
+  return raw < 0 ? 'negative' : raw;
+}
+
+/** Turn a level's problem class into a bounded, non-echoing failure. */
+function failProbability(
+  problem: 'not-a-number' | 'not-finite' | 'negative',
+  key: string,
+): Either<ScoreDistribution> {
+  if (problem === 'negative') {
+    return fail('probability-negative', `level ${key} is negative`);
+  }
+  return fail(
+    'probability-not-finite',
+    problem === 'not-finite'
+      ? `level ${key} is not finite`
+      : `level ${key} does not hold a number`,
+  );
 }
 
 /** The cumulative mass through one native level, inclusive. */
@@ -135,9 +239,25 @@ export function cumulative(
   distribution: ScoreDistribution,
   level: number,
 ): number {
+  return cumulativeUnits(distribution, level, 0) / 10 ** PROBABILITY_DECIMALS;
+}
+
+/**
+ * The cumulative mass in integer units, so a comparison against one half is exact.
+ *
+ * Adding floats can turn an exact half into 0.5000000000000001 or
+ * 0.49999999999999994 depending on the order of the terms, which is precisely the
+ * distinction N0 depends on.
+ */
+function cumulativeUnits(
+  distribution: ScoreDistribution,
+  level: number,
+  base: 0 | 1,
+): number {
   let sum = 0;
   for (const [key, value] of Object.entries(distribution)) {
-    if (Number(key) <= level) sum += value;
+    const index = Number(key);
+    if (index >= base && index <= level) sum += toUnits(value);
   }
   return sum;
 }
@@ -158,10 +278,12 @@ export function bandFrom(
   rule: 'risk' | 'authorization',
 ): PublicScore {
   const highest = base === 0 ? NATIVE_MAX : 10;
-  let running = 0;
   for (let level = base; level <= highest; level += 1) {
-    running += distribution[String(level)] ?? 0;
-    const reached = rule === 'risk' ? running > 0.5 : running >= 0.5;
+    // Integer units throughout: an exact half must stay exactly half, or the two
+    // rules would agree where the contract says they must differ.
+    const running = cumulativeUnits(distribution, level, base);
+    const reached =
+      rule === 'risk' ? running > HALF_UNITS : running >= HALF_UNITS;
     if (reached) return publicScoreAt(level, base);
   }
   // Unreachable for a validated distribution: a total of one always crosses one
@@ -225,7 +347,14 @@ export function readProtocolScores(scores: ProtocolScores):
       readonly authorization: PublicScore;
       readonly audit: ScoreAudit;
     }
-  | { readonly ok: false; readonly failures: readonly ScoreFailure[] } {
+  | {
+      readonly ok: false;
+      readonly failures: readonly ScoreFailure[];
+      readonly diagnostic: {
+        readonly risk: ScoreTrail | null;
+        readonly authorization: ScoreTrail | null;
+      };
+    } {
   return scores.source === 'chat'
     ? readChatScores(scores)
     : readDecisionScores(scores);
@@ -238,7 +367,14 @@ function readChatScores(scores: ChatScores):
       readonly authorization: PublicScore;
       readonly audit: ScoreAudit;
     }
-  | { readonly ok: false; readonly failures: readonly ScoreFailure[] } {
+  | {
+      readonly ok: false;
+      readonly failures: readonly ScoreFailure[];
+      readonly diagnostic: {
+        readonly risk: ScoreTrail | null;
+        readonly authorization: ScoreTrail | null;
+      };
+    } {
   const failures: ScoreFailure[] = [];
   const risk = chatScore(scores.risk);
   if (!risk.ok) {
@@ -252,7 +388,18 @@ function readChatScores(scores: ChatScores):
       detail: authorization.detail,
     });
   }
-  if (!risk.ok || !authorization.ok) return { ok: false, failures };
+  if (!risk.ok || !authorization.ok) {
+    return {
+      ok: false,
+      failures,
+      diagnostic: {
+        risk: risk.ok ? pointTrail(risk.score) : null,
+        authorization: authorization.ok
+          ? pointTrail(authorization.score)
+          : null,
+      },
+    };
+  }
   return {
     ok: true,
     risk: risk.score,
@@ -271,7 +418,14 @@ function readDecisionScores(scores: DecisionScores):
       readonly authorization: PublicScore;
       readonly audit: ScoreAudit;
     }
-  | { readonly ok: false; readonly failures: readonly ScoreFailure[] } {
+  | {
+      readonly ok: false;
+      readonly failures: readonly ScoreFailure[];
+      readonly diagnostic: {
+        readonly risk: ScoreTrail | null;
+        readonly authorization: ScoreTrail | null;
+      };
+    } {
   const failures: ScoreFailure[] = [];
   const risk = validateNativeDistribution(scores.risk);
   if (!risk.ok) {
@@ -285,7 +439,20 @@ function readDecisionScores(scores: DecisionScores):
       detail: authorization.detail,
     });
   }
-  if (!risk.ok || !authorization.ok) return { ok: false, failures };
+  if (!risk.ok || !authorization.ok) {
+    // The half that did read is kept as diagnostic evidence; the half that did not
+    // stays null rather than being guessed at.
+    return {
+      ok: false,
+      failures,
+      diagnostic: {
+        risk: risk.ok ? distributionTrail(risk.value, 'risk') : null,
+        authorization: authorization.ok
+          ? distributionTrail(authorization.value, 'authorization')
+          : null,
+      },
+    };
+  }
   return {
     ok: true,
     risk: bandFromNative(risk.value, 'risk'),
@@ -326,17 +493,18 @@ function fail(reason: ScoreFailureReason, detail: string): Either<never> {
   return { ok: false, reason, detail };
 }
 
-/** A bounded, non-echoing description of an unexpected value. */
+/**
+ * A non-echoing description of an unexpected value.
+ *
+ * It names the *kind* only. Echoing the submitted value would copy provider output
+ * into an error field, a review reason and the audit record — and that output can
+ * contain a credential the provider repeated from its own prompt.
+ */
 function describe(value: unknown): string {
   if (value === null) return 'null';
   if (Array.isArray(value)) return 'an array';
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (typeof value === 'string') {
-    return value.length > 32
-      ? `a string of length ${String(value.length)}`
-      : value;
-  }
+  if (typeof value === 'number') return 'a number';
+  if (typeof value === 'string') return 'a string';
+  if (typeof value === 'boolean') return 'a boolean';
   return typeof value;
 }

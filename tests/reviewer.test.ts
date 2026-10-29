@@ -505,6 +505,75 @@ describe('decision reviewer run', () => {
   });
 });
 
+describe('credential redaction on a malformed answer', () => {
+  // #90/#91 require a credential the provider echoes to stay out of attempt
+  // records, returned errors and audit data. The score validator is a place that
+  // could reintroduce it: it reads provider-controlled keys and values, so its
+  // messages must name a rule class and never repeat what was submitted.
+  const SECRET = 'test-credential-xyz';
+
+  const answerWithSecret = (): string =>
+    JSON.stringify({
+      model: 'clef',
+      answers: {
+        // An invalid value in a valid-looking field: the value is the secret.
+        risk: { type: 'score', probabilities: { '0': SECRET }, score: 1 },
+        authorized: { type: 'score', probabilities: { 0: 1 }, score: 1 },
+        secrets: { type: 'noul', noul: 0.01 },
+        destructive: { type: 'noul', noul: 0.01 },
+        egress: { type: 'noul', noul: 0.01 },
+        bulk: { type: 'noul', noul: 0.01 },
+      },
+      usage: {},
+    });
+
+  const runWith = async (body: string) =>
+    runDecisionReviewer(
+      {
+        fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+        credentials: { resolve: () => Promise.resolve({ value: SECRET }) },
+        decision: {
+          url: 'https://example.test/review',
+          model: 'clef',
+          apiKeyRef: 'TEST_KEY',
+          timeoutMs: 1000,
+          costTier: 'free',
+        },
+        thresholds,
+        signal: new AbortController().signal,
+      },
+      snapshot,
+      { user: 'STATE', estimatedInputTokens: 10 },
+      'call-leak',
+    );
+
+  test('a secret in a probability value reaches no returned field', async () => {
+    const result = await runWith(answerWithSecret());
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    // The failure is still classified, so the reason stays useful.
+    expect(result.ok ? '' : result.error).toContain('probability');
+  });
+
+  test('a secret in an object key reaches no returned field', async () => {
+    const body = JSON.stringify({
+      model: 'clef',
+      answers: {
+        risk: { type: 'score', probabilities: { [SECRET]: 1 }, score: 1 },
+        authorized: { type: 'score', probabilities: { 0: 1 }, score: 1 },
+        secrets: { type: 'noul', noul: 0.01 },
+        destructive: { type: 'noul', noul: 0.01 },
+        egress: { type: 'noul', noul: 0.01 },
+        bulk: { type: 'noul', noul: 0.01 },
+      },
+      usage: {},
+    });
+    const result = await runWith(body);
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+});
+
 /** A minimal request body builder so each shape test reads as one assertion. */
 async function postedBody(url: string): Promise<Record<string, unknown>> {
   let received: unknown = null;
@@ -985,13 +1054,27 @@ describe('calibrated cross-protocol parity', () => {
   // spellings: the two protocols must reach one verdict for one set of facts.
   // Each pair below states the same authorization and risk situation twice, once
   // as chat point values and once as a decision distribution.
+  //
+  // Every distribution below is written out as the complete canonical ten levels,
+  // because that is what the contract requires of a real answer — a sparse object
+  // is rejected rather than read as a shorter distribution. `complete()` below is
+  // test scaffolding for that requirement, not a production repair path.
+  const complete = (
+    mass: Readonly<Record<string, number>>,
+  ): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (let level = 0; level <= 9; level += 1) {
+      out[String(level)] = mass[String(level)] ?? 0;
+    }
+    return out;
+  };
   const pairs = [
     {
       name: 'explicit authorization on a medium in-project write',
       chat: { risk: 5, authorized: 9 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '8': 0.85, '9': 0.15 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '8': 0.85, '9': 0.15 }) },
       },
       expected: 'review-allow',
     },
@@ -1002,8 +1085,8 @@ describe('calibrated cross-protocol parity', () => {
       name: 'no authorization on the same write',
       chat: { risk: 5, authorized: 2 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '1': 0.9, '3': 0.1 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '1': 0.9, '3': 0.1 }) },
       },
       expected: 'review-escalate',
     },
@@ -1013,8 +1096,8 @@ describe('calibrated cross-protocol parity', () => {
       name: 'an effective prohibition on the same write',
       chat: { risk: 5, authorized: 1 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '0': 0.85, '9': 0.15 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '0': 0.85, '9': 0.15 }) },
       },
       expected: 'review-deny',
     },
@@ -1022,8 +1105,8 @@ describe('calibrated cross-protocol parity', () => {
       name: 'a goal-level hint on the same write',
       chat: { risk: 5, authorized: 6 },
       decision: {
-        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
-        authorized: { probabilities: { '5': 0.9, '6': 0.1 } },
+        risk: { probabilities: complete({ '4': 0.2, '5': 0.6, '6': 0.2 }) },
+        authorized: { probabilities: complete({ '5': 0.9, '6': 0.1 }) },
       },
       expected: 'review-escalate',
     },

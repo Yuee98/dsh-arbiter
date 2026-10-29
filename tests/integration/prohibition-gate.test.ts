@@ -115,6 +115,17 @@ function chatAnswer(answer: {
   };
 }
 
+/** A native distribution from the levels that carry mass, complete to ten. */
+function native(
+  mass: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (let level = 0; level <= 9; level += 1) {
+    out[String(level)] = mass[String(level)] ?? 0;
+  }
+  return out;
+}
+
 /** A decision-protocol reviewer that answers with two native distributions. */
 function decisionAnswer(answer: {
   readonly risk: Record<string, number>;
@@ -258,8 +269,8 @@ describe('an effective prohibition through the real gate', () => {
     const session = makeSession('p-dec-a1');
     const realFetch = globalThis.fetch;
     globalThis.fetch = decisionAnswer({
-      risk: { '0': 1 },
-      authorization: { '0': 0.6, '9': 0.4 },
+      risk: native({ '0': 1 }),
+      authorization: native({ '0': 0.6, '9': 0.4 }),
     });
     const harness = createHarness({
       session,
@@ -283,8 +294,8 @@ describe('an effective prohibition through the real gate', () => {
     const session = makeSession('p-dec-a10');
     const realFetch = globalThis.fetch;
     globalThis.fetch = decisionAnswer({
-      risk: { '0': 1 },
-      authorization: { '0': 0.4, '9': 0.6 },
+      risk: native({ '0': 1 }),
+      authorization: native({ '0': 0.4, '9': 0.6 }),
     });
     const harness = createHarness({
       session,
@@ -328,8 +339,8 @@ describe('the decision adapter publishes public keys to the engine', () => {
     const session = makeSession('p-keys');
     const realFetch = globalThis.fetch;
     globalThis.fetch = decisionAnswer({
-      risk: { '0': 1 },
-      authorization: { '0': 0.4, '9': 0.6 },
+      risk: native({ '0': 1 }),
+      authorization: native({ '0': 0.4, '9': 0.6 }),
     });
     const harness = createHarness({
       session,
@@ -344,15 +355,15 @@ describe('the decision adapter publishes public keys to the engine', () => {
       const keys = Object.keys(authDist)
         .map(Number)
         .sort((a, b) => a - b);
-      // The adapter publishes the public band for each submitted level. The two
-      // levels that carried mass are 1 and 10 — native 0 and 9 shifted by one —
-      // and no key sits outside 1..10, which is what tells this apart from the
-      // native numbering.
-      expect(keys).toEqual([1, 10]);
-      for (const key of keys) {
-        expect(key).toBeGreaterThanOrEqual(1);
-        expect(key).toBeLessThanOrEqual(10);
-      }
+      // The adapter publishes the public band for each submitted level. A valid
+      // answer carries all ten canonical levels, so the published form does too,
+      // shifted by one: no key is 0 and none exceeds 10, which is what tells this
+      // apart from the native numbering.
+      expect(keys).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(keys).not.toContain(0);
+      // The mass submitted at native 0 and 9 lands on public 1 and 10.
+      expect(authDist['1']).toBeCloseTo(0.4, 10);
+      expect(authDist['10']).toBeCloseTo(0.6, 10);
       expect(Object.values(authDist).reduce((a, b) => a + b, 0)).toBeCloseTo(
         1,
         10,
