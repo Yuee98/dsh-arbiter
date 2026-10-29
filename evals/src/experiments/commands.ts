@@ -200,7 +200,7 @@ export async function planExperiment(
   io.out(
     `budget maxRequests ${String(definition.budget.maxRequests)} measured ${String(requiredRequests(definition, matrix, cache))} (matrix ${String(matrix.cells)} + cache ${String(cache.requests)}); maxInputTokensTotal ${String(definition.budget.maxInputTokensTotal)} measured ${String(matrix.estimatedInputTokens + cache.estimatedInputTokens)}`,
   );
-  const problems = budgetProblemsOf(definition, matrix, cache);
+  const problems = experimentProblemsOf(definition, matrix, cache, cases);
   for (const problem of problems) io.err(`problem ${problem}`);
   if (problems.length > 0) return 1;
   io.out('dry run only: nothing was sent and nothing was written');
@@ -260,16 +260,40 @@ export function requiredRequests(
 }
 
 /**
+ * Everything the three experiment commands refuse a definition for.
+ *
+ * `plan`, `check-all` and `record` all call this. They previously validated different
+ * subsets, so a definition that `plan` called ready could be refused by `record` — and a
+ * dry run that advertises a validated plan has to be the same standard the writing
+ * command applies.
+ */
+export function experimentProblemsOf(
+  definition: ExperimentDefinition,
+  matrix: ExpandedMatrix,
+  cache: CacheExpansion,
+  cases: readonly { readonly caseId: string }[],
+): readonly string[] {
+  return [
+    ...cacheProblems({
+      expansion: cache,
+      definition: definition.cache,
+      bounds: definition.bounds,
+      caseIds: cases.map((entry) => entry.caseId),
+    }),
+    ...budgetProblemsOf(definition, matrix, cache),
+  ];
+}
+
+/**
  * Why a measured experiment does not fit its declared budget or its run bounds.
  *
- * Three separate ceilings have to agree, and each failure has its own message because
- * each needs a different correction:
+ * Four separate ceilings have to agree, and each failure has its own message because each
+ * needs a different correction:
  *
  *   - `budget.maxRequests` bounds every request, repairs included;
  *   - `budget.maxInputTokensTotal` bounds the measured total;
  *   - `bounds.maxAttempts` bounds the attempts of **one bounded run**, so a matrix that
- *     needs more dispatches than that has to be partitioned into runs rather than sent
- *     as one;
+ *     needs more dispatches than that has no single run that could finish it;
  *   - `bounds.maxInputTokens` bounds a single request, so a cell measured above it is one
  *     the runner would refuse rather than send.
  */
@@ -382,18 +406,16 @@ export async function checkExperiments(io: ExperimentIo): Promise<number> {
       for (const problem of expanded.problems) io.err(`problem ${problem}`);
       continue;
     }
-    const { definition, matrix, cache } = expanded.expanded;
+    const { definition, matrix, cache, cases } = expanded.expanded;
     io.out(
       `${path}: ${definition.experimentId}, ${String(definition.candidates.length)} candidates, ${String(matrix.cells)} cells, ${String(cache.requests)} cache request(s), ${String(matrix.estimatedInputTokens + cache.estimatedInputTokens)} estimated input tokens`,
     );
-    for (const problem of [
-      ...cacheProblems({
-        expansion: cache,
-        definition: definition.cache,
-        bounds: definition.bounds,
-      }),
-      ...budgetProblemsOf(definition, matrix, cache),
-    ]) {
+    for (const problem of experimentProblemsOf(
+      definition,
+      matrix,
+      cache,
+      cases,
+    )) {
       failed += 1;
       io.err(`problem ${problem}`);
     }

@@ -32,13 +32,12 @@ import { digestOf } from '../data/hash.js';
 
 import { definitionProblems, resolveCandidates } from './inspect.js';
 import {
-  budgetProblemsOf,
   expandCacheWorkload,
+  experimentProblemsOf,
   RECORD_VERSION,
   requiredRequests,
 } from './commands.js';
 import type { ExperimentIo } from './commands.js';
-import { cacheProblems } from './cache.js';
 import type { CacheExpansion } from './cache.js';
 import { loadCases, loadDefinition } from './load.js';
 import { expandMatrix } from './matrix.js';
@@ -274,12 +273,7 @@ export async function recordExperiment(
   }
   const problems = [
     ...definitionProblems(loaded.definition),
-    ...cacheProblems({
-      expansion: cache,
-      definition: loaded.definition.cache,
-      bounds: loaded.definition.bounds,
-    }),
-    ...budgetProblemsOf(loaded.definition, matrix, cache),
+    ...experimentProblemsOf(loaded.definition, matrix, cache, cases.cases),
   ];
   if (problems.length > 0) {
     for (const problem of problems) io.err(`problem ${problem}`);

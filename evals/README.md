@@ -262,7 +262,7 @@ pnpm evals:experiments record <定义.json>      # 写出冻结的 experiments/r
 - `budget.maxInputTokensTotal`：全部请求的输入估计之和；
 - `bounds.maxAttempts`／`bounds.maxInputTokens`：单次运行的尝试上限与单条请求的输入上限（沿用 RQ-10 的 `RunBounds`）。实测超过单请求上限的格会被点名拒绝，因为运行器会拒发它；变体渲染也一起核对，B 多出的问题可能撑大生产本身放得下的请求。
 
-缓存工作负载不只是「冷请求 → 稳定前缀 → 变化动作」的标签：`cache.baseCaseId` 与 `cache.changedActionCaseIds` 指明材料，`plan`／`check-all` 会逐条渲染并校验稳定前缀逐字一致、changed-action 确实改变动作。**命中与否只读 provider 自己报告的计数**（经 `review-usage-v1` 映射），未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。
+缓存工作负载不只是「冷请求 → 稳定前缀 → 变化动作」的标签：`cache.baseCaseId` 与 `cache.changedActionCaseIds` 指明材料，合成在 case 层完成（身份、policy、证据、session 与工作目录取基线，动作取动作 case），再走生产的 `caseMaterial`，因此派生事实在提交的工作目录里求值、合成请求也按生产预算裁剪。`plan`／`check-all`／`record` 共用同一套校验：逐条渲染并核对稳定前缀逐字一致、changed-action 确实改变动作、每个 changed 槽位提交自己的动作、没有未发布的动作 case。**命中与否只读 provider 自己报告的计数**（经 `review-usage-v1` 映射），未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。
 
 ## 目录
 

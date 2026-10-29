@@ -55,11 +55,18 @@ withdrawn | recoverable | partially-recoverable | irreversible | unknown
 - `cache.baseCaseId`：所有请求共享的 policy、环境、许可、历史与完整性；冷请求提交它自己的动作。
 - `cache.changedActionCaseIds`：changed-action 槽位按顺序提交这些 case 的动作，前缀仍是基线 case。**列出来而不是推断**，所以调大某个槽位的 `repeats` 会变成真实请求，且必须有真实动作，否则校验失败。
 
-`plan` / `check-all` 会逐条渲染这 5 条请求并测量，`record.json` 的 `cache.expanded` 记录每条请求的 case、角色、输入估计、稳定前缀指纹，以及与矩阵格逐字节相同的项。三条性质是**被测出来的**，不是写死的：
+合成发生在 **case 层**：每个请求是一个 case，其身份、policy、证据、session 与工作目录取自基线 case，动作取自动作 case；合成后的 case 再走 `caseMaterial`，也就是生产路径 —— 求事实、装快照、按输入预算裁剪、生成完整性报告、渲染。两条后果让工作负载诚实而不是近似：
+
+- 派生事实在**基线 case 的目录**里求值：相对路径按审查者被告知的工作目录解析，用动作 case 自己的 `cwd` 会提交一条命令行与一组效果指向两个不同目录的请求。
+- 合成请求重新走生产的裁剪步骤，所以更大的动作会按生产同样的方式被裁剪并标记；`OVER_BUDGET` 描述的是这一条请求，而不是它替换掉的基线 case。
+
+`plan` / `check-all` / `record` 调用**同一个** `experimentProblemsOf`，所以干跑判为可用的定义不会被写记录的命令拒绝。`record.json` 的 `cache.expanded` 记录每条请求的 case、角色、输入估计、稳定前缀指纹，以及与矩阵格逐字节相同的项。三条性质是**被测出来的**，不是写死的：
 
 - 全部请求的 `stablePrefixFingerprint` 相同（provider 前缀缓存唯一能依赖的东西）；
 - changed-action 的 `actionFingerprint` 与冷请求不同，且彼此不同；
 - 非 changed 槽位的 `actionFingerprint` 与冷请求完全相同。
+
+校验拒绝的状态包括：没有 changed-action 槽位；声明了数据集未发布的动作 case；展开后的请求数/变化动作数与声明不符；两个 changed 槽位提交同一个动作；动作区超过单请求上限（含 `OVER_BUDGET`）；稳定前缀不唯一。changed-action 游标在槽位之间**累积**，所以把一个 `× 2` 拆成两个 `× 1` 会提交两个不同动作，而不是重复第一个。
 
 `byteIdenticalToMatrix` 只记录哪些请求与某个矩阵格逐字节相同，**不抵扣预算**：那一次派发是否真的发生过属于执行事实，规划不能预先声称省下一条。
 

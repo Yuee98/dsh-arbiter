@@ -28,9 +28,18 @@ import {
 import type { ExperimentIo } from '../../evals/src/experiments/commands.js';
 import {
   budgetProblemsOf,
+  experimentProblemsOf,
   requiredRequests,
 } from '../../evals/src/experiments/commands.js';
-import { cacheProblems } from '../../evals/src/experiments/cache.js';
+import { resolveCandidates } from '../../evals/src/experiments/inspect.js';
+import { loadCases } from '../../evals/src/experiments/load.js';
+import { caseMaterial } from '../../evals/src/run/material.js';
+import {
+  cacheProblems,
+  cacheStepsOf,
+  composedCase,
+  expandCache,
+} from '../../evals/src/experiments/cache.js';
 import { splitAtAction } from '../../evals/src/experiments/matrix.js';
 import { definitionProblems } from '../../evals/src/experiments/inspect.js';
 import type { ExperimentCell } from '../../evals/src/experiments/matrix.js';
@@ -38,6 +47,7 @@ import {
   compileExperimentCheckers,
   EXPERIMENT_SCHEMA,
 } from '../../evals/src/experiments/schemas.js';
+import type { ReviewCase } from '../../evals/src/data/types.js';
 import { EXPERIMENT_VERSION } from '../../evals/src/experiments/types.js';
 import type { ExperimentDefinition } from '../../evals/src/experiments/types.js';
 import {
@@ -87,6 +97,12 @@ function planReportOnce(): Promise<{
   })();
   return planReport;
 }
+
+/** The committed definition with its selected cases, computed once for these cases. */
+let expandedSelection: Promise<{
+  readonly definition: ExperimentDefinition;
+  readonly cases: readonly ReviewCase[];
+}> | null = null;
 
 /** The expanded committed matrix, computed once for the whole file. */
 let committedExpansion: Promise<
@@ -644,6 +660,241 @@ describe('the cache workload is a measured sequence', () => {
     return check().then((problems) => {
       expect(problems.join('\n')).toContain('same changed action');
     });
+  });
+});
+
+describe('the cache workload refuses material it cannot measure', () => {
+  /** The committed definition's selection, expanded once for this block. */
+  const selection = (): Promise<{
+    readonly definition: ExperimentDefinition;
+    readonly cases: readonly ReviewCase[];
+  }> => {
+    expandedSelection ??= (async () => {
+      const definition = await committedDefinition();
+      const loaded = await loadCases(QUIET, definition);
+      if (!loaded.ok) throw new Error(loaded.problems.join('; '));
+      return { definition, cases: loaded.cases };
+    })();
+    return expandedSelection;
+  };
+
+  /** One candidate, resolved, for a workload built directly. */
+  const candidateA = async (): Promise<
+    ReturnType<typeof resolveCandidates>[number]
+  > => {
+    const { definition } = await selection();
+    const [first] = resolveCandidates(definition);
+    if (first === undefined) throw new Error('no candidate');
+    return first;
+  };
+
+  test('refuses a sequence with no changed action at all', async () => {
+    const { cases } = await selection();
+    const sequence = [
+      { role: 'cold' as const, repeats: 1 },
+      { role: 'stable-prefix' as const, repeats: 2 },
+    ];
+    const expansion = expandCache({
+      candidate: await candidateA(),
+      cases,
+      protocol: 'chat',
+      baseCaseId: 'delete-generated-output-authorized',
+      sequence,
+      changedActionCaseIds: [],
+      maxInputTokens: 20_000,
+    });
+    // A warm-up workload measures a prefix re-use and nothing about whether the action
+    // moved, which is one of the three things the issue requires.
+    expect(
+      cacheProblems({
+        expansion,
+        definition: {
+          sequence,
+          baseCaseId: 'delete-generated-output-authorized',
+          changedActionCaseIds: [],
+        },
+        bounds: { maxInputTokens: 20_000 },
+        caseIds: cases.map((entry) => entry.caseId),
+      }).join('\n'),
+    ).toContain('no changed-action request');
+  });
+
+  test('refuses an action case the selection does not publish', async () => {
+    const { cases } = await selection();
+    const sequence = [
+      { role: 'cold' as const, repeats: 1 },
+      { role: 'changed-action' as const, repeats: 1 },
+    ];
+    const expansion = expandCache({
+      candidate: await candidateA(),
+      cases,
+      protocol: 'chat',
+      baseCaseId: 'delete-generated-output-authorized',
+      sequence,
+      changedActionCaseIds: ['no-such-case'],
+      maxInputTokens: 20_000,
+    });
+    // The request would silently disappear; the count check catches the shortfall and
+    // the id check names which case is missing.
+    const problems = cacheProblems({
+      expansion,
+      definition: {
+        sequence,
+        baseCaseId: 'delete-generated-output-authorized',
+        changedActionCaseIds: ['no-such-case'],
+      },
+      bounds: { maxInputTokens: 20_000 },
+      caseIds: cases.map((entry) => entry.caseId),
+    }).join('\n');
+    expect(problems).toContain('expands to 1');
+    expect(problems).toContain('no-such-case');
+  });
+
+  test('keeps the changed-action cursor cumulative across slots', async () => {
+    const { cases } = await selection();
+    // Splitting one `changed-action x2` into two `x1` slots must submit two different
+    // actions: a cursor that restarts per slot would repeat the first and drop the second.
+    const steps = cacheStepsOf({
+      sequence: [
+        { role: 'cold', repeats: 1 },
+        { role: 'changed-action', repeats: 1 },
+        { role: 'changed-action', repeats: 1 },
+      ],
+      baseCaseId: 'delete-generated-output-authorized',
+      changedActionCaseIds: [
+        'delete-uncommitted-drafts',
+        'cleanup-stale-cache-dir',
+      ],
+    });
+    expect(steps.map((step) => step.actionCaseId)).toEqual([
+      'delete-generated-output-authorized',
+      'delete-uncommitted-drafts',
+      'cleanup-stale-cache-dir',
+    ]);
+    // And the expansion agrees with the steps rather than re-deriving them.
+    const expansion = expandCache({
+      candidate: await candidateA(),
+      cases,
+      protocol: 'chat',
+      baseCaseId: 'delete-generated-output-authorized',
+      sequence: [
+        { role: 'cold', repeats: 1 },
+        { role: 'changed-action', repeats: 1 },
+        { role: 'changed-action', repeats: 1 },
+      ],
+      changedActionCaseIds: [
+        'delete-uncommitted-drafts',
+        'cleanup-stale-cache-dir',
+      ],
+      maxInputTokens: 20_000,
+    });
+    expect(
+      expansion.cells
+        .filter((cell) => cell.role === 'changed-action')
+        .map((cell) => cell.actionCaseId),
+    ).toEqual(['delete-uncommitted-drafts', 'cleanup-stale-cache-dir']);
+  });
+
+  test('evaluates a composed action in the directory it is told it runs in', async () => {
+    const { cases } = await selection();
+    const base = cases.find(
+      (entry) => entry.caseId === 'delete-generated-output-authorized',
+    );
+    const action = cases.find(
+      (entry) => entry.caseId === 'delete-uncommitted-drafts',
+    );
+    if (base === undefined || action === undefined) {
+      throw new Error('the committed selection changed');
+    }
+    // The action case has its own directory; the composition deliberately keeps the base
+    // case's, so the command line and the derived effects describe one place.
+    expect(base.input.cwd).not.toBe(action.input.cwd);
+    const composed = caseMaterial(composedCase(base, action), 'chat', {
+      maxInputTokens: 20_000,
+    });
+    expect(composed.snapshot.cwd).toBe(base.input.cwd);
+    // The relative path resolved against the submitted directory, not the action case's.
+    expect(composed.snapshot.facts?.observed.writes).toContain(
+      `${String(base.input.cwd)}/drafts/export-2026-10-29`,
+    );
+    // The base case's hint would point at an action this request does not submit, so
+    // it is not inherited; the action case's own hint still travels with its action.
+    expect(composed.snapshot.hint).toBeUndefined();
+    const hinted = {
+      ...action,
+      input: { ...action.input, hint: 'a hint that belongs to this action' },
+    };
+    expect(composedCase(base, hinted).input.hint).toBe(
+      'a hint that belongs to this action',
+    );
+  });
+
+  test('refuses a cache request measured above the per-request ceiling', async () => {
+    const { cases } = await selection();
+    const sequence = [
+      { role: 'cold' as const, repeats: 1 },
+      { role: 'changed-action' as const, repeats: 1 },
+    ];
+    const expansion = expandCache({
+      candidate: await candidateA(),
+      cases,
+      protocol: 'chat',
+      baseCaseId: 'delete-generated-output-authorized',
+      sequence,
+      changedActionCaseIds: ['delete-uncommitted-drafts'],
+      maxInputTokens: 20_000,
+    });
+    // The measured comparison, not only the production marker: an inherited flag would
+    // describe a smaller submission than the one this request contains.
+    const problems = cacheProblems({
+      expansion,
+      definition: {
+        sequence,
+        baseCaseId: 'delete-generated-output-authorized',
+        changedActionCaseIds: ['delete-uncommitted-drafts'],
+      },
+      bounds: { maxInputTokens: 10 },
+      caseIds: cases.map((entry) => entry.caseId),
+    }).join('\n');
+    expect(problems).toContain('per-request ceiling');
+    expect(problems).toContain('measures');
+  });
+
+  test('the plan refuses a workload check-all would refuse', async () => {
+    const document = await editable();
+    objectAt(document, 'cache')['changedActionCaseIds'] = [
+      // A real, selected case whose action is identical to the cold request's.
+      'delete-generated-output-no-permission',
+      'delete-uncommitted-drafts',
+    ];
+    await withDocument(document, async (path) => {
+      const io = recorder();
+      expect(await planExperiment(io, path)).toBe(1);
+      // The same standard the writing command applies, on the entry point that
+      // advertises a validated dry run.
+      expect(io.problems.join('\n')).toContain('unchanged');
+    });
+  });
+});
+
+describe('the three commands agree on what is valid', () => {
+  test('share one problem set', async () => {
+    const expanded = await expansionOnce();
+    if (!expanded.ok) return;
+    const { definition, cases, matrix, cache } = expanded.expanded;
+    // `experimentProblemsOf` is what plan, check-all and record all call; a command that
+    // assembled its own subset could accept what another refuses.
+    expect(experimentProblemsOf(definition, matrix, cache, cases)).toEqual([
+      ...cacheProblems({
+        expansion: cache,
+        definition: definition.cache,
+        bounds: definition.bounds,
+        caseIds: cases.map((entry) => entry.caseId),
+      }),
+      ...budgetProblemsOf(definition, matrix, cache),
+    ]);
+    // And the committed definition passes it.
+    expect(experimentProblemsOf(definition, matrix, cache, cases)).toEqual([]);
   });
 });
 

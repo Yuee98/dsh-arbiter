@@ -13,10 +13,20 @@
  *   action region   the action block, its derived facts, the hint, and the completeness
  *                   report. This is what a new action changes.
  *
- * The base case supplies everything in the prefix; each step's action case supplies only
- * the action region. That is exactly the situation the design describes — consecutive
- * actions in one session share the policy, environment, authorization and turn history —
- * and it means the workload is built from committed cases rather than invented material.
+ * The composition happens at the *case* level, not the snapshot level. A step's request is
+ * a case whose identity, policy, evidence, session and working directory are the base
+ * case's and whose action is the action case's; that composed case then goes through
+ * `caseMaterial`, which is the production path: evaluate the facts, assemble the snapshot,
+ * trim it against the input budget, build the completeness report, render. Two
+ * consequences make the workload honest rather than approximate:
+ *
+ *   - derived facts are evaluated in the directory the reviewer is told the call runs in.
+ *     A relative path resolves against that directory, so deriving facts from the action
+ *     case's own `cwd` would submit a command line and a write target that describe two
+ *     different directories.
+ *   - the composed request is trimmed by production's own budget step, so a larger action
+ *     is bounded exactly as production would bound it and `OVER_BUDGET` describes the
+ *     request that would actually be sent rather than the base case it replaced.
  *
  * Nothing here sends anything, and nothing here claims a cache hit: the provider's
  * counters are read later, and an unreported counter stays unknown.
@@ -25,17 +35,12 @@
 import type { ReviewCase } from '../data/types.js';
 import { digestOf } from '../data/hash.js';
 
-import type { ReviewSnapshot } from '../../../src/types.js';
-import { caseFacts } from '../run/material.js';
+import { caseMaterial } from '../run/material.js';
 import type { RunProtocol } from '../run/types.js';
 
 import type { ResolvedCandidate } from './inspect.js';
-import {
-  materialFor,
-  measuredOf,
-  splitAtAction,
-  type MaterialCache,
-} from './matrix.js';
+import { measuredOf } from './matrix.js';
+import { splitAtAction } from './matrix.js';
 import type { CacheSlot } from './types.js';
 
 /** One rendered request of the cache workload. */
@@ -75,6 +80,7 @@ export interface CacheCell {
    * plan. Every request here is charged as its own dispatch.
    */
   readonly sameAsMatrixCell: string | null;
+  /** Whether production's budget marked this exact request over its own bind. */
   readonly overBudget: boolean;
 }
 
@@ -94,7 +100,7 @@ export interface CacheExpansion {
   readonly byteIdenticalToMatrix: number;
 }
 
-/** One slot's case ids, resolved in order. */
+/** One slot's resolved request, in the order the sequence asks for it. */
 interface CacheStep {
   readonly role: CacheSlot['role'];
   readonly actionCaseId: string;
@@ -102,12 +108,11 @@ interface CacheStep {
 }
 
 /**
- * The sequence as concrete requests.
+ * The sequence as concrete requests, in order.
  *
- * `cold` and `stable-prefix` re-submit the base case's own action; `changed-action`
- * walks `changedActionCaseIds` in order. A repeat index with no matching action is
- * dropped here and reported by {@link cacheProblems}, so a workload that asks for more
- * actions than it declares is refused rather than measured against a repeated case.
+ * The changed-action cursor is cumulative across slots, not reset per slot: splitting one
+ * `changed-action × 2` into two `× 1` slots has to submit two different actions, because a
+ * workload that submits the same action twice cannot show that an action changed.
  */
 export function cacheStepsOf(parts: {
   readonly sequence: readonly CacheSlot[];
@@ -115,53 +120,61 @@ export function cacheStepsOf(parts: {
   readonly changedActionCaseIds: readonly string[];
 }): readonly CacheStep[] {
   const steps: CacheStep[] = [];
+  let cursor = 0;
   for (const slot of parts.sequence) {
     for (let repeat = 1; repeat <= slot.repeats; repeat += 1) {
-      const actionCaseId =
-        slot.role === 'changed-action'
-          ? (parts.changedActionCaseIds[repeat - 1] ?? '')
-          : parts.baseCaseId;
-      steps.push({ role: slot.role, actionCaseId, repeat });
+      if (slot.role === 'changed-action') {
+        cursor += 1;
+        steps.push({
+          role: slot.role,
+          actionCaseId: parts.changedActionCaseIds[cursor - 1] ?? '',
+          repeat,
+        });
+        continue;
+      }
+      steps.push({
+        role: slot.role,
+        actionCaseId: parts.baseCaseId,
+        repeat,
+      });
     }
   }
   return steps;
 }
 
 /**
- * The snapshot one cache request submits.
+ * The case one cache request submits.
  *
- * The base case's material is production's own, unchanged — that is the prefix. Only the
- * action region is replaced, from the action case. The completeness report stays the base
- * case's own, which is stated in the definition: it describes the submission the prefix
- * belongs to, and carrying it unchanged is what makes "only the action changed" true of
- * the bytes rather than approximately true.
+ * Identity, policy, evidence, session, tool and working directory are the base case's, so
+ * every block production emits before the action is byte-identical. The action, its
+ * derived facts and the hint are the action case's, evaluated in the base case's
+ * directory. The base case's hint is dropped rather than inherited: it would point at an
+ * action this request does not submit.
  */
-function cacheSnapshot(
-  base: ReviewSnapshot,
+export function composedCase(
+  base: ReviewCase,
   actionCase: ReviewCase,
-): ReviewSnapshot {
-  const input = actionCase.input;
+): ReviewCase {
+  const { hint: _inherited, ...baseInput } = base.input;
   return {
     ...base,
-    action: {
-      name: input.action.name,
-      arguments: input.action.arguments ?? {},
-      ...(input.action.programText === undefined
+    input: {
+      ...baseInput,
+      action: actionCase.input.action,
+      ...(actionCase.input.hint === undefined
         ? {}
-        : { programText: input.action.programText }),
+        : { hint: actionCase.input.hint }),
     },
-    facts: caseFacts(actionCase),
-    ...(input.hint === undefined ? {} : { hint: input.hint }),
   };
 }
 
 /**
  * Expand the cache workload into the requests it would send.
  *
- * `cases` is the dataset's selection; a step whose action case is absent contributes no
- * cell, so a definition naming an unpublished case is reported rather than silently
- * measured against the base case. `matrixCells` is used only to name a request that
- * submits the same bytes, never to skip one.
+ * `cases` is the dataset's selection. A step whose action case is absent contributes no
+ * cell and is reported by {@link cacheProblems}, so a definition naming an unpublished
+ * case is refused rather than silently measured against the base case. `matrixCells` is
+ * used only to name a request that submits the same bytes, never to skip one.
  */
 export function expandCache(parts: {
   readonly candidate: ResolvedCandidate;
@@ -191,12 +204,6 @@ export function expandCache(parts: {
       byteIdenticalToMatrix: 0,
     };
   }
-  const materials: MaterialCache = new Map();
-  const base = materialFor(materials, {
-    caseEntry: baseCase,
-    protocol: parts.protocol,
-    maxInputTokens: parts.maxInputTokens,
-  });
   const cells: CacheCell[] = [];
   for (const step of cacheStepsOf({
     sequence: parts.sequence,
@@ -205,8 +212,15 @@ export function expandCache(parts: {
   })) {
     const actionCase = byId.get(step.actionCaseId);
     if (actionCase === undefined) continue;
+    // The composed case goes through the production composition and trim, so the request
+    // is bounded and reported exactly as production would bound and report it.
+    const material = caseMaterial(
+      composedCase(baseCase, actionCase),
+      parts.protocol,
+      { maxInputTokens: parts.maxInputTokens },
+    );
     const measured = measuredOf(
-      { snapshot: cacheSnapshot(base.snapshot, actionCase) },
+      { snapshot: material.snapshot },
       { variant: parts.candidate.variant, protocol: parts.protocol },
     );
     const split = splitAtAction(measured.material);
@@ -253,28 +267,59 @@ export function expandCache(parts: {
   };
 }
 
+/** The action cases a sequence names that the selection does not publish. */
+export function missingActionCasesOf(parts: {
+  readonly sequence: readonly CacheSlot[];
+  readonly baseCaseId: string;
+  readonly changedActionCaseIds: readonly string[];
+  readonly caseIds: readonly string[];
+}): readonly string[] {
+  const published = new Set(parts.caseIds);
+  const named = new Set<string>();
+  for (const step of cacheStepsOf(parts)) {
+    if (step.actionCaseId !== '' && !published.has(step.actionCaseId)) {
+      named.add(step.actionCaseId);
+    }
+  }
+  return [...named];
+}
+
 /**
  * Why an expanded cache workload cannot measure what it claims.
  *
  * Every problem here is about bytes the workload would actually send, not about the
- * definition's wording: a workload whose requests do not share a prefix, whose
- * "changed action" is the same action again, or whose declared repeats exceed the actions
- * it names would produce readings that cannot be attributed to the treatment it describes.
+ * definition's wording: a workload that expands to fewer requests than it declares, whose
+ * requests do not share a prefix, whose "changed action" is the same action again, or
+ * whose requests exceed the per-request ceiling would produce readings that cannot be
+ * attributed to the treatment it describes.
  */
 export function cacheProblems(parts: {
   readonly expansion: CacheExpansion;
   readonly definition: {
     readonly sequence: readonly CacheSlot[];
+    readonly baseCaseId: string;
     readonly changedActionCaseIds: readonly string[];
   };
   readonly bounds: { readonly maxInputTokens: number };
+  /** The case ids the dataset selection publishes, for the action-id check. */
+  readonly caseIds?: readonly string[];
 }): readonly string[] {
   const problems: string[] = [];
   const { expansion, definition } = parts;
   const cold = expansion.cells.filter((cell) => cell.role === 'cold');
+  const changedSlots = definition.sequence.filter(
+    (slot) => slot.role === 'changed-action',
+  );
   if (!definition.sequence.some((slot) => slot.role === 'cold')) {
     problems.push(
       'the cache workload names no cold request; a warm-only sequence cannot show what the cache did',
+    );
+  }
+  if (changedSlots.length === 0) {
+    // The changing action is one of the three things the issue names. A workload without
+    // it measures a prefix re-use and nothing about whether the action moved.
+    problems.push(
+      'the cache workload names no changed-action request; the experiment needs a cold request, a stable-prefix re-use and a changing action',
     );
   }
   if (!definition.sequence.some((slot) => slot.role !== 'cold')) {
@@ -282,24 +327,33 @@ export function cacheProblems(parts: {
       'the cache workload names only cold requests; nothing would be re-used',
     );
   }
-  if (expansion.requests < 2) {
-    problems.push(
-      'the cache workload expands to fewer than two requests; a cold request and one re-use are the minimum that can measure anything',
-    );
-  }
-  // A slot that asks for more repeats than it has actions would repeat one action and
-  // report it as a different one. That is refused by counting what the sequence asks for,
-  // not by trusting the expansion to have skipped it.
-  const changedSlots = definition.sequence.filter(
-    (slot) => slot.role === 'changed-action',
-  );
-  const askedChanged = changedSlots.reduce(
+  // What the definition declares has to be what the expansion produced. A request that
+  // silently disappeared would make the record certify a smaller experiment than the
+  // definition describes.
+  const declaredRequests = definition.sequence.reduce(
     (sum, slot) => sum + slot.repeats,
     0,
   );
-  if (askedChanged > definition.changedActionCaseIds.length) {
+  if (expansion.requests !== declaredRequests) {
     problems.push(
-      `the cache workload asks for ${String(askedChanged)} changed action(s) but declares ${String(definition.changedActionCaseIds.length)}; raising a slot's repeats adds real requests and needs real actions`,
+      `the cache workload declares ${String(declaredRequests)} request(s) but expands to ${String(expansion.requests)}; every declared request has to name material a run could send`,
+    );
+  }
+  const declaredChanged = changedSlots.reduce(
+    (sum, slot) => sum + slot.repeats,
+    0,
+  );
+  const expandedChanged = expansion.cells.filter(
+    (cell) => cell.role === 'changed-action',
+  ).length;
+  if (expandedChanged !== declaredChanged) {
+    problems.push(
+      `the cache workload declares ${String(declaredChanged)} changed-action request(s) but expands to ${String(expandedChanged)}`,
+    );
+  }
+  if (declaredChanged > definition.changedActionCaseIds.length) {
+    problems.push(
+      `the cache workload asks for ${String(declaredChanged)} changed action(s) but declares ${String(definition.changedActionCaseIds.length)}; a slot's repeats add real requests and need real actions`,
     );
   }
   const uniqueChanged = new Set(definition.changedActionCaseIds);
@@ -308,15 +362,33 @@ export function cacheProblems(parts: {
       'the cache workload declares the same changed action more than once; two slots submitting one action cannot show that a change was made',
     );
   }
+  for (const caseId of missingActionCasesOf({
+    sequence: definition.sequence,
+    baseCaseId: definition.baseCaseId,
+    changedActionCaseIds: definition.changedActionCaseIds,
+    caseIds: parts.caseIds ?? [],
+  })) {
+    problems.push(
+      `the cache workload names action case ${caseId}, which the experiment's dataset selection does not publish`,
+    );
+  }
   for (const cell of expansion.cells) {
     if (cell.stablePrefixFingerprint === null) {
       problems.push(
         `cache request ${cell.cellId} carries no locatable action boundary, so its stable prefix cannot be established`,
       );
     }
+    // The per-request ceiling is checked against the measured request, not only against
+    // the production flag: a composed action can be larger than the base case's, and a
+    // flag inherited from a smaller submission would not describe this one.
+    if (cell.estimatedInputTokens > parts.bounds.maxInputTokens) {
+      problems.push(
+        `cache request ${cell.cellId} measures ${String(cell.estimatedInputTokens)} input tokens against a per-request ceiling of ${String(parts.bounds.maxInputTokens)}; the run would refuse it rather than send it`,
+      );
+    }
     if (cell.overBudget) {
       problems.push(
-        `cache request ${cell.cellId} is marked OVER_BUDGET by the production budget, so the workload cannot be assembled within ${String(parts.bounds.maxInputTokens)} input tokens`,
+        `cache request ${cell.cellId} is marked OVER_BUDGET by the production budget, so it cannot be assembled within the per-request ceiling of ${String(parts.bounds.maxInputTokens)} input tokens`,
       );
     }
   }
@@ -348,6 +420,16 @@ export function cacheProblems(parts: {
         );
       }
     }
+  }
+  const actions = new Set(
+    expansion.cells
+      .filter((cell) => cell.role === 'changed-action')
+      .map((cell) => cell.actionFingerprint),
+  );
+  if (expandedChanged > 0 && actions.size !== expandedChanged) {
+    problems.push(
+      `the cache workload submits ${String(expandedChanged)} changed-action request(s) but only ${String(actions.size)} distinct action(s); each changed slot has to submit its own action`,
+    );
   }
   return problems;
 }
