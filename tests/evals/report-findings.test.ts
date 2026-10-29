@@ -416,6 +416,47 @@ describe('RQ11-B03: a contested adjudication never becomes gold', () => {
     });
   });
 
+  it('reports the conflict in the self-checks rather than only in the counts', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const hash = hashOf(entry);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [label('read-named-source-file', hash, 1, 10)],
+      });
+      await created.write(
+        'dataset/labels/duplicate.json',
+        label('read-named-source-file', hash, 7, 1),
+      );
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const report = await buildFor(directory, dataset);
+      const check = report.checks.find(
+        (entry2) => entry2.name === 'labels-uncontested',
+      );
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain('没有可用参考');
+      // The exit status follows the checks, so a contested dataset cannot pass silently.
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: null,
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('labels-uncontested');
+    });
+  });
+
   it('treats a label the inspector found incoherent as no decision', async () => {
     await withArea(async (created) => {
       const entry = await committedCase('read-named-source-file');

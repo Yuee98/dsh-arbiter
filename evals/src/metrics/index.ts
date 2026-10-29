@@ -145,7 +145,7 @@ function coverageOf(
  */
 function checksOf(parts: {
   readonly observation: Observation;
-  readonly cells: readonly CellFacts[];
+  readonly diagnostics: DiagnosticsSection;
   readonly usageReproduced: boolean;
   readonly recordCount: number;
 }): readonly ReportCheck[] {
@@ -178,6 +178,26 @@ function checksOf(parts: {
       detail: parts.usageReproduced
         ? '逐格用共享 aggregateUsage 重算每个记录的 attempt，结果与记录自带的汇总一致。'
         : '至少一个记录自带的 usage 汇总无法由其 attempt 重算得到，报告仍按重算值输出。',
+    },
+    {
+      name: 'labels-uncontested',
+      ok: parts.diagnostics.labels.authorityConflict === 0,
+      detail:
+        parts.diagnostics.labels.authorityConflict === 0
+          ? '没有互相冲突或结构无效的裁决，每条参考都来自一份可追溯的决定。'
+          : `${String(parts.diagnostics.labels.authorityConflict)} 个案例的裁决互相冲突或结构无效，已全部排除出金标；这不是 0% 通过率，而是没有可用参考。`,
+    },
+    {
+      name: 'labels-match-run-input',
+      // Deliberately not a failure: a dataset edited after a run is a normal event, and
+      // the run's evidence is still complete. It is published because a reader comparing
+      // this run's numbers against a freshly approved label set needs to know the two are
+      // about different material.
+      ok: true,
+      detail:
+        parts.diagnostics.labels.inputMismatch === 0
+          ? '每条计入金标的标签都与本次提交的输入指纹一致。'
+          : `${String(parts.diagnostics.labels.inputMismatch)} 个案例的标签是为另一次输入批准的，因此未作为本次运行的参考；这是不同输入之间的正常差异，不是缺陷。`,
     },
     {
       name: 'records-read',
@@ -344,7 +364,7 @@ export function buildReport(parts: {
     differences: differencesFor({ cells, observation: parts.observation }),
     checks: checksOf({
       observation: parts.observation,
-      cells,
+      diagnostics,
       usageReproduced: usage.byCell.every((cell) => cell.matchesRecord),
       recordCount: parts.observation.records.size,
     }),
