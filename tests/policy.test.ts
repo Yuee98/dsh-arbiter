@@ -13,13 +13,19 @@ import type { ReviewSignals } from '../src/types.js';
 const normal = DEFAULT_CONFIG.policy.normal;
 const progress = DEFAULT_CONFIG.policy.progress;
 
+/**
+ * A neutral signal set: the lowest risk, and A2 — "no applicable permission" —
+ * rather than A1. Since the shared rubric makes band 1 an *effective prohibition*
+ * that always denies, a default of 1 would put that refusal in the path of every
+ * case below and stop them testing what they name.
+ */
 const signals = (overrides: Partial<ReviewSignals> = {}): ReviewSignals => ({
   riskDist: null,
   riskPoint: 1,
   riskScore: null,
   riskClass: 'low',
   authDist: null,
-  authPoint: 1,
+  authPoint: 2,
   authClass: 'none',
   secrets: false,
   destructive: false,
@@ -53,7 +59,7 @@ describe('review policy', () => {
   test('explicitFromRisk can require authorization even for low point values', () => {
     const configured = { ...normal, explicitFromRisk: 2 };
     const decision = decideReview(
-      signals({ riskPoint: 2, authPoint: 1 }),
+      signals({ riskPoint: 2, authPoint: 2 }),
       'normal',
       configured,
     );
@@ -137,7 +143,7 @@ describe('review policy', () => {
   test('progress bulk egress still requires explicit authorization', () => {
     const unauthorized = signals({
       riskPoint: 3,
-      authPoint: 0,
+      authPoint: 2,
       authClass: 'none',
       bulk: true,
       egress: true,
@@ -284,7 +290,7 @@ describe('mode to strategy mapping', () => {
       progress: new Set(),
     };
     for (const risk of [1, 4, 6, 8, 9]) {
-      for (const auth of [0, 5, 8, 10]) {
+      for (const auth of [1, 5, 8, 10]) {
         for (const bulk of [false, true]) {
           for (const egress of [false, true]) {
             const input = signals({
@@ -334,7 +340,7 @@ describe('mode to strategy mapping', () => {
       riskDist: { '1': 0.8, '3': 0.15, '9': 0.05 },
       riskClass: 'low',
       authPoint: null,
-      authDist: { '8': 0.85, '9': 0.1, '1': 0.05 },
+      authDist: { '8': 0.85, '9': 0.1, '2': 0.05 },
       authClass: 'explicit',
       source: 'decision',
     });
@@ -346,7 +352,7 @@ describe('mode to strategy mapping', () => {
     const chatNone = signals({
       riskPoint: 5,
       riskClass: 'medium',
-      authPoint: 1,
+      authPoint: 2,
       authClass: 'none',
     });
     const decisionNone = signals({
@@ -354,7 +360,7 @@ describe('mode to strategy mapping', () => {
       riskDist: { '1': 0.1, '5': 0.8, '7': 0.1 },
       riskClass: 'medium',
       authPoint: null,
-      authDist: { '1': 0.9, '8': 0.1 },
+      authDist: { '2': 0.9, '8': 0.1 },
       authClass: 'none',
       source: 'decision',
     });
@@ -414,7 +420,7 @@ describe('calibrated rule rows', () => {
       riskDist: { '4': 0.2, '5': 0.6, '6': 0.2 },
       riskClass: 'medium',
       authPoint: null,
-      authDist: { '1': 0.7, '2': 0.2, '6': 0.1 },
+      authDist: { '2': 0.7, '3': 0.2, '6': 0.1 },
       authClass: 'none',
       source: 'decision',
     });

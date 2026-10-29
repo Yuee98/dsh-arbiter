@@ -60,16 +60,34 @@ describe('chat reviewer output', () => {
     ).toBe(false);
   });
 
-  test('detects contradictions that require a repair', () => {
+  test('accepts risk/probe combinations the shared rubric permits', () => {
+    // These two were repair failures under the earlier contract, which required
+    // low risk to exclude destruction and high risk to include it. The rubric
+    // grades consequences: disposable data can be destroyed at negligible cost,
+    // and a critical objective can be lost without destroying data or reading
+    // credentials. Rejecting either reports a failure for a legal classification.
     const lowDestructive = parseChatText(
       '{"risk":2,"authorized":6,"secrets":false,"destructive":true,"egress":false,"bulk":false}',
     );
-    expect(lowDestructive.ok).toBe(false);
-    expect(lowDestructive.error).toContain('contradiction');
+    expect(lowDestructive.ok).toBe(true);
     const highClean = parseChatText(
       '{"risk":10,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
     );
-    expect(highClean.ok).toBe(false);
+    expect(highClean.ok).toBe(true);
+  });
+
+  test('rejects a score outside the public 1..10 scale', () => {
+    // The public scale starts at 1, where 1 means an effective prohibition. An
+    // answer of 0 names no band at all, so it is a failed read rather than a
+    // lowest score.
+    const zero = parseChatText(
+      '{"risk":0,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+    );
+    expect(zero.ok).toBe(false);
+    const eleven = parseChatText(
+      '{"risk":11,"authorized":6,"secrets":false,"destructive":false,"egress":false,"bulk":false}',
+    );
+    expect(eleven.ok).toBe(false);
   });
 
   test('extraction finds the first balanced object', () => {
@@ -91,7 +109,17 @@ describe('decision reviewer output', () => {
       0,
     );
     expect(total).toBeCloseTo(1, 10);
-    expect(signals.riskScore).toBeCloseTo(3.8154, 4);
+    // The weighted band is a public-scale diagnostic: the native capture averages
+    // 3.8154 over levels 0..9, which is 4.8154 once the ten bands are numbered 1..10.
+    // It is derived from the distribution rather than read from the vendor's own
+    // `score` field, so the assertion is against the arithmetic, not the capture.
+    const captured = CAPTURED_CLOUDFLARE.result.answers.risk.probabilities;
+    const publicWeighted = Object.entries(captured).reduce(
+      (sum, [level, probability]) => sum + (Number(level) + 1) * probability,
+      0,
+    );
+    expect(publicWeighted).toBeCloseTo(4.8154, 3);
+    expect(signals.riskScore).toBeCloseTo(publicWeighted, 10);
     // The probes are the captured probabilities thresholded at one half. The
     // expected booleans are written out because the capture is a literal: the
     // comparison would be constant-folded, and a fold cannot drift when the
@@ -111,7 +139,15 @@ describe('decision reviewer output', () => {
     if (!parsed.ok) return;
     const signals = parsed.signals;
     const answers = CAPTURED_TYPESAFE.answers;
-    expect(signals.riskScore).toBeCloseTo(answers.risk.score, 4);
+    // Recompute the public weighted band from the capture's own probabilities
+    // rather than trusting the vendor's `score` field, which is diagnostic input
+    // the contract does not read.
+    const probabilities = answers.risk.probabilities;
+    const weighted = Object.entries(probabilities).reduce(
+      (sum, [level, probability]) => sum + (Number(level) + 1) * probability,
+      0,
+    );
+    expect(signals.riskScore).toBeCloseTo(weighted, 10);
     expect(
       [answers.secrets.noul, answers.destructive.noul].map(
         (value) => value >= 0.5,
@@ -960,13 +996,27 @@ describe('calibrated cross-protocol parity', () => {
       expected: 'review-allow',
     },
     {
+      // A2 on both sides: "no applicable permission" for this write. A1 is a
+      // different fact — an effective prohibition — and it denies instead, which
+      // the dedicated case below covers.
       name: 'no authorization on the same write',
-      chat: { risk: 5, authorized: 1 },
+      chat: { risk: 5, authorized: 2 },
       decision: {
         risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
         authorized: { probabilities: { '1': 0.9, '3': 0.1 } },
       },
       expected: 'review-escalate',
+    },
+    {
+      // One prohibition, stated both ways: the same facts must refuse in both
+      // protocols, because an effective prohibition is not a weak authorization.
+      name: 'an effective prohibition on the same write',
+      chat: { risk: 5, authorized: 1 },
+      decision: {
+        risk: { probabilities: { '4': 0.2, '5': 0.6, '6': 0.2 } },
+        authorized: { probabilities: { '0': 0.85, '9': 0.15 } },
+      },
+      expected: 'review-deny',
     },
     {
       name: 'a goal-level hint on the same write',
