@@ -2341,6 +2341,42 @@ describe('cross-source contradictions and boundaries', () => {
     }
   });
 
+  test('a refused audit database makes the history unknown, not empty', async () => {
+    // The database exists and holds a decision, but its structure belongs to an
+    // older release, so this build refuses it. An empty session log plus a
+    // refused store must not be reported as "this session never had a verdict":
+    // the refused source is unavailable, and that is what coverage has to say.
+    await seedAudit([verdictRecord('refused-store', recent(0), 'deny')]);
+    const db = new DatabaseSync(auditPath());
+    try {
+      db.exec('PRAGMA user_version = 1');
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } finally {
+      db.close();
+    }
+    const session = makeSession('session-1');
+    const host = await harness({
+      sessions: new Map([['session-1', session]]),
+      profile: 'refused-store',
+      config: denyRuleConfig((base) => ({
+        ...base,
+        rules: [],
+        context: { historyMaxItems: 10 },
+      })),
+    });
+    try {
+      await probe(host, session);
+      const status = host.resetStatus('session-1');
+      // Neither "known-empty" nor "partial": the source could not be read at all.
+      expect(status.coverage).not.toBe('known-empty');
+      const reason = status.reason ?? '';
+      expect(reason).toContain('reset');
+      expect(submittedHistoryBlock(host).prior).toEqual([]);
+    } finally {
+      await host.dispose();
+    }
+  });
+
   test('a genuinely new session is still reported as an empty history', async () => {
     // The control: no rows at all, no decision history, so "known-empty" is the
     // correct answer. Introducing the unreadable count must not turn the common

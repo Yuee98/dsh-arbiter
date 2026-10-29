@@ -6,6 +6,8 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1479,6 +1481,114 @@ function buildOldDatabase(path: string, version: number): void {
   db.close();
 }
 
+/**
+ * The database the superseded build created, as it left it on disk.
+ *
+ * Every table it defined, the retired review columns included, stamped with the
+ * schema number it wrote. This is the input a name-only structural check would
+ * accept, so it is the regression that proves the stamp discriminates.
+ */
+function buildPreviousReleaseDatabase(path: string): void {
+  const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE config_snapshots (
+    snapshot_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL, format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE config_activations (
+    id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, activated_at INTEGER NOT NULL,
+    entry TEXT NOT NULL, scope TEXT NOT NULL, revision TEXT NOT NULL)`);
+  db.exec(`CREATE TABLE templates (
+    template_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL, format_version INTEGER NOT NULL,
+    renderer_version TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE calls (
+    call_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, session_id TEXT NOT NULL,
+    session_kind TEXT NOT NULL, parent_session TEXT, profile TEXT, workspace TEXT,
+    tool TEXT NOT NULL, arguments TEXT NOT NULL, arguments_schema TEXT, cwd TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, config_revision TEXT NOT NULL,
+    config_snapshot_id TEXT NOT NULL, approval_mode TEXT NOT NULL,
+    execution_mode TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL,
+    trace TEXT NOT NULL, effect TEXT NOT NULL, session_record_state TEXT NOT NULL,
+    scores TEXT, review_stage TEXT, usage TEXT,
+    signals TEXT, policy_strategy TEXT,
+    decision_rules TEXT NOT NULL, execution_status TEXT NOT NULL,
+    record_format_version INTEGER NOT NULL,
+    execution_started_at INTEGER, execution_finished_at INTEGER)`);
+  db.exec(`CREATE TABLE stages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL, reason TEXT,
+    rule_id TEXT, rule_name TEXT, decision_rules TEXT, config_revision TEXT,
+    config_snapshot_id TEXT, ts INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    content_hash TEXT NOT NULL, content TEXT NOT NULL,
+    format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE model_calls (
+    id TEXT PRIMARY KEY,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    attempt INTEGER NOT NULL, backend TEXT NOT NULL, protocol TEXT NOT NULL,
+    request TEXT NOT NULL, template_id TEXT, response_text TEXT, parsed TEXT, error TEXT,
+    started_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+    estimated_input_tokens INTEGER NOT NULL, usage TEXT, normalized_usage TEXT,
+    failure_kind TEXT)`);
+  db.exec(`CREATE TABLE candidates (
+    candidate_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL,
+    rule TEXT NOT NULL, stats TEXT NOT NULL, evidence TEXT NOT NULL,
+    window_start INTEGER NOT NULL, window_end INTEGER NOT NULL, note TEXT)`);
+  db.exec(`CREATE TABLE analysis_runs (
+    id TEXT PRIMARY KEY, ran_at INTEGER NOT NULL, window_start INTEGER NOT NULL,
+    window_end INTEGER NOT NULL, considered INTEGER NOT NULL, created INTEGER NOT NULL)`);
+  db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  db.prepare(
+    `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+       tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
+       approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
+       scores, review_stage, usage, signals, policy_strategy, decision_rules, execution_status,
+       record_format_version, execution_started_at, execution_finished_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'previous-call',
+    1_700_000_000_000,
+    'previous-session',
+    'main',
+    null,
+    'previous-profile',
+    '/previous/workspace',
+    'bash',
+    '{"command":"echo previous"}',
+    null,
+    '/previous/workspace',
+    'bash:previous',
+    'rev-previous',
+    'cfg-previous',
+    'ask',
+    'trusted',
+    'review-deny',
+    'previous denial',
+    '[]',
+    'null',
+    'written',
+    null,
+    null,
+    null,
+    '{"riskClass":"low","authClass":"none","source":"chat"}',
+    'normal',
+    '["R7"]',
+    'not-started',
+    2,
+    null,
+    null,
+  );
+  db.exec('PRAGMA user_version = 2');
+  db.close();
+}
+
+/** One file's content digest, for byte-identity checks across a directory. */
+function hashFile(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 /** The audit directory's files, so "untouched" can be checked exactly. */
 async function auditFiles(dir: string): Promise<readonly string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -1629,6 +1739,120 @@ describe('a database from an older release is refused, not migrated', () => {
     after.close();
   });
 
+  test("the previous release's stamped-2 database is refused, not accepted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v2-stamped-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // The exact shape the superseded build left: every table and column it wrote,
+    // including the retired review columns, stamped with the number it used. A
+    // check that only compared table names would open this and call its rows
+    // current, so the stamp has to discriminate the structure, not just exist.
+    buildPreviousReleaseDatabase(path);
+    const before = await readFile(path);
+    const filesBefore = await auditFiles(dir);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('not supported');
+    expect(store.health().lastError).toContain('reset');
+    store.close();
+
+    // Refused means untouched: same bytes, same files, same stamp.
+    expect(await readFile(path)).toEqual(before);
+    expect(await auditFiles(dir)).toEqual(filesBefore);
+    const after = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(2);
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
+  });
+
+  test('a current structure missing a column the writer needs is refused', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-writer-column-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    const db = new DatabaseSync(path);
+    // Not a column any migration added: the writer's own INSERT names it. A hand
+    // written drift list missed this and let every write fail, one record at a
+    // time, after start-up had reported the structure complete.
+    db.exec('ALTER TABLE model_calls DROP COLUMN response_text');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('model_calls.response_text');
+    store.close();
+  });
+
+  test('a refused database with an uncheckpointed WAL is not touched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-'));
+    dirs.push(dir);
+    // The leftover is produced outside the audit directory so only the three
+    // audit files are compared after the refusal.
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-source-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+    // A crashed earlier run leaves committed transactions in the WAL. Copying the
+    // three files while that connection still holds them is what reproduces the
+    // leftover: closing the writer first would checkpoint it and hide the case.
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA journal_mode = WAL');
+    writer.exec(OLD_CALLS_SQL);
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+         tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+         execution_mode, result, reason, trace, effect, session_record_state, signals,
+         policy_strategy, decision_rules, execution_status)
+       VALUES ('wal-call', 1, 's', 'main', NULL, NULL, NULL, 'bash', '{}', '/w', 'f', 'r', 'c',
+         'ask', 'trusted', 'allow', 'r', '[]', 'null', 'written', NULL, NULL, '[]', 'pending')`,
+    );
+    writer.exec('PRAGMA user_version = 1');
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Opening the file — even read-only — lets SQLite recover the WAL and rewrite
+    // the header and sidecars, so the refusal has to happen before any connection
+    // exists for this promise to hold.
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('not supported');
+    // A refused store answers no read: an empty page beside a refusal reason
+    // reads as "the record was never written", which is a different fact.
+    expect(store.listCalls({}).total).toBe(0);
+    expect(store.listCalls({}).unreadable).toBe(true);
+    expect(store.getCall('wal-call')).toBeNull();
+    expect(store.readCall('wal-call')).toEqual({
+      record: null,
+      unreadable: true,
+    });
+    expect(store.priorVerdictsForSession('s', 10).unreadableCount).toBe(0);
+    store.close();
+
+    // Every file is byte-identical: no WAL recovery, no checkpoint, no rewrite.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
   test('a newer structure is left untouched and only pauses writes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'arbiter-newer-'));
     dirs.push(dir);
@@ -1671,7 +1895,7 @@ describe('a current database reopens with its own records', () => {
     const check = new DatabaseSync(path, { readOnly: true });
     expect(
       numberField(check.prepare('PRAGMA user_version').get(), 'user_version'),
-    ).toBe(2);
+    ).toBe(3);
     check.close();
   });
 

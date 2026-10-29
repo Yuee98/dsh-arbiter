@@ -19,9 +19,9 @@ export type {
   CandidateRecord,
   StoredCall,
 } from './audit/types.js';
-import { hash, json, rowChanges } from './audit/rows.js';
+import { hash, json } from './audit/rows.js';
 import { clampPageSize } from './audit/call-list.js';
-import { openAuditSchema } from './audit/schema.js';
+import { auditRefusal, openAuditSchema } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
 import {
   configHistory,
@@ -52,6 +52,12 @@ import {
   retentionPolicyOf,
 } from './audit/ownership.js';
 import { clearCalls, runRetention } from './audit/retention.js';
+import {
+  evictedFor,
+  markExecuted,
+  markStarted,
+  type EarlyResult,
+} from './audit/execution.js';
 
 /**
  * The outcome of one retention pass.
@@ -70,7 +76,16 @@ export function fingerprintOf(tool: string, args: unknown): string {
   return `${tool}:${hash(json(args)).slice(0, 24)}`;
 }
 export class AuditStore {
-  private readonly db: DatabaseSync;
+  /**
+   * The handle, or `null` when this file was refused before it was opened.
+   *
+   * A refused database is never handed to SQLite: opening it — even read-only —
+   * lets SQLite recover a WAL and rewrite the main file and its `-shm`/`-wal`
+   * sidecars, which would contradict the promise that a refusal leaves the file
+   * untouched. Every read and write therefore reports the refusal instead of
+   * touching the disk.
+   */
+  private readonly db: DatabaseSync | null;
   private readonly path: string;
   private config: ArbiterConfig['audit'];
   private queue: {
@@ -104,22 +119,33 @@ export class AuditStore {
     this.path = path;
     this.config = config;
     mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
-    // A database this build must not modify is checked *before* any mutating
-    // pragma: `journal_mode = WAL` rewrites the file header, so running it
-    // first would already have altered a newer database we promised not to touch.
-    try {
-      this.db.exec('PRAGMA foreign_keys = ON');
-      openAuditSchema(this.db);
-      // Only a database this build owns is switched to WAL.
-      this.db.exec('PRAGMA journal_mode = WAL');
-    } catch (error) {
-      // The database was left as it was. Keep the handle for reads, stop
-      // writes, and carry the reason so the UI can explain the pause.
-      this.pausedReason =
-        error instanceof Error ? error.message : String(error);
-      this.lastError = this.pausedReason;
+    // The version is read from the file header before any connection exists, so
+    // a file this build refuses is never opened, recovered or checkpointed.
+    const refusal = auditRefusal(path);
+    if (refusal !== null) {
+      this.db = null;
+      this.pausedReason = refusal;
+      this.lastError = refusal;
       this.degraded = true;
+    } else {
+      const db = new DatabaseSync(path);
+      this.db = db;
+      // A database this build must not modify is checked *before* any mutating
+      // pragma: `journal_mode = WAL` rewrites the file header, so running it
+      // first would already have altered a database we promised not to touch.
+      try {
+        db.exec('PRAGMA foreign_keys = ON');
+        openAuditSchema(db);
+        // Only a database this build owns is switched to WAL.
+        db.exec('PRAGMA journal_mode = WAL');
+      } catch (error) {
+        // The database was left as it was. Keep the handle for reads, stop
+        // writes, and carry the reason so the UI can explain the pause.
+        this.pausedReason =
+          error instanceof Error ? error.message : String(error);
+        this.lastError = this.pausedReason;
+        this.degraded = true;
+      }
     }
     // One effective retention policy per database path: a second store for the
     // same file adopts the owner's values instead of changing cleanup semantics
@@ -154,6 +180,17 @@ export class AuditStore {
   /** True when this store must not accept new records. */
   get paused(): boolean {
     return this.pausedReason !== null;
+  }
+
+  /**
+   * The handle to read or write through, or `null` when there is none.
+   *
+   * Both a closed store and a refused database answer `null`: a refused file was
+   * never opened, so there is nothing to query, and pretending otherwise would
+   * report an unreadable history as an empty one.
+   */
+  private get open(): DatabaseSync | null {
+    return this.closedState || this.pausedReason !== null ? null : this.db;
   }
 
   get databasePath(): string {
@@ -283,10 +320,11 @@ export class AuditStore {
    * return value to decide what they can claim, and the health view explains
    * the failure.
    */
-  private guard<T>(operation: () => T): T | null {
-    if (this.pausedReason !== null || this.closedState) return null;
+  private guard<T>(operation: (db: DatabaseSync) => T): T | null {
+    const db = this.open;
+    if (db === null) return null;
     try {
-      const value = operation();
+      const value = operation(db);
       this.lastError = null;
       return value;
     } catch (error) {
@@ -301,7 +339,7 @@ export class AuditStore {
     readonly snapshotId: string;
     readonly revision: string;
   } | null {
-    return this.guard(() => saveConfigSnapshot(this.db, config));
+    return this.guard((db) => saveConfigSnapshot(db, config));
   }
 
   configHistory(limit = 20): readonly {
@@ -312,7 +350,10 @@ export class AuditStore {
     readonly scope: string;
     readonly snapshotId: string;
   }[] {
-    return configHistory(this.db, limit);
+    // A refused store answers with no history: the configuration history belongs
+    // to a database this build will not read.
+    const db = this.open;
+    return db === null ? [] : configHistory(db, limit);
   }
 
   recordActivation(
@@ -322,8 +363,8 @@ export class AuditStore {
     scope: string,
   ): boolean {
     return (
-      this.guard(() => {
-        recordActivation(this.db, snapshotId, revision, entry, scope);
+      this.guard((db) => {
+        recordActivation(db, snapshotId, revision, entry, scope);
         return true;
       }) === true
     );
@@ -426,6 +467,7 @@ export class AuditStore {
   }
 
   private write(record: CallRecord): void {
+    if (this.db === null) return;
     writeCallRecord(this.db, record);
     // A result observed before this insert is applied now, so both orderings
     // converge on the same final status.
@@ -440,9 +482,15 @@ export class AuditStore {
    * route; the caller returns a payload with `audit-unavailable` and the health
    * reason instead.
    */
-  private readGuard<T>(operation: () => T, fallback: T): T {
+  private readGuard<T>(operation: (db: DatabaseSync) => T, fallback: T): T {
+    // A refused or paused database must not answer a read as if it were the
+    // current structure: an empty page and a refused page look identical to a
+    // caller, and the caller here is a route that reports one of them to the
+    // operator.
+    const db = this.open;
+    if (db === null) return fallback;
     try {
-      return operation();
+      return operation(db);
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
       this.degraded = true;
@@ -460,7 +508,7 @@ export class AuditStore {
     filter: CallFilter = {},
   ): CallPage & { readonly unreadable?: boolean } {
     return this.readGuard<CallPage & { readonly unreadable?: boolean }>(
-      () => listCalls(this.db, filter),
+      (db) => listCalls(db, filter),
       {
         rows: [],
         total: 0,
@@ -483,7 +531,7 @@ export class AuditStore {
    */
   /** One stored call, or null when it does not exist or cannot be read. */
   getCall(callId: string): StoredCall | null {
-    return this.readGuard(() => getCall(this.db, callId), null);
+    return this.readGuard((db) => getCall(db, callId), null);
   }
 
   /**
@@ -495,8 +543,10 @@ export class AuditStore {
     readonly record: StoredCall | null;
     readonly unreadable: boolean;
   } {
+    const db = this.open;
+    if (db === null) return { record: null, unreadable: true };
     try {
-      return { record: getCall(this.db, callId), unreadable: false };
+      return { record: getCall(db, callId), unreadable: false };
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
       this.degraded = true;
@@ -505,7 +555,8 @@ export class AuditStore {
   }
 
   stats(): unknown {
-    return stats(this.db, () => this.databaseBytes);
+    const db = this.open;
+    return db === null ? null : stats(db, () => this.databaseBytes);
   }
 
   callsForAnalysis(
@@ -523,7 +574,10 @@ export class AuditStore {
     readonly effect: unknown;
     readonly fingerprint: string;
   }[] {
-    return callsForAnalysis(this.db, from, to, limit);
+    // An analysis pass over a database this build refused would report an empty
+    // window as if nothing had been recorded.
+    const db = this.open;
+    return db === null ? [] : callsForAnalysis(db, from, to, limit);
   }
 
   /**
@@ -535,13 +589,7 @@ export class AuditStore {
    * once the row exists. The map is bounded so a stream of results without
    * records cannot grow without limit.
    */
-  private readonly earlyResults = new Map<
-    string,
-    { readonly status: string; readonly at: number }
-  >();
-
-  /** Bound on execution observations awaiting their record's insertion. */
-  private static readonly MAX_EARLY_RESULTS = 512;
+  private readonly earlyResults = new Map<string, EarlyResult>();
 
   /**
    * Record the observed execution outcome.
@@ -550,50 +598,23 @@ export class AuditStore {
    * of the permission verdict: an allowed call that never ran stays `pending`.
    */
   updateExecution(callId: string, status: string, at = Date.now()): void {
-    if (this.pausedReason !== null) return;
+    const db = this.open;
+    if (db === null) return;
     try {
-      const changed = this.markExecuted(callId, status, at);
+      const changed = markExecuted(db, callId, status, at);
       if (changed === 0 && !this.earlyResults.has(callId)) {
         // The record has not been inserted yet (or was dropped). Remember the
         // observation so it is applied when the row appears.
-        if (this.earlyResults.size >= AuditStore.MAX_EARLY_RESULTS) {
-          const oldest = this.earlyResults.keys().next().value;
-          if (oldest !== undefined) this.earlyResults.delete(oldest);
+        const evicted = evictedFor(this.earlyResults, callId);
+        if (evicted !== null) {
+          this.earlyResults.delete(evicted);
           this.dropped += 1;
         }
         this.earlyResults.set(callId, { status, at });
       }
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-      this.degraded = true;
+      this.markDegraded(error);
     }
-  }
-
-  /**
-   * Apply one execution observation to an existing row; returns rows changed.
-   *
-   * Only the terminal observation is recorded. `execution_started_at` stays
-   * NULL unless a genuine start signal was stored earlier: `tools/result` tells
-   * us the call finished, and copying that timestamp into "started at" would
-   * claim an observation nobody made.
-   */
-  private markExecuted(callId: string, status: string, at: number): number {
-    const changed = rowChanges(
-      this.db
-        .prepare(
-          `UPDATE calls
-              SET execution_status = ?,
-                  execution_finished_at = ?
-            WHERE call_id = ?`,
-        )
-        .run(status, at, callId),
-    );
-    this.db
-      .prepare(
-        "UPDATE stages SET result = ? WHERE call_id = ? AND stage = 'execution'",
-      )
-      .run(status, callId);
-    return changed;
   }
 
   /**
@@ -604,29 +625,24 @@ export class AuditStore {
    * invents a start time from a finish observation.
    */
   markExecutionStarted(callId: string, at = Date.now()): void {
-    if (this.pausedReason !== null) return;
+    const db = this.open;
+    if (db === null) return;
     try {
-      this.db
-        .prepare(
-          'UPDATE calls SET execution_started_at = ? WHERE call_id = ? AND execution_started_at IS NULL',
-        )
-        .run(at, callId);
+      markStarted(db, callId, at);
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-      this.degraded = true;
+      this.markDegraded(error);
     }
   }
 
   /** Apply an observation that arrived before its record was stored. */
   private applyEarlyResult(callId: string): void {
     const early = this.earlyResults.get(callId);
-    if (early === undefined) return;
+    if (early === undefined || this.db === null) return;
     this.earlyResults.delete(callId);
     try {
-      this.markExecuted(callId, early.status, early.at);
+      markExecuted(this.db, callId, early.status, early.at);
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
-      this.degraded = true;
+      this.markDegraded(error);
     }
   }
 
@@ -646,8 +662,13 @@ export class AuditStore {
     sessionId: string,
     callIds: readonly string[],
   ): readonly StoredVerdict[] {
+    // A refused store must not answer "this call has no stored verdict": that
+    // reads as evidence the decision was never written, when the real answer is
+    // that this build cannot read the file at all.
+    const db = this.open;
+    if (db === null) return [];
     try {
-      return storedReads(this.db).calls(sessionId, callIds);
+      return storedReads(db).calls(sessionId, callIds);
     } catch (error) {
       this.markDegraded(error);
       return [];
@@ -662,8 +683,10 @@ export class AuditStore {
    * involved.
    */
   priorVerdictStages(callId: string): readonly StoredStage[] {
+    const db = this.open;
+    if (db === null) return [];
     try {
-      return storedReads(this.db).stages(callId);
+      return storedReads(db).stages(callId);
     } catch (error) {
       this.markDegraded(error);
       return [];
@@ -696,7 +719,7 @@ export class AuditStore {
     readonly unreadableCount: number;
   } {
     return this.readGuard(
-      () => priorVerdictsForSession(this.db, sessionId, limit),
+      (db) => priorVerdictsForSession(db, sessionId, limit),
       { verdicts: [], unreadableCount: 0 },
     );
   }
@@ -708,17 +731,19 @@ export class AuditStore {
     readonly result: string;
     readonly reviewStage: string | null;
   }[] {
-    return recentForReplay(this.db, limit);
+    const db = this.open;
+    return db === null ? [] : recentForReplay(db, limit);
   }
 
   saveCandidate(candidate: CandidateRecord): void {
-    this.guard(() => {
-      saveCandidate(this.db, candidate);
+    this.guard((db) => {
+      saveCandidate(db, candidate);
     });
   }
 
   listCandidates(status?: string): readonly CandidateRecord[] {
-    return listCandidates(this.db, status);
+    const db = this.open;
+    return db === null ? [] : listCandidates(db, status);
   }
 
   updateCandidateStatus(
@@ -726,8 +751,8 @@ export class AuditStore {
     status: CandidateRecord['status'],
     note: string | null,
   ): void {
-    this.guard(() => {
-      updateCandidateStatus(this.db, candidateId, status, note);
+    this.guard((db) => {
+      updateCandidateStatus(db, candidateId, status, note);
     });
   }
 
@@ -737,8 +762,8 @@ export class AuditStore {
     considered: number,
     created: number,
   ): void {
-    this.guard(() => {
-      recordAnalysis(this.db, windowStart, windowEnd, considered, created);
+    this.guard((db) => {
+      recordAnalysis(db, windowStart, windowEnd, considered, created);
     });
   }
 
@@ -756,7 +781,7 @@ export class AuditStore {
     // queued events before the SQL result is known would lose them when the
     // delete fails, and keeping them after a successful clear would let them
     // reappear.
-    const cleared = this.guard(() => clearCalls(this.db));
+    const cleared = this.guard((db) => clearCalls(db));
     if (cleared === null) return { ok: false, deleted: 0 };
     this.queue.splice(0);
     this.earlyResults.clear();
@@ -801,8 +826,8 @@ export class AuditStore {
     const bytes = retentionBytes ?? policy?.bytes ?? this.config.retentionBytes;
     // Scheduled from an interval, so a throw here would escape into the host.
     return (
-      this.guard(() =>
-        runRetention(this.db, now, days, bytes, () => this.auxiliaryBytes),
+      this.guard((db) =>
+        runRetention(db, now, days, bytes, () => this.auxiliaryBytes),
       ) ?? { deleted: 0, irreducible: false, bytes: this.databaseBytes }
     );
   }
@@ -821,6 +846,7 @@ export class AuditStore {
     this.closedState = true;
     this.released = true;
     releaseRetention(this.path, this.member);
+    if (this.db === null) return;
     try {
       this.db.close();
     } catch {

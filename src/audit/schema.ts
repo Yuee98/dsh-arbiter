@@ -14,7 +14,8 @@
  * - a file whose **tables are gone** is not recreated, because an empty table
  *   would report a lost history as a complete one.
  */
-import type { DatabaseSync } from 'node:sqlite';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 
 /**
  * Application schema version, carried by `PRAGMA user_version`.
@@ -23,8 +24,15 @@ import type { DatabaseSync } from 'node:sqlite';
  * format (`record_format_version`) that says how one record was written. Only
  * this version is supported; a file carrying another one must be reset rather
  * than upgraded.
+ *
+ * The number is a **discriminator, not a migration step**. It is incremented
+ * whenever the structure changes, so the previous release's file can never be
+ * mistaken for this one: the retired `signals` and `policy_strategy` columns are
+ * gone, and a build that only compared table names would have opened the old
+ * file and called its rows current. There is no upgrade from one number to the
+ * next — a mismatch means the audit history has to be reset.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /**
  * Record format this build writes and can fully interpret.
@@ -201,32 +209,35 @@ const REQUIRED_TABLES: readonly string[] = [
 ];
 
 /**
- * The columns one current record writes, per table.
+ * Every column this build reads or writes, per table.
  *
- * The structure check compares this list as well as the tables: a file that
- * carries the version stamp but not the columns would accept every connection
- * and then reject each record, one at a time, with the failure contained as a
- * degraded store. Naming the drift at start-up is the honest answer, and the fix
- * is the same reset a wrong version needs. Extra columns are ignored: a file from
- * an earlier build of this same structure stays usable.
+ * Derived from the structure above rather than hand-listed. A hand-written list
+ * is what let a file missing `model_calls.response_text` pass start-up and then
+ * fail on every write, one record at a time: the check only covered columns an
+ * earlier migration happened to add. Building the reference structure in memory
+ * makes the comparison follow the writer by construction, so it cannot fall
+ * behind a column again.
  */
-const REQUIRED_COLUMNS: readonly (readonly [string, readonly string[]])[] = [
-  [
-    'calls',
-    [
-      'scores',
-      'review_stage',
-      'usage',
-      'record_format_version',
-      'execution_status',
-      'execution_started_at',
-      'execution_finished_at',
-      'arguments_schema',
-    ],
-  ],
-  ['stages', ['rule_name', 'config_snapshot_id']],
-  ['model_calls', ['normalized_usage', 'failure_kind', 'template_id']],
-];
+function canonicalColumns(): ReadonlyMap<string, ReadonlySet<string>> {
+  const reference = new DatabaseSync(':memory:');
+  try {
+    reference.exec(SCHEMA_SQL);
+    const columns = new Map<string, ReadonlySet<string>>();
+    for (const table of REQUIRED_TABLES)
+      columns.set(table, columnNames(reference, table));
+    return columns;
+  } finally {
+    reference.close();
+  }
+}
+
+let canonicalCache: ReadonlyMap<string, ReadonlySet<string>> | null = null;
+
+/** The reference structure, built once per process. */
+function requiredColumns(): ReadonlyMap<string, ReadonlySet<string>> {
+  canonicalCache ??= canonicalColumns();
+  return canonicalCache;
+}
 
 /**
  * A database this build will not open.
@@ -240,6 +251,81 @@ export class AuditSchemaError extends Error {
     super(message, { cause });
     this.name = 'AuditSchemaError';
   }
+}
+
+/** The refusal message for a file this build does not open. */
+function refusalFor(state: AuditFileState): string | null {
+  switch (state.kind) {
+    case 'new':
+    case 'current':
+      return null;
+    case 'newer':
+      return `audit database schema ${String(state.version)} is newer than this plugin (${String(SCHEMA_VERSION)}); refusing to modify it`;
+    case 'unsupported':
+      return `audit database schema ${String(state.version)} is not supported by this build (only ${String(SCHEMA_VERSION)} is read); reset the audit database instead of migrating it`;
+  }
+}
+
+/**
+ * The refusal reason for one audit path, read without opening the database.
+ *
+ * The store asks this before it creates a connection, so a file it refuses is
+ * never touched by SQLite: no WAL recovery, no checkpoint, no rewritten header.
+ * `null` means the file may be opened — it is either absent or already current,
+ * and the remaining structural checks run on the live connection.
+ */
+export function auditRefusal(path: string): string | null {
+  return refusalFor(auditFileState(path));
+}
+
+/** The 16 bytes every SQLite 3 file starts with. */
+const SQLITE_MAGIC = 'SQLite format 3\u0000';
+
+/**
+ * What one audit file is, decided without opening it as a database.
+ *
+ * `unsupported` is the important outcome: reading the version from the header
+ * means a file this build refuses is never handed to SQLite at all. Opening it
+ * — even read-only — lets SQLite recover a WAL and rewrite the main file and its
+ * sidecars, so a refusal that claims to leave the file untouched would be a
+ * false claim about a file we must not touch in the first place.
+ */
+type AuditFileState =
+  | { readonly kind: 'new' }
+  | { readonly kind: 'current' }
+  | { readonly kind: 'unsupported'; readonly version: number }
+  | { readonly kind: 'newer'; readonly version: number };
+
+/**
+ * Read `PRAGMA user_version` straight out of the file header.
+ *
+ * Bytes 60–63 of the header hold the application version as a big-endian
+ * 32-bit integer. A file that is absent, empty, or not SQLite at all reports
+ * `new`: there is nothing to preserve, and `openAuditSchema` still refuses to
+ * recreate a populated structure it cannot read.
+ */
+export function auditFileState(path: string): AuditFileState {
+  let size: number;
+  try {
+    size = statSync(path).size;
+  } catch {
+    return { kind: 'new' };
+  }
+  // A shorter file cannot hold a header, so it holds no history either.
+  if (size < 100) return { kind: 'new' };
+  const header = Buffer.alloc(100);
+  const handle = openSync(path, 'r');
+  try {
+    readSync(handle, header, 0, 100, 0);
+  } finally {
+    closeSync(handle);
+  }
+  if (header.subarray(0, 16).toString('latin1') !== SQLITE_MAGIC)
+    return { kind: 'new' };
+  const version = header.readUInt32BE(60);
+  if (version > SCHEMA_VERSION) return { kind: 'newer', version };
+  if (version !== SCHEMA_VERSION) return { kind: 'unsupported', version };
+  return { kind: 'current' };
 }
 
 function userVersion(db: DatabaseSync): number {
@@ -323,7 +409,9 @@ export function openAuditSchema(db: DatabaseSync): void {
   const tables = tableNames(db);
   // A genuinely new file has no application table yet and no stamp; SQLite
   // reports 0 for any file that never had the pragma written, so "no tables" is
-  // the only honest test for "nothing here to preserve".
+  // the only honest test for "nothing here to preserve". The header probe in
+  // `auditRefusal` already refused every stamped mismatch before this ran, so
+  // this branch only sees a file that is empty or carries no stamp.
   if (version === 0 && tables.size === 0) {
     createSchema(db);
     return;
@@ -341,9 +429,9 @@ export function openAuditSchema(db: DatabaseSync): void {
       `audit database is missing the ${absent.join(', ')} table(s); this build does not recreate them, so the audit history must be reset`,
     );
   }
-  const drift = REQUIRED_COLUMNS.flatMap(([table, columns]) => {
+  const drift = [...requiredColumns()].flatMap(([table, columns]) => {
     const present = columnNames(db, table);
-    return columns
+    return [...columns]
       .filter((column) => !present.has(column))
       .map((column) => `${table}.${column}`);
   });
