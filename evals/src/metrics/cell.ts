@@ -34,7 +34,9 @@ import type {
   Observation,
 } from './observe.js';
 import type { CellRecord, CellState, RunProtocol } from '../run/types.js';
-import type { UsageField } from '../../../src/reviewer/usage.js';
+import { aggregateUsage } from '../../../src/reviewer/usage.js';
+import type { UsageAttempt, UsageField } from '../../../src/reviewer/usage.js';
+import { usageAttemptsOf } from '../run/artifact.js';
 
 /** Which of the artifact's states a cell is in, as a report needs to state it. */
 export type CellStanding =
@@ -84,8 +86,16 @@ export interface CellFacts {
     readonly provenance: string;
     /** Dataset-relative path of the case document, or null when the dataset lacks it. */
     readonly path: string | null;
-    /** The mechanisms the input uses, or null when the dataset did not supply the case. */
+    /**
+     * The mechanisms the input uses, or null when they cannot be attributed to this run.
+     *
+     * Null means either that the dataset did not supply the case, or that its input has
+     * changed since the run: in both states the mechanisms belong to material the reviewer
+     * never saw, so the classification is `unclassified` rather than a guess.
+     */
     readonly challenge: readonly string[] | null;
+    /** Whether the challenge mechanisms were read from the input this run submitted. */
+    readonly challengeVerified: boolean;
     /** Which input supplied these figures. */
     readonly source: 'record' | 'dataset' | 'record-and-dataset';
     /** Whether the dataset has since been reorganised away from what the run recorded. */
@@ -276,6 +286,11 @@ function isJudged(engine: EngineAnswer): boolean {
   return engine.word !== null && engine.word !== 'review-failure';
 }
 
+/** One record's sent attempts, as the shared aggregate takes them. */
+function attempts(record: CellRecord): readonly UsageAttempt[] {
+  return usageAttemptsOf(record);
+}
+
 /** The model a record's target block names, or null when there is no record. */
 function modelOf(record: CellRecord | null): CellFacts['model'] {
   if (record === null) return null;
@@ -304,13 +319,25 @@ function modelKeyOf(record: CellRecord | null): string {
   return `${record.target.provider}/${record.target.configuredModel}`;
 }
 
-/** The six buckets a record's summary reported, or null per bucket. */
+/**
+ * The six buckets a record's attempts add up to, or null per bucket.
+ *
+ * Recomputed from the attempts rather than copied from the record's stored summary, for the
+ * same reason `byCell.aggregate` is: one authoritative figure per cell. Copying the stored
+ * value here would let the example table publish a number the report's own reconciliation
+ * says is wrong, which is precisely the inconsistency the reconciliation exists to catch.
+ */
 function tokensOf(
   record: CellRecord | null,
 ): Readonly<Record<UsageField, number | null>> {
-  const totals = record?.usage?.totals;
+  const totals =
+    record === null
+      ? null
+      : attempts(record).length === 0
+        ? null
+        : aggregateUsage(attempts(record)).totals;
   const value = (field: UsageField): number | null =>
-    totals === undefined ? null : totals[field].total;
+    totals === null ? null : totals[field].total;
   return {
     inputTokens: value('inputTokens'),
     outputTokens: value('outputTokens'),
@@ -336,31 +363,43 @@ function tokensOf(
 function caseFactsOf(parts: {
   readonly record: CellRecord | null;
   readonly datasetCase: CaseFacts | null;
+  readonly cellInputHash: string | null;
 }): CellFacts['caseFacts'] {
   const recorded = parts.record?.case ?? null;
   const datasetCase = parts.datasetCase;
   if (recorded === null && datasetCase === null) return null;
+  // The mechanisms are read from the input the dataset holds *now*, so they describe the
+  // input this run submitted only when the two fingerprints agree. A case whose input gained
+  // a hint after the run would otherwise move from ordinary to targeted without a single
+  // executed cell changing — a silent reclassification of history.
+  const mechanismsCurrent =
+    datasetCase !== null &&
+    (parts.cellInputHash === null ||
+      datasetCase.inputHash === parts.cellInputHash);
   return {
     familyId: recorded?.familyId ?? datasetCase?.familyId ?? 'unknown',
     split: recorded?.split ?? datasetCase?.split ?? 'unknown',
     provenance:
       recorded?.provenanceSource ?? datasetCase?.provenance ?? 'unknown',
     path: datasetCase?.path ?? null,
-    challenge: datasetCase?.challenge ?? null,
+    challenge: mechanismsCurrent ? datasetCase.challenge : null,
+    challengeVerified: mechanismsCurrent,
     source:
       recorded !== null && datasetCase !== null
         ? 'record-and-dataset'
         : recorded !== null
           ? 'record'
           : 'dataset',
-    // A conflict is a dataset that has since been reorganized. It is reported rather than
-    // resolved: the grouping follows the record, and the reader is told the two disagree.
+    // A conflict is a dataset that has since been reorganized or re-edited. It is reported
+    // rather than resolved: the grouping follows the record, and the reader is told the two
+    // disagree.
     conflictsWithDataset:
-      recorded !== null &&
       datasetCase !== null &&
-      (recorded.familyId !== datasetCase.familyId ||
-        recorded.split !== datasetCase.split ||
-        recorded.provenanceSource !== datasetCase.provenance),
+      ((recorded !== null &&
+        (recorded.familyId !== datasetCase.familyId ||
+          recorded.split !== datasetCase.split ||
+          recorded.provenanceSource !== datasetCase.provenance)) ||
+        !mechanismsCurrent),
   };
 }
 
@@ -375,6 +414,11 @@ export function cellFactsOf(parts: {
   const engine = engineAnswerOf(parts.record);
   const inputHash =
     parts.record === null ? null : recordInputHash(parts.record);
+  const caseFacts = caseFactsOf({
+    record: parts.record,
+    datasetCase: facts,
+    cellInputHash: inputHash,
+  });
   const labelStatus = labelStatusOf({
     label,
     caseKnown: facts !== null,
@@ -393,8 +437,11 @@ export function cellFactsOf(parts: {
     inputHash,
     model: modelOf(parts.record),
     modelKey: modelKeyOf(parts.record),
-    caseFacts: caseFactsOf({ record: parts.record, datasetCase: facts }),
-    challengeClass: challengeClassOf(facts?.challenge ?? null),
+    caseFacts: caseFacts,
+    // Read from the joined facts, not from the dataset directly: when the mechanisms cannot be
+    // attributed to this run the joined value is null, and the honest class is `unclassified`
+    // rather than one inferred from material the reviewer never saw.
+    challengeClass: challengeClassOf(caseFacts?.challenge ?? null),
     label,
     engine,
     reference: referenceOf(label, labelStatus),
@@ -424,6 +471,23 @@ export function cellFactsOfRun(observation: Observation): readonly CellFacts[] {
       dataset: observation.dataset,
     }),
   );
+}
+
+/**
+ * Whether this cell's label may be used as a gold reference.
+ *
+ * The single predicate every gold-dependent metric consults. `cell.labelStatus` is where the
+ * cross-artifact checks already landed — the label was approved, it was not contested, and it
+ * judges the same input this cell submitted — so re-deriving eligibility from
+ * `cell.label.gold` anywhere else would reintroduce exactly the defect that status exists to
+ * prevent: the dataset's own view is about the dataset, not about this run.
+ *
+ * Layer one, both diagnostic fields, allowed-pair counting, monotonicity, the reference
+ * distribution and the score differences all call this, so the layers cannot disagree about
+ * which cells they measured.
+ */
+export function hasGoldReference(cell: CellFacts): boolean {
+  return cell.labelStatus === 'gold' && cell.reference !== null;
 }
 
 /** The behaviour classes a classification can produce, as a value for counting. */

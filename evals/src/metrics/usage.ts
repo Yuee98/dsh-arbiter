@@ -116,13 +116,24 @@ function sameAggregate(
   right: UsageAggregate | null,
 ): boolean {
   if (left === null || right === null) return left === right;
+  // Every member that carries meaning is compared, not just the token sums. A stored
+  // aggregate can agree on all six totals while disagreeing about how many attempts it
+  // counted, which mapping produced it, or how a sub-count relates to its parent; any of those
+  // would make `matchesRecord` claim a reconciliation that did not happen.
   if (left.attempts !== right.attempts) return false;
   if (left.withUsage !== right.withUsage) return false;
+  if (left.duplicateAttempts !== right.duplicateAttempts) return false;
+  if (left.mappingVersion !== right.mappingVersion) return false;
+  for (const inclusion of ['cacheRead', 'cacheWrite', 'reasoning'] as const) {
+    if (left.inclusions[inclusion] !== right.inclusions[inclusion])
+      return false;
+  }
   for (const field of FIELDS) {
     const a = left.totals[field];
     const b = right.totals[field];
     if (a.total !== b.total) return false;
     if (a.reported !== b.reported || a.missing !== b.missing) return false;
+    if (a.complete !== b.complete) return false;
   }
   return true;
 }

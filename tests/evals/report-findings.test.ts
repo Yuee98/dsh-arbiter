@@ -996,3 +996,351 @@ export async function run(
 ): Promise<void> {
   await promisify(execFile)(command, [...args]);
 }
+
+describe('RQ11-B07 (round 2): the recorded dataset is protected too', () => {
+  it('refuses a prefix that would replace the run-recorded dataset case', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const casePath = join(
+        REPOSITORY_ROOT,
+        'evals/datasets/core-v1/cases/read-named-source-file.json',
+      );
+      const before = await readFile(casePath, 'utf8');
+      const err: string[] = [];
+      // No `--dataset`: the CLI takes the path the run recorded, which is the one a person
+      // actually uses. Protecting only an explicit path left this case writable.
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: casePath.replace(/\.json$/u, ''),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      expect(await readFile(casePath, 'utf8')).toBe(before);
+    });
+  });
+
+  it('refuses a prefix that would replace the dataset manifest', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const manifestPath = join(
+        REPOSITORY_ROOT,
+        'evals/datasets/core-v1/manifest.json',
+      );
+      const before = await readFile(manifestPath, 'utf8');
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: manifestPath.replace(/\.json$/u, ''),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      expect(await readFile(manifestPath, 'utf8')).toBe(before);
+    });
+  });
+});
+
+describe('RQ11-B04 (round 2): allowed-pair counting keeps each model', () => {
+  it('counts both models pairs rather than only the first case match', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [label('read-named-source-file', hashOf(entry), 1, 10)],
+      });
+      const directory = join(created.path, 'run');
+      // Model A returns the allowed pair; model B returns a pair outside it but still an
+      // allow. A case-only dedupe would have reported a perfect pair-hit rate.
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file'],
+          protocols: ['chat'],
+          targets: [chatTarget('chat-a'), chatModel('chat-b', 'model-b')],
+        }),
+        fixture: fixtureOf({
+          [cellIdOf({
+            caseId: 'read-named-source-file',
+            targetId: 'chat-a',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(1, 10)] }),
+          [cellIdOf({
+            caseId: 'read-named-source-file',
+            targetId: 'chat-b',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(6, 10)] }),
+        }),
+      });
+      const report = await buildFor(directory, dataset);
+      expect(report.diagnostics.pairs.labeled).toBe(2);
+      expect(report.diagnostics.pairs.exactPair).toBe(1);
+      expect(report.diagnostics.pairs.pairRate).toBe(0.5);
+      expect(report.diagnostics.pairs.outside).toHaveLength(1);
+    });
+  });
+});
+
+describe('RQ11-B03 (round 2): a misnamed label resolves by its declared id', () => {
+  it('excludes the declared case, not the filename', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+      });
+      // A schema-valid approved label whose file name disagrees with the id it declares.
+      // The inspector reports the filename mismatch against the file; attributing that to
+      // the *filename* would leave the label usable under the id it declares.
+      await created.write(
+        'dataset/labels/wrong-name.json',
+        label('read-named-source-file', hashOf(entry), 1, 10),
+      );
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const report = await buildFor(directory, dataset);
+      expect(report.diagnostics.labels.gold).toBe(0);
+      expect(report.diagnostics.labels.authorityConflict).toBe(1);
+      expect(report.behaviour.overall.compared).toBe(0);
+      expect(report.examples[0]?.labelStatus).toBe('authority-conflict');
+    });
+  });
+});
+
+describe('RQ11-B01/B03 (round 2): layer two uses the same gold predicate', () => {
+  it('leaves every diagnostic denominator at zero for an input mismatch', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const original = await committedCase('read-named-source-file');
+      const edited: ReviewCase = {
+        ...original,
+        input: {
+          ...original.input,
+          action: { ...original.input.action, name: 'read-edited' },
+        },
+      };
+      const dataset = await datasetOf(created, {
+        cases: [],
+        labels: [],
+        name: 'edited',
+      });
+      await created.write('edited/cases/read-named-source-file.json', edited);
+      const checkers = await compileCheckers();
+      const checked = checkers.case(edited);
+      if (!checked.ok) throw new Error(checked.problems.join('; '));
+      await created.write(
+        'edited/labels/read-named-source-file.json',
+        label(
+          'read-named-source-file',
+          inputHashOf(checked.document.input),
+          1,
+          10,
+        ),
+      );
+
+      const report = await buildFor(directory, dataset);
+      // Every gold-dependent number, not only the headline.
+      expect(report.diagnostics.risk.comparable).toBe(0);
+      expect(report.diagnostics.authorization.comparable).toBe(0);
+      expect(report.diagnostics.pairs.labeled).toBe(0);
+      expect(
+        report.diagnostics.monotonicity.every(
+          (entry) => entry.comparablePairs === 0,
+        ),
+      ).toBe(true);
+      expect(
+        report.diagnostics.shape.every((entry) => entry.reference === null),
+      ).toBe(true);
+      // And no score difference is published against the inapplicable label.
+      expect(
+        report.differences.filter((entry) => entry.kind === 'score'),
+      ).toHaveLength(0);
+    });
+  });
+
+  it('leaves every diagnostic denominator at zero for a contested label', async () => {
+    await withArea(async (created) => {
+      const entry = await committedCase('read-named-source-file');
+      const hash = hashOf(entry);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [label('read-named-source-file', hash, 1, 10)],
+      });
+      await created.write(
+        'dataset/labels/duplicate.json',
+        label('read-named-source-file', hash, 7, 1),
+      );
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const report = await buildFor(directory, dataset);
+      expect(report.diagnostics.risk.comparable).toBe(0);
+      expect(report.diagnostics.pairs.labeled).toBe(0);
+      expect(report.diagnostics.shape[0]?.reference).toBeNull();
+      expect(
+        report.differences.filter((row) => row.kind === 'score'),
+      ).toHaveLength(0);
+    });
+  });
+});
+
+describe('RQ11-B06 (round 2): the example table uses the recomputation', () => {
+  it('publishes recomputed example tokens and detects a metadata-only mismatch', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const checkers = await compileRunCheckers();
+      const path = join(
+        directory,
+        'records',
+        'read-named-source-file~chat-a~chat~r1.json',
+      );
+      const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+      const checked = checkers.record(parsed);
+      if (!checked.ok) throw new Error(checked.problems.join('; '));
+      const usage = checked.document.usage;
+      if (usage === null) throw new Error('the fixture record has no usage');
+      const tampered = {
+        ...checked.document,
+        usage: {
+          ...usage,
+          // Totals untouched; only the declared inclusion and coverage change. A
+          // totals-only comparison would call this reconciled.
+          inclusions: { ...usage.inclusions, cacheRead: 'contained' as const },
+        },
+      };
+      const rechecked = checkers.record(tampered);
+      if (!rechecked.ok) throw new Error(rechecked.problems.join('; '));
+      await writeFile(path, `${JSON.stringify(rechecked.document, null, 2)}\n`);
+
+      const report = await buildFrom(directory);
+      const cell = report.usage.byCell[0];
+      expect(cell?.matchesRecord).toBe(false);
+      // The example row carries the same recomputed figure as the cell aggregate.
+      expect(report.examples[0]?.tokens.inputTokens).toBe(
+        cell?.aggregate?.totals.inputTokens.total,
+      );
+      expect(report.examples[0]?.tokens.inputTokens).toBe(900);
+    });
+  });
+});
+
+describe('RQ11-B09 (round 2): challenge mechanisms are bound to the input', () => {
+  it('withholds the classification when the case input changed after the run', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const original = await committedCase('read-named-source-file');
+      // The same family and split, but the input gains a hint. Nothing about the executed
+      // cell changed, so a classification that read the current input would move an
+      // ordinary case to targeted.
+      const hinted: ReviewCase = {
+        ...original,
+        input: { ...original.input, hint: '注意：这次操作可能已被授权' },
+      };
+      const dataset = await datasetOf(created, {
+        cases: [],
+        labels: [],
+        name: 'hinted',
+      });
+      await created.write('hinted/cases/read-named-source-file.json', hinted);
+      const report = await buildFor(directory, dataset);
+      const example = report.examples[0];
+      expect(example?.challengeClass).toBe('unclassified');
+      expect(example?.challenge).toEqual([]);
+      expect(example?.caseFactsConflict).toBe(true);
+      // The grouping follows that state rather than a guess.
+      const challengeGroups = report.behaviour.byGroup
+        .filter((group) => group.axis === 'challenge')
+        .map((group) => group.key);
+      expect(challengeGroups).toEqual(['unclassified']);
+    });
+  });
+});
+
+describe('RQ11-B10: monotonicity compares within one system', () => {
+  it('does not invent a reversal across two models at different offsets', async () => {
+    await withArea(async (created) => {
+      // Two gold cases ordered R2 < R8, and two models that both preserve the order while
+      // sitting at different offsets. A cross-model comparison would pair model B's answer
+      // for the lower case with model A's answer for the higher one and call it a reversal.
+      const low = await committedCase('read-named-source-file');
+      const high = await committedCase('read-repo-index-with-cache');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file', 'read-repo-index-with-cache'],
+        labels: [
+          label('read-named-source-file', hashOf(low), 2, 10),
+          label('read-repo-index-with-cache', hashOf(high), 8, 10),
+        ],
+      });
+      const directory = join(created.path, 'run');
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+          protocols: ['chat'],
+          targets: [chatTarget('chat-a'), chatModel('chat-b', 'model-b')],
+        }),
+        fixture: fixtureOf({
+          ...Object.fromEntries([
+            [
+              cellIdOf({
+                caseId: 'read-named-source-file',
+                targetId: 'chat-a',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(1, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-repo-index-with-cache',
+                targetId: 'chat-a',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(3, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-named-source-file',
+                targetId: 'chat-b',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(7, 10)] }),
+            ],
+            [
+              cellIdOf({
+                caseId: 'read-repo-index-with-cache',
+                targetId: 'chat-b',
+                protocol: 'chat',
+              }),
+              fixtureCell({ chat: [chatAnswer(9, 10)] }),
+            ],
+          ]),
+        }),
+      });
+      const report = await buildFor(directory, dataset);
+      const risk = report.diagnostics.monotonicity.find(
+        (entry) => entry.field === 'risk',
+      );
+      // One comparable pair per model, and neither model reverses.
+      expect(risk?.comparablePairs).toBe(2);
+      expect(risk?.reversals).toBe(0);
+      expect(risk?.reversalRate).toBe(0);
+    });
+  });
+});

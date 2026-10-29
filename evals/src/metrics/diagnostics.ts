@@ -23,6 +23,7 @@
 import { verdictFor } from '../../../src/review-contract/matrix.js';
 import { isPublicScore } from '../../../src/review-contract/rubrics.js';
 
+import { hasGoldReference } from './cell.js';
 import type { CellFacts } from './cell.js';
 import { legalPairs } from '../data/eligibility.js';
 import type { ReviewLabel } from '../data/types.js';
@@ -91,7 +92,8 @@ function observationsOf(
     (left, right) =>
       compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
   )) {
-    if (!cell.judged || cell.label === null || !cell.label.gold) continue;
+    if (!cell.judged || cell.label === null || !hasGoldReference(cell))
+      continue;
     const observed =
       field === 'risk' ? cell.engine.risk : cell.engine.authorization;
     if (observed === null) continue;
@@ -197,6 +199,8 @@ function pairDistance(
  * the wrong reason is worth knowing about.
  */
 export function pairStats(cells: readonly CellFacts[]): PairStats {
+  // The same observation population the field errors use: one measurement per (case, model,
+  // protocol), so a second model's illegal pair cannot be dropped by a case-only dedupe.
   const seen = new Set<string>();
   let labeled = 0;
   let exact = 0;
@@ -205,13 +209,18 @@ export function pairStats(cells: readonly CellFacts[]): PairStats {
     readonly observed: readonly [number, number];
     readonly distance: number;
   }[] = [];
-  for (const cell of cells) {
-    if (!cell.judged || cell.label === null || !cell.label.gold) continue;
+  for (const cell of [...cells].sort(
+    (left, right) =>
+      compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
+  )) {
+    if (!cell.judged || cell.label === null || !hasGoldReference(cell))
+      continue;
     const risk = cell.engine.risk;
     const authorization = cell.engine.authorization;
     if (risk === null || authorization === null) continue;
-    if (seen.has(cell.caseId)) continue;
-    seen.add(cell.caseId);
+    const key = [cell.caseId, cell.modelKey, cell.protocol].join('~');
+    if (seen.has(key)) continue;
+    seen.add(key);
     const pairs = legalPairs(cell.label.label);
     if (pairs === null) continue;
     labeled += 1;
@@ -225,8 +234,8 @@ export function pairStats(cells: readonly CellFacts[]): PairStats {
     outside.push({
       caseId: cell.caseId,
       observed,
-      // The distance to the nearest allowed pair, so a reader can tell a near miss
-      // from a pair that has nothing to do with the adjudication.
+      // The distance to the nearest allowed pair, so a reader can tell a near miss from a
+      // pair that has nothing to do with the adjudication.
       distance: fixed(
         Math.sqrt(
           Math.min(
@@ -260,6 +269,17 @@ export function monotonicityStats(
   field: 'risk' | 'authorization',
 ): MonotonicityStats {
   const observations = observationsOf(cells, field);
+  // Monotonicity is a claim about one ranker. Comparing model A's answer for one case with
+  // model B's answer for another would invent a reversal whenever the two models sit at
+  // different offsets, which is the normal case rather than a finding. So the comparison runs
+  // within each (model, protocol) population and the counts are summed afterwards.
+  const populations = new Map<string, FieldObservation[]>();
+  for (const entry of observations) {
+    const key = [entry.modelKey, entry.protocol].join('~');
+    const existing = populations.get(key);
+    if (existing === undefined) populations.set(key, [entry]);
+    else existing.push(entry);
+  }
   const violations: {
     readonly higher: string;
     readonly lower: string;
@@ -268,26 +288,30 @@ export function monotonicityStats(
   }[] = [];
   let comparable = 0;
   let ties = 0;
-  for (let left = 0; left < observations.length; left += 1) {
-    for (let right = left + 1; right < observations.length; right += 1) {
-      const a = observations[left];
-      const b = observations[right];
-      if (a === undefined || b === undefined) continue;
-      if (a.reference === b.reference) continue;
-      comparable += 1;
-      const higher = a.reference > b.reference ? a : b;
-      const lower = a.reference > b.reference ? b : a;
-      if (higher.observed === lower.observed) {
-        ties += 1;
-        continue;
-      }
-      if (higher.observed < lower.observed) {
-        violations.push({
-          higher: higher.caseId,
-          lower: lower.caseId,
-          reference: [higher.reference, lower.reference],
-          observed: [higher.observed, lower.observed],
-        });
+  for (const [, population] of [...populations.entries()].sort(
+    ([left], [right]) => compareText(left, right),
+  )) {
+    for (let left = 0; left < population.length; left += 1) {
+      for (let right = left + 1; right < population.length; right += 1) {
+        const a = population[left];
+        const b = population[right];
+        if (a === undefined || b === undefined) continue;
+        if (a.reference === b.reference) continue;
+        comparable += 1;
+        const higher = a.reference > b.reference ? a : b;
+        const lower = a.reference > b.reference ? b : a;
+        if (higher.observed === lower.observed) {
+          ties += 1;
+          continue;
+        }
+        if (higher.observed < lower.observed) {
+          violations.push({
+            higher: higher.caseId,
+            lower: lower.caseId,
+            reference: [higher.reference, lower.reference],
+            observed: [higher.observed, lower.observed],
+          });
+        }
       }
     }
   }

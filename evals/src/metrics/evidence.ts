@@ -22,6 +22,7 @@
 
 import type { CellFacts } from './cell.js';
 import { classifyCell, isError } from './behaviour.js';
+import { hasGoldReference } from './cell.js';
 import { settlementOf } from './settlement.js';
 import { compareText } from './support.js';
 import type { AskPolicy } from '../../../src/review-contract/matrix.js';
@@ -141,7 +142,7 @@ function behaviourDifferences(
  * working on.
  */
 function scoreDifferences(cell: CellFacts): readonly DifferenceRow[] {
-  if (!cell.judged || cell.label === null || !cell.label.gold) return [];
+  if (!cell.judged || cell.label === null || !hasGoldReference(cell)) return [];
   const reference = cell.label.label.target.allowed;
   const rows: DifferenceRow[] = [];
   const fields = [
@@ -185,7 +186,7 @@ export function labelFindingsOf(parts: {
   for (const cell of parts.cells) {
     if (seen.has(cell.caseId)) continue;
     if (cell.label === null) continue;
-    if (cell.label.gold) continue;
+    if (hasGoldReference(cell)) continue;
     seen.add(cell.caseId);
     rows.push({
       kind: 'label',

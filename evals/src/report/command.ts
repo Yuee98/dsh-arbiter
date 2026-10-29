@@ -25,7 +25,7 @@ import {
   defaultSettings,
   parseSettlementMode,
 } from '../metrics/index.js';
-import { observeRun } from '../metrics/observe.js';
+import { datasetPathOf, observeRun } from '../metrics/observe.js';
 import type { ReportSettings } from '../metrics/types.js';
 import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
@@ -153,6 +153,9 @@ function protectedEvidenceOf(parts: {
   readonly settings: ReportSettings;
   readonly observation: {
     readonly dataset: { readonly status: string };
+    readonly artifact: {
+      readonly index: { readonly plan: { readonly datasetPath: string } };
+    };
   };
 }): readonly EvidencePath[] {
   const evidence: EvidencePath[] = [
@@ -161,17 +164,23 @@ function protectedEvidenceOf(parts: {
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
   ];
-  const dataset = parts.settings.dataset;
-  if (
-    parts.observation.dataset.status === 'joined' &&
-    dataset.kind === 'path'
-  ) {
-    const base = dataset.path.startsWith('/')
-      ? dataset.path
-      : resolve(parts.root, dataset.path);
-    for (const name of ['cases', 'labels', 'reviews']) {
-      evidence.push({ path: join(base, name), kind: 'directory' });
-    }
+  if (parts.observation.dataset.status !== 'joined') return evidence;
+  // The dataset's location is resolved the same way the read resolved it, whichever source
+  // named it. Protecting only an explicit `--dataset` left the CLI's own default — the path
+  // the run recorded — readable and writable at once, and that is the case that matters most
+  // because it is the one a person actually invokes.
+  const base = datasetPathOf(
+    parts.settings.dataset,
+    parts.observation.artifact,
+  );
+  if (base === null) return evidence;
+  const absolute = base.startsWith('/') ? base : resolve(parts.root, base);
+  // The manifest is protected as a file and the three document directories as directories: a
+  // report written over `manifest.json` would replace the dataset's own table of contents,
+  // which every later check depends on.
+  evidence.push({ path: join(absolute, 'manifest.json'), kind: 'file' });
+  for (const name of ['cases', 'labels', 'reviews']) {
+    evidence.push({ path: join(absolute, name), kind: 'directory' });
   }
   return evidence;
 }

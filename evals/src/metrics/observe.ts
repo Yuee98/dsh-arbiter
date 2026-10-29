@@ -51,6 +51,8 @@ export interface CaseFacts {
   readonly provenance: string;
   /** Dataset-relative path of the case document. */
   readonly path: string;
+  /** The fingerprint of the input these facts were read from. */
+  readonly inputHash: string;
   /** The mechanisms the input uses, in a fixed order; empty for an ordinary case. */
   readonly challenge: readonly string[];
 }
@@ -183,6 +185,7 @@ function casesOf(
       split: document.split,
       provenance: document.provenance.source,
       path: entry.path,
+      inputHash: inputHashOf(document.input),
       challenge: challengeMechanismsOf(document),
     });
   }
@@ -335,13 +338,39 @@ function contestedOf(inspection: DatasetInspection): ReadonlySet<string> {
   // which the eligibility rules already decide with a precise reason — an input that moved,
   // a version that drifted, an adjudication that was never approved. Treating that as a
   // conflict would replace those reasons with one word and hide which of them applies.
+  //
+  // The case id is read from the *document* the file declares, never from the filename. A
+  // misnamed file is itself one of the defects being reported, so inferring the case from its
+  // name would mark the wrong case — and leave the approved label, indexed under the id it
+  // declares, usable as gold.
+  const declaredByPath = declaredCaseIdByPath(inspection);
   for (const problem of inspection.problems) {
     if (!problem.path.startsWith('labels/')) continue;
     if (problem.message.startsWith('this label cannot count')) continue;
-    const caseId = problem.path.slice('labels/'.length).replace(/\.json$/u, '');
-    contested.add(caseId);
+    const declared = declaredByPath.get(problem.path);
+    if (declared !== undefined) contested.add(declared);
   }
   return contested;
+}
+
+/**
+ * The case id each label file declares, keyed by its dataset-relative path.
+ *
+ * Built from the assessed labels, so it covers exactly the files the inspector read. A file
+ * whose document does not parse as a label has no entry, and a defect reported against it is
+ * therefore not attributed to any case: there is no id to attribute it to.
+ */
+function declaredCaseIdByPath(
+  inspection: DatasetInspection,
+): ReadonlyMap<string, string> {
+  const byPath = new Map<string, string>();
+  for (const assessment of [
+    ...inspection.labels.gold,
+    ...inspection.labels.excluded,
+  ]) {
+    byPath.set(assessment.path, assessment.label.caseId);
+  }
+  return byPath;
 }
 
 /** An empty dataset result with the reason it is empty. */
@@ -389,9 +418,11 @@ function rubricVersionOf(manifest: Sourced | null): string {
  * An explicit path still wins, because a rebuild against a corrected dataset is a
  * legitimate operation the caller must be able to ask for.
  */
-function datasetPathOf(
+export function datasetPathOf(
   source: DatasetSource,
-  artifact: RunArtifact,
+  artifact: {
+    readonly index: { readonly plan: { readonly datasetPath: string } };
+  },
 ): string | null {
   switch (source.kind) {
     case 'recorded':
