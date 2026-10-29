@@ -32,6 +32,7 @@ import { AuditStore } from '../../src/audit.js';
 import { parseDocument } from '../../src/config.js';
 import { apply } from '../../src/index.js';
 import { installSessionRecordApi } from '../../src/records.js';
+import { decodeDecisionRecord } from '../../src/host/history-record.js';
 import {
   admitSession,
   recordingSessionApi,
@@ -238,6 +239,25 @@ function call(
 
 const allowNext = (): Promise<{ kind: string }> =>
   Promise.resolve({ kind: 'allow' });
+
+/** Whether the durable history readers accept this row as a known result. */
+function readableCancellation(
+  callId: string,
+  stored: { readonly result: string },
+): boolean {
+  const decoded = decodeDecisionRecord(
+    {
+      callId,
+      tool: 'run_code',
+      result: stored.result,
+      reason: 'cancelled',
+      mode: 'ask',
+      trace: [],
+    },
+    { time: Date.now(), seq: 1 },
+  );
+  return decoded !== null;
+}
 
 /** The stored call row, once the audit store has written it. */
 async function storedCall(callId: string): Promise<{
@@ -646,6 +666,10 @@ describe('a cancelled review keeps its attempts', () => {
       expect(decision.kind).toBe('cancel');
       // The record proves the attempt happened, with the usage it reported.
       const stored = await storedCall('cancel-1');
+      // The result must survive a round trip through the durable readers, or a
+      // cancelled call would read as uninterpretable history once the audit store is
+      // disabled or cleared.
+      expect(readableCancellation('cancel-1', stored)).toBe(true);
       expect(stored.result).toBe('review-cancelled');
       const attempts = stored.modelAttempts;
       expect(attempts).toHaveLength(1);
