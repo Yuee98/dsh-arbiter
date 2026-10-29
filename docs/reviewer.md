@@ -481,7 +481,7 @@ not coverage.
 
 **两模式（ask／no-ask）。** 两种模式共用同一矩阵，唯一差别是升级时能否开启真人审批。`no-ask` 不是更严格的策略：无 ask、或子任务／宿主没有真实通道时，`review-escalate` 与 `error-escalate` 一律 fallback-deny，模型不能代替人工。旧值不转换——`normal`／`strict` 本是同一引擎加一个通道开关（正是这一对），`progress` 会放宽矩阵本身（设计禁止），因此三者都作为配置错误报出并提示替代值。`force-ask` 同样必须真人：无通道时拒绝，不转入审查。
 
-**记录（#68）。** 新记录只写新形状：`scores`（两项公共分、矩阵要求的最低授权、`verdict`、逐字段 trail 与 `contractVersion`）、`review_stage`、`usage`（原始脱敏载荷加规范化值，逐 attempt 一并保存）与 `decision_rules`；旧的 `signals`／`policy_strategy` 列保留为可空但当前记录不再写入，因此老行如实报告「没有新式评分」而不是默认分。详情 API 与 UI 按同一契约展示；材料缺失或调用失败到达阶段但不产生分数。
+**记录（#68、#70）。** 新记录只写新形状：`scores`（两项公共分、矩阵要求的最低授权、`verdict`、逐字段 trail 与 `contractVersion`）、`review_stage`、`usage`（原始脱敏载荷加规范化值，逐 attempt 一并保存）与 `decision_rules`。旧的 `signals`／`policy_strategy` 列与旧评分编码的读取分支已删除：本版只写、只读这一套记录格式，评分缺失如实报「没有新式评分」而不是默认分。详情 API 与 UI 按同一契约展示；材料缺失或调用失败到达阶段但不产生分数。
 
 <a id="design-5-5-ir"></a>
 

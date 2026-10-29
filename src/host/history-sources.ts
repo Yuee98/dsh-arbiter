@@ -301,6 +301,15 @@ export function readAudit(
         : 'the audit store is disabled',
     );
   }
+  // A store that refused its database answers with an empty list, which is
+  // indistinguishable from "this session has no history". The refusal is the
+  // honest answer: report the source unavailable with its reason rather than
+  // claiming the history was read and found empty.
+  if (audit.paused) {
+    return unavailableSource(
+      audit.health().lastError ?? 'the audit database is not usable',
+    );
+  }
   let invalid = 0;
   try {
     // One row beyond the window: the audit store applies its own SQL LIMIT, so

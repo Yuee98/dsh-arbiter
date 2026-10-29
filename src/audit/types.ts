@@ -59,12 +59,13 @@ export interface CallRecord {
 /**
  * One stored call as the read adapter returns it.
  *
- * `recordFormatVersion` says how the row was written. A row whose format this
- * build cannot interpret is reported with `unreadable: true` and its original
- * fields untouched rather than being coerced into the current shape.
+ * `recordFormatVersion` says how the row was written, or is `null` when the row
+ * declares none. A row whose format this build cannot interpret is reported with
+ * `unreadable: true` and its original fields untouched rather than being coerced
+ * into the current shape.
  */
 export interface StoredCall {
-  readonly recordFormatVersion: number;
+  readonly recordFormatVersion: number | null;
   readonly unreadable: boolean;
   readonly unreadableReason: string | null;
   readonly [key: string]: unknown;
@@ -207,9 +208,9 @@ export interface CallSummary {
   readonly command: string;
   readonly result: string;
   readonly ruleId: string | null;
-  /** The rule's name at decision time, or null when the row predates it. */
+  /** The rule's name at decision time, or null when the row recorded none. */
   readonly ruleName: string | null;
-  readonly recordFormatVersion: number;
+  readonly recordFormatVersion: number | null;
   readonly unreadable: boolean;
   readonly unreadableReason: string | null;
 }

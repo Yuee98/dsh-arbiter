@@ -371,6 +371,34 @@ describe('logs route failure states', () => {
     expect(memberOf(body, 'total')).toBe(0);
   });
 
+  test('a refused database is reported as unavailable, never as an empty page', async () => {
+    const { home } = await startHost(async (store) => {
+      store.enqueue(recordOf('kept'));
+      await store.flush();
+    });
+    // Stamp the file as an older release's. The store refuses it without opening
+    // it, and no read may then succeed: a 200 with zero rows would tell the
+    // operator the audit trail is empty when the truth is that it is unreadable.
+    const db = new DatabaseSync(join(home, 'arbiter', 'arbiter.db'));
+    db.exec('PRAGMA user_version = 1');
+    db.close();
+
+    const refused = new AuditStore(join(home, 'arbiter', 'arbiter.db'), {
+      ...DEFAULT_CONFIG.audit,
+      enabled: true,
+    });
+    expect(refused.paused).toBe(true);
+    // The store contract first: every read answers the refusal, not zero.
+    expect(refused.listCalls({}).unreadable).toBe(true);
+    expect(refused.readCall('kept')).toEqual({
+      record: null,
+      unreadable: true,
+    });
+    expect(refused.stats()).toBeNull();
+    expect(refused.configHistory()).toEqual([]);
+    refused.close();
+  });
+
   test('a successful empty search is a normal empty page', async () => {
     const { routes } = await startHost(async (store) => {
       store.enqueue(recordOf('kept'));

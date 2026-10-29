@@ -1,13 +1,13 @@
-import { existsSync } from 'node:fs';
 import {
-  mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
-  utimes,
   writeFile,
 } from 'node:fs/promises';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,7 +23,6 @@ import {
   renderChatUser,
   renderDecisionRequest,
 } from '../src/reviewer/prompt.js';
-import { pruneBackups } from '../src/audit/schema.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import type { ReviewScores, TraceStage } from '../src/types.js';
 
@@ -487,7 +486,7 @@ describe('execution result stays separate from the verdict', () => {
   });
 });
 
-describe('record format and old data', () => {
+describe('record format handling', () => {
   test('rows carry the format they were written with', async () => {
     const { store } = await makeStore();
     store.enqueue(record({ callId: 'current', result: 'allow' }));
@@ -499,23 +498,24 @@ describe('record format and old data', () => {
     store.close();
   });
 
-  test('a v1 row is read with unknown fields left absent, not defaulted', async () => {
+  test('a row written in another format is unreadable, not reinterpreted', async () => {
     const { store } = await makeStore();
     const path = store.databasePath;
+    store.enqueue(record({ callId: 'current', result: 'allow' }));
+    await store.flush();
     store.close();
     const db = new DatabaseSync(path);
-    // Simulate a record written before the new columns existed: a v1 database
-    // has no such columns, so the adapter must not invent values for them.
-    db.exec('PRAGMA user_version = 1');
+    // Same columns, different declared format: this build writes one format and
+    // must not present another one's contents under today's semantics.
     db.prepare(
       `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
          tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-         execution_mode, result, reason, trace, effect, session_record_state, signals,
-         policy_strategy, decision_rules, execution_status, record_format_version,
+         execution_mode, result, reason, trace, effect, session_record_state,
+         decision_rules, execution_status, record_format_version,
          execution_started_at, execution_finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      'legacy',
+      'other-format',
       Date.now(),
       's1',
       'main',
@@ -528,15 +528,13 @@ describe('record format and old data', () => {
       'bash:abc',
       'rev-old',
       'cfg-old',
-      'normal',
+      'ask',
       'trusted',
       'review-allow',
-      'legacy row',
+      'other-format row',
       '[]',
       'null',
       'written',
-      null,
-      null,
       '[]',
       'pending',
       1,
@@ -545,65 +543,79 @@ describe('record format and old data', () => {
     );
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
-    const detail = reopened.getCall('legacy');
+    const detail = reopened.getCall('other-format');
+    expect(boolField(detail, 'unreadable')).toBe(true);
     expect(numberField(detail, 'recordFormatVersion')).toBe(1);
-    expect(stringField(detail, 'executionStatus')).toBe('pending');
-    expect(nullableNumberField(detail, 'executionStartedAt')).toBeNull();
-    expect(nullableNumberField(detail, 'executionFinishedAt')).toBeNull();
-    expect(listField(detail, 'stages')).toEqual([]);
+    expect(stringField(detail, 'unreadableReason')).toContain('not supported');
+    // The identifying fields stay; the interpreted ones are not claimed.
+    expect(recordField(detail, 'tool')).toBe('bash');
+    expect(recordField(detail, 'result')).toBeNull();
+    expect(recordField(recordField(detail, 'raw'), 'result')).toBe(
+      'review-allow',
+    );
+    reopened.close();
+    // Reading it did not rewrite the row into today's shape.
+    const check = new DatabaseSync(path);
+    const stored = check
+      .prepare('SELECT record_format_version FROM calls WHERE call_id = ?')
+      .get('other-format');
+    expect(numberField(stored, 'record_format_version')).toBe(1);
+    check.close();
+  });
+
+  test('a row declaring no format is named as such, not numbered', async () => {
+    const { store } = await makeStore();
+    const path = store.databasePath;
+    store.enqueue(record({ callId: 'unversioned', result: 'review-allow' }));
+    await store.flush();
+    store.close();
+    // The structure this build creates declares the column NOT NULL, so a row
+    // without a value can only come from another build. Re-declaring the column
+    // without the constraint is the narrowest way to produce that row.
+    const db = new DatabaseSync(path);
+    db.exec('ALTER TABLE calls DROP COLUMN record_format_version');
+    db.exec('ALTER TABLE calls ADD COLUMN record_format_version INTEGER');
+    db.close();
+
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const detail = reopened.getCall('unversioned');
+    // The absence is reported as an absence, not invented into a format number.
+    expect(recordField(detail, 'recordFormatVersion')).toBeNull();
+    expect(boolField(detail, 'unreadable')).toBe(true);
+    expect(stringField(detail, 'unreadableReason')).toContain(
+      'declares no record format',
+    );
+    expect(recordField(detail, 'result')).toBeNull();
+    // The list reports the same absence rather than a default.
+    const listed = reopened.listCalls({}).rows[0];
+    expect(recordField(listed, 'recordFormatVersion')).toBeNull();
+    expect(boolField(listed, 'unreadable')).toBe(true);
+    // A record this build writes is unaffected by the older row beside it.
+    reopened.enqueue(record({ callId: 'current-row', result: 'review-deny' }));
+    await reopened.flush();
+    expect(
+      numberField(reopened.getCall('current-row'), 'recordFormatVersion'),
+    ).toBe(2);
+    expect(boolField(reopened.getCall('current-row'), 'unreadable')).toBe(
+      false,
+    );
     reopened.close();
   });
 
-  test('an unknown record format is reported without being rewritten', async () => {
+  test('a future record format is reported without being rewritten', async () => {
     const { store } = await makeStore();
     const path = store.databasePath;
+    store.enqueue(record({ callId: 'future', result: 'review-allow' }));
+    await store.flush();
     store.close();
     const db = new DatabaseSync(path);
-    db.prepare(
-      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
-         tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
-         execution_mode, result, reason, trace, effect, session_record_state, signals,
-         policy_strategy, decision_rules, execution_status, record_format_version,
-         execution_started_at, execution_finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      'future',
-      Date.now(),
-      's1',
-      'main',
-      null,
-      'test',
-      '/w',
-      'bash',
-      '{"command":"echo hi"}',
-      '/w',
-      'bash:def',
-      'rev-f',
-      'cfg-f',
-      'normal',
-      'trusted',
-      'review-allow',
-      'future row',
-      '[]',
-      'null',
-      'written',
-      null,
-      null,
-      '[]',
-      'pending',
-      99,
-      null,
-      null,
-    );
+    db.prepare('UPDATE calls SET record_format_version = 99').run();
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
     const detail = reopened.getCall('future');
     expect(boolField(detail, 'unreadable')).toBe(true);
     expect(numberField(detail, 'recordFormatVersion')).toBe(99);
-    expect(stringField(detail, 'unreadableReason')).toContain(
-      'newer than this plugin',
-    );
-    // The row is reported as unreadable rather than coerced into today's shape.
+    expect(stringField(detail, 'unreadableReason')).toContain('not supported');
     expect(recordField(detail, 'result')).toBeNull();
     expect(recordField(recordField(detail, 'raw'), 'result')).toBe(
       'review-allow',
@@ -857,6 +869,19 @@ describe('credential boundary in stored material', () => {
     expect(stored).not.toContain(sentinel);
     expect(stored).toContain('[redacted]');
     db.close();
+
+    // A cold read is the same guarantee: the three columns are readable again
+    // after a restart, and what was masked before the write stays masked.
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    const detail = reopened.getCall('echo-call');
+    const attempt = listField(detail, 'modelCalls')[0];
+    expect(recordField(attempt, 'responseText')).toBeTypeOf('string');
+    expect(recordField(attempt, 'error')).toBeTypeOf('string');
+    expect(recordField(attempt, 'usage')).not.toBeNull();
+    const reread = JSON.stringify(detail);
+    expect(reread).not.toContain(sentinel);
+    expect(reread).toContain('[redacted]');
+    reopened.close();
   });
 
   test('a chat attempt keeps its full request material', async () => {
@@ -1269,73 +1294,47 @@ describe('record and stage provenance', () => {
   });
 });
 
-describe('analysis consumers and unknown formats', () => {
-  test('a retired signal set carries no new-style score', async () => {
+describe('analysis consumers and scoreless records', () => {
+  test("a record that produced no score is not graded under today's matrix", async () => {
     const { store } = await makeStore();
-    const path = store.databasePath;
-    store.close();
-    const db = new DatabaseSync(path);
-    db.prepare(
-      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
-         tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
-         approval_mode, execution_mode, result, reason, trace, effect, session_record_state, signals,
-         policy_strategy, decision_rules, execution_status, record_format_version,
-         execution_started_at, execution_finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      'retired-signals',
-      Date.now(),
-      's1',
-      'main',
-      null,
-      'test',
-      '/w',
-      'bash',
-      '{"command":"echo hi"}',
-      null,
-      '/w',
-      'bash:retired',
-      'rev-1',
-      'cfg-1',
-      'ask',
-      'trusted',
-      'review-allow',
-      'retired',
-      '[]',
-      'null',
-      'written',
-      // A row written before the shared-contract switch: the retired probe
-      // encoding is present, and no new-style score exists.
-      '{"source":"chat","riskClass":"low","authClass":"none","riskPoint":1,"authDist":null,"riskDist":null,"riskScore":null,"authPoint":1}',
-      'normal',
-      '[]',
-      'pending',
-      1,
-      null,
-      null,
+    // A review that reached a stage without a number: a material gap or a
+    // reviewer failure. `NULL` scores is a real state, not an old encoding, and
+    // it must not be read as a score of the lowest band.
+    store.enqueue(
+      record({
+        callId: 'no-score',
+        result: 'fallback-deny',
+        scores: null,
+        reviewStage: 'error-escalate',
+      }),
     );
-    db.close();
-    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
-    const analysis = reopened.callsForAnalysis(0, Date.now() + 1_000);
-    // The retired encoding is not reinterpreted as a band: the row reports no
-    // new-style score, which is a different fact from a score of the lowest band.
-    expect(
-      analysis.find((row) => row.callId === 'retired-signals')?.scores,
-    ).toBe(null);
+    await store.flush();
+    const analysis = store.callsForAnalysis(0, Date.now() + 1_000);
+    const row = analysis.find((item) => item.callId === 'no-score');
+    expect(row?.scores).toBe(null);
     // A replay only considers rows whose stored score this build can read, so a
-    // retired row is skipped rather than graded under today's matrix.
-    expect(reopened.recentForReplay(10)).toEqual([]);
-    reopened.close();
+    // scoreless row is skipped rather than graded under today's matrix.
+    expect(store.recentForReplay(10)).toEqual([]);
+    // The verdict itself is still stored and readable.
+    expect(stringField(store.getCall('no-score'), 'result')).toBe(
+      'fallback-deny',
+    );
+    expect(recordField(store.getCall('no-score'), 'reviewStage')).toBe(
+      'error-escalate',
+    );
+    store.close();
   });
 });
 
 /**
- * A genuine v1 database: the structure this project shipped before #15, with a
- * call, a stage, a model attempt, a configuration snapshot and an activation.
- * Building it by hand (not by downgrading a v2 file) is what makes the migration
- * test meaningful.
+ * The database structure a previous release wrote.
+ *
+ * Built by hand rather than by downgrading a current file: this is what an
+ * operator's audit directory actually contains after an upgrade, and it is the
+ * input the old build used to migrate. The current build must refuse it instead —
+ * no migration, no backup, no reinterpretation of its rows.
  */
-const V1_CALLS_SQL = `CREATE TABLE calls (
+const OLD_CALLS_SQL = `CREATE TABLE calls (
   call_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, session_id TEXT NOT NULL,
   session_kind TEXT NOT NULL, parent_session TEXT, profile TEXT, workspace TEXT,
   tool TEXT NOT NULL, arguments TEXT NOT NULL, cwd TEXT NOT NULL,
@@ -1346,13 +1345,13 @@ const V1_CALLS_SQL = `CREATE TABLE calls (
   signals TEXT, policy_strategy TEXT, decision_rules TEXT NOT NULL,
   execution_status TEXT NOT NULL)`;
 
-const V1_STAGES_SQL = `CREATE TABLE stages (
+const OLD_STAGES_SQL = `CREATE TABLE stages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
   seq INTEGER NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL, reason TEXT,
   rule_id TEXT, decision_rules TEXT, config_revision TEXT, ts INTEGER NOT NULL)`;
 
-const V1_MODELS_SQL = `CREATE TABLE model_calls (
+const OLD_MODELS_SQL = `CREATE TABLE model_calls (
   id TEXT PRIMARY KEY,
   call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
   attempt INTEGER NOT NULL, backend TEXT NOT NULL, protocol TEXT NOT NULL,
@@ -1360,58 +1359,59 @@ const V1_MODELS_SQL = `CREATE TABLE model_calls (
   started_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
   estimated_input_tokens INTEGER NOT NULL, usage TEXT)`;
 
-const V1_CONFIG_SQL = `CREATE TABLE config_snapshots (
+const OLD_CONFIG_SQL = `CREATE TABLE config_snapshots (
   snapshot_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
   content TEXT NOT NULL, format_version INTEGER NOT NULL,
   created_at INTEGER NOT NULL)`;
 
-const V1_ACTIVATIONS_SQL = `CREATE TABLE config_activations (
+const OLD_ACTIVATIONS_SQL = `CREATE TABLE config_activations (
   id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, activated_at INTEGER NOT NULL,
   entry TEXT NOT NULL, scope TEXT NOT NULL, revision TEXT NOT NULL)`;
 
-const V1_SNAPSHOTS_SQL = `CREATE TABLE snapshots (
+const OLD_SNAPSHOTS_SQL = `CREATE TABLE snapshots (
   snapshot_id TEXT PRIMARY KEY,
   call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
   content_hash TEXT NOT NULL, content TEXT NOT NULL,
   format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`;
 
-const V1_CANDIDATES_SQL = `CREATE TABLE candidates (
+const OLD_CANDIDATES_SQL = `CREATE TABLE candidates (
   candidate_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
   status TEXT NOT NULL, rule TEXT NOT NULL, stats TEXT NOT NULL,
   evidence TEXT NOT NULL, window_start INTEGER NOT NULL,
   window_end INTEGER NOT NULL, note TEXT)`;
 
-const V1_ANALYSIS_SQL = `CREATE TABLE analysis_runs (
+const OLD_ANALYSIS_SQL = `CREATE TABLE analysis_runs (
   id TEXT PRIMARY KEY, ran_at INTEGER NOT NULL, window_start INTEGER NOT NULL,
   window_end INTEGER NOT NULL, considered INTEGER NOT NULL,
   created INTEGER NOT NULL)`;
 
-const V1_META_SQL =
+const OLD_META_SQL =
   'CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)';
 
-function buildV1Database(path: string): void {
+/** One real row per table, so "refused" can never mean "looked empty". */
+function buildOldDatabase(path: string, version: number): void {
   const db = new DatabaseSync(path);
-  db.exec(V1_CONFIG_SQL);
-  db.exec(V1_ACTIVATIONS_SQL);
-  db.exec(V1_CALLS_SQL);
-  db.exec(V1_STAGES_SQL);
-  db.exec(V1_MODELS_SQL);
-  db.exec(V1_SNAPSHOTS_SQL);
-  db.exec(V1_CANDIDATES_SQL);
-  db.exec(V1_ANALYSIS_SQL);
-  db.exec(V1_META_SQL);
+  db.exec(OLD_CONFIG_SQL);
+  db.exec(OLD_ACTIVATIONS_SQL);
+  db.exec(OLD_CALLS_SQL);
+  db.exec(OLD_STAGES_SQL);
+  db.exec(OLD_MODELS_SQL);
+  db.exec(OLD_SNAPSHOTS_SQL);
+  db.exec(OLD_CANDIDATES_SQL);
+  db.exec(OLD_ANALYSIS_SQL);
+  db.exec(OLD_META_SQL);
   db.prepare(
     'INSERT INTO config_snapshots(snapshot_id, content_hash, content, format_version, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run('cfg-legacy', 'hash-legacy', '{"enabled":true}', 1, 1_600_000_000_000);
+  ).run('cfg-old', 'hash-old', '{"enabled":true}', 1, 1_600_000_000_000);
   db.prepare(
     'INSERT INTO config_activations(id, snapshot_id, activated_at, entry, scope, revision) VALUES (?, ?, ?, ?, ?, ?)',
   ).run(
-    'act-legacy',
-    'cfg-legacy',
+    'act-old',
+    'cfg-old',
     1_600_000_000_000,
     'startup',
     'profile',
-    'rev-legacy',
+    'rev-old',
   );
   db.prepare(
     `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
@@ -1420,27 +1420,27 @@ function buildV1Database(path: string): void {
        policy_strategy, decision_rules, execution_status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    'legacy-call',
+    'old-call',
     1_600_000_000_000,
-    'legacy-session',
+    'old-session',
     'main',
     null,
-    'legacy-profile',
-    '/legacy/workspace',
+    'old-profile',
+    '/old/workspace',
     'bash',
-    '{"command":"echo legacy"}',
-    '/legacy/workspace',
-    'bash:legacyfingerprint',
-    'rev-legacy',
-    'cfg-legacy',
+    '{"command":"echo old"}',
+    '/old/workspace',
+    'bash:oldfingerprint',
+    'rev-old',
+    'cfg-old',
     'normal',
     'trusted',
     'review-deny',
-    'legacy denial',
-    '[{"stage":"rule","result":"deny","ruleId":"legacy-rule","at":1600000000000}]',
+    'old denial',
+    '[{"stage":"rule","result":"deny","ruleId":"old-rule","at":1600000000000}]',
     'null',
     'written',
-    '{"riskDist":null,"riskPoint":1,"riskScore":null,"riskClass":"low","authDist":null,"authPoint":1,"authClass":"none","secrets":false,"destructive":false,"egress":false,"bulk":false,"source":"chat","repairs":0}',
+    '{"riskDist":null,"riskPoint":1,"riskScore":null,"riskClass":"low","source":"chat","repairs":0}',
     'normal',
     '["R7"]',
     'not-started',
@@ -1448,14 +1448,14 @@ function buildV1Database(path: string): void {
   db.prepare(
     'INSERT INTO stages(call_id, seq, stage, result, reason, rule_id, decision_rules, config_revision, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
-    'legacy-call',
+    'old-call',
     0,
     'rule',
     'deny',
-    'legacy denial',
-    'legacy-rule',
+    'old denial',
+    'old-rule',
     '["R7"]',
-    'rev-legacy',
+    'rev-old',
     1_600_000_000_000,
   );
   db.prepare(
@@ -1463,12 +1463,12 @@ function buildV1Database(path: string): void {
        parsed, error, started_at, duration_ms, estimated_input_tokens, usage)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    'legacy-call:model:1',
-    'legacy-call',
+    'old-call:model:1',
+    'old-call',
     1,
     'decision',
     'arbiter-decision-v1',
-    '{"model":"legacy-model","state":"STATE"}',
+    '{"model":"old-model","state":"STATE"}',
     '{"response":{}}',
     null,
     null,
@@ -1477,114 +1477,151 @@ function buildV1Database(path: string): void {
     3,
     null,
   );
-  db.exec('PRAGMA user_version = 1');
+  db.exec(`PRAGMA user_version = ${String(version)}`);
   db.close();
 }
 
-describe('a real v1 database', () => {
-  test('upgrades in place, keeps every row and takes a backup first', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v1-'));
+/**
+ * The database the superseded build created, as it left it on disk.
+ *
+ * Every table it defined, the retired review columns included, stamped with the
+ * schema number it wrote. This is the input a name-only structural check would
+ * accept, so it is the regression that proves the stamp discriminates.
+ */
+function buildPreviousReleaseDatabase(path: string): void {
+  const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE config_snapshots (
+    snapshot_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL, format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE config_activations (
+    id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, activated_at INTEGER NOT NULL,
+    entry TEXT NOT NULL, scope TEXT NOT NULL, revision TEXT NOT NULL)`);
+  db.exec(`CREATE TABLE templates (
+    template_id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL, format_version INTEGER NOT NULL,
+    renderer_version TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE calls (
+    call_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, session_id TEXT NOT NULL,
+    session_kind TEXT NOT NULL, parent_session TEXT, profile TEXT, workspace TEXT,
+    tool TEXT NOT NULL, arguments TEXT NOT NULL, arguments_schema TEXT, cwd TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, config_revision TEXT NOT NULL,
+    config_snapshot_id TEXT NOT NULL, approval_mode TEXT NOT NULL,
+    execution_mode TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL,
+    trace TEXT NOT NULL, effect TEXT NOT NULL, session_record_state TEXT NOT NULL,
+    scores TEXT, review_stage TEXT, usage TEXT,
+    signals TEXT, policy_strategy TEXT,
+    decision_rules TEXT NOT NULL, execution_status TEXT NOT NULL,
+    record_format_version INTEGER NOT NULL,
+    execution_started_at INTEGER, execution_finished_at INTEGER)`);
+  db.exec(`CREATE TABLE stages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL, reason TEXT,
+    rule_id TEXT, rule_name TEXT, decision_rules TEXT, config_revision TEXT,
+    config_snapshot_id TEXT, ts INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    content_hash TEXT NOT NULL, content TEXT NOT NULL,
+    format_version INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE model_calls (
+    id TEXT PRIMARY KEY,
+    call_id TEXT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    attempt INTEGER NOT NULL, backend TEXT NOT NULL, protocol TEXT NOT NULL,
+    request TEXT NOT NULL, template_id TEXT, response_text TEXT, parsed TEXT, error TEXT,
+    started_at INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+    estimated_input_tokens INTEGER NOT NULL, usage TEXT, normalized_usage TEXT,
+    failure_kind TEXT)`);
+  db.exec(`CREATE TABLE candidates (
+    candidate_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL,
+    rule TEXT NOT NULL, stats TEXT NOT NULL, evidence TEXT NOT NULL,
+    window_start INTEGER NOT NULL, window_end INTEGER NOT NULL, note TEXT)`);
+  db.exec(`CREATE TABLE analysis_runs (
+    id TEXT PRIMARY KEY, ran_at INTEGER NOT NULL, window_start INTEGER NOT NULL,
+    window_end INTEGER NOT NULL, considered INTEGER NOT NULL, created INTEGER NOT NULL)`);
+  db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  db.prepare(
+    `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+       tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
+       approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
+       scores, review_stage, usage, signals, policy_strategy, decision_rules, execution_status,
+       record_format_version, execution_started_at, execution_finished_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'previous-call',
+    1_700_000_000_000,
+    'previous-session',
+    'main',
+    null,
+    'previous-profile',
+    '/previous/workspace',
+    'bash',
+    '{"command":"echo previous"}',
+    null,
+    '/previous/workspace',
+    'bash:previous',
+    'rev-previous',
+    'cfg-previous',
+    'ask',
+    'trusted',
+    'review-deny',
+    'previous denial',
+    '[]',
+    'null',
+    'written',
+    null,
+    null,
+    null,
+    '{"riskClass":"low","authClass":"none","source":"chat"}',
+    'normal',
+    '["R7"]',
+    'not-started',
+    2,
+    null,
+    null,
+  );
+  db.exec('PRAGMA user_version = 2');
+  db.close();
+}
+
+/** One file's content digest, for byte-identity checks across a directory. */
+function hashFile(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/** The audit directory's files, so "untouched" can be checked exactly. */
+async function auditFiles(dir: string): Promise<readonly string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries.map((entry) => entry.name).sort();
+}
+
+describe('a database from an older release is refused, not migrated', () => {
+  test('an old structure is refused with a reset instruction and left byte-identical', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-old-'));
     dirs.push(dir);
     const path = join(dir, 'arbiter.db');
-    buildV1Database(path);
+    buildOldDatabase(path, 1);
+    const before = await readFile(path);
+    const filesBefore = await auditFiles(dir);
 
     const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(store.paused).toBe(false);
-    // The upgrade completed and the store now writes the current format.
-    expect(store.health().state).toBe('ok');
-
-    const detail = store.getCall('legacy-call');
-    expect(stringField(detail, 'result')).toBe('review-deny');
-    // A v1 row predates the new columns: they read as unknown, not as defaults.
-    expect(numberField(detail, 'recordFormatVersion')).toBe(1);
-    expect(nullableNumberField(detail, 'executionStartedAt')).toBeNull();
-    expect(nullableNumberField(detail, 'executionFinishedAt')).toBeNull();
-    expect(recordField(detail, 'argumentsSchema')).toBeNull();
-    const stage = listField(detail, 'stages')[0];
-    expect(recordField(stage, 'ruleId')).toBe('legacy-rule');
-    expect(recordField(stage, 'ruleName')).toBeNull();
-    expect(recordField(stage, 'configSnapshotId')).toBeNull();
-    // The original material survives verbatim.
-    expect(recordField(detail, 'reason')).toBe('legacy denial');
-    expect(recordField(detail, 'config')).toMatchObject({ enabled: true });
-    const attempt = listField(detail, 'modelCalls')[0];
-    expect(recordField(attempt, 'request')).toMatchObject({
-      model: 'legacy-model',
-    });
-    expect(store.configHistory(10)).toHaveLength(1);
+    // The refusal names the action instead of leaving the operator with silent
+    // empty lists: this build does not upgrade, and the old history is not
+    // reinterpreted as current scores.
+    expect(store.paused).toBe(true);
+    const reason = store.health().lastError ?? '';
+    expect(reason).toContain('not supported');
+    expect(reason).toContain('reset');
+    expect(store.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
+    store.enqueue(record({ callId: 'refused', result: 'review-allow' }));
+    await store.flush();
+    expect(store.listCalls({}).total).toBe(0);
     store.close();
 
-    // The pre-migration copy exists and holds the v1 content.
-    const backupPath = `${path}.backup-v1`;
-    expect(existsSync(backupPath)).toBe(true);
-    const backup = new DatabaseSync(backupPath, { readOnly: true });
-    expect(
-      numberField(backup.prepare('PRAGMA user_version').get(), 'user_version'),
-    ).toBe(1);
-    const backedUp = backup
-      .prepare('SELECT COUNT(*) AS count FROM calls')
-      .get();
-    expect(numberField(backedUp, 'count')).toBe(1);
-    const backupColumns = backup
-      .prepare('PRAGMA table_info(calls)')
-      .all()
-      .map((row) => recordField(row, 'name'));
-    expect(backupColumns).not.toContain('record_format_version');
-    backup.close();
-
-    const upgraded = new DatabaseSync(path, { readOnly: true });
-    expect(
-      numberField(
-        upgraded.prepare('PRAGMA user_version').get(),
-        'user_version',
-      ),
-    ).toBe(2);
-    upgraded.close();
-  });
-
-  test('a failed migration rolls back, keeps the backup and pauses writes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v1fail-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildV1Database(path);
-    // A stage table with an incompatible `rule_name` makes the ALTER fail while
-    // the backup has already been taken.
-    const before = new DatabaseSync(path);
-    before.exec('ALTER TABLE stages ADD COLUMN rule_name TEXT');
-    before.close();
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    // The duplicate column is what a partial earlier attempt looks like, and the
-    // migration is written to be safe against it, so this case now succeeds.
-    expect(store.paused).toBe(false);
-    store.close();
-
-    // Now force a real failure after the backup: a trigger that rejects the
-    // INSERT the migration's own verification performs is not enough (the
-    // migration only reads), so block the ALTER by occupying the column name with
-    // an incompatible declaration is also unhelpful. Instead make the schema
-    // statement itself fail by pre-creating `tasks` as a view.
-    const path2 = join(dir, 'arbiter2.db');
-    buildV1Database(path2);
-    const blocker = new DatabaseSync(path2);
-    // `CREATE TABLE IF NOT EXISTS calls` would skip an existing table, but a
-    // view with that name makes the statement fail outright.
-    blocker.exec('DROP TABLE stages');
-    blocker.exec('CREATE VIEW stages AS SELECT 1 AS id');
-    blocker.close();
-    const failing = new AuditStore(path2, DEFAULT_CONFIG.audit);
-    expect(failing.paused).toBe(true);
-    // A missing established table is refused before any DDL runs: recreating it
-    // would report an empty history as a complete one.
-    expect(failing.health()).toMatchObject({
-      state: 'unavailable',
-      lastError: expect.stringContaining('missing the stages table') as unknown,
-    });
-    // Writes are refused and the original structure is intact.
-    expect(failing.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
-    expect(failing.listCalls({}).total).toBe(0);
-    failing.close();
-    const after = new DatabaseSync(path2, { readOnly: true });
+    // Nothing was migrated, backed up, stamped or recreated.
+    expect(await readFile(path)).toEqual(before);
+    expect(await auditFiles(dir)).toEqual(filesBefore);
+    const after = new DatabaseSync(path, { readOnly: true });
     expect(
       numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
     ).toBe(1);
@@ -1594,186 +1631,59 @@ describe('a real v1 database', () => {
         'count',
       ),
     ).toBe(1);
-    after.close();
-    // No backup is written for this case: the file is rejected before the
-    // migration starts, so nothing was touched and there is nothing to restore.
-    // (A migration that fails mid-transaction keeps its backup; that is
-    // exercised separately.)
-    expect(existsSync(`${path2}.backup-v1`)).toBe(false);
-  });
-});
-
-/**
- * A file that carries the v1 structure but is stamped with the current version.
- *
- * Built from the genuine v1 fixture so the stored row keeps its real v1
- * provenance: `record_format_version` is absent rather than invented, and the
- * repair must leave that row readable as a v1 record. The `templates` table and
- * the seven columns this version adds are then absent exactly as they would be
- * on a file some build stamped before applying its own additions.
- */
-function buildDriftedV2Database(path: string): void {
-  buildV1Database(path);
-  const db = new DatabaseSync(path);
-  db.exec('PRAGMA user_version = 2');
-  db.close();
-}
-
-describe('a failed backup keeps the previous copy', () => {
-  test('an interrupted VACUUM INTO does not destroy the existing backup', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-backup-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildDriftedV2Database(path);
-    // A previous backup of this version already exists; it is the operator's
-    // only way back if the next upgrade fails.
-    const previous = `${path}.backup-v2`;
-    await writeFile(previous, 'previous-backup-content');
-
-    // Make VACUUM INTO fail by occupying its staging target with a directory,
-    // which SQLite cannot write over.
-    await mkdir(`${previous}.staging`, { recursive: true });
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(store.paused).toBe(true);
-    store.close();
-    // The earlier backup is untouched, byte for byte, and the failed staging
-    // target was never promoted over it.
-    expect(await readFile(previous, 'utf8')).toBe('previous-backup-content');
-  });
-});
-
-describe('the upgrade recipe covers every addition', () => {
-  test('a file stripped to the v1 structure is repairable and writable', async () => {
-    // `ADDED_COLUMNS` is both the v1 upgrade recipe and the completeness check
-    // for a stamped file, so an addition missing from it would leave a drifted
-    // file looking complete. Take a real v1 file, stamp it current, and prove
-    // the opener repairs whatever differs and then accepts a record: if the
-    // recipe ever falls behind the schema, this write fails.
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-recipe-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildDriftedV2Database(path);
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(store.paused).toBe(false);
-    store.enqueue(record({ callId: 'recipe-covers', result: 'review-allow' }));
-    await store.flush();
-    expect(stringField(store.getCall('recipe-covers'), 'result')).toBe(
-      'review-allow',
-    );
-    store.close();
-
-    // Every table the current build writes now exists, so no writer prepares
-    // against a table the repair did not create.
-    const after = new DatabaseSync(path, { readOnly: true });
-    const tables = new Set(
-      after
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all()
-        .map((row) => recordField(row, 'name')),
-    );
-    for (const table of [
-      'config_snapshots',
-      'config_activations',
-      'templates',
-      'calls',
-      'stages',
-      'snapshots',
-      'model_calls',
-      'candidates',
-      'analysis_runs',
-      'meta',
-    ]) {
-      expect(tables.has(table)).toBe(true);
-    }
+    const columns = after
+      .prepare('PRAGMA table_info(calls)')
+      .all()
+      .map((row) => recordField(row, 'name'));
+    expect(columns).not.toContain('scores');
     after.close();
   });
-});
 
-describe('version-0 backups join the same retention and accounting', () => {
-  test('pruning keeps the newest two across v0, v1 and v2', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-prune0-'));
+  test('an old structure with a table missing is still refused as a whole', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-old-missing-'));
     dirs.push(dir);
     const path = join(dir, 'arbiter.db');
-    buildV1Database(path);
-    // Three real backups with distinct mtimes, so "newest" is unambiguous.
-    for (const [version, age] of [
-      [0, 3_000],
-      [1, 2_000],
-      [2, 1_000],
-    ] as const) {
-      const backup = `${path}.backup-v${String(version)}`;
-      await writeFile(backup, `backup-${String(version)}`);
-      const when = new Date(Date.now() - age);
-      await utimes(backup, when, when);
-    }
-
-    const removed = pruneBackups(path);
-    // The oldest (v0) goes; the two newest survive, matching BACKUP_KEEP.
-    expect(removed).toEqual([`${path}.backup-v0`]);
-    expect(existsSync(`${path}.backup-v0`)).toBe(false);
-    expect(existsSync(`${path}.backup-v1`)).toBe(true);
-    expect(existsSync(`${path}.backup-v2`)).toBe(true);
-  });
-
-  test('a version-0 backup counts toward the storage the store reports', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-account0-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
-    seed.close();
-    // A backup the previous accounting never enumerated. Its size must reach
-    // both the reported total and the auxiliary deduction, or retention
-    // overestimates the budget it may fill.
-    const backup = `${path}.backup-v0`;
-    await writeFile(backup, 'x'.repeat(4_096));
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    const withoutBackup = store.databaseBytes;
-    // Grow only the version-0 backup, so the delta in the reported footprint
-    // can come from nowhere else. A hard-coded `backup-v1`/`backup-v2` list
-    // makes this delta zero.
-    await writeFile(backup, 'x'.repeat(64_000));
-    // One allocation unit of slack: the exact size is the file system's, but a
-    // hard-coded v1/v2 list reports no change at all here.
-    expect(store.databaseBytes - withoutBackup).toBeGreaterThanOrEqual(32_000);
-    store.close();
-  });
-});
-
-describe('an unstamped file is not assumed to be new', () => {
-  test('a populated file without a version stamp is not recreated as empty', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildV1Database(path);
-    // A database that never had the pragma written reports 0 even though it
-    // holds real rows. Recreating a table it lost would erase that history.
+    buildOldDatabase(path, 1);
     const db = new DatabaseSync(path);
     db.exec('DROP TABLE stages');
-    db.exec('PRAGMA user_version = 0');
     db.close();
 
     const store = new AuditStore(path, DEFAULT_CONFIG.audit);
     expect(store.paused).toBe(true);
-    expect(store.health()).toMatchObject({
-      state: 'unavailable',
-      lastError: expect.stringContaining('missing the stages table') as unknown,
-    });
+    // The file is an older release's as a whole, so the reason is the version and
+    // not a repair recipe for one table.
+    expect(store.health().lastError).toContain('not supported');
     store.close();
 
+    // Nothing was created: a partial structure must not gain the tables this
+    // build would need, which would report a lost history as a complete one.
     const after = new DatabaseSync(path, { readOnly: true });
     const tables = after
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all()
       .map((row) => recordField(row, 'name'));
     expect(tables).not.toContain('stages');
-    // Nothing was migrated and nothing was stamped: the file is as it was.
+    expect(tables).not.toContain('templates');
+    after.close();
+  });
+
+  test('a populated file without a version stamp is not assumed to be new', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildOldDatabase(path, 0);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Recreating the tables would erase the rows this file still holds, so an
+    // unstamped file is an old file until its structure proves otherwise.
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('not supported');
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
     expect(
       numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
     ).toBe(0);
-    // The history that is still there was never touched.
     expect(
       numberField(
         after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
@@ -1783,150 +1693,29 @@ describe('an unstamped file is not assumed to be new', () => {
     after.close();
   });
 
-  test('an unstamped file with a complete structure is upgraded with a backup', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-unstamped-ok-'));
+  test('a current structure missing a column is refused rather than failing per record', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-column-'));
     dirs.push(dir);
     const path = join(dir, 'arbiter.db');
-    // Same genuine v1 content, but the stamp was never written. It has every
-    // established table, so this is an ordinary upgrade, not a damaged file.
-    buildV1Database(path);
-    const db = new DatabaseSync(path);
-    db.exec('PRAGMA user_version = 0');
-    db.close();
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(store.paused).toBe(false);
-    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
-      'review-deny',
-    );
-    store.enqueue(
-      record({ callId: 'unstamped-upgrade', result: 'review-allow' }),
-    );
-    await store.flush();
-    expect(store.listCalls({}).total).toBe(2);
-    store.close();
-    // Version 0 is not "fresh", so the file is backed up before it is touched.
-    expect(existsSync(`${path}.backup-v0`)).toBe(true);
-  });
-});
-
-describe('a stamped version with a drifted structure', () => {
-  test('is repaired in place, keeps its rows and writes again', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildDriftedV2Database(path);
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    // The store no longer accepts the stamp as proof of the structure.
-    expect(store.health()).toMatchObject({
-      state: 'ok',
-      lastError: null,
-    });
-    expect(store.paused).toBe(false);
-    // The legacy row survived and still reads through the old-format adapter.
-    expect(stringField(store.getCall('legacy-call'), 'result')).toBe(
-      'review-deny',
-    );
-    // A new record actually reaches the database: this is the failure the
-    // drift caused, so the test must observe storage, not just health.
-    store.enqueue(record({ callId: 'after-repair', result: 'review-allow' }));
-    await store.flush();
-    expect(store.listCalls({}).total).toBe(2);
-    expect(stringField(store.getCall('after-repair'), 'result')).toBe(
-      'review-allow',
-    );
-    store.close();
-
-    // The version did not move: this is a repair, not a downgrade.
-    const repaired = new DatabaseSync(path, { readOnly: true });
-    expect(
-      numberField(
-        repaired.prepare('PRAGMA user_version').get(),
-        'user_version',
-      ),
-    ).toBe(2);
-    const callColumns = repaired
-      .prepare('PRAGMA table_info(calls)')
-      .all()
-      .map((row) => recordField(row, 'name'));
-    expect(callColumns).toContain('arguments_schema');
-    const stageColumns = repaired
-      .prepare('PRAGMA table_info(stages)')
-      .all()
-      .map((row) => recordField(row, 'name'));
-    expect(stageColumns).toContain('config_snapshot_id');
-    repaired.close();
-    // A structure change is still a migration: the pre-repair copy is kept.
-    expect(existsSync(`${path}.backup-v2`)).toBe(true);
-  });
-
-  test('a single missing column is repaired without touching the rest', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-one-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    // A complete current file, then exactly one column removed: the narrowest
-    // possible drift, which must not need a wider rewrite to recover.
     const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
     seed.close();
     const db = new DatabaseSync(path);
-    db.exec('ALTER TABLE calls DROP COLUMN arguments_schema');
+    db.exec('ALTER TABLE calls DROP COLUMN scores');
     db.close();
 
     const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    expect(store.paused).toBe(false);
-    store.enqueue(record({ callId: 'one-column', result: 'review-allow' }));
-    await store.flush();
-    expect(store.listCalls({}).total).toBe(1);
-    store.close();
-  });
-
-  test('a missing established table pauses writes instead of being recreated', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-table-'));
-    dirs.push(dir);
-    const path = join(dir, 'arbiter.db');
-    buildDriftedV2Database(path);
-    const db = new DatabaseSync(path);
-    db.exec('DROP TABLE calls');
-    db.close();
-
-    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
-    // Recreating the table would report an empty history as a complete one, and
-    // accepting the file for writes would drop every record against the missing
-    // table. Both are refused at start-up, before a single record is lost.
+    // Accepting this file would make every write fail on its own, one record at
+    // a time; the drift is named once, at start-up, with the same reset remedy.
     expect(store.paused).toBe(true);
-    expect(store.health()).toMatchObject({
-      state: 'unavailable',
-      lastError: expect.stringContaining('missing the calls table') as unknown,
-    });
-    store.enqueue(record({ callId: 'refused', result: 'review-allow' }));
-    await store.flush();
-    // Reads still answer and claim nothing about the missing history.
-    const listed = store.listCalls({});
-    expect(listed.unreadable).toBe(true);
-    expect(listed.rows).toEqual([]);
+    expect(store.health().lastError).toContain('calls.scores');
+    expect(store.health().lastError).toContain('reset');
     store.close();
-
-    const after = new DatabaseSync(path, { readOnly: true });
-    const tables = after
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-      .all()
-      .map((row) => recordField(row, 'name'));
-    expect(tables).not.toContain('calls');
-    // The stamp is untouched: nothing was migrated.
-    expect(
-      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
-    ).toBe(2);
-    after.close();
   });
 
-  test('a stamped file missing one established table is not migrated at all', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'arbiter-drift-stage-'));
+  test('a current structure missing one table is refused rather than written to', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-current-missing-'));
     dirs.push(dir);
     const path = join(dir, 'arbiter.db');
-    // Complete current structure, then one established table removed while
-    // `calls` and its history stay intact: the case where a write would fail
-    // later, one record at a time, if the file were accepted.
     const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
     seed.enqueue(record({ callId: 'kept-row', result: 'review-deny' }));
     await seed.flush();
@@ -1948,6 +1737,370 @@ describe('a stamped version with a drifted structure', () => {
       ),
     ).toBe(1);
     after.close();
+  });
+
+  test("the previous release's stamped-2 database is refused, not accepted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-v2-stamped-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    // The exact shape the superseded build left: every table and column it wrote,
+    // including the retired review columns, stamped with the number it used. A
+    // check that only compared table names would open this and call its rows
+    // current, so the stamp has to discriminate the structure, not just exist.
+    buildPreviousReleaseDatabase(path);
+    const before = await readFile(path);
+    const filesBefore = await auditFiles(dir);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('not supported');
+    expect(store.health().lastError).toContain('reset');
+    store.close();
+
+    // Refused means untouched: same bytes, same files, same stamp.
+    expect(await readFile(path)).toEqual(before);
+    expect(await auditFiles(dir)).toEqual(filesBefore);
+    const after = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(2);
+    expect(
+      numberField(
+        after.prepare('SELECT COUNT(*) AS count FROM calls').get(),
+        'count',
+      ),
+    ).toBe(1);
+    after.close();
+  });
+
+  test('a current structure missing a column the writer needs is refused', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-writer-column-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const seed = new AuditStore(path, DEFAULT_CONFIG.audit);
+    seed.close();
+    const db = new DatabaseSync(path);
+    // Not a column any migration added: the writer's own INSERT names it. A hand
+    // written drift list missed this and let every write fail, one record at a
+    // time, after start-up had reported the structure complete.
+    db.exec('ALTER TABLE model_calls DROP COLUMN response_text');
+    db.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('model_calls.response_text');
+    store.close();
+  });
+
+  test('a refused database with an uncheckpointed WAL is not touched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-'));
+    dirs.push(dir);
+    // The leftover is produced outside the audit directory so only the three
+    // audit files are compared after the refusal.
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-source-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+    // A crashed earlier run leaves committed transactions in the WAL. Copying the
+    // three files while that connection still holds them is what reproduces the
+    // leftover: closing the writer first would checkpoint it and hide the case.
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA journal_mode = WAL');
+    writer.exec(OLD_CALLS_SQL);
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec(
+      `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
+         tool, arguments, cwd, fingerprint, config_revision, config_snapshot_id, approval_mode,
+         execution_mode, result, reason, trace, effect, session_record_state, signals,
+         policy_strategy, decision_rules, execution_status)
+       VALUES ('wal-call', 1, 's', 'main', NULL, NULL, NULL, 'bash', '{}', '/w', 'f', 'r', 'c',
+         'ask', 'trusted', 'allow', 'r', '[]', 'null', 'written', NULL, NULL, '[]', 'pending')`,
+    );
+    writer.exec('PRAGMA user_version = 1');
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    // Opening the file — even read-only — lets SQLite recover the WAL and rewrite
+    // the header and sidecars, so the refusal has to happen before any connection
+    // exists for this promise to hold.
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('not supported');
+    // A refused store answers no read: an empty page beside a refusal reason
+    // reads as "the record was never written", which is a different fact.
+    expect(store.listCalls({}).total).toBe(0);
+    expect(store.listCalls({}).unreadable).toBe(true);
+    expect(store.getCall('wal-call')).toBeNull();
+    expect(store.readCall('wal-call')).toEqual({
+      record: null,
+      unreadable: true,
+    });
+    expect(store.priorVerdictsForSession('s', 10).unreadableCount).toBe(0);
+    store.close();
+
+    // Every file is byte-identical: no WAL recovery, no checkpoint, no rewrite.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
+  test('every read path answers a refusal instead of an empty result', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-refused-reads-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildPreviousReleaseDatabase(path);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // A read that succeeds here would be indistinguishable from "this audit
+    // holds nothing", which is the opposite of "this build cannot read it".
+    expect(store.listCalls({}).total).toBe(0);
+    expect(store.listCalls({}).unreadable).toBe(true);
+    expect(store.getCall('previous-call')).toBeNull();
+    expect(store.readCall('previous-call')).toEqual({
+      record: null,
+      unreadable: true,
+    });
+    expect(store.stats()).toBeNull();
+    expect(store.configHistory()).toEqual([]);
+    expect(store.callsForAnalysis(0, Date.now() + 1_000)).toEqual([]);
+    expect(store.recentForReplay()).toEqual([]);
+    expect(store.listCandidates()).toEqual([]);
+    expect(
+      store.verdictsForCalls('previous-session', ['previous-call']),
+    ).toEqual([]);
+    expect(store.priorVerdictStages('previous-call')).toEqual([]);
+    const prior = store.priorVerdictsForSession('previous-session', 10);
+    // The count is "rows this build cannot interpret", which is zero here; the
+    // refusal itself is reported through `paused` and `health()`.
+    expect(prior.verdicts).toEqual([]);
+    expect(prior.unreadableCount).toBe(0);
+    // Mutating entry points stay contained as before.
+    expect(store.clearCalls()).toEqual({ ok: false, deleted: 0 });
+    expect(store.runRetention().deleted).toBe(0);
+    expect(store.saveConfigSnapshot(DEFAULT_CONFIG)).toBeNull();
+    store.close();
+  });
+
+  test('a current-stamped WAL leftover with a table dropped is not touched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-drift-'));
+    dirs.push(dir);
+    // The leftover is produced outside the audit directory so only the audit
+    // files are compared after the refusal.
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-drift-src-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+
+    // A clean current database, then a DROP committed only into the WAL. The
+    // stamp in the main file is already current, so a header-only check would
+    // accept it, and opening it to inspect the structure is exactly what lets
+    // SQLite checkpoint and delete the sidecars.
+    const seed = new AuditStore(
+      join(source, 'arbiter.db'),
+      DEFAULT_CONFIG.audit,
+    );
+    seed.enqueue(record({ callId: 'drift-call', result: 'review-deny' }));
+    await seed.flush();
+    seed.close();
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec('DROP TABLE stages');
+    expect(
+      numberField(writer.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(3);
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // The structure is refused for what is missing, not for its version: the
+    // stamp matches, and that is why this case needed its own check.
+    expect(store.health().lastError).toContain('stages');
+    expect(store.health().lastError).toContain('reset');
+    store.close();
+
+    // The original keeps every file and every byte, sidecars included.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
+  test('a version bumped only in the WAL is refused before the file is opened', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-version-'));
+    dirs.push(dir);
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-version-src-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+
+    // A current database whose *effective* version was later raised inside an
+    // uncheckpointed WAL. The main file's header still says 3, so a header-only
+    // comparison would accept it and only notice after opening the original —
+    // which is exactly the connection that rewrites the sidecars.
+    const seed = new AuditStore(
+      join(source, 'arbiter.db'),
+      DEFAULT_CONFIG.audit,
+    );
+    seed.enqueue(record({ callId: 'bumped-call', result: 'review-deny' }));
+    await seed.flush();
+    seed.close();
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec('PRAGMA user_version = 99');
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    // The premise: the header alone still reports this build's version.
+    expect(readFileSync(path).readUInt32BE(60)).toBe(3);
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // The newer-version protection applies to the version the WAL makes
+    // effective, not only to the one in the main header.
+    expect(store.health().lastError).toContain('newer');
+    expect(store.health().lastError).toContain('refusing to modify');
+    expect(store.listCalls({}).unreadable).toBe(true);
+    store.close();
+
+    // No connection to the original was ever made, so nothing changed.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
+  test('a newer structure is left untouched and only pauses writes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-newer-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    buildOldDatabase(path, 99);
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    expect(store.health().lastError).toContain('newer');
+    store.close();
+
+    const after = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(after.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(99);
+    after.close();
+  });
+});
+
+describe('a current database reopens with its own records', () => {
+  test('an empty database initialises once and reopens without change', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-empty-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+
+    const first = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(first.health().state).toBe('ok');
+    expect(first.paused).toBe(false);
+    expect(first.listCalls({}).total).toBe(0);
+    first.close();
+    const afterFirst = await readFile(path);
+
+    const second = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(second.health().state).toBe('ok');
+    expect(second.listCalls({}).total).toBe(0);
+    second.close();
+    // A restart of an empty store rewrites no structure and no stamp.
+    expect(await readFile(path)).toEqual(afterFirst);
+
+    const check = new DatabaseSync(path, { readOnly: true });
+    expect(
+      numberField(check.prepare('PRAGMA user_version').get(), 'user_version'),
+    ).toBe(3);
+    check.close();
+  });
+
+  test('new-shape records survive a restart, including attempts, usage and errors', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-reopen-'));
+    dirs.push(dir);
+    const path = join(dir, 'arbiter.db');
+    const secret = 'sk-cold-recovery-sentinel';
+
+    const seeded = record({
+      callId: 'cold-recovery',
+      result: 'review-deny',
+      modelAttempts: [
+        {
+          requestId: 'cold-recovery:model:1',
+          callId: 'cold-recovery',
+          attempt: 1,
+          backend: 'decision',
+          protocol: 'arbiter-decision-v1',
+          request: { model: 'clef', state: 'STATE' },
+          responseText: '[redacted] echo',
+          parsed: { verdict: 'review-deny' },
+          error: `rejected [redacted]`,
+          startedAt: 1,
+          durationMs: 2,
+          estimatedInputTokens: 3,
+          usage: { input_tokens: 1, note: '[redacted]' },
+          normalizedUsage: { inputTokens: 1 },
+          failureKind: 'provider-refusal',
+        },
+      ],
+    });
+    const writing = new AuditStore(path, DEFAULT_CONFIG.audit);
+    writing.enqueue(seeded);
+    await writing.flush();
+    writing.close();
+
+    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(reopened.health().state).toBe('ok');
+    const detail = reopened.getCall('cold-recovery');
+    expect(numberField(detail, 'recordFormatVersion')).toBe(2);
+    expect(boolField(detail, 'unreadable')).toBe(false);
+    // The current review shape is read back as written, not as an old encoding.
+    expect(recordField(detail, 'scores')).toMatchObject({
+      contractVersion: 'review-contract-v1',
+      risk: 1,
+      authorization: 2,
+      verdict: 'review-allow',
+    });
+    expect(recordField(detail, 'reviewStage')).toBe('review-allow');
+    const attempt = listField(detail, 'modelCalls')[0];
+    expect(recordField(attempt, 'responseText')).toBe('[redacted] echo');
+    expect(recordField(attempt, 'error')).toBe('rejected [redacted]');
+    expect(recordField(attempt, 'usage')).toEqual({
+      input_tokens: 1,
+      note: '[redacted]',
+    });
+    expect(recordField(attempt, 'normalizedUsage')).toEqual({ inputTokens: 1 });
+    expect(recordField(attempt, 'failureKind')).toBe('provider-refusal');
+    expect(recordField(attempt, 'templateId')).toBeNull();
+    // Nothing that was masked before the write becomes readable afterwards.
+    expect(JSON.stringify(detail)).not.toContain(secret);
+    reopened.close();
   });
 });
 
@@ -2119,7 +2272,7 @@ describe('template snapshots are immutable and reused', () => {
 });
 
 describe('capacity accounting includes every audit artefact', () => {
-  test('backups count toward the capacity target that drives eviction', async () => {
+  test('the reported target covers the database and its sidecars', async () => {
     const { store } = await makeStore();
     for (let index = 0; index < 8; index += 1) {
       store.enqueue(
@@ -2133,8 +2286,8 @@ describe('capacity accounting includes every audit artefact', () => {
     }
     await store.flush();
     const before = store.listCalls({}).total;
-    // A target the database alone could meet but the database plus a backup
-    // cannot: eviction has to see the same footprint the target is measured in.
+    // A target below the reported footprint: eviction has to see the same bytes
+    // the target is measured in, sidecars included.
     const target = Math.floor(store.databaseBytes * 0.6);
     const outcome = store.runRetention(Date.now(), 30, target);
     expect(outcome.bytes).toBeGreaterThan(0);
@@ -2498,12 +2651,12 @@ describe('retention reclaims and protects the right references', () => {
 });
 
 describe('capacity pressure from auxiliary files', () => {
-  test('a large backup still drives eviction of reclaimable rows', async () => {
+  test('sidecar bytes reduce the budget the database itself may use', async () => {
     const { store } = await makeStore();
     for (let index = 0; index < 10; index += 1) {
       store.enqueue(
         record({
-          callId: `backup-pressure-${String(index)}`,
+          callId: `sidecar-pressure-${String(index)}`,
           result: 'allow',
           ts: Date.now() - index * 1_000,
           arguments: { command: 'echo hi', padding: 'q'.repeat(4_000) },
@@ -2511,22 +2664,18 @@ describe('capacity pressure from auxiliary files', () => {
       );
     }
     await store.flush();
-    const path = store.databasePath;
     const before = store.listCalls({}).total;
-    store.close();
-    // A retained migration backup consumes part of the budget, so the database
-    // must shrink even though its own pages are below the overall target.
-    const db = new DatabaseSync(path);
-    db.exec(`VACUUM INTO '${path}.backup-v1'`);
-    db.close();
-    const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
-    const elapsed = await stat(`${path}.backup-v1`);
-    const target = Math.floor(reopened.databaseBytes * 0.85);
-    expect(elapsed.size).toBeGreaterThan(0);
-    const outcome = reopened.runRetention(Date.now(), 365, target);
+    const path = store.databasePath;
+    const databaseOnly = (await stat(path)).size;
+    // The reported footprint is the database plus its sidecars, and the eviction
+    // budget is the target minus those sidecars: they cannot be reclaimed by
+    // deleting rows, so a target equal to the database file alone is already
+    // exceeded and the database has to shrink.
+    expect(store.databaseBytes).toBeGreaterThanOrEqual(databaseOnly);
+    const outcome = store.runRetention(Date.now(), 365, databaseOnly);
     expect(outcome.deleted).toBeGreaterThan(0);
-    expect(reopened.listCalls({}).total).toBeLessThan(before);
-    reopened.close();
+    expect(store.listCalls({}).total).toBeLessThan(before);
+    store.close();
   });
 
   test('expired calls with large unique templates do not evict recent calls', async () => {
@@ -3325,7 +3474,7 @@ describe('call list paging and filtering', () => {
     store.close();
   });
 
-  test('unreadable, legacy and current records all remain in the default list', async () => {
+  test('an unreadable row remains in the default list beside current ones', async () => {
     const { store } = await makeStore();
     const path = store.databasePath;
     store.enqueue(record({ callId: 'current', result: 'allow', ts: 1_000 }));
@@ -3336,26 +3485,29 @@ describe('call list paging and filtering', () => {
       `INSERT INTO calls(call_id, ts, session_id, session_kind, parent_session, profile, workspace,
           tool, arguments, arguments_schema, cwd, fingerprint, config_revision, config_snapshot_id,
           approval_mode, execution_mode, result, reason, trace, effect, session_record_state,
-          signals, policy_strategy, decision_rules, execution_status, record_format_version,
+          decision_rules, execution_status, record_format_version,
           execution_started_at, execution_finished_at)
        VALUES (?, ?, 'session-1', 'main', NULL, NULL, NULL, 'bash', '{"command":"seeded"}', NULL,
           '/w', 'fp', 'rev', 'cfg', 'normal', 'trusted', 'allow', 'reason', '[]', 'null',
-          'written', NULL, NULL, '[]', 'pending', ?, NULL, NULL)`,
+          'written', '[]', 'pending', ?, NULL, NULL)`,
     );
-    insert.run('legacy', 2_000, 1);
+    insert.run('other-format', 2_000, 1);
     insert.run('future', 3_000, 99);
     db.close();
     const reopened = new AuditStore(path, DEFAULT_CONFIG.audit);
     const page = reopened.listCalls({ limit: 10 });
     expect(page.rows.map((row) => row.callId)).toEqual([
       'future',
-      'legacy',
+      'other-format',
       'current',
     ]);
     const rows = new Map(page.rows.map((row) => [row.callId, row]));
+    // A row this build did not write is not hidden: its identifying fields are
+    // still what the list is for. It is reported as unreadable, so no current
+    // semantics are claimed for it.
     expect(rows.get('future')?.unreadable).toBe(true);
     expect(rows.get('future')?.command).toBe('seeded');
-    expect(rows.get('legacy')?.unreadable).toBe(false);
+    expect(rows.get('other-format')?.unreadable).toBe(true);
     expect(rows.get('current')?.unreadable).toBe(false);
     reopened.close();
   });

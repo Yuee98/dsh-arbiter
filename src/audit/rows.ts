@@ -73,9 +73,9 @@ export function rowDistribution(
  * names the semantics. A row missing any of them is not guessed at — reporting a
  * default band would state a decision this build never made.
  *
- * `signals` and `policy_strategy` are the *retired* encoding and are absent from a
- * current record by construction, so nothing here reads them: a row that carries
- * only those columns has no new-style score, which is the honest answer.
+ * A current record writes exactly this shape. A row whose stored object does not
+ * match it reports no score at all, which is the honest answer: reporting a
+ * default band would state a decision this build never made.
  */
 export function rowScores(value: unknown): ReviewScores | null {
   const parsed = rowJson(value);
