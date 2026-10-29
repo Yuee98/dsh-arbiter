@@ -45,7 +45,25 @@ function keepsAudit(structure: ReviewVariant['structure']): boolean {
   return structure !== 'compact-no-audit';
 }
 
-/** The policy member: the two guidance sources, unchanged. */
+/**
+ * The policy member: the two guidance sources, plus the input facts about them.
+ *
+ * `materials` is the audit record of each source (char counts, per-source limit,
+ * candidate path), so an ablation may drop it. What it must NOT drop with it are the two
+ * facts a reader needs in order to know what the guidance text *is*:
+ *
+ *   - whether a source was present and enabled at all, because "(none)" and "switched
+ *     off by configuration" are different statements about a project; and
+ *   - whether a submitted source was truncated, because a cut-off guidance file is an
+ *     input fact the reviewer has to see — the retained text alone would look complete,
+ *     and a permission statement whose tail is missing reads as unauthoritative
+ *     completeness it does not have.
+ *
+ * Both are kept in a `guidance_sources` member for every layout, so the ablated package
+ * still says what production says about its own material. What the no-audit step removes
+ * is the bookkeeping — lengths, limits and the path the text was read from — not the
+ * facts. Dropping the facts would turn a metadata cleanup into a different submission.
+ */
 function compactPolicy(parts: SubmissionParts, audit: boolean): object {
   return {
     project_rules: parts.policy.projectRules ?? NONE_TEXT,
@@ -53,6 +71,12 @@ function compactPolicy(parts: SubmissionParts, audit: boolean): object {
       parts.policy.customRules.length > 0
         ? parts.policy.customRules
         : NONE_TEXT,
+    guidance_sources: parts.policy.materials.map((material) => ({
+      id: material.id,
+      present: material.present,
+      enabled: material.enabled,
+      truncated: material.truncated,
+    })),
     ...(audit
       ? {
           materials: parts.policy.materials,
@@ -147,14 +171,21 @@ export function renderCompactMaterial(
 /**
  * The material one variant submits.
  *
- * `full` delegates to production's own renderer rather than restating it, so the
- * baseline of every comparison is literally the bytes production sends.
+ * `full` delegates to production's own renderer rather than restating it, so the baseline
+ * of every comparison is literally the bytes production sends. The history axis is
+ * applied on top for either layout: `full` + `none` is a supported combination, and
+ * silently ignoring it would give two distinct identities one treatment.
  */
 export function renderVariantMaterial(
   snapshot: ReviewSnapshot,
   variant: ReviewVariant,
-  productionMaterial: (snapshot: ReviewSnapshot) => string,
+  productionMaterial: (
+    snapshot: ReviewSnapshot,
+    history?: ReviewVariant['history'],
+  ) => string,
 ): string {
-  if (variant.structure === 'full') return productionMaterial(snapshot);
+  if (variant.structure === 'full') {
+    return productionMaterial(snapshot, variant.history);
+  }
   return renderCompactMaterial(snapshot, variant);
 }

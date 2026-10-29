@@ -15,7 +15,10 @@
 import { describe, expect, test } from 'vitest';
 
 import { review } from '../src/reviewer/service.js';
-import { offlineChatBackend } from '../src/reviewer/offline.js';
+import {
+  offlineChatBackend,
+  offlineDecisionBackend,
+} from '../src/reviewer/offline.js';
 import {
   defineVariant,
   isProductionVariant,
@@ -40,6 +43,7 @@ import {
   renderChatSystem,
   renderVariantChatRequest,
   renderVariantChatSystem,
+  renderVariantDecisionRequest,
   renderVariantQuestions,
 } from '../src/reviewer/prompt.js';
 import {
@@ -449,6 +453,120 @@ describe('the probe never reaches a score', () => {
   });
 });
 
+describe('the history axis is honoured by every layout', () => {
+  test('a full layout with history none withholds the window', () => {
+    const withheld = renderVariantChatRequest(
+      SNAPSHOT,
+      variantOf({ history: 'none' }),
+    );
+    const kept = renderVariantChatRequest(SNAPSHOT, variantOf());
+    // Two identities must never be one treatment: `full` + `none` is a supported
+    // combination, and it has to submit something different from production.
+    expect(withheld.user).not.toBe(kept.user);
+    expect(withheld.user).toContain('withheld');
+    expect(withheld.user).toContain('not evidence that no call happened');
+    // The tool window itself is gone; the label survives so the absence is stated.
+    expect(withheld.user).toContain('TURN_TOOL_HISTORY');
+    expect(withheld.user).not.toContain('"tool_calls"');
+    expect(kept.user).toContain('"tool_calls"');
+  });
+
+  test('the withheld block never claims the turn was empty', () => {
+    const withheld = renderVariantChatRequest(
+      SNAPSHOT,
+      variantOf({ history: 'none' }),
+    );
+    // An empty `tool_calls` array would be a claim that nothing ran, which is a
+    // different fact about the submission.
+    expect(withheld.user).not.toContain('tool_calls');
+    expect(withheld.user).toContain('deliberately');
+  });
+
+  test('withholding history never withholds authorization', () => {
+    const withheld = renderVariantChatRequest(
+      SNAPSHOT,
+      variantOf({ history: 'none' }),
+    );
+    // Authorization is a different block, and the experiment does not touch it.
+    expect(withheld.user).toContain('clean the build directory');
+    expect(withheld.user).toContain('HUMAN_AUTHORIZATION');
+  });
+
+  test('every structure honours the axis, and the decision state follows it', () => {
+    for (const structure of ['full', 'compact', 'compact-no-audit'] as const) {
+      const variant = variantOf({ structure, history: 'none' });
+      const chat = renderVariantChatRequest(SNAPSHOT, variant);
+      const decision = renderVariantDecisionRequest(SNAPSHOT, variant);
+      expect(chat.user).toContain('withheld');
+      expect(decision.state).toContain('withheld');
+      // The window's own content is not in the material under either protocol.
+      expect(chat.user).not.toContain('"tool_calls"');
+      expect(decision.state).not.toContain('"tool_calls"');
+    }
+  });
+});
+
+describe('the compact layouts keep the material facts', () => {
+  /** The snapshot, with a guidance source the budget cut. */
+  const TRUNCATED: ReviewSnapshot = {
+    ...SNAPSHOT,
+    materials: [
+      {
+        id: 'project-rules',
+        enabled: true,
+        present: true,
+        chars: 2_000,
+        limit: 2_000,
+        truncated: true,
+      },
+      {
+        id: 'custom-rules',
+        enabled: false,
+        present: false,
+        chars: 0,
+        limit: 2_000,
+        truncated: false,
+      },
+    ],
+  };
+
+  test('a truncated guidance source is disclosed by every layout', () => {
+    for (const structure of ['full', 'compact', 'compact-no-audit'] as const) {
+      const variant = variantOf({ structure, history: 'none' });
+      const material =
+        structure === 'full'
+          ? renderVariantChatRequest(TRUNCATED, variant).user
+          : renderVariantChatRequest(TRUNCATED, variant).user;
+      // A cut-off permission source is an input fact: the reviewer has to be able to
+      // tell this from complete guidance, or it would read an unknown tail as absent.
+      expect(material).toContain('"truncated": true');
+    }
+  });
+
+  test('the no-audit step drops the bookkeeping, not the facts', () => {
+    const noAudit = renderVariantChatRequest(
+      TRUNCATED,
+      variantOf({ structure: 'compact-no-audit' }),
+    ).user;
+    // Lengths, limits and the per-source path are bookkeeping.
+    expect(noAudit).not.toContain('"limit"');
+    expect(noAudit).not.toContain('"chars"');
+    // Presence, enablement and truncation are facts about the material.
+    expect(noAudit).toContain('"present": true');
+    expect(noAudit).toContain('"enabled": false');
+    expect(noAudit).toContain('"truncated": true');
+  });
+
+  test('the audit layout still carries the full materials record', () => {
+    const compact = renderVariantChatRequest(
+      TRUNCATED,
+      variantOf({ structure: 'compact' }),
+    ).user;
+    expect(compact).toContain('"limit"');
+    expect(compact).toContain('"chars"');
+  });
+});
+
 describe('the service keeps production and experiments apart', () => {
   test('reviews through the production package and reports no probe', async () => {
     const result = await review({
@@ -518,6 +636,118 @@ describe('the service keeps production and experiments apart', () => {
       }),
     });
     expect(variantResult.outcome).toEqual(productionResult.outcome);
+  });
+});
+
+describe('a stored decision attempt keeps its probe reading', () => {
+  /**
+   * A complete ten-level distribution, which is what the contract requires.
+   *
+   * A sparse object is rejected outright — an omitted level has not been reported as
+   * anything — so the fixture fills every level rather than only the one holding mass.
+   */
+  function distribution(
+    mass: Readonly<Record<number, number>>,
+  ): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (let level = 0; level <= 9; level += 1)
+      out[String(level)] = mass[level] ?? 0;
+    return out;
+  }
+
+  /** The score answers, in the shape the native envelope carries. */
+  const SCORES = {
+    risk: { type: 'score', probabilities: distribution({ 9: 1 }) },
+    authorization: { type: 'score', probabilities: distribution({ 9: 1 }) },
+  };
+
+  /** A body under the native envelope, with the probe answer beside the scores. */
+  function decisionBody(probe: unknown): string {
+    return JSON.stringify({
+      model: 'offline-decision',
+      answers: {
+        ...SCORES,
+        ...(probe === undefined ? {} : { recoverability: probe }),
+      },
+    });
+  }
+
+  test('reports the answer from the attempt the service actually stored', async () => {
+    const { reviewWith } = await import('../src/reviewer/service.js');
+    const pkg = variantPackage(variantOf({ prompt: 'recovery-probe' }));
+    const result = await reviewWith(pkg)({
+      snapshot: SNAPSHOT,
+      callId: 'call-decision-probe',
+      signal: new AbortController().signal,
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: decisionBody({ choice: 'irreversible' }),
+          },
+        ],
+      }),
+    });
+    expect(result.outcome.status).toBe('scored');
+    // This is the shape the transport stores: the answers object the envelope reader
+    // located, not a wrapper around it. A reader that looked for `answers` inside it
+    // would report `member-absent` for an answer that is right there.
+    const stored = result.attempts[0]?.parsed;
+    expect(stored).toEqual({
+      ...SCORES,
+      recoverability: { choice: 'irreversible' },
+    });
+    expect(probesOf(pkg, result.attempts)).toEqual([
+      { status: 'answered', option: 'irreversible', raw: 'irreversible' },
+    ]);
+  });
+
+  test('keeps a readable probe on an attempt whose scores were malformed', async () => {
+    const { reviewWith } = await import('../src/reviewer/service.js');
+    const pkg = variantPackage(variantOf({ prompt: 'recovery-probe' }));
+    const result = await reviewWith(pkg)({
+      snapshot: SNAPSHOT,
+      callId: 'call-decision-malformed',
+      signal: new AbortController().signal,
+      backend: offlineDecisionBackend({
+        scripts: [
+          {
+            status: 200,
+            body: JSON.stringify({
+              answers: {
+                // A distribution the contract refuses outright: a non-numeric
+                // probability is not a value the reader may coerce.
+                risk: { type: 'score', probabilities: { '9': 'all' } },
+                authorization: SCORES.authorization,
+                recoverability: { choice: 'recoverable' },
+              },
+            }),
+          },
+        ],
+      }),
+    });
+    // The score half failed; the probe half did not.
+    expect(result.outcome.status).toBe('review-failure');
+    expect(probesOf(pkg, result.attempts)).toEqual([
+      { status: 'answered', option: 'recoverable', raw: 'recoverable' },
+    ]);
+  });
+
+  test('reports an absent member when the body carried no probe', async () => {
+    const { reviewWith } = await import('../src/reviewer/service.js');
+    const pkg = variantPackage(variantOf({ prompt: 'recovery-probe' }));
+    const result = await reviewWith(pkg)({
+      snapshot: SNAPSHOT,
+      callId: 'call-decision-absent',
+      signal: new AbortController().signal,
+      backend: offlineDecisionBackend({
+        scripts: [{ status: 200, body: decisionBody(undefined) }],
+      }),
+    });
+    expect(result.outcome.status).toBe('scored');
+    expect(probesOf(pkg, result.attempts)).toEqual([
+      { status: 'unknown', reason: 'member-absent' },
+    ]);
   });
 });
 

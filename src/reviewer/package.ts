@@ -134,13 +134,23 @@ export function probeOfAttempt(parts: {
 }): ProbeReading {
   if (!parts.probeAsked) return { status: 'not-asked' };
   if (parts.backend === 'decision') {
-    if (parts.parsed === null || parts.parsed === undefined) {
-      return { status: 'unknown', reason: 'member-absent' };
+    // The stored answers object is the primary source: a successful decision attempt
+    // keeps what the transport already located, so nothing is re-parsed.
+    if (isRecord(parts.parsed)) {
+      return decisionProbeOf(answersOf(parts.parsed));
     }
-    if (!isRecord(parts.parsed)) {
+    if (parts.parsed !== null && parts.parsed !== undefined) {
       return { status: 'unknown', reason: 'not-a-string' };
     }
-    return decisionProbeOf(decisionAnswers(parts.parsed));
+    // A failed read still keeps the body. A response whose score distributions were
+    // malformed can carry a perfectly readable probe, and the experiment has to record
+    // that answer rather than report the question as unanswered: "the reviewer said
+    // irreversible" and "we could not read the answer" are different measurements, and
+    // attributing the first to the second would understate what the candidate said.
+    if (parts.responseText === null) {
+      return { status: 'unknown', reason: 'member-absent' };
+    }
+    return decisionProbeOf(answersIn(parts.responseText));
   }
   if (parts.responseText === null) {
     return { status: 'unknown', reason: 'member-absent' };
@@ -167,6 +177,39 @@ function chatProbeOf(text: string): ProbeReading {
     return { status: 'unknown', reason: 'member-absent' };
   }
   return readProbeAnswer(parsed[PROBE_MEMBER]);
+}
+
+/**
+ * The answers object behind a stored decision attempt.
+ *
+ * A stored attempt's `parsed` is the answers object; a whole response body has them under
+ * `answers` or `result.answers`. Both shapes are accepted so a reader of a record and a
+ * reader of a live body cannot disagree, and a body with none of them yields `undefined`
+ * rather than a guessed empty object.
+ */
+function answersOf(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (PROBE_MEMBER in parsed) return parsed;
+  return decisionAnswers(parsed);
+}
+
+/**
+ * The answers object inside a stored response body.
+ *
+ * Used only for an attempt whose answer could not be read: the body is the bytes the
+ * provider sent, so the probe answer is still in it, and re-reading the envelope is what
+ * lets a malformed score distribution keep a readable probe reading. A body that is not
+ * JSON yields `undefined`, which is reported as an absent member rather than a guess.
+ */
+function answersIn(responseText: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseText);
+  } catch {
+    return undefined;
+  }
+  return isRecord(parsed) ? decisionAnswers(parsed) : undefined;
 }
 
 /** The probe a decision answers object carries. */

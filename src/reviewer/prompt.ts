@@ -40,6 +40,18 @@ import { compressQuestions, renderLabelScaleText } from './scale.js';
 import { renderVariantMaterial } from './variant-material.js';
 import type { ReviewVariant } from './variant.js';
 
+/**
+ * How a variant renders the production layout for one history axis.
+ *
+ * Production's own `renderMaterial`, whose second argument an experiment may set. Typed as
+ * one alias so the variant renderers and the production renderer cannot drift about what
+ * the baseline is.
+ */
+export type ProductionMaterial = (
+  snapshot: ReviewSnapshot,
+  history?: ReviewVariant['history'],
+) => string;
+
 /** The chat request: a system contract and one labelled user message. */
 export interface ChatRequest {
   readonly system: string;
@@ -202,7 +214,7 @@ export interface VariantDecisionRequest {
 export function renderVariantChatRequest(
   snapshot: ReviewSnapshot,
   variant: ReviewVariant,
-  productionMaterial: (snapshot: ReviewSnapshot) => string = renderMaterial,
+  productionMaterial: ProductionMaterial = renderMaterial,
 ): ChatRequest {
   const system = renderVariantChatSystem(variant);
   const user = renderVariantMaterial(snapshot, variant, productionMaterial);
@@ -223,7 +235,7 @@ export function renderVariantChatRequest(
 export function renderVariantDecisionRequest(
   snapshot: ReviewSnapshot,
   variant: ReviewVariant,
-  productionMaterial: (snapshot: ReviewSnapshot) => string = renderMaterial,
+  productionMaterial: ProductionMaterial = renderMaterial,
 ): VariantDecisionRequest {
   const state = renderVariantDecisionState(
     renderVariantMaterial(snapshot, variant, productionMaterial),

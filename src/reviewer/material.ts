@@ -272,9 +272,22 @@ function authorizationBlock(parts: AuthorizationParts): string {
   return ['HUMAN_AUTHORIZATION', AUTHORIZATION_NOTE, json(parts)].join('\n');
 }
 
-/** The history block's production text. */
-function historyBlock(parts: HistoryParts, note: string): string {
-  return ['TURN_TOOL_HISTORY', note, json(parts)].join('\n');
+/**
+ * The history block's text.
+ *
+ * A withheld block keeps its label and replaces the window with a stated reason, so the
+ * reader learns a fact about the submission instead of inferring an empty turn. The
+ * `tool_calls` member is absent rather than empty for the same reason: an empty list
+ * would be a claim that nothing ran.
+ */
+function historyBlock(
+  parts: HistoryParts,
+  history: 'current-turn' | 'none',
+): string {
+  if (history === 'none') {
+    return ['TURN_TOOL_HISTORY', HISTORY_WITHHELD_NOTE].join('\n');
+  }
+  return ['TURN_TOOL_HISTORY', HISTORY_NOTE, json(parts)].join('\n');
 }
 
 /** The prior-verdict block's production text. */
@@ -308,8 +321,16 @@ function completenessBlock(parts: CompletenessParts): string {
  * message; the decision request puts both in `state`. One composition means the
  * decision backend cannot see a differently ordered or differently worded copy
  * of the same submission.
+ *
+ * `history` is the one option: `current-turn` (production's own) submits the tool
+ * window, and `none` withholds it while saying so. A withheld block is never an
+ * absent block, because "the turn was empty" and "this experiment withheld it" are
+ * different facts about a submission.
  */
-export function renderMaterial(snapshot: ReviewSnapshot): string {
+export function renderMaterial(
+  snapshot: ReviewSnapshot,
+  history: 'current-turn' | 'none' = 'current-turn',
+): string {
   const parts = submissionParts(snapshot);
   return [
     // The design's order: the source-labelled policy and environment come first,
@@ -317,7 +338,7 @@ export function renderMaterial(snapshot: ReviewSnapshot): string {
     policyBlock(parts.policy),
     ['ENVIRONMENT', json(parts.environment)].join('\n'),
     authorizationBlock(parts.authorization),
-    historyBlock(parts.history, HISTORY_NOTE),
+    historyBlock(parts.history, history),
     priorVerdictsBlock(parts.prior),
     ...actionBlock(parts.action),
     completenessBlock(parts.completeness),
