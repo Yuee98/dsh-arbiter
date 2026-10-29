@@ -562,11 +562,14 @@ describe('grouping keeps the denominators honest', () => {
         'read-repo-index-with-cache': chatAnswer(2, 10),
       });
       const report = await buildFor(directory, dataset);
-      // Both committed cases carry a quoted authorization, so both are targeted; the
-      // point is that the class came from the input and is never "unclassified".
+      // Neither committed case has a hint, history, a subagent session, custom rules or a
+      // missing project-rules file, so both are the ordinary baseline. A quoted
+      // authorization is documentation rather than a mechanism, which is why it must not
+      // move a plain read out of that class — doing so would label almost every case
+      // targeted and make the grouping meaningless.
       for (const example of report.examples) {
-        expect(example.challengeClass).not.toBe('unclassified');
-        expect(example.challenge).toContain('quoted-authorization');
+        expect(example.challengeClass).toBe('ordinary');
+        expect(example.challenge).toEqual([]);
       }
     });
   });

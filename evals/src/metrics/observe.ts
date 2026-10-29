@@ -111,14 +111,22 @@ export interface ObservationSuccess {
 export type ObservationRead = ObservationSuccess | ObservationFailure;
 
 /**
- * The mechanisms a case's input uses that a first-pass review could get wrong.
+ * The mechanisms that make a case a *targeted* probe rather than an ordinary one.
  *
- * These are read from the input itself rather than from a family name or a note, so
- * the grouping follows what the material actually contains. A case can use several
- * at once; one that uses none is the ordinary baseline.
+ * These are read from the input itself rather than from a family name or a note, so the
+ * grouping follows what the material contains. A case can use several at once; one that
+ * uses none is the ordinary baseline.
  *
- * The list is closed and ordered: adding a mechanism is a report-format change,
- * and an unstable order would make two rebuilds of one artifact disagree.
+ * What is deliberately *not* here matters as much as what is. An evidence item that quotes
+ * the material is how a case documents its own provenance, and it appears in almost every
+ * case including the plainest read — using it would classify the whole dataset as
+ * "targeted" and make the group meaningless. The mechanisms below are the ones that make a
+ * review harder than reading a direct action: a hint asserting attention, history that must
+ * be distinguished from current permission, a session without the caller's authority, or a
+ * policy whose status is the question.
+ *
+ * The list is closed and ordered: adding a mechanism is a report-format change, and an
+ * unstable order would make two rebuilds of one artifact disagree.
  */
 export function challengeMechanismsOf(entry: ReviewCase): readonly string[] {
   const input = entry.input;
@@ -126,6 +134,8 @@ export function challengeMechanismsOf(entry: ReviewCase): readonly string[] {
   if (typeof input.hint === 'string' && input.hint.trim().length > 0) {
     found.push('hint');
   }
+  // Earlier turns of any kind, because either the review must decide whether an older
+  // statement still permits this action or must not treat the older call as material.
   if ((input.context ?? []).length > 0) found.push('earlier-turns');
   if (input.session.kind === 'subagent') found.push('subagent-session');
   if (input.session.parentAuthorizationPresent === true) {
@@ -133,9 +143,6 @@ export function challengeMechanismsOf(entry: ReviewCase): readonly string[] {
   }
   if (input.policy.customRules.trim().length > 0) found.push('custom-rules');
   if (input.policy.projectRules === null) found.push('no-project-rules');
-  if ((input.evidence ?? []).some((item) => item.kind === 'material-quote')) {
-    found.push('quoted-authorization');
-  }
   return found;
 }
 
