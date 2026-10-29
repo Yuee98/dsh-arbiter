@@ -141,6 +141,33 @@ function at2(area: { readonly path: string }, name: string): string {
   return `${area.path}/${name}`;
 }
 
+/**
+ * A record document derived from a real one, with a chosen cell id and note.
+ *
+ * Built and then checked, rather than asserted into `CellRecord`: the test needs a valid
+ * document to write, and a document it merely claimed was valid would make a schema change
+ * surface as a confusing failure here instead of in the artifact tests.
+ */
+function forgedRecord(
+  original: string,
+  cellId: string,
+  index: number,
+): CellRecord {
+  const parsed: unknown = JSON.parse(original);
+  if (!isRecord(parsed)) throw new TypeError('the record is not an object');
+  const checked = checkers.record({
+    ...parsed,
+    cellId,
+    notes: [`writer ${String(index)}`],
+  });
+  if (!checked.ok) {
+    throw new TypeError(
+      `the forged record does not match its schema: ${checked.problems.join('; ')}`,
+    );
+  }
+  return checked.document;
+}
+
 /** A non-array object, for narrowing a parsed document without asserting its type. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -2367,6 +2394,96 @@ describe('corrections from the fourth review', () => {
       ).rejects.toThrow(/requests may still be outstanding/u);
       // Nothing new was written: the refusal happens before dispatch.
       expect(await recordsOf(directory)).toHaveLength(1);
+    });
+  });
+});
+
+describe('a record is claimed exclusively', () => {
+  it('lets exactly one of several concurrent writers publish', async () => {
+    // Checking for the file and then writing it leaves a window in which two writers both
+    // see nothing and both publish, and the losing rename replaces evidence the other had
+    // already recorded. Creating the file exclusively makes the creation itself the claim,
+    // so only the races a singleton test cannot reach are ruled out here.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf();
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory,
+      });
+      const original = await readFile(
+        join(directory, 'records', `${cellId}.json`),
+        'utf8',
+      );
+      // A forged record: the real one with a different note, built through the checker so
+      // the test cannot rely on a type it never verified.
+      const forged = forgedRecord(original, cellId, 0);
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_unused, index) =>
+          writeRecord(directory, forgedRecord(original, cellId, index)),
+        ),
+      );
+      expect(forged.cellId).toBe(cellId);
+      // Every writer failed, because the name was already taken by the real record.
+      expect(results.every((result) => result.status === 'rejected')).toBe(
+        true,
+      );
+      // And the evidence is byte-identical: no rename replaced it.
+      expect(
+        await readFile(join(directory, 'records', `${cellId}.json`), 'utf8'),
+      ).toBe(original);
+    });
+  });
+
+  it('lets exactly one of two writers publish into an empty slot', async () => {
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf();
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory,
+      });
+      const original = await readFile(
+        join(directory, 'records', `${cellId}.json`),
+        'utf8',
+      );
+      // A fresh cell id, so the slot is genuinely empty and the writers race each other.
+      const contested = `${cellId}-contested`;
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_unused, index) =>
+          writeRecord(directory, forgedRecord(original, contested, index)),
+        ),
+      );
+      // Exactly one wins; a check-then-write lets several through and the last rename wins.
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const written = await readFile(
+        join(directory, 'records', `${contested}.json`),
+        'utf8',
+      );
+      const winner = results.findIndex(
+        (result) => result.status === 'fulfilled',
+      );
+      expect(JSON.parse(written)).toMatchObject({
+        notes: [`writer ${String(winner)}`],
+      });
     });
   });
 });

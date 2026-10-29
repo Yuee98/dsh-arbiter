@@ -17,7 +17,7 @@
  * option.
  */
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { ReviewOutcome } from '../../../src/review-contract/types.js';
@@ -57,6 +57,14 @@ export const RUN_FILES = {
   index: 'index.json',
   fixture: 'fixture.json',
   records: 'records',
+  /**
+   * The claim file a dispatch holds.
+   *
+   * Not part of the artifact's readable surface: a report never reads it, and a run
+   * interrupted without releasing it is a run a person has to inspect rather than one a
+   * later pass may quietly take over.
+   */
+  lock: 'run.lock',
 } as const;
 
 /** Where one cell's record lives, relative to the run directory. */
@@ -97,6 +105,53 @@ async function readJson(path: string): Promise<unknown> {
     throw error;
   }
   return JSON.parse(text) as unknown;
+}
+
+/**
+ * A run directory's exclusive claim, held for the life of one dispatch.
+ *
+ * Two processes pointed at the same directory would each read the same pending cells and
+ * each dispatch them, spending the run's budget twice and racing to write the same
+ * records. The occupancy check alone cannot stop that: both can pass it before either
+ * publishes. A lock file created exclusively is what makes "one run, one writer" true
+ * rather than expected, and it is the same mechanism a record uses to claim its own name.
+ *
+ * The claim is released on success and on failure alike, and a stale claim from a crashed
+ * process deliberately blocks continuation: a run whose writer died mid-dispatch cannot
+ * promise its budget either, so a person has to look at it.
+ */
+export async function claimRun(
+  directory: string,
+): Promise<() => Promise<void>> {
+  await mkdir(directory, { recursive: true });
+  const lock = join(directory, RUN_FILES.lock);
+  try {
+    const handle = await open(lock, 'wx');
+    try {
+      await handle.writeFile(
+        `${JSON.stringify({ pid: process.pid, claimedAt: new Date().toISOString() })}\n`,
+        'utf8',
+      );
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    const code: unknown =
+      error !== null && typeof error === 'object'
+        ? Reflect.get(error, 'code')
+        : null;
+    if (code === 'EEXIST') {
+      const held = await readFile(lock, 'utf8').catch(() => '');
+      throw new Error(
+        `refusing to dispatch ${directory}: another process holds the run claim (${held.trim() || 'no details'}); a run has one writer, so finish or remove it before continuing`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  return async (): Promise<void> => {
+    await rm(lock, { force: true });
+  };
 }
 
 /**

@@ -251,12 +251,16 @@ export function unknownCaseIds(
 }
 
 /**
- * Resolve the cases a plan selects from its split.
+ * Resolve the cases a plan selects, in the order the plan asked for.
  *
  * The split is applied here, once: a plan that names `caseIds` keeps them, and a plan
  * that names only a split gets the split's cases in manifest order. Resolving at run
- * start is what freezes the selection, so a later commit that adds a case cannot
- * enlarge a run already in progress.
+ * start is what freezes the selection, so a later commit that adds a case cannot enlarge a
+ * run already in progress.
+ *
+ * An explicit list is resolved in *its own* order, not the dataset's. When the attempt
+ * budget only covers part of the selection, the order decides which cells actually run, so
+ * silently reordering would execute a different experiment from the one the plan declared.
  */
 export function resolveCases(
   plan: RunPlan,
@@ -264,7 +268,11 @@ export function resolveCases(
 ): readonly ReviewCase[] {
   const named = plan.caseIds ?? [];
   if (named.length > 0) {
-    return cases.filter((entry) => named.includes(entry.caseId));
+    const byId = new Map(cases.map((entry) => [entry.caseId, entry] as const));
+    return named.flatMap((caseId) => {
+      const entry = byId.get(caseId);
+      return entry === undefined ? [] : [entry];
+    });
   }
   if (plan.split === 'all') return cases;
   return cases.filter((entry) => entry.split === plan.split);
@@ -518,7 +526,7 @@ export async function executeRun(
       for (const problem of existing.problems) io.err(`problem ${problem}`);
       return 1;
     }
-    const outcome = await resumeRun({
+    const outcome = await guardedResume(io, {
       directory,
       existing: existing.existing,
       cases,
@@ -537,6 +545,7 @@ export async function executeRun(
       continuation: true,
       now,
     });
+    if (outcome === null) return 1;
     reportRun(io, directory, outcome.index.status, outcome.index.spent);
     return outcome.index.status === 'complete' ? 0 : 1;
   }
@@ -565,7 +574,7 @@ export async function executeRun(
     for (const problem of created.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const outcome = await resumeRun({
+  const outcome = await guardedResume(io, {
     directory,
     existing: { index: created.index, records: [] },
     cases,
@@ -583,6 +592,7 @@ export async function executeRun(
     continuation: false,
     now,
   });
+  if (outcome === null) return 1;
   reportRun(io, directory, outcome.index.status, outcome.index.spent);
   return outcome.index.status === 'complete' ? 0 : 1;
 }
@@ -659,6 +669,29 @@ export function liveProblems(
     }
   }
   return problems;
+}
+
+/**
+ * Run one dispatch, reporting a refusal as a command problem rather than a crash.
+ *
+ * A continuation can be refused for reasons the operator can act on — another process
+ * holds the run claim, a request may still be outstanding, the versions moved. Those are
+ * failures of this command, not defects of this program, so they belong on stderr with an
+ * exit code rather than as an unhandled rejection.
+ */
+async function guardedResume(
+  io: RunIo,
+  options: Parameters<typeof resumeRun>[0],
+): Promise<Awaited<ReturnType<typeof resumeRun>> | null> {
+  try {
+    return await resumeRun(options);
+  } catch (error) {
+    if (error instanceof Error) {
+      io.err(`problem ${error.message}`);
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** The default directory one run writes into, outside version control. */

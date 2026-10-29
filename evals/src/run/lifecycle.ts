@@ -23,13 +23,19 @@
  * caller decides whether to dispatch; `evals run` is the explicit command that does.
  */
 
-import { mkdir, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile, readdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { canonicalJson } from '../data/hash.js';
 import type { ReviewCase } from '../data/types.js';
 
-import { planDigest, recordPathOf, RUN_FILES, writeJson } from './artifact.js';
+import {
+  claimRun,
+  planDigest,
+  recordPathOf,
+  RUN_FILES,
+  writeJson,
+} from './artifact.js';
 import { dispatch } from './scheduler.js';
 import type { DispatchOutcome } from './scheduler.js';
 import { cellGrid, planProblems } from './plan.js';
@@ -375,28 +381,36 @@ export async function resumeRun(options: {
   const cases = new Map(
     options.cases.map((entry) => [entry.caseId, entry] as const),
   );
-  const outcome = await dispatch({
-    runId: options.existing.index.runId,
-    plan: options.existing.index.plan,
-    cells: pending,
-    cases,
-    fixture: fixtureByCell(options.fixture),
-    versions: options.versions,
-    llm: options.llm,
-    readCredential: options.readCredential,
-    signal: options.signal,
-    // The continuation inherits the run's remaining allowance, not a fresh one: without
-    // this, each pass could spend the full maximum and the cumulative total would exceed
-    // the bound the frozen plan declared.
-    alreadySpentAttempts: attemptsIn(options.existing.records),
-    now,
-    onSettled: async (result) => {
-      if (result.record !== null) {
-        await writeRecord(options.directory, result.record);
-        await options.onProgress?.(result.record);
-      }
-    },
-  });
+  // One writer per run: the claim is taken before any cell is dispatched and released
+  // however the dispatch ends, so a second process cannot spend the same budget.
+  const release = await claimRun(options.directory);
+  let outcome: DispatchOutcome;
+  try {
+    outcome = await dispatch({
+      runId: options.existing.index.runId,
+      plan: options.existing.index.plan,
+      cells: pending,
+      cases,
+      fixture: fixtureByCell(options.fixture),
+      versions: options.versions,
+      llm: options.llm,
+      readCredential: options.readCredential,
+      signal: options.signal,
+      // The continuation inherits the run's remaining allowance, not a fresh one: without
+      // this, each pass could spend the full maximum and the cumulative total would exceed
+      // the bound the frozen plan declared.
+      alreadySpentAttempts: attemptsIn(options.existing.records),
+      now,
+      onSettled: async (result) => {
+        if (result.record !== null) {
+          await writeRecord(options.directory, result.record);
+          await options.onProgress?.(result.record);
+        }
+      },
+    });
+  } finally {
+    await release();
+  }
   const records = await readRecords(options.directory, options.checkers);
   if (records.problems.length > 0) {
     throw new Error(
@@ -479,13 +493,38 @@ export async function writeRecord(
   record: CellRecord,
 ): Promise<void> {
   const path = join(directory, recordPathOf(record.cellId));
-  const existing = await readFile(path, 'utf8').catch(() => null);
-  if (existing !== null) {
-    throw new Error(
-      `refusing to overwrite ${record.cellId}: a record is written once and read many times`,
-    );
+  // Claimed by creating the file exclusively rather than checking and then writing. A
+  // read-then-write leaves a window in which two processes both see no file and both
+  // publish, and the losing rename replaces evidence the other one had already recorded —
+  // which is the one thing this artifact promises cannot happen. `wx` makes the creation
+  // itself the claim, so exactly one writer can ever succeed for a given cell.
+  let claimed: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    claimed = await open(path, 'wx');
+  } catch (error) {
+    if (isExistError(error)) {
+      throw new Error(
+        `refusing to overwrite ${record.cellId}: a record is written once and read many times`,
+        { cause: error },
+      );
+    }
+    throw error;
+  } finally {
+    // The handle only reserves the name; the content is written by `writeJson`, which
+    // needs the path rather than a handle.
+    await claimed?.close();
   }
   await writeJson(path, record);
+}
+
+/** Whether a failure is "the file already exists". */
+function isExistError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    Reflect.get(error, 'code') === 'EEXIST'
+  );
 }
 
 /**

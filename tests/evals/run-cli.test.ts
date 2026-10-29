@@ -1459,3 +1459,175 @@ describe('planning is not gated on an unselected protocol', () => {
     });
   });
 });
+
+describe('an explicit case list keeps its own order', () => {
+  it('runs the first requested case, not the first in the dataset', async () => {
+    // The bot's finding: `filter(cases)` reorders the selection into dataset order, so a
+    // budget-limited run can execute a different case than the plan names first.
+    await withArea(async (area) => {
+      const raw = await readDataset(
+        join(REPOSITORY_ROOT, 'evals/datasets/core-v1'),
+      );
+      const devCases = inspectDataset(raw, await compileCheckers(), {
+        contract: REVIEW_CONTRACT_VERSION,
+        rubric: 'review-rubric-v1',
+      })
+        .cases.map((entry) => entry.document)
+        .filter((entry) => entry.split === 'dev');
+      const first = devCases[0];
+      const second = devCases[1];
+      if (first === undefined || second === undefined) {
+        throw new Error('the dev split needs two cases');
+      }
+      // Requested in the reverse of the dataset's order, with budget for exactly one cell.
+      await area.write('plan.json', {
+        ...planOf({
+          caseIds: [second.caseId, first.caseId],
+          bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
+        }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cellIdOf({
+            caseId: second.caseId,
+            targetId: 'chat-a',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cellIdOf({
+            caseId: first.caseId,
+            targetId: 'chat-a',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const files = await readdir(join(area.path, 'run', RUN_FILES.records));
+      // The first cell dispatched is the first case the plan named.
+      expect(files).toEqual([
+        `${cellIdOf({ caseId: second.caseId, targetId: 'chat-a', protocol: 'chat' })}.json`,
+      ]);
+    });
+  });
+
+  it('freezes the requested order into the plan it hashes', async () => {
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await area.write('plan.json', {
+        ...planOf({
+          caseIds: ['read-repo-index-with-cache', 'read-named-source-file'],
+        }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cellIdOf({
+            caseId: 'read-repo-index-with-cache',
+            targetId: 'chat-a',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const index = JSON.parse(
+        await readFile(join(area.path, 'run', RUN_FILES.plan), 'utf8'),
+      ) as unknown;
+      if (index === null || typeof index !== 'object') {
+        throw new TypeError('the frozen plan is not an object');
+      }
+      expect(Reflect.get(index, 'caseIds')).toEqual([
+        'read-repo-index-with-cache',
+        'read-named-source-file',
+      ]);
+    });
+  });
+});
+
+describe('a run has one writer', () => {
+  it('refuses a second dispatch while a claim is held', async () => {
+    // The bot's finding: two processes can both pass the occupancy check before either
+    // publishes, then both dispatch the same cells and spend the budget twice.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      // A claim left behind, as a crashed writer would leave one.
+      await area.write(`run/${RUN_FILES.lock}`, {
+        pid: 12345,
+        claimedAt: '2026-10-29T00:00:00.000Z',
+      });
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      // The claim is taken before dispatch, so nothing was spent: the records directory is
+      // created but holds no evidence.
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('holds the run claim');
+      const records = await readdir(
+        join(area.path, 'run', RUN_FILES.records),
+      ).catch(() => []);
+      expect(records).toEqual([]);
+    });
+  });
+
+  it('releases the claim when a dispatch finishes', async () => {
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await seedPlan(area, planOf(), {
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+      });
+      const first = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      expect(first).toBe(0);
+      // Released, so a continuation is not blocked by the previous pass's claim.
+      const second = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        recorder(area.path).io,
+      );
+      expect(second).toBe(0);
+      // And the claim file is gone rather than left as debris.
+      const files = await readdir(join(area.path, 'run'));
+      expect(files).not.toContain(RUN_FILES.lock);
+    });
+  });
+
+  it('releases the claim when a dispatch fails', async () => {
+    await withArea(async (area) => {
+      // An empty fixture makes the cell fail, which is a dispatch that ends badly.
+      await seedPlan(area, planOf(), {});
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const files = await readdir(join(area.path, 'run'));
+      // A failed run must not leave a claim that blocks the operator from continuing it.
+      expect(files).not.toContain(RUN_FILES.lock);
+    });
+  });
+});
