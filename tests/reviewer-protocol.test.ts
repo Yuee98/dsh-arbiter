@@ -1414,6 +1414,28 @@ describe('the score object is exempt while every header still masks', () => {
     // JSON's ban on literal NULs is not a defence.
     const forged = 'Authorization: \u0000score:0\u0000Bearer PRIVATE_TOKEN';
     expect(redactAuthHeaders(forged)).not.toContain('PRIVATE_TOKEN');
+    // Nor may a real token's spelling carry a suffix into the exemption.
+    expect(
+      redactAuthHeaders(
+        'Authorization: \u0000score:0\u0000 Bearer PRIVATE_TOKEN',
+      ),
+    ).not.toContain('PRIVATE_TOKEN');
+  });
+
+  test('a valid score answer with trailing whitespace stays readable', () => {
+    // The unquoted branch consumes the blanks that follow a value, so a real answer
+    // written as `…} }` reaches the check with trailing whitespace. Matching it
+    // strictly would mask a valid score and lose the distribution from the record.
+    const shapes = [
+      '{"authorization":{"type":"score","probabilities":{"9":1}} }',
+      '{"authorization":{"type":"score","probabilities":{"9":1}}\t}',
+      '{"authorization":{"type":"score","probabilities":{"9":1}},\r\n"success":true}',
+    ];
+    for (const input of shapes) {
+      const masked = redactAuthHeaders(input);
+      expect(() => JSON.parse(masked) as unknown).not.toThrow();
+      expect(masked).toContain('"probabilities":{"9":1}');
+    }
   });
 
   test('a replacement pattern in provider text is restored literally', () => {

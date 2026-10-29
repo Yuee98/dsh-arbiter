@@ -155,10 +155,15 @@ export function redactAuthHeaders(text: string): string {
       // actually produced is exempt: matching the prefix alone would let provider
       // text that merely *looks* like a token (`Authorization: \0score:0\0Bearer …`)
       // skip masking, and chat text is decoded before it arrives, so JSON's ban on
-      // literal NULs does not protect this boundary. A numeric literal is a chat
-      // answer's band. Everything else is masked, which is what keeps a
-      // credential-shaped value hidden whatever field carries it.
-      issuedTokens.has(value) || isScoreLiteral(field, value)
+      // literal NULs does not protect this boundary.
+      //
+      // The unquoted branch also consumes the whitespace that follows a value, so a
+      // real answer written as `…} }` arrives here with trailing blanks. Trimming
+      // only the tail keeps a valid score readable while still rejecting anything
+      // with a non-whitespace suffix, which is what a disguise would need. A numeric
+      // literal is a chat answer's band; everything else is masked, which is what
+      // keeps a credential-shaped value hidden whatever field carries it.
+      issuedTokens.has(value.trimEnd()) || isScoreLiteral(field, value)
         ? match
         : `${field}${separator}[redacted]`,
   );
