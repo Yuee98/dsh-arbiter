@@ -322,7 +322,10 @@ function auditStructureRefusal(path: string): string | null {
         copyFileSync(`${path}${suffix}`, `${copy}${suffix}`);
     const probe = new DatabaseSync(copy);
     try {
-      return structureRefusal(probe);
+      // Both the effective version and the structure decide acceptance here, in
+      // the same order the live open uses: a version bumped only in the WAL is
+      // not visible in the header the first check read.
+      return schemaRefusal(probe);
     } finally {
       probe.close();
     }
@@ -422,11 +425,25 @@ function tableNames(db: DatabaseSync): ReadonlySet<string> {
 }
 
 /**
- * What is missing from a current-stamped file, or `null` when nothing is.
+ * The refusal for a connection whose version or structure is not this build's.
  *
  * Shared by the copy-based pre-check and the live open so the two can never
- * disagree about what a usable structure is: the pre-check decides whether the
- * original may be opened at all, and the live check must then find it complete.
+ * disagree about what counts as usable. The **effective** version is read here
+ * rather than from the file header alone: a version bumped inside an
+ * uncheckpointed WAL is invisible in the main file, so a header-only comparison
+ * would accept a newer database and only discover it after opening the original.
+ */
+function schemaRefusal(db: DatabaseSync): string | null {
+  const version = userVersion(db);
+  if (version > SCHEMA_VERSION)
+    return `audit database schema ${String(version)} is newer than this plugin (${String(SCHEMA_VERSION)}); refusing to modify it`;
+  if (version !== SCHEMA_VERSION)
+    return `audit database schema ${String(version)} is not supported by this build (only ${String(SCHEMA_VERSION)} is read); reset the audit database instead of migrating it`;
+  return structureRefusal(db);
+}
+
+/**
+ * What is missing from a current-version file, or `null` when nothing is.
  */
 function structureRefusal(db: DatabaseSync): string | null {
   const tables = tableNames(db);
@@ -503,6 +520,6 @@ export function openAuditSchema(db: DatabaseSync): void {
       `audit database schema ${String(version)} is not supported by this build (only ${String(SCHEMA_VERSION)} is read); reset the audit database instead of migrating it`,
     );
   }
-  const refusal = structureRefusal(db);
+  const refusal = schemaRefusal(db);
   if (refusal !== null) throw new AuditSchemaError(refusal);
 }

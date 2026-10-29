@@ -1944,6 +1944,57 @@ describe('a database from an older release is refused, not migrated', () => {
       expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
   });
 
+  test('a version bumped only in the WAL is refused before the file is opened', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'arbiter-wal-version-'));
+    dirs.push(dir);
+    const source = await mkdtemp(join(tmpdir(), 'arbiter-wal-version-src-'));
+    dirs.push(source);
+    const path = join(dir, 'arbiter.db');
+
+    // A current database whose *effective* version was later raised inside an
+    // uncheckpointed WAL. The main file's header still says 3, so a header-only
+    // comparison would accept it and only notice after opening the original —
+    // which is exactly the connection that rewrites the sidecars.
+    const seed = new AuditStore(
+      join(source, 'arbiter.db'),
+      DEFAULT_CONFIG.audit,
+    );
+    seed.enqueue(record({ callId: 'bumped-call', result: 'review-deny' }));
+    await seed.flush();
+    seed.close();
+    const writer = new DatabaseSync(join(source, 'arbiter.db'));
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    writer.exec('PRAGMA user_version = 99');
+    const leftover = readdirSync(source).sort();
+    expect(leftover).toContain('arbiter.db-wal');
+    for (const file of leftover)
+      writeFileSync(
+        path + file.slice('arbiter.db'.length),
+        readFileSync(join(source, file)),
+      );
+    // The premise: the header alone still reports this build's version.
+    expect(readFileSync(path).readUInt32BE(60)).toBe(3);
+    const files = readdirSync(dir).sort();
+    const digests = new Map(
+      files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
+    );
+    writer.close();
+
+    const store = new AuditStore(path, DEFAULT_CONFIG.audit);
+    expect(store.paused).toBe(true);
+    // The newer-version protection applies to the version the WAL makes
+    // effective, not only to the one in the main header.
+    expect(store.health().lastError).toContain('newer');
+    expect(store.health().lastError).toContain('refusing to modify');
+    expect(store.listCalls({}).unreadable).toBe(true);
+    store.close();
+
+    // No connection to the original was ever made, so nothing changed.
+    expect(readdirSync(dir).sort()).toEqual(files);
+    for (const [file, digest] of digests)
+      expect(hashFile(readFileSync(join(dir, file)))).toBe(digest);
+  });
+
   test('a newer structure is left untouched and only pauses writes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'arbiter-newer-'));
     dirs.push(dir);
