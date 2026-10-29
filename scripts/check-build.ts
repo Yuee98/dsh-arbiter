@@ -20,11 +20,13 @@ import * as reactDomClient from 'react-dom/client';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { publint } from 'publint';
 import { formatMessage } from 'publint/utils';
+import { evalsSpecifiers, forbiddenEntries } from './build/package-boundary.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-arbiter-build-'));
 const consumer = join(temporary, 'consumer');
 const tarball = join(temporary, 'dsh-arbiter.tgz');
+const unpacked = join(temporary, 'unpacked');
 
 function run(command: string, args: string[], cwd = consumer): void {
   const result = spawnSync(command, args, {
@@ -38,6 +40,70 @@ function run(command: string, args: string[], cwd = consumer): void {
 
 function runNode(args: string[]): void {
   run(process.execPath, args);
+}
+
+/** Run one command and return its stdout, failing if it does not succeed. */
+function runCapture(command: string, args: string[], cwd = consumer): string {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, CI: 'true' },
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, `${command} ${args.join(' ')} failed.`);
+  return result.stdout;
+}
+
+/**
+ * Every evals specifier a packaged module imports, as file/line pairs.
+ *
+ * Reading the emitted JavaScript rather than the source is what makes this a check
+ * on the artifact: a source-level scan could pass while a build step inlined an
+ * evals module.
+ */
+async function importFreeOfEvals(
+  packageRoot: string,
+): Promise<readonly string[]> {
+  const files = await readdir(join(packageRoot, 'lib'), { recursive: true });
+  const findings: string[] = [];
+  for (const file of files) {
+    if (!file.endsWith('.js') && !file.endsWith('.cjs')) continue;
+    const text = await readFile(join(packageRoot, 'lib', file), 'utf8');
+    for (const specifier of evalsSpecifiers(text)) {
+      findings.push(`${file}: ${specifier}`);
+    }
+  }
+  return findings;
+}
+
+/**
+ * Assert the packed artifact carries no evals source, schema or data.
+ *
+ * The publishable file list is the whole contract for what a user installs, so an
+ * evals path reaching the tarball is a packaging defect rather than a documentation
+ * matter. Both halves read what the packer produced — the file list from the tarball
+ * and the imports from the emitted JavaScript inside it — so a build step that inlined
+ * an evals module would still be caught.
+ */
+async function assertNoEvalsInPackage(options: {
+  readonly tarball: string;
+  readonly unpacked: string;
+}): Promise<void> {
+  assert.deepEqual(
+    forbiddenEntries(runCapture('tar', ['tzf', options.tarball])),
+    [],
+    'The published tarball must not contain evals sources, schemas or data.',
+  );
+  await mkdir(options.unpacked, { recursive: true });
+  run('tar', ['xzf', options.tarball, '-C', options.unpacked], root);
+  assert.deepEqual(
+    await importFreeOfEvals(join(options.unpacked, 'package')),
+    [],
+    'Published modules must not import evals.',
+  );
+  process.stdout.write(
+    'Published package: no evals source, schema, data or import.\n',
+  );
 }
 
 interface LoadedClient {
@@ -67,6 +133,10 @@ try {
     );
   }
   assert.equal(packageErrors.length, 0, 'Publint found package defects.');
+  // The evals boundary is asserted here, against the tarball, rather than after the
+  // consumer install: a packaging defect should be reported even when the offline
+  // install cannot run in the current environment.
+  await assertNoEvalsInPackage({ tarball, unpacked });
   await writeFile(
     join(consumer, 'package.json'),
     JSON.stringify({

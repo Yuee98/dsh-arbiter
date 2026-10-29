@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/reviews.schema.json",
+  "title": "Evals model reviews",
+  "description": "Every independent model opinion recorded for one case. Each model answers on its own; a field it did not answer stays null. These are evidence for the human adjudication, never a substitute for it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["caseId", "inputHash", "reviews"],
+  "properties": {
+    "caseId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "inputHash": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+    },
+    "reviews": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/opinion"
+      }
+    }
+  }
+}

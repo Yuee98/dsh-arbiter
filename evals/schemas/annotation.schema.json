@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/annotation.schema.json",
+  "title": "Evals annotation document",
+  "description": "The document an annotator edits. It is exported with blank targets and imported with filled ones, and the two states are checked separately: a blank target is what keeps an exported pack from anchoring the annotator, and a filled one has to name a decision. It carries its own copy of each case input so an import can prove the decision was made against the material the dataset still holds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packVersion",
+    "datasetId",
+    "exportedAt",
+    "versions",
+    "rubric",
+    "entries"
+  ],
+  "properties": {
+    "packVersion": {
+      "const": "evals-annotation-pack-v1"
+    },
+    "datasetId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "exportedAt": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/date"
+    },
+    "rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rubricVersion", "source", "risk", "authorization"],
+      "properties": {
+        "rubricVersion": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sha256": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+            }
+          }
+        },
+        "risk": {
+          "$ref": "#/definitions/bands"
+        },
+        "authorization": {
+          "$ref": "#/definitions/bands"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "familyId", "split", "input", "target"],
+        "properties": {
+          "caseId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "familyId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "split": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/split"
+          },
+          "input": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/reviewInput"
+          },
+          "target": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/labelTarget"
+          }
+        }
+      }
+    },
+    "annotatedBy": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+    },
+    "versions": {
+      "description": "The versions in force when the pack was exported. A fill made under other versions is refused rather than stamped with whatever is current at import time, because a decision made under one contract or policy is not a decision under another.",
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+    }
+  },
+  "definitions": {
+    "bands": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["score", "criterion"],
+        "properties": {
+          "score": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/publicScore"
+          },
+          "criterion": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+          }
+        }
+      }
+    }
+  }
+}

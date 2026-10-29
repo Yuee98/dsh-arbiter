@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/label.schema.json",
+  "title": "Evals review label",
+  "description": "One adjudication, bound to the exact input it judged. A label whose inputHash no longer matches the case is stale and cannot count as gold. Labels never contain the reviewer's output, so no engine answer can overwrite a human one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["caseId", "inputHash", "versions", "target"],
+  "properties": {
+    "caseId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "inputHash": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+    },
+    "versions": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+    },
+    "target": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/labelTarget"
+    },
+    "notes": { "type": "string" }
+  }
+}

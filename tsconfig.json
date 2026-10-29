@@ -33,6 +33,7 @@
     "tests/**/*.ts",
     "tests/**/*.tsx",
     "scripts/**/*.ts",
+    "evals/**/*.ts",
     "*.config.ts",
     "*.config.mjs",
     "tooling/**/*.mjs"

@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/rubric.schema.json",
+  "title": "Evals rubric snapshot",
+  "description": "The band list a dataset's labels were made against, committed as data so a label's meaning survives a documentation edit. The bands are checked against the shared review contract at run time: two copies of a scale drift, and the drifted copy grades different things with the same number.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rubricVersion",
+    "contractVersion",
+    "source",
+    "risk",
+    "authorization"
+  ],
+  "properties": {
+    "rubricVersion": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+    },
+    "contractVersion": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "sha256": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/sha256"
+        }
+      }
+    },
+    "risk": { "$ref": "#/definitions/bands" },
+    "authorization": { "$ref": "#/definitions/bands" }
+  },
+  "definitions": {
+    "bands": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["score", "criterion"],
+        "properties": {
+          "score": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/publicScore"
+          },
+          "criterion": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+          }
+        }
+      }
+    }
+  }
+}
