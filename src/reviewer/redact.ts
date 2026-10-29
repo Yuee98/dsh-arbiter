@@ -311,7 +311,13 @@ function rebuildScoreObject(objectText: string): string {
     const prefix = match[1] ?? '';
     const value = member.slice(prefix.length).trim();
     if (!SCORE_MEMBERS.has(key) || seen.has(key)) {
-      kept.push(`${prefix}[redacted]`);
+      // The rejected member's *key* is provider-controlled text too. It must go
+      // through the header rule rather than being reprinted, or an echo that has
+      // been moved from the value into the key would be restored untouched. If the
+      // key itself carries a header, the whole member collapses to `[redacted]`
+      // because a masked key can no longer name a field.
+      const safeKey = maskHeadersIn(prefix);
+      kept.push(safeKey === prefix ? `${prefix}[redacted]` : '[redacted]');
       continue;
     }
     seen.add(key);
@@ -380,7 +386,13 @@ function levelObject(value: string, kind: 'number' | 'text'): string | null {
   const kept: string[] = [];
   for (const entry of topLevelMemberChunks(value.slice(1, -1))) {
     const match = MEMBER_PREFIX.exec(entry);
-    if (match === null || !LEVEL_KEY.test(`"${match[2] ?? ''}"`)) return null;
+    // A key is provider-chosen text: it must be a legal level *and* carry no
+    // header. Either failure rejects the whole object, which then falls back to
+    // being scanned as ordinary text.
+    if (match === null) return null;
+    const rawKey = match[1] ?? '';
+    if (!LEVEL_KEY.test(`"${match[2] ?? ''}"`)) return null;
+    if (maskHeadersIn(rawKey) !== rawKey) return null;
     const prefix = match[1] ?? '';
     const inner = entry.slice(prefix.length).trim();
     if (kind === 'number') {

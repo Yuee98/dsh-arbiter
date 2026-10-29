@@ -1388,6 +1388,12 @@ describe('the score object is exempt while every header still masks', () => {
         'probabilities key',
         '{"authorization":{"type":"score","probabilities":{"Authorization: Bearer PRIVATE_TOKEN":1}}}',
       ],
+      // The rejected member's own key is provider text too: masking its value while
+      // reprinting the key would restore the echo one field to the left.
+      [
+        'rejected member key',
+        '{"authorization":{"type":"score","probabilities":{"9":1},"Authorization: Bearer PRIVATE_TOKEN":"normal"}}',
+      ],
     ];
     for (const [label, input] of cases) {
       // Folded into one matcher per case: the label names which shape failed.
@@ -1400,6 +1406,26 @@ describe('the score object is exempt while every header still masks', () => {
     const legit =
       '{"authorization":{"type":"score","probabilities":{"9":1},"score":1,"legend":{"9":"mass delete"},"confidence":0.5}}';
     expect(redactAuthHeaders(legit)).toBe(legit);
+  });
+
+  test('a credential in a rejected member key masks end to end', async () => {
+    // Codex P1 on head d53e25b: this shape kept the key verbatim.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"Authorization: Bearer sk-member-key":"normal"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-member-key');
   });
 
   test('a credential in a legend key masks end to end', async () => {
