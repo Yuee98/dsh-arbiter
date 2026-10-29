@@ -6,11 +6,18 @@
  * a command string here would drop fields a rule can select and would change what
  * the tester evaluates.
  *
- * This reads the existing audit log routes; it writes nothing.
+ * This reads the same `/log` route the shared call detail uses and decodes it
+ * with that route's own decoder. Hand-reading a second, private shape here is
+ * what once made the importer answer `call-incomplete` for every real record:
+ * the route publishes a decoded detail, not a bare stored row.
+ *
+ * It writes nothing.
  */
 
 import { getJson } from '../../api.js';
+import { callDetailResponse } from '../../decoders/logs.js';
 import type { SessionKind } from '../../../types.js';
+import type { CallDetailView } from '../../view-types.js';
 import type { TestSample } from './rule-test-model.js';
 
 /** One recorded call the tester can replay. */
@@ -83,32 +90,54 @@ export async function recentCalls(): Promise<RecentCalls> {
   return { ok: true, calls };
 }
 
-/** Read one call's original tool input, unchanged. */
+/**
+ * Read one call's original tool input, unchanged.
+ *
+ * The arguments come from the detail's raw layer, which is the stored object
+ * rather than a rendering of it. A record that kept no input answers
+ * `call-incomplete`: the tester cannot replay a call whose input nobody stored.
+ */
 export async function importedSample(callId: string): Promise<ImportedCall> {
-  const payload: unknown = await getJson(
-    `/log?callId=${encodeURIComponent(callId)}`,
-  );
-  if (!isRecord(payload)) return { ok: false, code: 'call-invalid' };
-  if (payload['ok'] !== true)
-    return {
-      ok: false,
-      code:
-        typeof payload['code'] === 'string' ? payload['code'] : 'call-failed',
-    };
-  const record = payload['record'];
-  if (!isRecord(record) || typeof record['tool'] !== 'string')
+  let detail: CallDetailView;
+  try {
+    detail = await getJson(
+      `/log?callId=${encodeURIComponent(callId)}`,
+      callDetailResponse,
+    );
+  } catch (error) {
+    return { ok: false, code: codeOfFailure(error) };
+  }
+  if (detail.unreadable) return { ok: false, code: 'call-unreadable' };
+  if (detail.overview.tool.length === 0)
     return { ok: false, code: 'call-incomplete' };
-  const args = record['arguments'];
+  const args = detail.raw.arguments;
+  if (args === undefined || args === null)
+    return { ok: false, code: 'call-incomplete' };
   return {
     ok: true,
     imported: {
       sample: {
-        tool: record['tool'],
+        tool: detail.overview.tool,
         args,
         input: JSON.stringify(args, null, 2),
       },
-      identity: record['sessionKind'] === 'subagent' ? 'subagent' : 'main',
-      cwd: typeof record['cwd'] === 'string' ? record['cwd'] : null,
+      identity:
+        detail.overview.sessionKind === 'subagent' ? 'subagent' : 'main',
+      cwd: detail.overview.cwd,
     },
   };
+}
+
+/**
+ * The stable code a failed read reports.
+ *
+ * `getJson` throws an `ApiError` carrying the route's own reason; any other
+ * failure is a malformed answer rather than a missing record.
+ */
+function codeOfFailure(error: unknown): string {
+  if (error !== null && typeof error === 'object') {
+    const code: unknown = Reflect.get(error, 'code');
+    if (typeof code === 'string' && code.length > 0) return code;
+  }
+  return 'call-invalid';
 }

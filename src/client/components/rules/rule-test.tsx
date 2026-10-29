@@ -19,6 +19,12 @@ import {
 import { ruleName } from './draft.js';
 import { RuleTestImport } from './rule-test-import.js';
 import {
+  recordedSampleOf,
+  recordedStillMatches,
+  useSeedApplication,
+} from './rule-test-recorded.js';
+import type { RecordedSample } from './rule-test-recorded.js';
+import {
   buildSample,
   defaultTool,
   issueTarget,
@@ -69,6 +75,20 @@ interface Answered {
   readonly signature: string;
 }
 
+/**
+ * A recorded call to load into the tester.
+ *
+ * `nonce` identifies one request: re-targeting the tester with the same sample
+ * twice must still reload it, and a new sample must replace what is on screen.
+ * The `callId` is kept so the tester can name the recorded call the inputs came
+ * from instead of presenting them as a sample someone just typed.
+ */
+export interface SampleSeed {
+  readonly nonce: number;
+  readonly callId: string;
+  readonly imported: ImportedTestSample;
+}
+
 export function RuleTest(props: {
   readonly draft: Draft;
   readonly focusedRule: DraftRule | null;
@@ -77,6 +97,7 @@ export function RuleTest(props: {
   readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
   readonly onLocateIssue?: (target: IssueTarget) => void;
   readonly onClearFocus?: () => void;
+  readonly sampleSeed?: SampleSeed | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   const [open, setOpen] = useState(false);
@@ -189,6 +210,9 @@ export function RuleTest(props: {
               draft={props.draft}
               focusedRule={props.focusedRule}
               onLocateIssue={handleLocate}
+              {...(props.sampleSeed === undefined
+                ? {}
+                : { seed: props.sampleSeed })}
             />
           </div>
         </DialogContent>
@@ -217,6 +241,7 @@ function RuleTestForm(props: {
   readonly draft: Draft;
   readonly focusedRule: DraftRule | null;
   readonly onLocateIssue?: (target: IssueTarget) => void;
+  readonly seed?: SampleSeed | undefined;
 }): ReactNode {
   const t = useArbiterTranslation();
   const { mode, setMode, tool, setTool, text, setText } = useFocusedRuleSample(
@@ -229,6 +254,7 @@ function RuleTestForm(props: {
   const [issues, setIssues] = useState<RejectedDraft | null>(null);
   const [answer, setAnswer] = useState<Answered | null>(null);
   const [busy, setBusy] = useState(false);
+  const [source, setSource] = useState<RecordedSample | null>(null);
 
   const signature = useMemo(() => {
     const sample = buildSample({ tool, identity, mode, text });
@@ -253,7 +279,7 @@ function RuleTestForm(props: {
   const stale = answer !== null && signature !== answer.signature;
 
   const importSample = useCallback(
-    (imported: ImportedTestSample): void => {
+    (callId: string, imported: ImportedTestSample): void => {
       setTool(imported.sample.tool);
       setMode('arguments');
       setText(imported.sample.input);
@@ -261,9 +287,26 @@ function RuleTestForm(props: {
       setCwd(imported.cwd ?? '');
       setProblem(null);
       setFailure(null);
+      setSource(recordedSampleOf(callId, imported));
     },
     [setMode, setText, setTool],
   );
+
+  // A draft created from a call hands its sample here. The nonce makes this one
+  // load per request, so re-opening the same call reloads the recorded values
+  // instead of keeping whatever was typed in between.
+  const seed = props.seed;
+  useSeedApplication(seed, () => {
+    if (seed !== undefined) importSample(seed.callId, seed.imported);
+  });
+
+  const recorded = recordedStillMatches(source, {
+    tool,
+    text,
+    mode,
+    identity,
+    cwd,
+  });
 
   const run = async (): Promise<void> => {
     const built = buildSample({ tool, identity, mode, text });
@@ -328,6 +371,7 @@ function RuleTestForm(props: {
 
   return (
     <div className="arb:flex arb:flex-col arb:gap-3">
+      <RecordedNote source={source} recorded={recorded} />
       <RuleTestInputs
         tool={tool}
         identity={identity}
@@ -391,20 +435,40 @@ function RuleTestForm(props: {
         />
       )}
       {stale ? <Notice kind="info" text={t('ruleTest.needsRetest')} /> : null}
-      {answer === null ? null : (
-        <div
-          data-testid="rule-test-answer"
-          data-arbiter-test-answer=""
-          className="arb:flex arb:flex-col arb:gap-3"
-        >
-          <RuleTestConclusion
-            result={answer.result}
-            rule={props.focusedRule}
-            stale={stale}
-          />
-          <RuleTestDetails result={answer.result} rule={props.focusedRule} />
-        </div>
-      )}
+      <AnswerBlock
+        answer={answer === null ? null : answer.result}
+        rule={props.focusedRule}
+        stale={stale}
+      />
+    </div>
+  );
+}
+
+/**
+ * The two conclusions, kept in one block.
+ *
+ * They answer different questions — did the selected rule match, and which path
+ * did the whole draft take — so they are rendered together but never merged, and
+ * both carry the same stale flag.
+ */
+function AnswerBlock(props: {
+  readonly answer: RuleTestResultView | null;
+  readonly rule: DraftRule | null;
+  readonly stale: boolean;
+}): ReactNode {
+  if (props.answer === null) return null;
+  return (
+    <div
+      data-testid="rule-test-answer"
+      data-arbiter-test-answer=""
+      className="arb:flex arb:flex-col arb:gap-3"
+    >
+      <RuleTestConclusion
+        result={props.answer}
+        rule={props.rule}
+        stale={props.stale}
+      />
+      <RuleTestDetails result={props.answer} rule={props.rule} />
     </div>
   );
 }
@@ -456,6 +520,33 @@ function invalidDraftText(
   return `${t('ruleTest.invalidRules')}\n${issuesText(issues, t)}`;
 }
 
+/**
+ * Which recorded call the inputs came from, and whether they still are it.
+ *
+ * The two sentences must stay distinct: after an edit the answer is about the
+ * sample on screen, and continuing to present the recorded call would credit the
+ * result to a call nobody is testing any more.
+ */
+function RecordedNote(props: {
+  readonly source: RecordedSample | null;
+  readonly recorded: boolean;
+}): ReactNode {
+  const t = useArbiterTranslation();
+  if (props.source === null) return null;
+  return (
+    <p
+      role="note"
+      data-rule-test-source={props.source.callId}
+      data-rule-test-source-recorded={props.recorded ? 'yes' : 'no'}
+      className="arb:m-0 arb:text-[11.5px] arb:text-tertiary"
+    >
+      {props.recorded
+        ? t('ruleTest.sourceCall', { call: props.source.callId })
+        : t('ruleTest.sourceCallEdited', { call: props.source.callId })}
+    </p>
+  );
+}
+
 function RuleTestInputs(props: {
   readonly tool: string;
   readonly identity: SessionKind;
@@ -466,7 +557,7 @@ function RuleTestInputs(props: {
   readonly onIdentity: (identity: SessionKind) => void;
   readonly onMode: (mode: TestInputMode) => void;
   readonly onCwd: (cwd: string) => void;
-  readonly onImport: (imported: ImportedTestSample) => void;
+  readonly onImport: (callId: string, imported: ImportedTestSample) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
   return (

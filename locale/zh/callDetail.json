@@ -140,5 +140,8 @@
   "conjunction": "合取证据（当时的判定依据）",
   "conjunctionWitness": "{target}：同时满足的节点 {text}",
   "conjunctionNoWitness": "这条记录没有留下可显示的合取节点。",
-  "dialogDescription": "查看工具调用的裁决结果、决策依据与原始审计材料。"
+  "dialogDescription": "查看工具调用的裁决结果、决策依据与原始审计材料。",
+  "createRuleOpen": "从这次调用创建规则",
+  "createRuleHint": "把这次调用记录下来的工具与参数带入规则草稿，只固定你选择的字段；草稿仍需保存并应用才生效。",
+  "createRuleUnavailable": "这条记录没有保存这次调用的输入，因此无法从它生成规则草稿。"
 }

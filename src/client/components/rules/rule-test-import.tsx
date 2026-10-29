@@ -7,9 +7,17 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover.js';
 import { importedSample, recentCalls } from './rule-test-source.js';
 import type { ImportableCall, ImportedTestSample } from './rule-test-source.js';
 
+/**
+ * Pick one recorded call.
+ *
+ * The chosen call is reported with its id as well as the replayable sample, so a
+ * caller can keep the source for a draft, not only fill the tester's inputs.
+ */
 export function RuleTestImport(props: {
   readonly disabled: boolean;
-  readonly onImport: (imported: ImportedTestSample) => void;
+  /** The trigger's copy; the tester's own label stays the default. */
+  readonly triggerLabelKey?: string | undefined;
+  readonly onImport: (callId: string, imported: ImportedTestSample) => void;
 }): ReactNode {
   const t = useArbiterTranslation();
   const [open, setOpen] = useState(false);
@@ -56,7 +64,7 @@ export function RuleTestImport(props: {
         setError(t('ruleTest.importFailed', { error: imported.code }));
         return;
       }
-      props.onImport(imported.imported);
+      props.onImport(call.callId, imported.imported);
       setOpen(false);
     } catch (failure) {
       setError(t('ruleTest.importFailed', { error: errorText(failure) }));
@@ -68,7 +76,9 @@ export function RuleTestImport(props: {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button disabled={props.disabled}>{t('ruleTest.importOpen')}</Button>
+        <Button disabled={props.disabled}>
+          {t(props.triggerLabelKey ?? 'ruleTest.importOpen')}
+        </Button>
       </PopoverTrigger>
       <PopoverContent
         data-arbiter-test-import=""

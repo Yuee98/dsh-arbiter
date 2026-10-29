@@ -17,6 +17,7 @@ import type {
   PendingExactTypeMap,
 } from './components/rules/draft.js';
 import { ArbiterPortalProvider } from './components/ui/portal-context.js';
+import type { RuleCallSource } from './components/rules/rule-from-call-model.js';
 import { saveResponse, validationResponse } from './decoders/state.js';
 import { useCoexistenceFeed } from './coexistence-feed.js';
 import { useArbiterTranslation } from './i18n-provider.js';
@@ -27,6 +28,7 @@ import { AdvancedPanel } from './panels/advanced.js';
 import { LogsPanel } from './panels/logs.js';
 import { ReviewerPanel } from './panels/reviewer.js';
 import { RulesPanel } from './panels/rules.js';
+import type { PendingRuleCall } from './panels/rules.js';
 import { StatusPanel } from './panels/status.js';
 import { cloneDraft, configErrors, errorText } from './view-helpers.js';
 import { issuesText } from './view-issues.js';
@@ -182,6 +184,24 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
     warnings: [],
     sourceWarnings: [],
   });
+  /**
+   * A call an open detail asked to turn into a draft.
+   *
+   * The request carries the call's recorded facts, so the panel opens the same
+   * dialog it would for its own import: the tab switch is only navigation and the
+   * draft is still built from the call by the same code.
+   */
+  const [pendingRuleCall, setPendingRuleCall] =
+    useState<PendingRuleCall | null>(null);
+  const ruleCallNonce = useRef(0);
+  const createRuleFromCall = useCallback((source: RuleCallSource): void => {
+    ruleCallNonce.current += 1;
+    setPendingRuleCall({ nonce: ruleCallNonce.current, source });
+    setTab('rules');
+  }, []);
+  const consumeRuleCall = useCallback((): void => {
+    setPendingRuleCall(null);
+  }, []);
   const generation = useRef(0);
   const validationRevision = useRef(0);
   const onFailure = useCallback((failure: unknown): void => {
@@ -352,6 +372,9 @@ export function ArbiterPage(_props: SlotProps): ReactNode {
           validation={validation}
           pendingExactTypes={pendingExactTypes}
           onDraft={onDraft}
+          onCreateRule={createRuleFromCall}
+          pendingRuleCall={pendingRuleCall}
+          onConsumeRuleCall={consumeRuleCall}
           onPendingTypeChange={handlePendingTypeChange}
           onRemoveCondition={handleRemoveCondition}
           onDeleteRule={handleDeleteRule}
@@ -397,6 +420,9 @@ function PageTabBody(props: {
   ) => void;
   readonly onRemoveCondition: (ruleId: string, conditionIndex: number) => void;
   readonly onDeleteRule: (ruleId: string) => void;
+  readonly onCreateRule: (source: RuleCallSource) => void;
+  readonly pendingRuleCall: PendingRuleCall | null;
+  readonly onConsumeRuleCall: () => void;
 }): ReactNode {
   const {
     tab,
@@ -409,6 +435,9 @@ function PageTabBody(props: {
     onPendingTypeChange,
     onRemoveCondition,
     onDeleteRule,
+    onCreateRule,
+    pendingRuleCall,
+    onConsumeRuleCall,
   } = props;
 
   if (tab === 'status') {
@@ -431,6 +460,8 @@ function PageTabBody(props: {
         onPendingTypeChange={onPendingTypeChange}
         onRemoveCondition={onRemoveCondition}
         onDeleteRule={onDeleteRule}
+        {...(pendingRuleCall === null ? {} : { initialCall: pendingRuleCall })}
+        onConsumeCall={onConsumeRuleCall}
       />
     );
   }
@@ -441,7 +472,7 @@ function PageTabBody(props: {
     return <AdvancedPanel draft={draft} onDraft={onDraft} />;
   }
   if (tab === 'logs') {
-    return <LogsPanel />;
+    return <LogsPanel onCreateRule={onCreateRule} />;
   }
   return <AboutPanel state={state} />;
 }
