@@ -20,13 +20,13 @@ import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
 import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
 
-import { datasetDigest } from '../annotation/summary.js';
 import { findingOrigin, inspectDataset } from '../data/inspect.js';
 import { readDataset } from '../data/read.js';
 import { compileCheckers } from '../data/schemas.js';
 import type { ReviewCase } from '../data/types.js';
 
 import {
+  executionDigest,
   planDigest,
   readFixture,
   readRun,
@@ -163,7 +163,12 @@ async function loadDataset(
     ok: true,
     dataset: {
       cases: inspection.cases.map((entry) => entry.document),
-      digest: datasetDigest(inspection),
+      // The execution revision, not the annotation digest: a label edit must not invalidate
+      // a run whose cases and plan are unchanged.
+      digest: executionDigest({
+        manifest: inspection.manifest,
+        cases: inspection.cases.map((entry) => entry.document),
+      }),
       datasetId: manifest.datasetId,
       // The label problems are carried rather than dropped: a run should not fail for them,
       // but a plan that names a dataset whose labels are stale is worth saying out loud.

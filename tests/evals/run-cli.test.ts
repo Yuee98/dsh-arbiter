@@ -20,7 +20,8 @@ import { compileCheckers } from '../../evals/src/data/schemas.js';
 import { REVIEW_CONTRACT_VERSION } from '../../src/review-contract/index.js';
 import type { CliIo } from '../../evals/src/cli/run.js';
 import { parseRunCommand } from '../../evals/src/cli/run-commands.js';
-import { RUN_FILES } from '../../evals/src/run/artifact.js';
+import { executionDigest, RUN_FILES } from '../../evals/src/run/artifact.js';
+import { datasetDigest as datasetDigestOf } from '../../evals/src/annotation/summary.js';
 import { defaultRunDirectory, runIdOf } from '../../evals/src/run/commands.js';
 import {
   bounds,
@@ -1628,6 +1629,92 @@ describe('a run has one writer', () => {
       const files = await readdir(join(area.path, 'run'));
       // A failed run must not leave a claim that blocks the operator from continuing it.
       expect(files).not.toContain(RUN_FILES.lock);
+    });
+  });
+});
+
+describe('annotation work does not invalidate a run', () => {
+  it('freezes an execution revision a label edit cannot move', async () => {
+    // A run reads the manifest and the cases; it never reads a label. Freezing the
+    // annotation digest meant ordinary adjudication work — even editing a rationale —
+    // blocked finishing an interrupted experiment whose inputs and plan were unchanged.
+    // The assertion is on what a *run directory records*, because that is what continuation
+    // compares; asserting on `executionDigest` alone would pass whatever the runner froze.
+    await withArea(async (area) => {
+      const dataCheckers = await compileCheckers();
+      const real = await readRealManifest();
+      await area.write('probe/manifest.json', {
+        ...real.raw,
+        datasetId: 'probe-v1',
+        families: real.families.filter(
+          (entry) => entry.familyId === 'dev-ordinary-read',
+        ),
+        cases: [
+          { caseId: 'read-named-source-file', familyId: 'dev-ordinary-read' },
+        ],
+      });
+      await area.write(
+        'probe/cases/read-named-source-file.json',
+        JSON.parse(
+          await readFile(
+            join(
+              REPOSITORY_ROOT,
+              'evals/datasets/core-v1/cases/read-named-source-file.json',
+            ),
+            'utf8',
+          ),
+        ) as unknown,
+      );
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await area.write(
+        'probe/fixture.json',
+        fixtureOf({ [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }) }),
+      );
+      await area.write('plan.json', {
+        ...planOf({
+          datasetId: 'probe-v1',
+          datasetPath: at(area, 'probe'),
+          caseIds: ['read-named-source-file'],
+        }),
+        fixture: at(area, 'probe/fixture.json'),
+      });
+      await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      const frozen = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      const recorded = frozen.status;
+      expect(recorded).toBe('complete');
+
+      // The frozen digest is the execution revision, which equals the value built from
+      // manifest and cases alone — and differs from the dataset digest for this dataset
+      // because the latter also covers labels and reviews.
+      const records = await readdir(join(area.path, 'run', RUN_FILES.records));
+      expect(records).toHaveLength(1);
+      // The probe dataset is a subset, so compare against its own two sources.
+      const probe = inspectDataset(
+        await readDataset(at(area, 'probe')),
+        dataCheckers,
+        { contract: REVIEW_CONTRACT_VERSION, rubric: 'review-rubric-v1' },
+      );
+      const probeExecution = executionDigest({
+        manifest: probe.manifest,
+        cases: probe.cases.map((entry) => entry.document),
+      });
+      const frozenPlan = JSON.parse(
+        await readFile(join(area.path, 'run', RUN_FILES.index), 'utf8'),
+      ) as unknown;
+      if (!isRecord(frozenPlan))
+        throw new TypeError('the index is not an object');
+      const dataset: unknown = Reflect.get(frozenPlan, 'dataset');
+      if (!isRecord(dataset)) throw new TypeError('the index has no dataset');
+      // What the run recorded is the execution revision, not the annotation digest.
+      expect(Reflect.get(dataset, 'digest')).toBe(probeExecution);
+      expect(Reflect.get(dataset, 'digest')).not.toBe(datasetDigestOf(probe));
     });
   });
 });

@@ -36,6 +36,8 @@ import { cellGrid } from '../../evals/src/run/plan.js';
 import { compileRunCheckers } from '../../evals/src/run/schemas.js';
 import type { CellRecord, RunFixture } from '../../evals/src/run/types.js';
 import type { LlmLike } from '../../src/reviewer.js';
+import type { ReviewSnapshot } from '../../src/types.js';
+import type { ReviewCase } from '../../evals/src/data/types.js';
 import { inputHashOf } from '../../evals/src/data/eligibility.js';
 import { inspectDataset } from '../../evals/src/data/inspect.js';
 import { readDataset } from '../../evals/src/data/read.js';
@@ -166,6 +168,26 @@ function forgedRecord(
     );
   }
   return checked.document;
+}
+
+/**
+ * The snapshot one case builds for one protocol.
+ *
+ * Read through the runner's own material builder rather than through a record, because the
+ * snapshot is what the attempt replayed and the record only keeps its fingerprints.
+ */
+async function snapshotOf(
+  _cellId: string,
+  plan: ReturnType<typeof planOf>,
+  entries: readonly ReviewCase[],
+): Promise<ReviewSnapshot> {
+  const { caseMaterial } = await import('../../evals/src/run/material.js');
+  const caseId = plan.caseIds?.[0] ?? '';
+  const entry = entries.find((candidate) => candidate.caseId === caseId);
+  if (entry === undefined) throw new Error(`case ${caseId} is missing`);
+  return caseMaterial(entry, 'chat', {
+    maxInputTokens: plan.context.maxInputTokens,
+  }).snapshot;
 }
 
 /** A non-array object, for narrowing a parsed document without asserting its type. */
@@ -2484,6 +2506,65 @@ describe('a record is claimed exclusively', () => {
       expect(JSON.parse(written)).toMatchObject({
         notes: [`writer ${String(winner)}`],
       });
+    });
+  });
+});
+
+describe('case evidence keeps its declared authority', () => {
+  it('does not promote an agent relay to this session human instruction', async () => {
+    // The P1 finding: a `material-quote` is how a case quotes anything, so deriving authority
+    // from the quotation shape labelled an agent relay as the session's own human words —
+    // upgrading exactly the source this case exists to test.
+    await withArea(async (area) => {
+      const plan = planOf({ caseIds: ['agent-relay-only'] });
+      const cellId = cellIdOf({
+        caseId: 'agent-relay-only',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      const record = result.records[0];
+      expect(record).toBeDefined();
+      // The rendered request is what the model reads, so the assertion is on the snapshot
+      // the attempt replayed: a relay must not arrive as explicit human instruction.
+      const snapshot = await snapshotOf(record?.cellId ?? '', plan, cases);
+      const relay = snapshot.evidence[0];
+      expect(relay?.source.kind).toBe('parent-relay');
+      expect(relay?.evidence).toBe('implied');
+      expect(relay?.sourcePriority).toBe(5);
+      // The session's own words in the same case stay human instruction.
+      const human = snapshot.evidence[1];
+      expect(human?.source.kind).toBe('session-human');
+      expect(human?.evidence).toBe('explicit');
+    });
+  });
+
+  it('treats tool history as a fact rather than an instruction', async () => {
+    await withArea(async (area) => {
+      const plan = planOf({ caseIds: ['tool-history-claims-approval'] });
+      const cellId = cellIdOf({
+        caseId: 'tool-history-claims-approval',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      const snapshot = await snapshotOf('', plan, cases);
+      const tool = snapshot.evidence[0];
+      // A tool transcript cannot grant permission, so it is a fact with no evidence level.
+      expect(tool?.role).toBe('fact');
+      expect(tool?.evidence).toBeNull();
     });
   });
 });

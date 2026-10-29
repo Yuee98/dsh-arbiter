@@ -186,6 +186,23 @@ export async function writeJson(
   }
 }
 
+/**
+ * The digest of what a run actually executes.
+ *
+ * A run reads the manifest and the cases; it never reads a label or a model opinion. The
+ * dataset's own digest covers all four because the annotation tools need to know when an
+ * adjudication moved, but freezing that value into a run would mean ordinary annotation
+ * work — even editing a rationale — blocks finishing an interrupted experiment whose inputs
+ * and plan never changed. So the execution revision is the part a run depends on, and the
+ * annotation digest stays where it belongs.
+ */
+export function executionDigest(parts: {
+  readonly manifest: unknown;
+  readonly cases: readonly unknown[];
+}): string {
+  return digestOf({ manifest: parts.manifest, cases: parts.cases });
+}
+
 /** The plan's canonical digest. A continuation compares it before adding anything. */
 export function planDigest(plan: RunPlan): string {
   return digestOf(plan);

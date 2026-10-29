@@ -25,6 +25,8 @@
 import type {
   DerivedFacts,
   EvidenceItem,
+  EvidenceKind,
+  EvidenceRole,
   ReviewSnapshot,
 } from '../../../src/types.js';
 import {
@@ -188,18 +190,74 @@ export async function guidanceLimit(): Promise<number> {
  */
 function evidenceItem(caseId: string) {
   return (entry: Evidence, index: number): EvidenceItem => {
-    const parent = entry.note?.includes('直接父会话') === true;
+    const authority = authorityOf(entry);
     return {
       ts: index,
-      source: {
-        kind: parent ? 'parent-human' : 'session-human',
-        sessionId: caseId,
-      },
-      role: 'human-instruction',
-      evidence: entry.kind === 'material-quote' ? 'explicit' : null,
-      sourcePriority: parent ? 2 : 1,
+      source: { kind: authority.kind, sessionId: caseId },
+      role: authority.role,
+      evidence: authority.evidence,
+      sourcePriority: authority.sourcePriority,
       text: entry.ref,
     };
+  };
+}
+
+/**
+ * The authority one piece of case evidence carries.
+ *
+ * A case's `note` declares where its text came from, and the renderer tells the model that
+ * whatever appears in the human layer *is* the human's words. So the authority cannot be
+ * derived from the quotation's shape: a `material-quote` is how a case quotes anything,
+ * including an agent relay and a tool transcript. Labelling those as this session's human
+ * instruction would upgrade exactly the lower-authority sources the cases about relays and
+ * standing permissions exist to test, and their results would measure the evaluator's
+ * mistake rather than the reviewer's judgement.
+ *
+ * The declared note is therefore read literally, and the ranking matches production's own:
+ * the direct parent's words outrank this session's by display policy, and a relay is last.
+ * When the note says nothing about origin, the text is treated as this session's human
+ * words — the conservative reading, since a case would otherwise silently gain authority
+ * it never declared.
+ */
+function authorityOf(entry: Evidence): {
+  readonly kind: EvidenceKind;
+  readonly role: EvidenceRole;
+  readonly evidence: 'explicit' | 'implied' | null;
+  readonly sourcePriority: 1 | 2 | 5;
+} {
+  const note = entry.note ?? '';
+  if (/agent|relay|转述/i.test(note)) {
+    return {
+      kind: 'parent-relay',
+      role: 'fact',
+      // A relay reports what someone else said, so the instruction it carries is implied
+      // rather than explicit — the distinction the contract's priority ladder turns on.
+      evidence: entry.kind === 'material-quote' ? 'implied' : null,
+      sourcePriority: 5,
+    };
+  }
+  if (note.includes('直接父会话')) {
+    return {
+      kind: 'parent-human',
+      role: 'direct-parent-instruction',
+      evidence: entry.kind === 'material-quote' ? 'explicit' : null,
+      sourcePriority: 2,
+    };
+  }
+  if (/tool|工具|命令输出|history/i.test(note)) {
+    // A tool transcript is a fact the session can read, never an instruction from a person.
+    return {
+      kind: 'session-human',
+      role: 'fact',
+      evidence: null,
+      sourcePriority: 1,
+    };
+  }
+  return {
+    kind: 'session-human',
+    role: 'human-instruction',
+    evidence: entry.kind === 'material-quote' ? 'explicit' : null,
+    sourcePriority: 1,
   };
 }
 
