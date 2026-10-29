@@ -1,7 +1,7 @@
 /**
  * The evals command line's commands.
  *
- * Five offline data commands and four run commands:
+ * Five offline data commands, four run commands and one report command:
  *
  *   check-all  validate every dataset in the repository, plus the rubric snapshot
  *   check      validate one dataset and report problems, without writing anything
@@ -12,6 +12,7 @@
  *   run        dispatch a run plan; the only command that can reach a provider
  *   resume     report, or continue, the cells a run has not recorded yet
  *   show       read a finished run directory and print what it holds
+ *   report     rebuild a run's three-layer report, offline, from its saved records
  *
  * `check` is the one CI runs. The data commands serve the annotation window: a person
  * exports a pack, decides the cases, and imports the result. Exporting never carries a
@@ -21,6 +22,10 @@
  * The run commands are deliberately not part of any automatic path: `pnpm verify` and
  * `pnpm check:evals` call `check-all` only. A real provider call happens when someone
  * types `evals run`, and nothing schedules that for them.
+ *
+ * `report` is the opposite of `run`: it only reads, and a report rebuilt from two copies
+ * of one run directory is byte-identical. That is why it may be called from a check even
+ * though `run` may not.
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -49,6 +54,13 @@ import {
   showRun,
 } from '../run/commands.js';
 import type { RunIo } from '../run/commands.js';
+import {
+  isReportCommand,
+  parseReportCommand,
+  REPORT_USAGE,
+  reportRun,
+} from '../report/command.js';
+import type { ReportCommand } from '../report/command.js';
 import { isRunCommand, parseRunCommand, RUN_USAGE } from './run-commands.js';
 
 /** Where a command writes. Supplied so tests never capture real streams. */
@@ -72,8 +84,8 @@ export interface Command {
   readonly write: boolean;
 }
 
-/** The command line a caller ran, once a run command has been parsed. */
-export type ParsedCommand = Command | RunCommandLine;
+/** The command line a caller ran, once a run or report command has been parsed. */
+export type ParsedCommand = Command | RunCommandLine | ReportCommand;
 
 /** The run commands' own command line shape, re-exported for callers. */
 import type { RunCommandLine } from './run-commands.js';
@@ -91,6 +103,8 @@ const USAGE = [
   '                                         check a filled document; --write stores labels',
   '',
   RUN_USAGE,
+  '',
+  REPORT_USAGE,
 ].join('\n');
 
 interface Flags {
@@ -136,6 +150,13 @@ export function parseCommand(argv: readonly string[]): ParsedCommand | string {
     // command's flags: `--out` on `run` would otherwise be accepted and ignored.
     return parseRunCommand(
       name,
+      [first, ...rest].filter((entry) => entry !== undefined),
+    );
+  }
+  if (isReportCommand(name)) {
+    // The report command has its own flags for the same reason: `--write` on `report`
+    // would be accepted by a shared parser and then do nothing.
+    return parseReportCommand(
       [first, ...rest].filter((entry) => entry !== undefined),
     );
   }
@@ -486,6 +507,9 @@ export async function runCli(
   if (typeof command === 'string') {
     io.err(command);
     return 2;
+  }
+  if ('directory' in command) {
+    return reportRun(io, command);
   }
   if ('plan' in command) {
     return runCommand(io, command);
