@@ -434,6 +434,30 @@ export function callsForAnalysis(
  * unreadable row anywhere in the session answers it. Deleted or expired rows are
  * not counted, because they are genuinely gone rather than unreadable.
  */
+/**
+ * Results that are not prior verdicts, as one SQL list.
+ *
+ * The filter has to live in the statement, not after it: the `LIMIT` decides which
+ * rows are the window, so a row excluded only in JavaScript has already displaced a
+ * real verdict by the time it is dropped. A cancellation is not a verdict — nothing
+ * was decided — and letting it consume the window is how a stored denial disappears
+ * on cold recovery, when the session log cannot supply the missing decisions.
+ *
+ * This list and `NOT_A_PRIOR_VERDICT` in `history-record.ts` express the same rule
+ * for two readers; both must name every non-verdict result.
+ */
+const PRIOR_VERDICT_EXCLUSIONS = sqlList([
+  'allow',
+  'review-allow',
+  'human-allow',
+  'review-cancelled',
+]);
+
+/** Render literals as a quoted SQL list for an `IN`/`NOT IN` clause. */
+function sqlList(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(', ');
+}
+
 export function priorVerdictsForSession(
   db: DatabaseSync,
   sessionId: string,
@@ -464,7 +488,7 @@ export function priorVerdictsForSession(
                 decision_rules, effect
            FROM calls
           WHERE session_id = ?
-            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
             AND record_format_version IN (${placeholders})
           ORDER BY ts DESC, call_id DESC
           LIMIT ?`,
@@ -476,7 +500,7 @@ export function priorVerdictsForSession(
       .prepare(
         `SELECT COUNT(*) AS count FROM calls
           WHERE session_id = ?
-            AND result NOT IN ('allow', 'review-allow', 'human-allow')
+            AND result NOT IN (${PRIOR_VERDICT_EXCLUSIONS})
             AND record_format_version NOT IN (${placeholders})`,
       )
       .get(sessionId, ...READABLE_CALL_FORMATS),

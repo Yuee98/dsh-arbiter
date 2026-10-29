@@ -932,6 +932,35 @@ describe('prior verdicts: window, ordering and unreadable count', () => {
     store.close();
   });
 
+  test('a cancelled review is filtered before LIMIT, not after', async () => {
+    // A cancellation is not a verdict. If it is removed only in JavaScript, the
+    // LIMIT has already spent window slots on it, so real denials fall out of the
+    // window and cold recovery sees no history at all.
+    const { store } = await makeStore();
+    let ts = 1_700_000_000_000;
+    store.enqueue(
+      deniedRow({ callId: 'the-denial', result: 'review-deny', ts }),
+    );
+    for (const suffix of ['1', '2', '3', '4']) {
+      ts += 1;
+      store.enqueue(
+        deniedRow({
+          callId: `cancelled-${suffix}`,
+          result: 'review-cancelled',
+          ts,
+        }),
+      );
+    }
+    await store.flush();
+    // The window is one row; the denial is the only verdict in it.
+    const prior = store.priorVerdictsForSession('session-1', 1);
+    expect(prior.verdicts.map((item) => item.callId)).toEqual(['the-denial']);
+    // A wider window still contains no cancellation: it is not a verdict at all.
+    const wider = store.priorVerdictsForSession('session-1', 10);
+    expect(wider.verdicts.map((item) => item.callId)).toEqual(['the-denial']);
+    store.close();
+  });
+
   test('an unreadable format is filtered before LIMIT, not after', async () => {
     const { store } = await makeStore();
     const path = store.databasePath;
