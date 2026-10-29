@@ -21,7 +21,7 @@ import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
 import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
 
 import { datasetDigest } from '../annotation/summary.js';
-import { inspectDataset } from '../data/inspect.js';
+import { findingOrigin, inspectDataset } from '../data/inspect.js';
 import { readDataset } from '../data/read.js';
 import { compileCheckers } from '../data/schemas.js';
 import type { ReviewCase } from '../data/types.js';
@@ -96,6 +96,8 @@ interface LoadedDataset {
   readonly cases: readonly ReviewCase[];
   readonly digest: string;
   readonly datasetId: string;
+  /** Problems with this dataset's labels, which a run reports but does not obey. */
+  readonly labelProblems: readonly string[];
 }
 
 /**
@@ -137,10 +139,18 @@ async function loadDataset(
     contract: REVIEW_CONTRACT_VERSION,
     rubric: rubricVersion,
   });
-  if (inspection.problems.length > 0) {
+  // Only a problem with the dataset *itself* blocks a run. A stale label is a problem
+  // with the annotation side: its input hash no longer matches the case, which a run reads
+  // and never touches. Rejecting the run for it would mean revised case inputs could not
+  // be evaluated until someone re-adjudicated labels that play no part in the execution —
+  // and the annotation tools are where that belongs.
+  const blocking = inspection.problems.filter(
+    (problem) => findingOrigin(problem) !== 'label',
+  );
+  if (blocking.length > 0) {
     return {
       ok: false,
-      problems: inspection.problems.map(
+      problems: blocking.map(
         (problem) => `${problem.path}: ${problem.message}`,
       ),
     };
@@ -155,8 +165,41 @@ async function loadDataset(
       cases: inspection.cases.map((entry) => entry.document),
       digest: datasetDigest(inspection),
       datasetId: manifest.datasetId,
+      // The label problems are carried rather than dropped: a run should not fail for them,
+      // but a plan that names a dataset whose labels are stale is worth saying out loud.
+      labelProblems: inspection.problems
+        .filter((problem) => findingOrigin(problem) === 'label')
+        .map((problem) => `${problem.path}: ${problem.message}`),
     },
   };
+}
+
+/**
+ * Why a plan cannot be run against the dataset it points at.
+ *
+ * The plan names a `datasetId` and a `datasetPath`, and the two can disagree: a copied or
+ * misconfigured plan would then place one dataset's cases under another's identity in the
+ * artifact, and a report would attribute the results to the wrong dataset. The manifest is
+ * the authority for what a directory is, so a mismatch is refused before anything expands.
+ *
+ * Label problems are reported here too, without blocking: a run reads cases and never
+ * labels, so a stale annotation is worth saying but is not this command's business to fix.
+ */
+function datasetProblems(
+  io: RunIo,
+  plan: RunPlan,
+  dataset: LoadedDataset,
+): void {
+  if (dataset.datasetId !== plan.datasetId) {
+    io.err(
+      `problem the plan names dataset ${plan.datasetId} but ${plan.datasetPath} declares itself ${dataset.datasetId}; a run cannot be attributed to a dataset it did not read`,
+    );
+  }
+  for (const problem of dataset.labelProblems) {
+    io.err(
+      `note this dataset has a label problem a run does not depend on: ${problem}`,
+    );
+  }
 }
 
 /** Read one plan document, or say why it is not a plan. */
@@ -270,6 +313,11 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  if (dataset.dataset.datasetId !== plan.datasetId) {
+    datasetProblems(io, plan, dataset.dataset);
+    return 1;
+  }
+  datasetProblems(io, plan, dataset.dataset);
   const unknown = unknownCaseIds(plan, dataset.dataset.cases);
   if (unknown.length > 0) {
     // A run that quietly skipped a case would report a smaller experiment than it was
@@ -393,6 +441,11 @@ export async function executeRun(
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  if (dataset.dataset.datasetId !== plan.datasetId) {
+    datasetProblems(io, plan, dataset.dataset);
+    return 1;
+  }
+  datasetProblems(io, plan, dataset.dataset);
   const unknown = unknownCaseIds(plan, dataset.dataset.cases);
   if (unknown.length > 0) {
     io.err(
@@ -658,6 +711,11 @@ export async function inspectResume(
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  if (dataset.dataset.datasetId !== read.plan.datasetId) {
+    datasetProblems(io, read.plan, dataset.dataset);
+    return 1;
+  }
+  datasetProblems(io, read.plan, dataset.dataset);
   const unknown = unknownCaseIds(read.plan, dataset.dataset.cases);
   if (unknown.length > 0) {
     io.err(

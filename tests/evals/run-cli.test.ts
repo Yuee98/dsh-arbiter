@@ -135,6 +135,52 @@ async function readIndex(path: string): Promise<{
   };
 }
 
+/** A non-array object, for narrowing a parsed document without asserting its type. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * The committed dataset's manifest, read as the shape a plan needs.
+ *
+ * Read through guards rather than asserted: this test builds a *modified* dataset, and an
+ * assertion here would let a change to the real manifest produce a confusing failure in an
+ * unrelated test instead of naming the field that moved.
+ */
+async function readRealManifest(): Promise<{
+  readonly families: readonly {
+    readonly familyId: string;
+    readonly split: string;
+  }[];
+  readonly raw: Record<string, unknown>;
+}> {
+  const parsed: unknown = JSON.parse(
+    await readFile(
+      join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+      'utf8',
+    ),
+  );
+  if (!isRecord(parsed)) {
+    throw new TypeError('the manifest is not an object');
+  }
+  const families: unknown = Reflect.get(parsed, 'families');
+  if (!Array.isArray(families)) {
+    throw new TypeError('the manifest has no families');
+  }
+  const named = families.map((entry: unknown) => {
+    if (entry === null || typeof entry !== 'object') {
+      throw new TypeError('a family is not an object');
+    }
+    const familyId: unknown = Reflect.get(entry, 'familyId');
+    const split: unknown = Reflect.get(entry, 'split');
+    if (typeof familyId !== 'string' || typeof split !== 'string') {
+      throw new TypeError('a family has no familyId or split');
+    }
+    return { familyId, split };
+  });
+  return { families: named, raw: parsed };
+}
+
 /** The absolute path of a document inside one temporary area. */
 function at(area: { readonly path: string }, name: string): string {
   return join(area.path, name);
@@ -1206,6 +1252,116 @@ describe('corrections from the bot review', () => {
       );
       expect(code).toBe(1);
       expect(err.join('\n')).toContain('a live run needs SECTION_KEY');
+    });
+  });
+});
+
+describe('dataset identity and label independence', () => {
+  it('refuses a plan whose datasetId disagrees with the dataset it points at', async () => {
+    // The bot's finding: a plan can name one dataset and point at another, so the artifact
+    // would attribute one dataset's results to the other's identity.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await area.write('plan.json', {
+        ...planOf({ datasetId: 'not-the-real-id' }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({ [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }) }),
+      );
+      const { io, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('declares itself core-v1');
+      expect(err.join('\n')).toContain(
+        'cannot be attributed to a dataset it did not read',
+      );
+    });
+  });
+
+  it('refuses the mismatch on run too, before writing a directory', async () => {
+    await withArea(async (area) => {
+      await area.write('plan.json', {
+        ...planOf({ datasetId: 'misnamed' }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write('fixture.json', fixtureOf({}));
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('declares itself core-v1');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('reports a stale label as a note rather than blocking the run', async () => {
+    // The bot's finding: a run reads cases and never labels, so a stale label must not stop
+    // it — that is the annotation tools' problem, not the runner's.
+    await withArea(async (area) => {
+      const real = await readRealManifest();
+      const caseDocument: unknown = JSON.parse(
+        await readFile(
+          join(
+            REPOSITORY_ROOT,
+            'evals/datasets/core-v1/cases/read-named-source-file.json',
+          ),
+          'utf8',
+        ),
+      );
+      // A one-case dataset of our own, whose label carries a hash that does not match its
+      // case. That is what a stale label looks like to the inspector.
+      // The real manifest with one case, so every required member is already correct and
+      // only the dataset's identity and scope differ.
+      const families = real.families.filter(
+        (entry) => entry.familyId === 'dev-ordinary-read',
+      );
+      await area.write('probe/manifest.json', {
+        ...real.raw,
+        datasetId: 'probe-v1',
+        families,
+        cases: [
+          { caseId: 'read-named-source-file', familyId: 'dev-ordinary-read' },
+        ],
+      });
+      await area.write('probe/cases/read-named-source-file.json', caseDocument);
+      await area.write('probe/labels/read-named-source-file.json', {
+        caseId: 'read-named-source-file',
+        inputHash: `sha256:${'0'.repeat(64)}`,
+        versions: {
+          contract: 'review-contract-v1',
+          rubric: 'review-rubric-v1',
+        },
+        target: { risk: '2', authorization: '10' },
+      });
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await area.write(
+        'probe/fixture.json',
+        fixtureOf({ [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }) }),
+      );
+      await area.write('plan.json', {
+        ...planOf({ datasetId: 'probe-v1', datasetPath: at(area, 'probe') }),
+        fixture: at(area, 'probe/fixture.json'),
+      });
+      const { io, out, err } = recorder(area.path);
+      const code = await runCli(['plan', at(area, 'plan.json')], io);
+      // The stale label is named, and the plan still expands: a label is not input.
+      expect(err.join('\n')).toContain(
+        'label problem a run does not depend on',
+      );
+      expect(out.join('\n')).toContain('cells');
+      expect(code).toBe(0);
     });
   });
 });
