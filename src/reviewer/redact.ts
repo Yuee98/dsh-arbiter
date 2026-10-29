@@ -48,6 +48,14 @@ const AUTH_FIELD =
  */
 const SCORE_FIELD = /^"authorization"$/u;
 
+/**
+ * The prefix of the opaque token one verified score object is held as.
+ *
+ * It starts with NUL, which cannot occur in a provider's JSON text, so a real value
+ * can never be mistaken for a token during the masking pass.
+ */
+const SCORE_TOKEN_PREFIX = '\u0000score:';
+
 /** A JSON numeric literal, unquoted. */
 const NUMERIC_LITERAL = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 
@@ -83,11 +91,8 @@ function scoreObjectSpans(
     match !== null;
     match = opener.exec(text)
   ) {
-    const start = match.index;
-    // The `{` this member opens: the last character of the match. The span keeps
-    // the key so `isScoreMember` can compare offsets against the match start, and
-    // the object itself starts one character later.
-    const objectStart = start + match[0].length - 1;
+    // The `{` this member opens: the last character of the match.
+    const objectStart = match.index + match[0].length - 1;
     let depth = 0;
     let index = objectStart;
     let inString = false;
@@ -119,15 +124,19 @@ function scoreObjectSpans(
     // Only a structurally verified score answer is exempt. The check reads the
     // object's own text, so an object that merely sits at this key is still masked.
     if (!isScoreObject(text.slice(objectStart, index + 1))) continue;
-    spans.push([start, index + 1]);
+    // The span is the object itself, so extraction can replace exactly it.
+    spans.push([objectStart, index + 1]);
   }
   return spans;
 }
 
 export function redactAuthHeaders(text: string): string {
-  // The spans are found first, from the original text, so the exemption is decided
-  // by evidence gathered before any masking can move an offset.
-  const spans = scoreObjectSpans(text);
+  // Verified score objects are extracted *before* the field pattern runs. The
+  // pattern's value branch stops at a quote or a structural terminator, so it
+  // cannot carry a whole object; letting it try would rebuild a truncated
+  // fragment. Each verified object becomes an opaque token, the remaining text is
+  // masked normally, and the rebuilt objects are restored afterwards.
+  const { masked, restored } = extractScoreObjects(text);
   // One pass over the field name and separator, then the whole value: a quoted
   // value (JSON double quotes, a JS object dump with single quotes, backticks)
   // or everything up to a structural terminator. The unquoted branch must
@@ -137,51 +146,59 @@ export function redactAuthHeaders(text: string): string {
     `((?:"|')?(?:${AUTH_FIELD})(?:"|')?)(\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
     'giu',
   );
-  return text.replace(
+  const redacted = masked.replace(
     pattern,
-    (
-      match: string,
-      field: string,
-      separator: string,
-      value: string,
-      offset: number,
-    ) => {
-      // The exemption is the answer's own member, not a safe region: the object it
-      // opens is rescanned without the exemption, so a credential placed inside the
-      // answer is still masked even though that mask makes the object unparseable.
-      // Masking wins over parseability when the two conflict.
-      if (isScoreMember(spans, field, value, offset))
-        return `${field}${separator}${maskStrict(value, pattern)}`;
-      // A numeric literal is a chat answer's band. Everything else is masked, which
-      // is what keeps a credential-shaped value hidden whatever field carries it.
-      return isScoreLiteral(field, value)
+    (match: string, field: string, separator: string, value: string) =>
+      // A verified score object became a token here; it is already rebuilt and
+      // must survive this pass so it can be restored intact. A numeric literal is
+      // a chat answer's band. Everything else is masked, which is what keeps a
+      // credential-shaped value hidden whatever field carries it.
+      value.startsWith(SCORE_TOKEN_PREFIX) || isScoreLiteral(field, value)
         ? match
-        : `${field}${separator}[redacted]`;
-    },
+        : `${field}${separator}[redacted]`,
+  );
+  return restored.reduce(
+    (current, [token, object]) => current.replace(token, object),
+    redacted,
   );
 }
 
-/** Mask every auth-looking field in a fragment, exempting nothing. */
-function maskStrict(fragment: string, pattern: RegExp): string {
-  return fragment.replace(
-    pattern,
-    (_match: string, field: string, separator: string) =>
-      `${field}${separator}[redacted]`,
-  );
+/**
+ * Replace every verified score object with an opaque token.
+ *
+ * The rebuilt object keeps only the members a score answer may carry; every other
+ * member's value becomes `[redacted]`. That is stronger than exempting the span: an
+ * exemption preserves whatever travels beside a valid distribution, which is
+ * exactly how a forged answer would smuggle a credential past a structural check.
+ */
+function extractScoreObjects(text: string): {
+  readonly masked: string;
+  readonly restored: readonly (readonly [string, string])[];
+} {
+  const restored: (readonly [string, string])[] = [];
+  const spans = scoreObjectSpans(text);
+  if (spans.length === 0) return { masked: text, restored };
+  let out = '';
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    const token = `${SCORE_TOKEN_PREFIX}${String(restored.length)}\u0000`;
+    restored.push([token, rebuildScoreObject(text.slice(start, end))]);
+    out += `${text.slice(cursor, start)}${token}`;
+    cursor = end;
+  }
+  return { masked: out + text.slice(cursor), restored };
 }
 
 /**
  * Whether this object's own top-level members identify a score answer.
  *
  * The predicate is deliberately narrow: the object must declare the score type the
- * decision protocol sends. It does not need to validate the distribution — the
- * parser does that, and this module is not a parser — but it must be impossible for
- * an arbitrary object carrying a credential to satisfy it. A `"type"` value that is
- * not `"score"`, a missing `"type"`, or a nested `"type":"score"` (which is not a
- * top-level member) all fail.
+ * decision protocol sends. It cannot prove the object is genuine — a forged answer
+ * can declare the type too — which is why the exemption does not preserve the span
+ * but rebuilds it from the members a score may carry. This test only decides
+ * whether the object is a candidate for that rebuild.
  */
 function isScoreObject(fragment: string): boolean {
-  // The opening brace is part of the span; the members start after it.
   const body = fragment.slice(1, -1);
   const member = /"type"\s*:\s*"([^"]*)"/u.exec(topLevelMembers(body));
   return member?.[1] === 'score';
@@ -190,9 +207,9 @@ function isScoreObject(fragment: string): boolean {
 /**
  * The portion of an object body that belongs to its own members.
  *
- * Nested objects are replaced by a placeholder, so a `"type":"score"` inside a
- * nested array or object cannot satisfy {@link isScoreObject}. Text inside string
- * literals is kept because that is where the member values live.
+ * Nested objects and arrays are collapsed, so a `"type":"score"` inside them cannot
+ * satisfy {@link isScoreObject}. Text inside string literals is kept because that is
+ * where the member values live.
  */
 function topLevelMembers(body: string): string {
   let out = '';
@@ -218,7 +235,6 @@ function topLevelMembers(body: string): string {
     if (!inString) {
       if (character === '{' || character === '[') {
         depth += 1;
-        if (depth === 1) out += ' ';
         continue;
       }
       if (character === '}' || character === ']') {
@@ -232,21 +248,84 @@ function topLevelMembers(body: string): string {
 }
 
 /**
- * Whether this match is the score object's own opening member.
+ * The members a decision score answer is allowed to carry.
  *
- * Three conditions together, and each rules out a way to over-exempt: the exact
- * JSON spelling of the key, a value that opens an object (not a quoted string), and
- * an offset that is exactly where a balanced score-member span begins.
+ * This is the whole list on purpose: the exemption exists so a real answer stays
+ * readable, and a real answer has exactly these. Anything else beside them is not
+ * part of a score and cannot be trusted to be harmless.
  */
-function isScoreMember(
-  spans: readonly (readonly [number, number])[],
-  field: string,
-  value: string,
-  offset: number,
-): boolean {
-  if (!SCORE_FIELD.test(field.trim())) return false;
-  if (!value.trimStart().startsWith('{')) return false;
-  return spans.some(([start]) => start === offset);
+const SCORE_MEMBERS: ReadonlySet<string> = new Set([
+  'type',
+  'probabilities',
+  'score',
+  'legend',
+  'confidence',
+]);
+
+/** One member's key and the text before its value, when it has them. */
+const MEMBER_PREFIX = /^(\s*"([^"]*)"\s*:\s*)/u;
+
+/**
+ * Rebuild a verified score object, keeping only the members a score may carry.
+ *
+ * Rebuilding is what closes the hole an exemption leaves open. Keeping the
+ * recognized members and replacing every other value means an extra member can
+ * only ever be recorded as `[redacted]`, so a valid distribution beside a
+ * credential-shaped `"value"` no longer protects the credential.
+ */
+function rebuildScoreObject(objectText: string): string {
+  const kept: string[] = [];
+  for (const member of topLevelMemberChunks(objectText.slice(1, -1))) {
+    const match = MEMBER_PREFIX.exec(member);
+    if (match === null) continue;
+    const key = match[2] ?? '';
+    kept.push(
+      SCORE_MEMBERS.has(key) ? member.trim() : `${match[1] ?? ''}[redacted]`,
+    );
+  }
+  // A score object that lost every member keeps its verified type, so the record
+  // still says what the provider claimed rather than becoming an empty object.
+  if (kept.length === 0) kept.push('"type":"score"');
+  return `{${kept.join(',')}}`;
+}
+
+/**
+ * The top-level member chunks of an object body.
+ *
+ * Splitting respects nested braces, brackets and string literals, so a comma inside
+ * `probabilities` or inside a legend string does not split a member.
+ */
+function topLevelMemberChunks(body: string): readonly string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (character === '{' || character === '[') depth += 1;
+    else if (character === '}' || character === ']') depth -= 1;
+    else if (character === ',' && depth === 0) {
+      chunks.push(body.slice(start, index));
+      start = index + 1;
+    }
+  }
+  const tail = body.slice(start);
+  if (tail.trim().length > 0) chunks.push(tail);
+  return chunks;
 }
 
 /**

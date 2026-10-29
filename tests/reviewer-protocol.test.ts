@@ -1297,6 +1297,27 @@ describe('the score object is exempt while every header still masks', () => {
     );
   });
 
+  test('a forged score object cannot carry a credential beside a real distribution', () => {
+    // The round-2 hole: declaring `type: "score"` was enough to exempt the whole
+    // object, so a valid distribution could ride shotgun for an arbitrary member.
+    // Verified by the parser too — `readDecisionAnswer` reads `probabilities` and
+    // does not reject extra members, so this shape can score *and* store the echo.
+    const forged =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"value":"Bearer PRIVATE_TOKEN"}}';
+    const masked = redactAuthHeaders(forged);
+    expect(masked).not.toContain('PRIVATE_TOKEN');
+    // The distribution still survives, so the record keeps the answer it judged.
+    expect(masked).toContain('"type":"score"');
+    expect(masked).toContain('"probabilities":{"9":1}');
+
+    // Any unrecognized member is replaced, not only auth-named ones.
+    const noted =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"confidence":0.9,"note":"Bearer TOK"}}';
+    expect(redactAuthHeaders(noted)).not.toContain('Bearer TOK');
+    // `confidence` is a score member and is kept; `note` is not.
+    expect(redactAuthHeaders(noted)).toContain('"confidence":0.9');
+  });
+
   test('a verified score answer is exempt in both envelopes', () => {
     // The exemption has to keep working for the real answers, or the fix would
     // trade a security hole for the parseability defect it was introduced to fix.
@@ -1321,6 +1342,32 @@ describe('the score object is exempt while every header still masks', () => {
     expect(
       () => JSON.parse(redactAuthHeaders(wrapped)) as unknown,
     ).not.toThrow();
+  });
+
+  test('a forged score object with no known secret still masks end to end', async () => {
+    // The chat path has no credential value to substitute, so the structural pass is
+    // the only protection — including when the answer is a valid score plus an echo.
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"value":"Bearer sk-forged"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    const text = attempt.responseText ?? '';
+    expect(text).not.toContain('sk-forged');
+    // The rebuilt object keeps the answer and replaces only the member that is not
+    // part of a score, so a reader can still see what the provider claimed.
+    expect(text).toContain('"probabilities":{"9":1}');
+    expect(text).toContain('"value":[redacted]');
   });
 
   test('a decision attempt with no known secret still masks a structured echo', async () => {
