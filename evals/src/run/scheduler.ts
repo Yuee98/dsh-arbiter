@@ -310,12 +310,14 @@ export async function dispatch(
         now,
       });
       if (abandoned) {
-        // The reservation stays consumed and the worker does not take another cell: the
-        // request it gave up on may still be in flight, so starting another would exceed
-        // the concurrency the plan declared. Dispatch stops, and the remaining cells are
-        // recorded as never started rather than as budget-exhausted.
-        await settle(settledCell);
+        // The stop is published *before* the await, not after it. A worker that stopped
+        // only once its record had been persisted would leave a window in which a peer
+        // worker claims and starts another cell while the abandoned request is still
+        // outstanding — the exact overrun this branch exists to prevent.
         state.stopped = 'in-flight-timeout';
+        // The abandoned call may have sent more attempts than its record could report, so
+        // its whole reservation stays consumed rather than being returned.
+        await settle(settledCell);
         return;
       }
       budget.release({ reserved: ceiling, used: settledCell.attempts });

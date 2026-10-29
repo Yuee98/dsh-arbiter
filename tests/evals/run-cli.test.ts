@@ -948,9 +948,10 @@ describe('corrections from review', () => {
 });
 
 describe('the exit code follows the run status', () => {
-  it('exits non-zero when a continuation leaves cells undecided', async () => {
-    // RQ10-B11: a resumed run that is still short of its plan must not report success, or a
-    // caller cannot tell a finished experiment from an interrupted one.
+  it('exits non-zero when a continuation cannot finish the plan', async () => {
+    // RQ10-B11: the implementation was right but the evidence was not. This drives a
+    // continuation whose remaining cell it cannot afford and asserts the exit code, which
+    // fails if the resume branch returns 0 unconditionally.
     await withArea(async (area) => {
       const cells = [
         'read-named-source-file',
@@ -958,52 +959,7 @@ describe('the exit code follows the run status', () => {
       ].map((caseId) =>
         cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
       );
-      const plan = {
-        ...planOf({
-          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
-        }),
-        fixture: at(area, 'fixture.json'),
-      };
-      await area.write('plan.json', plan);
-      // Only the first cell is scripted, so the run stops at the second: a budget that
-      // cannot cover it leaves the run short of its plan.
-      await area.write(
-        'fixture.json',
-        fixtureOf({
-          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
-          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
-        }),
-      );
-      const first = await runCli(
-        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
-        recorder(area.path).io,
-      );
-      expect(first).toBe(0);
-
-      // A continuation with nothing pending is complete, so it exits zero.
-      const second = await runCli(
-        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
-        recorder(area.path).io,
-      );
-      expect(second).toBe(0);
-
-      // Now a directory whose plan is only partly decided: a recorded budget refusal leaves
-      // one cell without a record, so a continuation still has work and must exit non-zero.
-      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
-      expect(index.status).toBe('complete');
-    });
-  });
-
-  it('reports an undecided plan when a cell could not be afforded', async () => {
-    await withArea(async (area) => {
-      const cells = [
-        'read-named-source-file',
-        'read-repo-index-with-cache',
-      ].map((caseId) =>
-        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
-      );
-      // One attempt of budget for two cells: the first spends it, the second is refused,
-      // so the run ends short of its plan.
+      // One attempt of budget for two cells: the initial run stops short of its plan.
       const plan = {
         ...planOf({
           caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
@@ -1019,19 +975,116 @@ describe('the exit code follows the run status', () => {
           [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
         }),
       );
+      const first = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      // The initial run could not decide everything it planned.
+      expect(first).toBe(1);
+
+      // The continuation still cannot afford the pending cell, because the budget is the
+      // run's, not a fresh one. It must not report success.
       const { io, err } = recorder(area.path);
       const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toBe('');
+      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      expect(index.status).not.toBe('complete');
+    });
+  });
+
+  it('exits zero when a continuation finishes the plan', async () => {
+    await withArea(async (area) => {
+      const cells = [
+        'read-named-source-file',
+        'read-repo-index-with-cache',
+      ].map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      await area.write('plan.json', {
+        ...planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        }),
+        fixture: at(area, 'fixture.json'),
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+      );
+      // A first pass cancelled by its own lifetime, which leaves every cell pending.
+      const controller = new AbortController();
+      controller.abort();
+      await runCli(['run', at(area, 'plan.json'), '--dir', at(area, 'run')], {
+        ...recorder(area.path).io,
+        signal: controller.signal,
+      });
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        recorder(area.path).io,
+      );
+      expect(code).toBe(0);
+      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      expect(index.status).toBe('complete');
+    });
+  });
+
+  it('accepts a decision-only plan whose unused chat section names the session route', async () => {
+    // RQ10-B14: only a selected protocol can make a target unroutable. Refusing a
+    // decision-only plan for its unused chat section blocks a run for something it does
+    // not touch.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        protocols: ['decision'],
+        targets: [
+          {
+            targetId: 'dual-live',
+            provider: 'session',
+            model: 'session-default',
+            modelVersion: null,
+            // The chat section names the session route, which a headless run cannot use —
+            // but this plan never selects chat.
+            chat: {
+              provider: 'session',
+              model: 'session-default',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 1,
+            },
+            decision: {
+              url: 'https://api.example/v1/systemone',
+              model: 'clef',
+              apiKeyRef: 'PROBE_KEY',
+              timeoutMs: 5_000,
+              costTier: 'paid',
+            },
+            credentialRef: 'PROBE_KEY',
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      // The credential is present, so nothing about the selected protocol is unroutable.
+      const { io, err } = recorder(area.path, { PROBE_KEY: 'value' });
+      // Not a dry run: the preflight that refuses unroutable live plans runs on the real
+      // path, so a dry run would not exercise it at all.
+      await runCli(
         ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
         io,
       );
-      // A run that could not decide every cell it planned is not a success.
-      expect(code).toBe(1);
-      expect(err.join('\n')).toBe('');
-      const read = await runCli(
-        ['show', at(area, 'run')],
-        recorder(area.path).io,
-      );
-      expect(read).toBe(0);
+      const message = err.join('\n');
+      // The unused chat section must not be the reason for a refusal. Whatever the real run
+      // does (it has no fixture, so its cells fail), the session-route objection is about a
+      // protocol this plan never selects.
+      expect(message).not.toContain('no headless run has');
+      expect(message).not.toContain('needs the host LLM service');
     });
   });
 });

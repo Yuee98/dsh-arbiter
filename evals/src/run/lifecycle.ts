@@ -269,6 +269,43 @@ export async function readExisting(
   return { ok: true, existing: { index, records: records.records } };
 }
 
+/**
+ * Why a continuation cannot use the build that is asking.
+ *
+ * A run's index declares the contract, prompt and usage mapping it started under. Those
+ * three decide what a recorded number *means*, so continuing under different ones would
+ * put two semantics inside one run and let a report compare them as if they were one. The
+ * build identity is compared too: a record written by a different runner implementation is
+ * not obviously the same evidence.
+ *
+ * Only the semantic identifiers are compared. A new plan or artifact version is a
+ * different document, which the plan hash and the schema already cover.
+ */
+export function versionDrift(
+  index: RunIndex,
+  current: RunVersions,
+): readonly string[] {
+  const problems: string[] = [];
+  const compare = (
+    name: 'contract' | 'prompt' | 'usageMapping' | 'implementation',
+    label: string,
+  ): void => {
+    // Every one of these four is required on an index, so a mismatch is the only case that
+    // matters.
+    const frozen = index.versions[name];
+    if (frozen !== current[name]) {
+      problems.push(
+        `the ${label} changed since this run was frozen: recorded ${frozen}, now ${current[name]}`,
+      );
+    }
+  };
+  compare('contract', 'review contract');
+  compare('prompt', 'review prompt');
+  compare('usageMapping', 'usage mapping');
+  compare('implementation', 'runner implementation');
+  return problems;
+}
+
 /** A continuation's outcome. */
 export interface ResumeOutcome {
   readonly index: RunIndex;
@@ -307,6 +344,18 @@ export async function resumeRun(options: {
   readonly now?: () => number;
 }): Promise<ResumeOutcome> {
   const now = options.now ?? (() => Date.now());
+  // A continuation must not mix reviewer semantics inside one run. The index declares what
+  // the run started under, so a build that disagrees is refused before dispatching
+  // anything: the records already written would otherwise be read as comparable with the
+  // new ones.
+  if (options.continuation) {
+    const drift = versionDrift(options.existing.index, options.versions);
+    if (drift.length > 0) {
+      throw new Error(
+        `refusing to continue a run under different versions — ${drift.join('; ')}`,
+      );
+    }
+  }
   const completed = new Set(
     options.existing.records.map((record) => record.cellId),
   );
@@ -508,13 +557,14 @@ export function indexFrom(parts: {
           ...parts.existing.resumed,
           {
             at: new Date(parts.now()).toISOString(),
-            // What was already done when this continuation started: the count now,
-            // minus what this continuation itself completed.
+            // What was already done when this continuation started: the count now, minus
+            // every record this pass created. Subtracting only the reviewed ones would
+            // leave a newly failed cell in `completedBefore` and report more history than
+            // the run had — a failure is a decided cell too.
             completedBefore:
               spent.cellsCompleted -
-              parts.outcome.results.filter(
-                (result) => result.record?.status === 'reviewed',
-              ).length,
+              parts.outcome.results.filter((result) => result.record !== null)
+                .length,
             plannedAfter: parts.planned,
           },
         ];

@@ -1859,3 +1859,222 @@ describe('corrections from the second review', () => {
     });
   });
 });
+
+describe('corrections from the third review', () => {
+  it('keeps an abandoned call whole reservation consumed', async () => {
+    // The record cannot report how many attempts the abandoned call sent, so the
+    // reservation must not be returned as if it had been.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        targets: [
+          {
+            targetId: 'chat-slow',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              maxRepairRetries: 2,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        bounds: bounds({ concurrency: 1, timeoutMs: 20, maxAttempts: 4 }),
+      });
+      const directory = join(area.path, 'run');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(() => {
+                // Never settles.
+              }),
+          }),
+        }),
+      };
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: hung,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      // Three attempts were reserved for this cell (one plus two repairs). The continuation
+      // may only spend the fourth, so it can start nothing.
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      const resumed = await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      expect(resumed.dispatch.results).toEqual([]);
+    });
+  });
+
+  it('subtracts every record a continuation created from completedBefore', async () => {
+    // RQ10-B15: subtracting only reviewed cells left a newly failed cell inside
+    // completedBefore, so the log claimed more history than the run had.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      // The first cell is unscripted, so its continuation records a failure.
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
+      });
+      const cells = cellGrid(plan).cells;
+      const first = cells[0];
+      if (first === undefined) throw new Error('the plan produced no cell');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({
+          [first.cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+        onProgress: (record) => {
+          if (record.cellId === first.cellId)
+            throw new Error('stop after first');
+        },
+      }).catch(() => undefined);
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      // The second cell has no script, so it settles as a recorded failure.
+      const resumed = await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      const entry = resumed.index.resumed[resumed.index.resumed.length - 1];
+      // One record existed before this pass; the pass added one, failed, record.
+      expect(entry?.completedBefore).toBe(1);
+    });
+  });
+
+  it('refuses a continuation whose reviewer versions moved', async () => {
+    // RQ10-B16: continuing under a different prompt would put two semantics inside one run
+    // while the index kept a single version declaration.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        bounds: bounds({ concurrency: 1, maxAttempts: 8 }),
+      });
+      const cells = cellGrid(plan).cells;
+      const first = cells[0];
+      if (first === undefined) throw new Error('the plan produced no cell');
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({
+          [first.cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+        onProgress: (record) => {
+          if (record.cellId === first.cellId)
+            throw new Error('stop after first');
+        },
+      }).catch(() => undefined);
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      // A different prompt marker is a different reviewer, so the run cannot continue.
+      await expect(
+        resumeRun({
+          directory,
+          existing: read.existing,
+          cases,
+          fixture: fixtureOf(
+            Object.fromEntries(
+              cells.map((cell) => [
+                cell.cellId,
+                fixtureCell({ chat: [chatAnswer(2, 10)] }),
+              ]),
+            ),
+          ),
+          versions: { ...versions, prompt: 'review-prompt-v2' },
+          checkers,
+          llm: null,
+          readCredential: () => undefined,
+          signal: new AbortController().signal,
+          continuation: true,
+          now: () => 2_000,
+        }),
+      ).rejects.toThrow(/review prompt changed/u);
+      // The records already written are untouched by the refusal.
+      expect(await recordsOf(directory)).toHaveLength(1);
+    });
+  });
+});

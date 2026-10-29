@@ -541,13 +541,18 @@ export function liveProblems(
   env: (name: string) => string | undefined,
 ): readonly string[] {
   const problems: string[] = [];
+  // Only a *selected* protocol can make a target unroutable. A dual-protocol target whose
+  // unused chat section names the session provider is not a problem for a decision-only
+  // plan, and refusing it would block a run for a section it never touches.
   const chats = plan.protocols.includes('chat');
   const decisions = plan.protocols.includes('decision');
-  const chatTargets = plan.targets.filter((target) => target.chat !== null);
-  const decisionTargets = plan.targets.filter(
-    (target) => target.decision !== null,
-  );
-  if (chats && chatTargets.length > 0 && llm === null) {
+  const chatTargets = chats
+    ? plan.targets.filter((target) => target.chat !== null)
+    : [];
+  const decisionTargets = decisions
+    ? plan.targets.filter((target) => target.decision !== null)
+    : [];
+  if (chatTargets.length > 0 && llm === null) {
     problems.push(
       'a live chat cell needs the host LLM service, which this command does not have; run a chat plan offline, or reach a chat model through a decision endpoint',
     );
@@ -559,7 +564,7 @@ export function liveProblems(
       );
     }
   }
-  if (decisions && decisionTargets.length > 0) {
+  if (decisionTargets.length > 0) {
     const missing = decisionTargets
       .map((target) => target.credentialRef ?? target.decision?.apiKeyRef ?? '')
       .filter((name) => (env(name) ?? '').length === 0);
