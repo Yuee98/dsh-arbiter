@@ -221,6 +221,41 @@ rubric 快照 `evals/rubrics/rubric-v1.json` 是评分档位的数据副本，�
 
 未作答字段不计入分母：没问过不是答错。分歧只作为发现列出，从不回写标签——人是答案，引擎是被测量对象。`summary` 还会打印数据集摘要 `digest`，用于判断两次运行之间是否有实质变化。
 
+## 实验配置
+
+对照实验的候选矩阵与记录在 `evals/experiments/`，代码在 `evals/src/experiments/`。三者都离线，**都不调用模型**：
+
+```sh
+pnpm evals:experiments check-all              # 校验并测量每个已提交定义
+pnpm evals:experiments plan <定义.json>        # 干跑：展开矩阵并报告实测输入量，不写文件
+pnpm evals:experiments record <定义.json>      # 写出冻结的 experiments/record.json
+```
+
+`check-all` 也包含在 `pnpm check:evals` 与 `pnpm verify` 里，因此 CI 会验证实验定义可编译、可测量，而不会执行它们。
+
+### 候选与消融
+
+候选是**四个独立轴**的组合，身份由四轴派生（`rq14/<prompt>.<scale>.<history>.<structure>`），所以两个候选不可能指向同一个包：
+
+| 轴          | 取值                                  | 含义                                               |
+| ----------- | ------------------------------------- | -------------------------------------------------- |
+| `prompt`    | `no-probe`／`recovery-probe`          | 候选 A 无探针；候选 B 多问一个可恢复／可撤回性问题 |
+| `structure` | `full`／`compact`／`compact-no-audit` | 生产布局／单 JSON 信封／再去掉审计元数据           |
+| `history`   | `current-turn`／`none`                | 当前 turn 工具历史／抽掉并声明「被有意抽掉」       |
+| `scale`     | `complete`／`labels`                  | 十档完整操作条件／一行档位标签＋守卫段             |
+
+**生产默认不受影响。** `review()` 固定用生产包（候选 A 即生产包本身）；实验入口是独立函数 `reviewWith(pkg)`，候选只能通过配置选择。压缩量表保留 `SCALE_GUARD`（A1 是禁止、3–10 累积、最弱关键效果封顶、恢复成本留在风险档内），因此量表消融不改变风险定义。
+
+**候选 B 的探针**定义固定在 `src/reviewer/probe.ts`，实验定义里的 `probe` 块与之逐项校验（版本、member、选项集合、`unknown`）。`unknown` 是**合法答案**，表示材料不足以确立事实，不是缺答；「读不出答案」是另一个状态（`member-absent`／`not-a-string`／`not-an-option`）。探针读数与两个档位分开记录，从不参与 outcome、矩阵或判定，所以任何候选都无法靠多答一题引入隐含门。
+
+### 记录与预算
+
+`experiments record` 写出的 `record.json` 固定：候选 id 与其派生包 id、每轴与生产默认的差异、阶梯（每步只改一个轴）、缓存工作负载、上限与实测值。它**不含分数**：本任务只准备矩阵，真实运行属后续评测任务。
+
+`plan` 逐格渲染并测量：`cells`、每候选的 `distinct requests` 与 `estimated input tokens` 都是实测值。实测总量超过 `maxInputTokensTotal` 或格数超过 `maxRequests` 时拒绝，不会为了塞进预算而裁掉格子。
+
+缓存工作负载只规定「冷请求 → 稳定前缀 → 变化动作」的连续序列；**命中与否只读 provider 自己报告的计数**（经 `review-usage-v1` 映射），未报告保持 `null`，不按 0 计入，也不据「应当命中」推断。
+
 ## 目录
 
 ```
@@ -228,8 +263,10 @@ evals/
   schemas/           发布的 JSON Schema（case／label／reviews／manifest／annotation／rubric）
   rubrics/           rubric 快照与来源文档摘要
   datasets/          已提交数据集（当前只有 format-example，见其 manifest 说明）
+  experiments/       实验定义、schema 与冻结的 record.json
   src/data/          读取、schema 校验、跨文件一致性、hash、rubric 比对
   src/annotation/    导出、回填、汇总
+  src/experiments/   实验定义校验、矩阵展开与测量、记录
   src/cli/           命令解析与命令实现
   src/metrics/       报告的三层指标、分组、逐例证据与可比性规则
   src/report/        Markdown／HTML／JSON 渲染、写出与 report 命令
@@ -261,6 +298,7 @@ tests/evals/         上述行为的测试
 
 ## 未完成事项
 
-- 离线回放与实验配置分别由 RQ-20／RQ-14 交付，本目录不包含它们。报告见上节。
+- 报告见上节；实验配置见「候选与消融」与 `evals/experiments/`。
+- 离线回放由 RQ-20 交付，本目录不包含它。
 - 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。
 - 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。

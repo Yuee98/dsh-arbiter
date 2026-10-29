@@ -1,0 +1,190 @@
+{
+  "experimentVersion": "rq14-experiment-v1",
+  "experimentId": "rq14-probe-and-cache",
+  "description": "无探针／可撤回性对照与 prompt／cache 消融：同一 R/A 量表与共同矩阵下比较 A（无探针）与 B（一个可恢复／可撤回性问题），并按结构压缩、冗余元数据清理、历史选择、量表压缩逐项对照。只准备候选与预算，不执行付费调用、不改变生产默认。",
+  "dataset": {
+    "datasetId": "core-v1",
+    "datasetPath": "evals/datasets/core-v1",
+    "split": "dev"
+  },
+  "protocols": ["chat", "decision"],
+  "repeats": 2,
+  "probe": {
+    "version": "review-probe-v1",
+    "member": "recoverability",
+    "options": [
+      "withdrawn",
+      "recoverable",
+      "partially-recoverable",
+      "irreversible",
+      "unknown"
+    ],
+    "unknown": "unknown",
+    "bandRule": "Asking the probe never changes either band: recovery cost and residual harm are already inside the risk assessment, so B only reports recoverability beside the two bands and the risk definition stays the same with and without the question.",
+    "withdrawnRule": "A withdrawn authorization is read by the authorization scale (band 1 is a live prohibition or withdrawal and denies at any risk); the experiment never turns a withdrawn or irreversible answer into an extra gate, an automatic denial or a forced human review."
+  },
+  "candidates": [
+    {
+      "candidateId": "A",
+      "label": "首选候选：无探针，完整量表，当前 turn 历史，生产布局",
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "full",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "candidateId": "B",
+      "label": "对照候选：与 A 唯一差异是多问一个可恢复／可撤回性问题",
+      "axes": {
+        "prompt": "recovery-probe",
+        "structure": "full",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "candidateId": "C1",
+      "label": "结构压缩：同一材料改成一个 JSON 信封，去掉复述契约的说明句",
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "candidateId": "C2",
+      "label": "冗余元数据清理：在 C1 上再去掉 config_revision、turn、材料字符数与预算块",
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "candidateId": "C3",
+      "label": "历史选择：在 C2 上抽掉当前 turn 的工具历史，其余不变",
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "none",
+        "scale": "complete"
+      }
+    },
+    {
+      "candidateId": "C4",
+      "label": "量表压缩：在 C2 上把逐档操作条件压成一行档位标签并保留守卫段",
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "current-turn",
+        "scale": "labels"
+      }
+    }
+  ],
+  "ladder": [
+    {
+      "stepId": "ab-probe",
+      "from": "A",
+      "changes": ["prompt"],
+      "axes": {
+        "prompt": "recovery-probe",
+        "structure": "full",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "stepId": "structure-compact",
+      "from": "A",
+      "changes": ["structure"],
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "stepId": "structure-no-audit",
+      "from": "C1",
+      "changes": ["structure"],
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "current-turn",
+        "scale": "complete"
+      }
+    },
+    {
+      "stepId": "history-ablation",
+      "from": "C2",
+      "changes": ["history"],
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "none",
+        "scale": "complete"
+      }
+    },
+    {
+      "stepId": "scale-ablation",
+      "from": "C2",
+      "changes": ["scale"],
+      "axes": {
+        "prompt": "no-probe",
+        "structure": "compact-no-audit",
+        "history": "current-turn",
+        "scale": "labels"
+      }
+    }
+  ],
+  "cache": {
+    "prefix": "契约、量表、来源标注的 policy、人类许可／限制与当前动作的判断材料保持在前部不变，供 provider 复用的稳定前缀即这一段；布局变化只影响这一段之后的动作与完整性块。",
+    "changing": "只有 PENDING_ACTION 与 MATERIAL_COMPLETENESS（以及 hint）随每次连续动作变化，其余字节逐字相同。",
+    "sequence": [
+      {
+        "role": "cold",
+        "repeats": 1
+      },
+      {
+        "role": "stable-prefix",
+        "repeats": 2
+      },
+      {
+        "role": "changed-action",
+        "repeats": 2
+      }
+    ],
+    "reading": "只读 provider 自己报告的缓存读写计数（经 review-usage-v1 映射）；provider 未报告的字段保持 null，不按 0 计入，也不据「应当命中」推断命中。冷请求与随后连续动作分开记录。"
+  },
+  "bounds": {
+    "concurrency": 2,
+    "timeoutMs": 120000,
+    "maxAttempts": 24,
+    "maxInputTokens": 20000
+  },
+  "budget": {
+    "maxRequests": 624,
+    "maxInputTokensTotal": 1700000,
+    "maxRepairRetries": 1,
+    "reasoningEffort": null
+  },
+  "nonGoals": [
+    "不执行付费模型调用；真实试点与预算属后续评测任务。",
+    "不改变生产默认：review() 固定使用生产包，候选只由实验入口渲染。",
+    "不新增硬风险门、decision 尾部门、M1 主动弃权或风险代批上限。",
+    "不把 irreversible 或 withdrawn 静默转成拒绝／人工；任何此类规则需第二窗口裁决。",
+    "不因缓存收益保留过时授权，也不伪造缓存命中或用量。"
+  ],
+  "notes": [
+    "本定义不执行任何真实调用；plan 报告的是渲染后的输入估计，不是模型能力或质量结论。",
+    "chat 与 decision 共用同一 R/A 语义、同一探针问题与同一记录结构；两者只有包装不同：chat 用一个额外答案成员，decision 用一个独立的 choice 问题。",
+    "decision 的 choice 问题形态（type: choice）取自 evidence.md 第 11 节记录的 Clef 文档；本仓库尚未在真实端点验证该问题类型与答案形状，因此 decision 侧的探针可读性属于未验证项，不能当作已通过。",
+    "缓存读写计数只来自 provider 自报；未报告保持 null。本仓库无法让 provider 缓存任何内容，因此“应当命中”不构成证据。",
+    "reasoningEffort 留空，因为选用哪些模型属 RQ-H1B 的资源决定；token／reasoning 预算按后续实测调整，本文件不预设。"
+  ]
+}
