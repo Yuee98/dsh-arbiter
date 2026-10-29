@@ -1,3 +1,10 @@
+import {
+  bandFromPublic,
+  chatScore,
+  distributionToPublic,
+  validateNativeDistribution,
+  weightedBand,
+} from '../review-contract/normalize.js';
 import type { PolicyThresholds, ReviewSignals } from '../types.js';
 
 export interface RawChatSignals {
@@ -24,7 +31,7 @@ export function extractJsonObject(text: string): string {
 }
 
 /**
- * The shared risk-category boundary: `low` is 0–3 for both backends
+ * The shared risk-category boundary: `low` is 1–3 for both backends
  * (`docs/reviewer.md#design-5-5`). It is a semantic definition, not a tuning
  * knob — a configurable version of it would let an advanced setting redefine
  * what a risk level means and desynchronize the two protocols' authorization
@@ -32,13 +39,9 @@ export function extractJsonObject(text: string): string {
  */
 const LOW_RISK_MAX = 3;
 
+/** A chat answer's public scale runs 1..10; see `docs/milestones`. */
 function isScore(value: unknown): value is number {
-  return (
-    typeof value === 'number' &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= 10
-  );
+  return chatScore(value).ok;
 }
 
 export function validateChatObject(value: unknown): {
@@ -69,12 +72,12 @@ export function validateChatObject(value: unknown): {
   const risk = value['risk'];
   const authorized = value['authorized'];
   if (!isScore(risk)) {
-    return { ok: false, error: 'risk must be an integer from 0 through 10' };
+    return { ok: false, error: 'risk must be an integer from 1 through 10' };
   }
   if (!isScore(authorized)) {
     return {
       ok: false,
-      error: 'authorized must be an integer from 0 through 10',
+      error: 'authorized must be an integer from 1 through 10',
     };
   }
   for (const probe of ['secrets', 'destructive', 'egress', 'bulk'] as const) {
@@ -90,20 +93,11 @@ export function validateChatObject(value: unknown): {
     egress: value['egress'] === true,
     bulk: value['bulk'] === true,
   };
-  if (raw.risk <= 3 && (raw.destructive || raw.secrets)) {
-    return {
-      ok: false,
-      error:
-        'contradiction: risk <= 3 requires destructive and secrets to be false',
-    };
-  }
-  if (raw.risk >= 9 && !raw.destructive && !raw.secrets) {
-    return {
-      ok: false,
-      error:
-        'contradiction: risk >= 9 requires destructive or secrets to be true',
-    };
-  }
+  // Risk and the probes are independent facts under the shared rubric: a
+  // high-consequence action need not destroy data or read credentials, and a
+  // negligible one may still lose disposable data. Cross-field implication was an
+  // earlier contract's rule and would now reject legal classifications, so each
+  // probe is validated for its own type only.
   return { ok: true, raw };
 }
 
@@ -146,71 +140,36 @@ export function signalsFromChat(
   };
 }
 
-function normalizeDistribution(value: unknown): Record<string, number> | null {
-  if (!isRecord(value)) return null;
-  const out: Record<string, number> = {};
-  let total = 0;
-  for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0)
-      return null;
-    const level = Number(key);
-    if (!Number.isInteger(level) || level < 0 || level > 10) return null;
-    out[String(level)] = raw;
-    total += raw;
-  }
-  if (total <= 0) return null;
-  for (const key of Object.keys(out)) {
-    out[key] = (out[key] ?? 0) / total;
-  }
-  return out;
-}
-
-function probabilityAtLeast(
-  distribution: Readonly<Record<string, number>>,
-  minimum: number,
-): number {
-  let sum = 0;
-  for (const [key, value] of Object.entries(distribution)) {
-    if (Number(key) >= minimum) sum += value;
-  }
-  return sum;
-}
-
-function probabilityAtMost(
-  distribution: Readonly<Record<string, number>>,
-  maximum: number,
-): number {
-  let sum = 0;
-  for (const [key, value] of Object.entries(distribution)) {
-    if (Number(key) <= maximum) sum += value;
-  }
-  return sum;
-}
-
+/**
+ * One decision score field, read strictly and mapped by N0.
+ *
+ * The protocol answers with a distribution over its ten native levels (0..9). The
+ * contract validates that distribution and derives the public band, so this adapter
+ * holds no second copy of the rule. Nothing is repaired: a distribution that does
+ * not sum to one, names level 10, or holds a bad probability is a failed read, and
+ * an unreadable answer never becomes a score.
+ */
 function scoreAnswer(
   answers: Record<string, unknown>,
-  name: string,
+  name: 'risk' | 'authorized',
 ): { dist: Record<string, number>; score: number } | string {
   const value = answers[name];
   if (!isRecord(value)) return `missing ${name} answer`;
-  const dist = normalizeDistribution(value['probabilities']);
-  if (dist === null)
-    return `${name} answer has no valid probability distribution`;
-  const score = value['score'];
-  const weighted = Object.entries(dist).reduce(
-    (sum, [level, probability]) => sum + Number(level) * probability,
-    0,
-  );
-  if (
-    typeof score === 'number' &&
-    Number.isFinite(score) &&
-    score >= 0 &&
-    score <= 10
-  ) {
-    return { dist, score };
+  const native = validateNativeDistribution(value['probabilities']);
+  if (!native.ok) {
+    // The reason class is safe to report: it names the violated rule, never the
+    // reviewer's values.
+    return `${name} answer has no valid probability distribution (${native.reason}: ${native.detail})`;
   }
-  return { dist, score: weighted };
+  // The audit keeps the distribution on the public scale, because the engine reads
+  // public bands; the native form stays available in the attempt's own record.
+  const dist = distributionToPublic(native.value);
+  return {
+    dist,
+    score: weightedBand(native.value),
+  };
 }
+
 function noul(
   answers: Record<string, unknown>,
   name: string,
@@ -252,7 +211,7 @@ export function decisionAnswers(
 
 export function parseDecisionResponse(
   body: unknown,
-  thresholds: PolicyThresholds,
+  _thresholds: PolicyThresholds,
 ):
   | { readonly ok: true; readonly signals: ReviewSignals }
   | { readonly ok: false; readonly error: string } {
@@ -275,22 +234,16 @@ export function parseDecisionResponse(
   const bulk = noul(answers, 'bulk');
   if (typeof bulk === 'string') return { ok: false, error: bulk };
 
-  const critical = probabilityAtLeast(risk.dist, 9);
-  const low = probabilityAtMost(risk.dist, LOW_RISK_MAX);
+  // The classes are derived from the public band the distribution reaches, not
+  // from a probability tail: a legacy tail test can label an effective prohibition
+  // as an ordinary `none`, and the two mean different things now. Every 0..10 tail
+  // the older rules read is still available in `risk.dist`/`auth.dist`.
+  const riskBand = bandFromPublic(risk.dist, 'risk');
+  const authBand = bandFromPublic(auth.dist, 'authorization');
   const riskClass =
-    critical >= thresholds.tauCritical
-      ? 'high'
-      : low >= thresholds.tauLow
-        ? 'low'
-        : 'medium';
-  const explicit = probabilityAtLeast(auth.dist, 8);
-  const implied = probabilityAtLeast(auth.dist, 5);
+    riskBand <= LOW_RISK_MAX ? 'low' : riskBand >= 9 ? 'high' : 'medium';
   const authClass =
-    explicit >= thresholds.tauAuth
-      ? 'explicit'
-      : implied >= thresholds.tauAuth
-        ? 'implied'
-        : 'none';
+    authBand >= 8 ? 'explicit' : authBand >= 5 ? 'implied' : 'none';
 
   return {
     ok: true,

@@ -8,6 +8,7 @@
  * R-rule it applied so the audit can be replayed.
  */
 
+import { isProhibited } from './review-contract/prohibition.js';
 import type {
   DerivedFacts,
   PolicyDecision,
@@ -398,6 +399,22 @@ export function decideReview(
   thresholds: PolicyThresholds,
 ): PolicyDecision {
   const context = { signals, strategy, thresholds };
+  // An effective prohibition is a refusal, never a weak authorization. The shared
+  // rubric makes band 1 "an applicable prohibition or withdrawal", and the new
+  // matrix refuses it at every risk; the legacy thresholds below predate that band
+  // and would let a low-risk call through it. The check runs first, in every mode,
+  // and reads whichever shape this protocol reported.
+  if (
+    isProhibited({ point: signals.authPoint, distribution: signals.authDist })
+  ) {
+    return deny(
+      'R0',
+      'the effective permission prohibits this action',
+      strategy,
+      signals,
+      thresholds,
+    );
+  }
   const fixed = fixedDecision(context);
   if (fixed !== null) return fixed;
   const auth = authGate(
