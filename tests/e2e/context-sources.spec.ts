@@ -16,7 +16,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { resolveDshCommand } from './dsh/profile.js';
-import { buildReviewSnapshot, truncationFeedback } from '../../src/snapshot.js';
+import {
+  buildReviewSnapshot,
+  materialAvailabilityOf,
+  truncationFeedback,
+} from '../../src/snapshot.js';
 import type { SessionLike, SessionEventLike } from '../../src/snapshot.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { renderRequest } from '../../src/reviewer.js';
@@ -427,6 +431,9 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
         delegationDepth: 1,
       }),
     );
+    // The host's own turn boundary, written the way it writes it: an earlier
+    // turn with real tool history, then the current turn.
+    appendEvent(child, 'turn/start', { turn: 1 });
     appendEvent(
       child,
       'user/message',
@@ -435,8 +442,40 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
         content: [{ type: 'text', text: 'run the child task' }],
       }),
     );
+    // A human permission in turn 1 that stays in force afterwards.
+    appendEvent(
+      child,
+      'user/message',
+      createUserMessage({
+        source: { kind: 'user', rpcId: 'rpc-child-standing' },
+        content: [
+          {
+            type: 'text',
+            text: 'build output may be deleted from now on; never upload logs',
+          },
+        ],
+      }),
+    );
     appendEvent(child, 'tool/call', {
       turn: 1,
+      step: 1,
+      callId: 'old-turn-call',
+      name: 'bash',
+      arguments: { command: 'echo from the earlier turn' },
+    });
+    appendEvent(child, 'tool/result', {
+      turn: 1,
+      step: 1,
+      message: createToolResultMessage({
+        callId: 'old-turn-call',
+        content: [{ type: 'text', text: 'from the earlier turn' }],
+        isError: false,
+      }),
+    });
+    appendEvent(child, 'turn/end', { turn: 1, reason: 'completed' });
+    appendEvent(child, 'turn/start', { turn: 2 });
+    appendEvent(child, 'tool/call', {
+      turn: 2,
       step: 1,
       callId: 'ask-fg',
       name: 'ask_user_question',
@@ -449,7 +488,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
     // The host envelope nests the message under `data.message`; that is what a
     // reader of the session log actually sees.
     appendEvent(child, 'tool/result', {
-      turn: 1,
+      turn: 2,
       step: 1,
       message: createToolResultMessage({
         callId: 'ask-fg',
@@ -554,6 +593,36 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
           item.text.includes('同意') &&
           (item.question ?? '').includes('/workspace/app/build'),
       ),
+    );
+    check(
+      'V15',
+      'the current turn is the host turn, and earlier-turn tool calls are excluded',
+      // The host wrote a real turn/end before turn 2, so the newest open turn is
+      // this call's; the turn-1 call was a real tool/call with a result.
+      snapshot.turn === 2 &&
+        snapshot.context.length === 1 &&
+        !snapshot.context.some((call) =>
+          call.arguments.includes('from the earlier turn'),
+        ) &&
+        snapshot.completeness.items.some(
+          (item) => item.kind === 'unrelated' && !item.blocking,
+        ),
+    );
+    check(
+      'V16',
+      'a human permission given in an earlier turn still applies and names its turn',
+      snapshot.evidence.some(
+        (item) =>
+          item.turn === 1 &&
+          item.evidence === 'explicit' &&
+          item.text.includes('build output may be deleted'),
+      ) && snapshot.evidence.some((item) => item.turn === 2),
+    );
+    check(
+      'V17',
+      'a real readable session with no blocking gap is available to score',
+      snapshot.completeness.status !== 'insufficient' &&
+        materialAvailabilityOf(snapshot.completeness).status === 'available',
     );
     check(
       'V3',

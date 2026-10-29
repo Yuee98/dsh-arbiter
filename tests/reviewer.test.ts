@@ -190,6 +190,7 @@ const snapshot: ReviewSnapshot = {
   callId: 'call-1',
   sessionId: 'session-1',
   sessionKind: 'main',
+  turn: 1,
   tool: 'bash',
   cwd: '/tmp',
   action: { name: 'bash', arguments: { command: 'echo hi' } },
@@ -233,6 +234,7 @@ const snapshot: ReviewSnapshot = {
     },
     reset: false,
   },
+  completeness: { status: 'complete', items: [], gaps: [], note: null },
   missing: [],
   budget: {
     maxInputTokens: 1000,

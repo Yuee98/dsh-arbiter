@@ -28,6 +28,8 @@ export const PROBE_SNAPSHOT: ReviewSnapshot = {
   callId: 'reviewer-probe',
   sessionId: 'reviewer-probe',
   sessionKind: 'main',
+  // The probe reads no session log, so it names no turn and synthesizes no gap.
+  turn: null,
   tool: 'bash',
   cwd: '/tmp/arbiter-probe',
   action: {
@@ -76,6 +78,15 @@ export const PROBE_SNAPSHOT: ReviewSnapshot = {
       audit: { read: 0, unavailable: null },
     },
     reset: false,
+  },
+  // A probe is a synthetic input with no session behind it. It reports no
+  // observation at all rather than borrowing a completeness claim that no
+  // reader made.
+  completeness: {
+    status: 'complete',
+    items: [],
+    gaps: [],
+    note: null,
   },
   missing: [],
   budget: {

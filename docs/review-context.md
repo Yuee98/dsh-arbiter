@@ -8,6 +8,10 @@
 
 实现状态（2026-10-21）：ReviewSnapshot、EVIDENCE／CONTEXT／PRIOR_VERDICTS、项目规则读取、token 预算与截断已实现；快照随每次调用保存，供审计和详情复用。实现与剩余验证见[首轮实施报告](implementation-report.md)。
 
+实现状态（2026-10-29，RQ-02／#66）：原始人类消息按宿主自身的 `source.kind === 'user'` 识别，既有带 `rpcId` 的 `user-rpc`，也有 ACP 提示桥创建的不带 `rpcId` 的 `{ kind: 'user' }`；只要求 `rpcId` 会把真实指令（包括撤回）丢掉，并把可读会话误报成"无人类证据"。人类证据的保位对——本会话最新人类陈述与最新的直接父会话原文——在初始容量选择和后续 token 裁剪中都不被丢弃；当合法容量装不下这两条时，按关键原文缺失报告，而不是悄悄评一个被反转过的子集。未归属到 turn 的工具调用按它写在哪个 `turn/start` 括号内归属；宿主最新 turn 已 `turn/end` 时不再被当作当前 turn，此时窗口为空并报告归因缺口。
+
+材料构建器按职责拆为 `snapshot/log.ts`（单次有界读取与 turn 归属）、`window.ts`（当前 turn 工具窗口、旧到新、排除待审调用）、`evidence.ts`＋`assemble.ts`（跨 turn 人类证据与父会话链）、`guidance.ts`（两个指引来源）与 `completeness.ts`（M0 分类与 review contract 映射）。工具历史只取宿主命名的当前 turn，宿主 `turn/end`／`session/end-seed` 后不再沿用旧 turn 号；跨 turn 人类许可／限制继续保留并各自标注 `turn`；`completeness` 只把 `unreadable` 计为阻断，`insufficient` 在无模型请求的情况下由 `gate` 记为 `review-escalate`。证据合并保留本会话最新人类陈述与父会话保底位，因此容量裁剪不会先丢掉新撤回。
+
 实现状态（2026-10-25，CONTEXT／#11）：证据按来源分层选取并带 `sourcePriority`，ask 的前台答复与 timed `user-question-reply` 连同问题一起进入证据，`PROJECT_RULES` 开关不读取文件时以 `materials` 记录“已关闭”而非“缺失”，父会话不可读时 `parent_authorization_present` 为 `null`；当前动作只在可选材料都裁掉后按预算截断，并记录 `action.truncated` 与 `missing` 输入事实。`truncationFeedback()` 提供不含因果断言的补充提示，供 DECISION 组合最终 reason。
 
 ## 本文导航
@@ -18,6 +22,7 @@
 - [先前裁决（prior verdicts）](#design-5-2-4)
 - [变量展开与 `cd` 追踪](#design-5-2-5)
 - [Token 预算与估算](#design-5-2-6)
+- [材料完整性（M0）](#material-completeness)
 
 ---
 
@@ -172,7 +177,7 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 {
   "evidence": [
     { "ts": 1234567890, "source": { "kind": "session-human", "sessionId": "child" },
-      "sourcePriority": 1, "role": "human-instruction",
+      "sourcePriority": 1, "role": "human-instruction", "turn": 3,
       "evidence": "explicit", "text": "删掉 build 目录" },
     { "ts": 1234567880, "source": { "kind": "parent-relay", "sessionId": "parent" },
       "sourcePriority": 5, "role": "direct-parent-instruction",
@@ -196,7 +201,9 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 }
 ```
 
-`sourcePriority`（1 本会话人类 / 2 直接父会话人类 / 5 父 agent 转述）只表达冲突优先级，不改变 `evidence` 上限；数组本身仍按 `ts` 从新到旧展示，两种顺序不互相取代。`question` 与 `askCallId` 保留短答复所回答的具体问题或操作。`materials` 记录两个指引来源是否关闭、是否真的读到，以及**实际提交**的字符数与截断状态：单来源上限和两者合计上限的裁剪都会反映在 `chars` / `truncated` 上。合计上限属于配置材料裁剪，不写入 `missing`，也不占用输入预算的 `truncatedSegments`。
+`sourcePriority`（1 本会话人类 / 2 直接父会话人类 / 5 父 agent 转述）只表达冲突优先级，不改变 `evidence` 上限；数组本身仍按 `ts` 从新到旧展示，两种顺序不互相取代。`question` 与 `askCallId` 保留短答复所回答的具体问题或操作。
+
+`turn` 记录该条人类消息来自宿主哪个 turn，用于同层级排序，**不用于过期**：跨 turn 有效的人类许可／限制继续保留，直到更新的适用内容与之冲突，撤回始终优先于它所推翻的许可（[当前 turn 材料](#design-5-2-4)）。宿主没有命名 turn 时不写该字段，而不是填一个推测值。`materials` 记录两个指引来源是否关闭、是否真的读到，以及**实际提交**的字符数与截断状态：单来源上限和两者合计上限的裁剪都会反映在 `chars` / `truncated` 上。合计上限属于配置材料裁剪，不写入 `missing`，也不占用输入预算的 `truncatedSegments`。
 
 **两个字段职责不同**：
 
@@ -227,6 +234,8 @@ const projectRules = firstExisting(candidates);   // 缺失 → null
 **已实测（2026-10-25，隔离 profile / 0.2.1-rc.3）**：采集器只配对**同一 callId 的 `ask_user_question` 工具调用**与其自身的 `tool/result`，或接受宿主标注的 `user-question-reply`；两条路径都解析 `{kind:"answer_to_pending_question", questions, answers}` 形状，把问题文本写入 `question`、callId 写入 `askCallId`。空 `selected` 且无 `custom`（跳过）以及 pending 结果不产生证据。其他工具的文本，即使内容形如 `{"answers":[...]}`，也不会成为人类证据。``tests/e2e/context-sources.spec.ts`` 记录真实 Session 验证（隔离 profile、无模型请求），并用宿主自身的 `ToolRuntime` 实际执行一次含 `tools.bash` 的 `run_code`：外层 `run_code` 与内层 `bash` 分别通过 `tools/pre-execute`（`dispatch-outer-1` 与 `dispatch-outer-1:ptc:1`），执行参数保持完整，不受送审截断影响。ask 答复与压缩摘要仍由真实 `Session` API 注入宿主合法事件，验证的是采集器对这些事件形状的处理，而非宿主交互流程本身。
 
 短答复只绑定**紧邻的上一条** assistant 回合：若该回合不是问句，或中间夹了另一条人类消息、压缩摘要，或任何 `tool/call`／`tool/result`（包括已经作答的 ask 结果），问题即视为陈旧，答案保留原文但不带 `question`。这样已被拒绝的操作不会经由后来的“继续／同意”重新变成明确授权。
+
+**正常结束的 turn 边界不算陈旧**。以提问结束 turn 是最常见的形态，宿主会在问题与答复之间写入 `turn/end` 与新的 `turn/start`；若把该边界当作陈旧，最常见的一次真实批准就会丢掉它所批准的操作——assistant 文本本就不算证据，上一 turn 的工具调用也已不在窗口内，reviewer 将无从得知同意了什么。因此搜索会穿过成对的 `turn/end`+`turn/start` 继续向前找问题，而其余陈旧信号（另一条人类消息、压缩摘要、任何工具交换）仍然终止搜索。
 
 **排序与截断**：展示顺序按 `ts` 从新到旧，受 `evidence.maxItems`（20）与 token 预算约束，超出置 `evidence_truncated: true`。**选取顺序不是纯时间序**：先保留父人类保底，其余名额按来源层依次填充（本会话人类 → 父会话人类 → 父 agent 转述），同层内较新者优先；否则子会话说话多时会把父原话挤掉。
 
@@ -262,9 +271,10 @@ const parentHuman = parent?.deriveMessages()
 ```jsonc
 {
   "context": {
+    "turn": 2,
     "tool_calls": [
       { "ts": ..., "tool": "bash", "arguments": "rm -rf build",
-        "result": { "ok": false, "exitCode": 1 } },
+        "result": { "ok": false } },
       { "ts": ..., "tool": "bash", "arguments": "bash -c \"set -e; cd build && …\"",
         "arguments_truncated": true }
     ],
@@ -276,7 +286,13 @@ const parentHuman = parent?.deriveMessages()
 }
 ```
 
-**tool call**：只记 `name` + `arguments`，**不记输出内容**。`result` 只保留结构化状态（`ok` / `exitCode`），不保留 stdout。
+**只取当前 turn，旧到新追加**。工具历史按宿主 turn 身份筛选：宿主 `turn/start` 宣告、`turn/end` 关闭，同一 turn 内的 `tool/call` 才属于本材料；上一个 turn 的调用只表达已结束的工作，不进入新请求。`turn` 字段记录本次选中的 turn，宿主没有命名 turn 时不写该字段。父子会话各读自己的turn窗口，父会话只贡献 EVIDENCE，不贡献工具历史。宿主关闭或重新播种后不再沿用旧 turn 号，恢复／重试／人工答复都保持宿主给出的 turn，不因本轮采集而伪造新 turn。
+
+**排除待审调用自身**：它尚未执行，写进历史会让 reviewer 把同一次调用当成已发生的事实读两遍。
+
+**预算裁剪从最旧的一端删**。`context` 按提交顺序保存（旧到新），所以最旧的调用是数组**第一个**元素；`truncateNext()` 的 `CONTEXT` 分支删除首元素而非末元素。删末元素会先丢掉待审动作前最后一步——通常也是解释它的那次记录失败——而留下窗口里最不相关的早期部分。
+
+**tool call**：只记 `name` + `arguments`，**不记输出内容**。`result` 只保留结构化状态（`ok`），不保留 stdout；`isError` 反转即 `ok`，事件不携带退出码时不臆造。**调用尝试不等于成功结果**：没有宿主 `tool/result` 的调用不写 `result`，历史里它就是一次尝试，不能读成已完成步骤。
 
 理由：工具输出是"待判数据"（可能含注入内容），体量也大。结构化状态已能回答"刚才失败了"这类关键问题。
 
@@ -496,6 +512,44 @@ maxInputTokens = 10000     # 宣告值 = 实际截断值，无隐藏边际
 | `CONTEXT` + `PRIOR_VERDICTS` | 剩余（~4000，其中 `history.maxItems = 40` 仍生效） |
 
 `EVIDENCE` 拿 40% 的理由：它直接决定 `authorized`，是 allow 判定的关键输入；另外两段更多是防误判。
+
+<a id="material-completeness"></a>
+
+### 材料完整性（M0）
+
+审查只有三个共同状态：`scored`、`insufficient-material`、`review-failure`。M0 只覆盖宿主／适配层能可靠识别的缺口，不宣称已实现模型语义弃权；模型拒答属于 `review-failure`，不是材料缺口。
+
+快照用两个字段表达这件事，两者不互相冒充：
+
+| 字段 | 语义 |
+|---|---|
+| `missing[]` | 面向 reviewer 的可读句子，逐条说明本次送审缺什么 |
+| `completeness` | 分类：`status` + `items[{source, kind, reason, blocking}]` + `gaps[]`（仅阻断项） |
+
+`kind` 区分五种事实，因为它们走不同路径：
+
+| kind | 含义 | 是否阻断 |
+|---|---|---|
+| `known-empty` | 来源已回答且内容为空（未启用、可读但无人类消息） | 否 |
+| `unreadable` | 应有答复的来源没有答复（可读性失败、父会话不在场） | 是 |
+| `truncated` | 材料存在但本次装不下 | 否 |
+| `unrelated` | 当前 turn 之外的材料被有意排除 | 否 |
+| `summarized` | 存在有损压缩摘要（原文仍在日志里） | 否 |
+
+**阻断有两种，且按来源与原因分别报告**：
+
+| 情形 | `source` | `kind` | `blocking` |
+|---|---|---|---|
+| 应有答复的来源没有答复 | 该来源自身 | `unreadable` | 是 |
+| 关键授权原文存在但合法容量装不下 | **实际缺失的那一层** | `truncated` | 是 |
+| 当前动作／工具参数／普通证据被裁剪 | 对应来源 | `truncated` | 否 |
+| 当前 turn 之外的调用被排除 | `tool-window` | `unrelated` | 否 |
+
+第二种是[保位对](#design-5-2-3-2)的容量冲突：本会话最新人类陈述与最新直接父会话原文都是审查不能缺少的原文，`evidenceMaxItems = 1` 这类合法配置可能只装得下一条。它属于**关键裁剪而非读取失败**，所以 `kind: 'truncated'`、`blocking: true`；同时 `source` 必须是真正没被送审的那一层——父会话原文被容量排除时报告 `parent-human`，不能借用 `session-human` 的名字，因为后者的日志读取成功、其陈述也已保留。`gaps[]` 恰好列出这些来源，`materialAvailabilityOf()` 直接映射成 review contract 的 `insufficient`。
+
+`known-empty` 是**事实而非故障**：读取成功但没有许可就是 A2 的正常情形；未配置 policy 来源同理，不因"没配"变成故障。普通 `truncated` 是输入事实（见[当前动作截断契约](#pending-action-truncation)），`unrelated` 是正常淘汰，两者都只报告、不阻断——普通无关历史丢失不应一律阻断审查。
+
+**缩略影响审阅者而非结论**：`blocking` 只由读数的一方设置，reviewer 不能把它变成 finding。`gate` 在没有任何模型请求的情况下把 `insufficient` 记为 `review-escalate`（`insufficient_material: <sources>`），因为人工可以补上日志补不出的东西；调用、解析、非法输出等故障仍走 `error-escalate`，两者阶段结果不同。
 
 ### 截断算法
 

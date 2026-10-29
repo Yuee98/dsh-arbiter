@@ -183,8 +183,13 @@ type Gate = (
 function stubContext(services: Record<string, unknown>): {
   ctx: ContextLike;
   gate: () => Gate;
+  emit: (session: StubSession, event: SessionEventLike) => void;
 } {
   let gate: Gate | undefined;
+  const sessionListeners: ((
+    session: StubSession,
+    event: SessionEventLike,
+  ) => void)[] = [];
   const registry = services;
   function get(key: 'profileContext'): ProfileContextLike | undefined;
   function get(
@@ -207,6 +212,14 @@ function stubContext(services: Record<string, unknown>): {
   const ctx: ContextLike = {
     get,
     on(event: string, listener: Listener) {
+      if (event === 'session/event') {
+        // The observer is invoked reflectively by the host, so its declared
+        // parameter list is not the shape this harness calls it with.
+        sessionListeners.push((target, payload) => {
+          Reflect.apply(listener, undefined, [target, payload]);
+        });
+        return () => undefined;
+      }
       if (event !== 'tools/pre-execute') return () => undefined;
       gate = async (execution, next) => {
         const decision: unknown = await Reflect.apply(listener, undefined, [
@@ -237,6 +250,9 @@ function stubContext(services: Record<string, unknown>): {
     gate: () => {
       if (gate === undefined) throw new Error('gate was not registered');
       return gate;
+    },
+    emit(session, event) {
+      for (const listener of sessionListeners) listener(session, event);
     },
   };
 }
@@ -297,10 +313,7 @@ function isStageList(value: unknown): value is readonly StageRecord[] {
 
 interface StoredCall {
   readonly snapshot: ReviewSnapshot;
-  readonly trace: readonly {
-    readonly stage: string;
-    readonly result: string;
-  }[];
+  readonly trace: readonly StoredTraceStage[];
 }
 
 /** Read back the snapshot and stage list the audit store actually persisted. */
@@ -332,6 +345,12 @@ async function persistedCall(callId: string): Promise<StoredCall> {
   }
 }
 
+interface StoredTraceStage {
+  readonly stage: string;
+  readonly result: string;
+  readonly reason?: string;
+}
+
 interface RunOptions {
   readonly session: StubSession;
   readonly sessions: Record<string, StubSession>;
@@ -346,7 +365,7 @@ async function reviewCall(options: RunOptions): Promise<{
   readonly decision: { readonly kind: string };
   readonly captured: Captured[];
   readonly snapshot: ReviewSnapshot;
-  readonly trace: readonly StageRecord[];
+  readonly trace: readonly StoredTraceStage[];
 }> {
   const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
   const { ctx, gate } = stubContext({
@@ -600,5 +619,261 @@ describe('gate review input', () => {
           item.source.kind === 'parent-human' && item.evidence === 'explicit',
       ),
     ).toBe(true);
+  });
+  test('the current turn is the host turn, not the newest tool call', async () => {
+    // Two turns, and the pending call is in the second. The host announces the
+    // turn through `turn/start`; the gate reads it there because this call's own
+    // event is written only after the decision.
+    const events: SessionEventLike[] = [
+      { seq: 1, time: 1, type: 'turn/start', data: { turn: 1 } },
+      human(2, 1, 'first task'),
+      {
+        seq: 3,
+        time: 2,
+        type: 'tool/call',
+        data: {
+          turn: 1,
+          step: 1,
+          callId: 'old-1',
+          name: 'bash',
+          arguments: { command: 'echo old' },
+        },
+      },
+      {
+        seq: 4,
+        time: 2,
+        type: 'tool/result',
+        data: {
+          turn: 1,
+          step: 1,
+          message: {
+            role: 'tool',
+            toolCallId: 'old-1',
+            isError: false,
+            source: { kind: 'tool', callId: 'old-1' },
+            content: [{ type: 'text', text: 'old' }],
+          },
+        },
+      },
+      {
+        seq: 5,
+        time: 3,
+        type: 'turn/end',
+        data: { turn: 1, reason: 'completed' },
+      },
+      { seq: 6, time: 4, type: 'turn/start', data: { turn: 2 } },
+      human(7, 4, 'second task'),
+      {
+        seq: 8,
+        time: 5,
+        type: 'tool/call',
+        data: {
+          turn: 2,
+          step: 1,
+          callId: 'new-1',
+          name: 'bash',
+          arguments: { command: 'echo new' },
+        },
+      },
+      {
+        seq: 9,
+        time: 5,
+        type: 'tool/result',
+        data: {
+          turn: 2,
+          step: 1,
+          message: {
+            role: 'tool',
+            toolCallId: 'new-1',
+            isError: false,
+            source: { kind: 'tool', callId: 'new-1' },
+            content: [{ type: 'text', text: 'new' }],
+          },
+        },
+      },
+    ];
+    const run = await reviewCall({
+      session: makeSession('turns', events),
+      sessions: {},
+      maxInputTokens: 200_000,
+      name: 'turns-profile',
+      callId: 'call-turns',
+      tool: 'bash',
+      args: { command: 'echo current' },
+    });
+    expect(run.snapshot.turn).toBe(2);
+    // Only the current turn's call is material; the earlier turn is an
+    // ordinary exclusion, and the review still reached the model.
+    expect(run.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo new"}',
+    ]);
+    expect(run.snapshot.completeness.status).not.toBe('insufficient');
+    expect(run.captured).toHaveLength(1);
+    // The submitted payload describes the exclusion, not a missing source.
+    expect(run.captured[0]?.user).toContain('"turn": 2');
+  });
+
+  test('insufficient material escalates instead of scoring', async () => {
+    // A subagent whose direct parent cannot be read: the parent's original
+    // words are the only explicit authorization this call could have, and the
+    // host cannot supply them. Admission still works because this session's own
+    // log is readable — which is exactly the case a real host can reach.
+    const child = makeSession(
+      'child',
+      [
+        human(1, 1, 'run the delegated task'),
+        {
+          seq: 2,
+          time: 2,
+          type: 'user/message',
+          data: {
+            source: { kind: 'agent-message', senderSessionId: 'parent' },
+            content: [{ type: 'text', text: 'the user approved the deletion' }],
+          },
+        },
+      ],
+      'parent',
+    );
+    const parent = makeSession('parent', [human(1, 1, 'delete build')]);
+    const broken = {
+      ...parent,
+      snapshotEvents: () => {
+        throw new Error('parent log unreadable');
+      },
+    };
+    const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
+    const { ctx, gate } = stubContext({
+      profileContext: {
+        home: process.env['DSH_HOME'] ?? '',
+        dir: process.cwd(),
+        name: 'unreadable-parent',
+      },
+      sandboxPolicy: { defaultMode: 'workspace-write' },
+      sessions: { get: (id: string) => (id === 'parent' ? broken : child) },
+      llm: reviewer.llm,
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('unavailable'),
+      },
+      permissionPresets: { registerAuto: () => () => undefined },
+      workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+    });
+    admitSession(child);
+    apply(ctx, {
+      modes: { main: 'normal', subagent: 'strict' },
+      reviewer: {
+        type: 'chat',
+        chat: {
+          provider: 'session',
+          model: '',
+          temperature: 0,
+          maxTokens: 400,
+          timeoutMs: 8_000,
+          maxRepairRetries: 1,
+        },
+      },
+      context: { maxInputTokens: 200_000 },
+    });
+    const decision: { kind: string } = await gate()(
+      {
+        callId: 'call-unreadable-parent',
+        name: 'bash',
+        arguments: { command: 'rm -rf build' },
+        signal: new AbortController().signal,
+        agent: { session: child },
+      },
+      allow,
+    );
+    // No model call: an answer to an incomplete submission cannot be a verdict,
+    // and spending the request would only produce a number to discard.
+    expect(reviewer.captured).toHaveLength(0);
+    expect(decision.kind).not.toBe('allow');
+    const stored = await persistedCall('call-unreadable-parent');
+    const review = stored.trace.find((stage) => stage.stage === 'review');
+    expect(review?.result).toBe('review-escalate');
+    expect(review?.reason ?? '').toContain('insufficient_material');
+    expect(stored.snapshot.completeness.status).toBe('insufficient');
+    expect(stored.snapshot.completeness.gaps[0]?.source).toBe('parent-human');
+    // The relay is still evidence with its own ceiling, and presence is unknown
+    // rather than "the parent never had human input".
+    expect(stored.snapshot.evidence[0]?.evidence).toBe('implied');
+    expect(stored.snapshot.parentAuthorizationPresent).toBeNull();
+    // The persisted structure is what the detail view reads, so both the
+    // escalation and the gap are explainable after the fact.
+    expect(stored.snapshot.missing.join(' ')).toContain('parent session');
+  });
+});
+
+describe('the host turn clock', () => {
+  test('an announced turn is used, and a closed turn is not', async () => {
+    const events = [human(1, 1, 'clean the build')];
+    const target = makeSession('clock', events);
+    const reviewer = reviewerLlm({ risk: 3, authorized: 8 });
+    const { ctx, gate, emit } = stubContext({
+      profileContext: {
+        home: process.env['DSH_HOME'] ?? '',
+        dir: process.cwd(),
+        name: 'clock-profile',
+      },
+      sandboxPolicy: { defaultMode: 'workspace-write' },
+      sessions: { get: () => target },
+      llm: reviewer.llm,
+      approval: {
+        config: { policy: 'ask' },
+        request: () => Promise.resolve('unavailable'),
+      },
+      permissionPresets: { registerAuto: () => () => undefined },
+      workingDirectory: { ensure: () => Promise.resolve(process.cwd()) },
+    });
+    admitSession(target);
+    apply(ctx, {
+      modes: { main: 'normal', subagent: 'strict' },
+      reviewer: {
+        type: 'chat',
+        chat: {
+          provider: 'session',
+          model: '',
+          temperature: 0,
+          maxTokens: 400,
+          timeoutMs: 8_000,
+          maxRepairRetries: 1,
+        },
+      },
+      context: { maxInputTokens: 200_000 },
+    });
+    // The host announces the turn; the observer runs a microtask later, exactly
+    // as it does inside the host's own commit.
+    emit(target, { seq: 90, time: 90, type: 'turn/start', data: { turn: 5 } });
+    await Promise.resolve();
+    await gate()(
+      {
+        callId: 'call-clock-on',
+        name: 'bash',
+        arguments: { command: 'echo hi' },
+        signal: new AbortController().signal,
+        agent: { session: target },
+      },
+      allow,
+    );
+    expect((await persistedCall('call-clock-on')).snapshot.turn).toBe(5);
+
+    // A closed turn is no longer current: the next call must not inherit it.
+    emit(target, { seq: 91, time: 91, type: 'turn/end', data: { turn: 5 } });
+    await Promise.resolve();
+    await gate()(
+      {
+        callId: 'call-clock-off',
+        name: 'bash',
+        arguments: { command: 'echo hi' },
+        signal: new AbortController().signal,
+        agent: { session: target },
+      },
+      allow,
+    );
+    const after = await persistedCall('call-clock-off');
+    // With no announced turn and no turn identity in the log, the snapshot says
+    // so rather than reusing the closed number.
+    expect(after.snapshot.turn).toBeNull();
+    expect(after.snapshot.context).toEqual([]);
   });
 });

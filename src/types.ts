@@ -355,6 +355,15 @@ export interface EvidenceItem {
   /** Conflict priority of the source layer; lower wins. Display order still uses ts. */
   readonly sourcePriority?: 1 | 2 | 5;
   readonly text: string;
+  /**
+   * The host turn this message was written in, when the log identifies turns.
+   *
+   * A human instruction from an earlier turn is still evidence — it stays in
+   * force until something newer and applicable conflicts with it — so this is
+   * attribution, not an expiry. `null`/absent means the log carried no turn at
+   * that point, which is unknown rather than turn zero.
+   */
+  readonly turn?: number;
   /** The question or operation a short answer answered, when it came from ask. */
   readonly question?: string;
   /** The ask call this human answer belongs to. */
@@ -396,6 +405,16 @@ export interface ContextToolCall {
   readonly tool: string;
   readonly arguments: string;
   readonly argumentsTruncated?: boolean;
+  /**
+   * The structured status of this call's recorded result.
+   *
+   * Absent means no result was observed: the call was an attempt, and the
+   * snapshot must not present an attempt as a completed step. Only the status is
+   * kept — never the output text, which may contain injected instructions and is
+   * large. `ok` is the host's own `isError` inverted; no exit code is invented
+   * when the event does not carry one.
+   */
+  readonly result?: { readonly ok: boolean };
 }
 
 export interface ContextCheckpoint {
@@ -508,6 +527,72 @@ export interface HistoryStatus {
   readonly reset: boolean;
 }
 
+/**
+ * What kind of observation a completeness item records.
+ *
+ * The four kinds are different facts and take different paths:
+ *
+ *   - `known-empty`: the source answered and the answer was "nothing here". A
+ *     configured-off source or a readable session with no human message is
+ *     known-empty; it is not a failure and it never blocks.
+ *   - `unreadable`: a source that should have answered did not.
+ *   - `truncated`: material was found but this submission cannot carry all of it.
+ *   - `unrelated`: material outside the current turn or outside the review's
+ *     scope was dropped on purpose. Losing it is the normal case.
+ *   - `summarized`: a lossy summary stands in for originals the log still holds.
+ */
+export type MaterialGapKind =
+  'known-empty' | 'unreadable' | 'truncated' | 'unrelated' | 'summarized';
+
+/** Which material an item is about. */
+export type MaterialSource =
+  | 'pending-action'
+  | 'session-human'
+  | 'parent-human'
+  | 'project-rules'
+  | 'custom-rules'
+  | 'tool-window'
+  | 'checkpoints'
+  | 'prior-verdicts';
+
+/**
+ * One reported observation about this submission's material.
+ *
+ * `blocking` is the only field a decision depends on, and it is set by the
+ * reader that observed the gap — never by the reviewer. A gap that blocks means
+ * the material behind this review cannot be assembled from the host's own
+ * records; that is `insufficient-material`, which is a different outcome from a
+ * failed reviewer call.
+ */
+export interface MaterialGapItem {
+  readonly source: MaterialSource;
+  readonly kind: MaterialGapKind;
+  readonly reason: string;
+  readonly blocking: boolean;
+}
+
+/** The three material states a review can be prepared from. */
+export type MaterialStatus = 'complete' | 'incomplete' | 'insufficient';
+
+/**
+ * The M0 report: what this submission can say about itself.
+ *
+ * This covers only gaps the host and adapter layer can identify reliably. A
+ * model that declines to answer is `review-failure`, not a material gap, and
+ * this structure never claims to have detected a semantic abstention.
+ */
+export interface MaterialCompleteness {
+  readonly status: MaterialStatus;
+  readonly items: readonly MaterialGapItem[];
+  /** The blocking items, in the review contract's gap shape. */
+  readonly gaps: readonly {
+    readonly source: string;
+    readonly reason: string;
+  }[];
+  /** One sentence naming the blocking sources, or `null` when none block. */
+  readonly note: string | null;
+}
+
 export interface ReviewSnapshot {
   readonly version: 1;
   readonly createdAt: number;
@@ -525,6 +610,13 @@ export interface ReviewSnapshot {
   readonly parentSessionId?: string;
   readonly tool: string;
   readonly cwd: string;
+  /**
+   * The host turn this review belongs to, when the log named one.
+   *
+   * `null` means the log carried no turn identity; the tool window then covered
+   * the whole readable history and `completeness` says so.
+   */
+  readonly turn: number | null;
   readonly action: {
     readonly name: string;
     readonly arguments: unknown;
@@ -547,6 +639,8 @@ export interface ReviewSnapshot {
   readonly historyTruncated: boolean;
   /** What this submission can say about prior verdicts; see {@link HistoryCoverage}. */
   readonly historyStatus: HistoryStatus;
+  /** What this submission can and cannot see; see {@link MaterialCompleteness}. */
+  readonly completeness: MaterialCompleteness;
   readonly missing: readonly string[];
   readonly budget: {
     readonly maxInputTokens: number;

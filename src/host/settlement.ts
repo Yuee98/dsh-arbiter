@@ -2,8 +2,9 @@ import { fingerprintOf, type CallRecord } from '../audit.js';
 import { appendRecord } from '../records.js';
 import type {
   CallResult,
-  PriorVerdictItem,
   PreToolDecision,
+  PriorVerdictItem,
+  ReviewSnapshot,
   TraceStage,
 } from '../types.js';
 import {
@@ -593,6 +594,45 @@ export class CallSettlement {
           });
         },
       );
+    });
+  }
+
+  /**
+   * The outcome for a review whose material the host could not assemble.
+   *
+   * This is not a review-deny and not a technical failure: no answer can stand
+   * on material that was never read, so the reviewer is not asked. It is an
+   * escalate — a person can supply what the log could not — recorded as
+   * `review-escalate` with the gap sources so the chain says why, and with no
+   * model request attributed to it.
+   */
+  insufficientMaterial(
+    call: CallContext,
+    snapshot: ReviewSnapshot,
+  ): Promise<PreToolDecision> {
+    const completeness = snapshot.completeness;
+    const reason =
+      completeness.note ??
+      'required review material could not be assembled from this session';
+    call.trace.push({
+      stage: 'review',
+      result: 'review-escalate',
+      reason: `insufficient_material: ${completeness.gaps
+        .map((gap) => gap.source)
+        .join(', ')}`,
+      configRevision: this.host.runtime.effectiveRevision,
+      configSnapshotId: this.host.runtime.configSnapshotId,
+      at: Date.now(),
+    });
+    return this.human(call, reason, {
+      ruleId: null,
+      decisionRules: [],
+      strategy: 'material',
+      effect: null,
+      signals: null,
+      snapshot,
+      reviewReason: reason,
+      modelAttempts: [],
     });
   }
 
