@@ -40,8 +40,11 @@ export type RulesPanelCallAction =
   | {
       readonly kind: 'created';
       readonly ruleId: string;
-      readonly sample: CreatedSample | null;
+      readonly sample: CreatedSample;
+      /** Whether the create action also asked to test the draft immediately. */
+      readonly test: boolean;
     }
+  | { readonly kind: 'prune'; readonly ruleIds: readonly string[] }
   | { readonly kind: 'focus-rule'; readonly ruleId: string }
   | { readonly kind: 'focus-none' }
   | { readonly kind: 'clear-focus' };
@@ -65,21 +68,33 @@ export function rulesPanelCallReducer(
       return { ...state, source: null };
     case 'created': {
       const nonce = state.focusRequest + 1;
-      if (action.sample === null) {
-        // A draft without a test request still becomes the selected rule; only
-        // the tester's sample stays as it was, so nothing claims to have tested
-        // the new rule.
-        return { ...state, source: null, focusedId: null };
-      }
       const seed: SampleSeed = { ...action.sample, nonce };
+      // The seed is stored either way: the rule's own recorded call is what a
+      // later "test this rule" must start from, whether or not this action also
+      // opened the tester now. A create without a test request therefore leaves
+      // the tester closed and claims nothing about having tested the rule.
       return {
         ...state,
         source: null,
         seeds: { ...state.seeds, [action.ruleId]: seed },
-        focusedId: action.ruleId,
-        focusRequest: nonce,
-        activeSeed: seed,
+        ...(action.test
+          ? {
+              focusedId: action.ruleId,
+              focusRequest: nonce,
+              activeSeed: seed,
+            }
+          : { activeSeed: null }),
       };
+    }
+    case 'prune': {
+      // A deleted rule's id can be handed out again by the next create, so its
+      // stored call must not survive it: a fresh rule would otherwise be tested
+      // against a recorded call it was never built from.
+      const kept = Object.entries(state.seeds).filter(([ruleId]) =>
+        action.ruleIds.includes(ruleId),
+      );
+      if (kept.length === Object.keys(state.seeds).length) return state;
+      return { ...state, seeds: Object.fromEntries(kept) };
     }
     case 'focus-rule': {
       const nonce = state.focusRequest + 1;
@@ -108,7 +123,12 @@ export function useRulesPanelCall(): {
   readonly state: RulesPanelCallState;
   readonly pickSource: (source: RuleCallSource) => void;
   readonly cancelSource: () => void;
-  readonly created: (ruleId: string, sample: CreatedSample | null) => void;
+  readonly created: (
+    ruleId: string,
+    sample: CreatedSample,
+    test: boolean,
+  ) => void;
+  readonly pruneSeeds: (ruleIds: readonly string[]) => void;
   readonly focusRule: (ruleId: string) => void;
   readonly focusNone: () => void;
   readonly clearFocus: () => void;
@@ -126,8 +146,11 @@ export function useRulesPanelCall(): {
       cancelSource: () => {
         dispatch({ kind: 'cancel-source' });
       },
-      created: (ruleId: string, sample: CreatedSample | null) => {
-        dispatch({ kind: 'created', ruleId, sample });
+      created: (ruleId: string, sample: CreatedSample, test: boolean) => {
+        dispatch({ kind: 'created', ruleId, sample, test });
+      },
+      pruneSeeds: (ruleIds: readonly string[]) => {
+        dispatch({ kind: 'prune', ruleIds });
       },
       focusRule: (ruleId: string) => {
         dispatch({ kind: 'focus-rule', ruleId });

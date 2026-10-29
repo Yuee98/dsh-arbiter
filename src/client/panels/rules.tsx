@@ -99,6 +99,14 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
   const focusedRule: DraftRule | null =
     draft.rules.find((rule) => rule.id === callState.focusedId) ?? null;
 
+  // A created rule's draft can be discarded without saving, and its id can be
+  // reused by the next create. Dropping the seeds of rules that no longer exist
+  // keeps a fresh rule from being tested against a call it was never built from.
+  const pruneSeeds = calls.pruneSeeds;
+  useEffect(() => {
+    pruneSeeds(draft.rules.map((rule) => rule.id));
+  }, [draft.rules, pruneSeeds]);
+
   useEffect(() => {
     if (locateRequest.nonce === 0) return;
     focusConditionField(locateRequest, {
@@ -181,12 +189,11 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
             setSelectedId(rule.id);
             calls.created(
               rule.id,
-              test
-                ? {
-                    callId: pending.callId,
-                    imported: importedSampleOf(pending),
-                  }
-                : null,
+              {
+                callId: pending.callId,
+                imported: importedSampleOf(pending),
+              },
+              test,
             );
           }}
           onClose={calls.cancelSource}

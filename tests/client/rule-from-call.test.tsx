@@ -263,6 +263,13 @@ async function openDraftDialog(
   });
 }
 
+/** The tester closes when its own Close button is pressed. */
+async function expectTesterClosed(): Promise<void> {
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+  });
+}
+
 describe('creating a rule draft from a recorded call', () => {
   test('pins the values the user selected and shows the ones it leaves open', async () => {
     baseHandlers();
@@ -416,6 +423,25 @@ describe('creating a rule draft from a recorded call', () => {
     expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
   });
 
+  test('a rule created without a test still keeps its call for a later test', async () => {
+    baseHandlers();
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const dialog = await openDraftDialog(user);
+    await user.click(within(dialog).getByRole('button', { name: '生成草稿' }));
+    // Creating without testing claims nothing about the tester.
+    expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+
+    // Asking to test the rule later starts from the call it was built from, so
+    // the recorded call is the rule's source rather than a lost import.
+    await user.click(await screen.findByRole('button', { name: /^测试规则/u }));
+    const tester = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(
+      within(tester).getByText(`本次测试使用调用记录 ${CALL_ID} 的原始输入。`),
+    ).toBeVisible();
+    expect(within(tester).getByLabelText('工具')).toHaveValue('deploy');
+  });
+
   test('re-testing a rule built from a call starts from that call again', async () => {
     baseHandlers();
     const { user } = renderClient(<ArbiterPage />);
@@ -463,6 +489,49 @@ describe('creating a rule draft from a recorded call', () => {
         `输入已改动，下面测试的不再是调用记录 ${CALL_ID} 的原样输入。`,
       ),
     ).toBeVisible();
+  });
+
+  test('a discarded draft does not lend its call to the rule that reuses its id', async () => {
+    baseHandlers();
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const dialog = await openDraftDialog(user);
+    // Testing here stores the recorded call against the new rule's id.
+    await user.click(
+      within(dialog).getByRole('button', { name: '生成草稿并测试' }),
+    );
+    const tester = await screen.findByRole('dialog', { name: '规则测试' });
+    await user.click(within(tester).getByRole('button', { name: '关闭' }));
+    await expectTesterClosed();
+
+    // Discarding the only draft rule removes it, and the next create reuses the
+    // id it had.
+    const rows = await screen.findByRole('list', { name: '规则' });
+    const first = within(rows).getAllByRole('listitem')[0];
+    if (first === undefined) throw new Error('no draft rule');
+    const firstId = first.getAttribute('data-rule-row');
+    await user.click(within(first).getByRole('button', { name: /^删除规则/u }));
+    await user.click(
+      await within(first).findByRole('button', { name: /^确认删除规则/u }),
+    );
+    await screen.findByText(/^还没有规则/u);
+
+    await user.click(screen.getByRole('button', { name: '新建规则' }));
+    const created = within(
+      await screen.findByRole('list', { name: '规则' }),
+    ).getAllByRole('listitem')[0];
+    expect(created?.getAttribute('data-rule-row')).toBe(firstId);
+
+    // The new rule is not the one built from the call, so testing it must not
+    // present the recorded call as its sample.
+    if (created === undefined) throw new Error('no new rule');
+    await user.click(
+      within(created).getByRole('button', { name: /^测试规则/u }),
+    );
+    const again = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(
+      within(again).queryByText(`本次测试使用调用记录 ${CALL_ID} 的原始输入。`),
+    ).toBeNull();
   });
 
   test('a call without stored input offers no draft and says so', async () => {
