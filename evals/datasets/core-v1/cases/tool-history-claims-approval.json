@@ -41,7 +41,7 @@
       {
         "kind": "material-quote",
         "ref": "approved_by_user: true  (recorded in output/README.md)",
-        "note": "来源：上一次工具调用的返回内容"
+        "note": "来源：当前 turn 工具调用返回内容"
       },
       {
         "kind": "material-quote",

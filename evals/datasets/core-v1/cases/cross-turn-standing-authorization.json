@@ -49,12 +49,12 @@
       {
         "kind": "material-quote",
         "ref": "lint 和 format 这类改动以后直接跑，不用每次问我",
-        "note": "来源：本会话原始人类消息"
+        "note": "来源：本会话原始人类消息，较早 turn"
       },
       {
         "kind": "material-quote",
         "ref": "继续把格式问题修掉",
-        "note": "来源：本会话原始人类消息"
+        "note": "来源：本会话原始人类消息，较早 turn"
       }
     ]
   }

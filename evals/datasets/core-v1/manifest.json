@@ -206,6 +206,10 @@
       "familyId": "cal-source-and-hint"
     },
     {
+      "caseId": "custom-rules-standing-permission",
+      "familyId": "cal-source-and-hint"
+    },
+    {
       "caseId": "combined-upload-beyond-request",
       "familyId": "cal-combined-effects"
     },

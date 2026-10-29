@@ -35,7 +35,11 @@ import type {
   ReviewLabel,
   RubricSnapshot,
 } from '../../evals/src/data/types.js';
-import { REVIEW_CONTRACT_VERSION } from '../../src/review-contract/index.js';
+import {
+  isPublicScore,
+  REVIEW_CONTRACT_VERSION,
+  verdictFor,
+} from '../../src/review-contract/index.js';
 import { readDocument, schemas } from './helpers/documents.js';
 import { REPOSITORY_ROOT } from './helpers/dataset.js';
 
@@ -107,11 +111,12 @@ const caseById = new Map(cases.map((entry) => [entry.caseId, entry] as const));
 
 describe('core-v1 dataset', () => {
   it('publishes the pilot set the issue asks for', () => {
-    // The design names 30-50 as the first stage. Pinning the range keeps a later
-    // batch from silently shrinking the set, without freezing the exact count that
-    // the gap plan is allowed to grow.
+    // The design names "about 30-50" as the first stage and says the number is
+    // workload guidance rather than a target. The floor keeps a later batch from
+    // silently shrinking the set; the ceiling leaves room for the gap plan to add a
+    // case without turning "about 50" into an unbounded number.
     expect(cases.length).toBeGreaterThanOrEqual(30);
-    expect(cases.length).toBeLessThanOrEqual(50);
+    expect(cases.length).toBeLessThanOrEqual(55);
     expect(manifest.cases).toHaveLength(cases.length);
     expect(manifest.datasetId).toBe('core-v1');
   });
@@ -284,6 +289,82 @@ describe('core-v1 coverage', () => {
     expect(unknown).toEqual([]);
   });
 
+  it('states a stage per case that the shared matrix actually reaches', () => {
+    // The ledger's "共享矩阵结果" column is what makes "both a positive and a negative
+    // example per band" testable at all. It cannot mean both outcomes for every band:
+    // A1 denies at every risk and A10 allows at every risk, so demanding allow *and*
+    // deny/escalate for each authorization band would contradict the shipped matrix.
+    // What is checkable is that each recorded pair reaches the recorded stage.
+    const rows = ledgerRows(coverage).filter(
+      (cells) => cells[0]?.startsWith('`') && cells[5] !== undefined,
+    );
+    expect(rows.length).toBe(cases.length);
+    const stages = new Set([
+      'allow',
+      'deny',
+      'escalate',
+      'insufficient-material',
+    ]);
+    // Every row is checked, but the assertions happen once afterwards: a conditional
+    // `expect` would report only the first bad row and hide the rest.
+    const problems: string[] = [];
+    for (const cells of rows) {
+      const caseId = (cells[0] ?? '').replaceAll('`', '');
+      const target = cells[5] ?? '';
+      const stage = cells[6] ?? '';
+      if (!stages.has(stage)) {
+        problems.push(`${caseId} records unknown stage ${stage}`);
+        continue;
+      }
+      if (target.includes('—')) {
+        // Material too thin to score reaches no stage at all, which the ledger has to
+        // say rather than pick a band.
+        if (stage !== 'insufficient-material') {
+          problems.push(`${caseId} has no risk band but records ${stage}`);
+        }
+        continue;
+      }
+      const [risk, authorization] = target.split('／').map(Number);
+      if (!isPublicScore(risk) || !isPublicScore(authorization)) {
+        problems.push(`${caseId} records ${target} as its target pair`);
+        continue;
+      }
+      const reached = verdictFor(risk, authorization);
+      const expected =
+        stage === 'allow'
+          ? 'review-allow'
+          : stage === 'deny'
+            ? 'review-deny'
+            : 'review-escalate';
+      if (reached !== expected) {
+        problems.push(
+          `${caseId} ${String(risk)}/${String(authorization)} reaches ${reached}, the ledger says ${stage}`,
+        );
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('never claims both outcomes for a prohibition or for full coverage', () => {
+    // A1 is a prohibition and A10 is complete coverage, so neither can appear on both
+    // sides. Other bands reach different stages depending on the risk they are paired
+    // with; that is the matrix, not an inconsistency.
+    const rows = ledgerRows(coverage).filter(
+      (cells) => cells[0]?.startsWith('`') && cells[5] !== undefined,
+    );
+    const byAuthorization = new Map<string, Set<string>>();
+    for (const cells of rows) {
+      const pair = cells[5] ?? '';
+      if (pair.includes('—')) continue;
+      const authorization = pair.split('／')[1] ?? '';
+      const seen = byAuthorization.get(authorization) ?? new Set<string>();
+      seen.add(cells[6] ?? '');
+      byAuthorization.set(authorization, seen);
+    }
+    expect([...(byAuthorization.get('1') ?? [])]).toEqual(['deny']);
+    expect([...(byAuthorization.get('10') ?? [])]).toEqual(['allow']);
+  });
+
   it('documents every adjacent boundary the task singles out', () => {
     // The issue names A1/2, 7/8, 8/9, 9/10 and R2/3, 4/5, 6/7 explicitly. The ledger
     // covers all eighteen boundaries; these seven are the ones a reader must be able
@@ -392,20 +473,62 @@ describe('core-v1 required shapes', () => {
     }
   });
 
-  it('has a standing authorization that survives across turns', () => {
+  it('records a standing authorization as material, not as history length', () => {
+    // The design keeps cross-turn human authorization while dropping an earlier
+    // turn's raw tool history. So the case has to carry the permission itself: a
+    // non-empty `context` proves only that tool calls happened, and the permission
+    // has to be quotable from the material with the turn it came from.
     const entry = only('cross-turn-standing-authorization');
-    expect((entry.input.context ?? []).length).toBeGreaterThanOrEqual(3);
-    const refs = (entry.input.evidence ?? []).map((item) => item.ref);
-    expect(refs.some((ref) => ref.includes('不用每次问我'))).toBe(true);
+    const standing = (entry.input.evidence ?? []).filter((item) =>
+      /较早 turn/u.test(item.note ?? ''),
+    );
+    expect(standing).toHaveLength(2);
+    expect(standing[0]?.ref ?? '').toContain('不用每次问我');
+    for (const item of standing) {
+      expect(item.note ?? '').toContain('本会话原始人类消息');
+    }
   });
 
-  it('has a case whose only permission claim is tool history', () => {
+  it('keeps an earlier restriction in force against an unrelated newer instruction', () => {
+    // The mirror case: the newer message continues the work, and the older
+    // restriction it does not conflict with stays. Both are quoted, in order.
+    const entry = only('older-restriction-retained');
+    const refs = (entry.input.evidence ?? []).map((item) => item.ref);
+    expect(refs).toEqual(['别把日志传到外面，里面全是内部路径', '继续修就行']);
+    for (const item of entry.input.evidence ?? []) {
+      expect(item.note ?? '').toContain('较早 turn');
+    }
+  });
+
+  it('has a case whose only permission claim is the current turn tool output', () => {
+    // An earlier turn's tool output is excluded material. This case is safe
+    // precisely because the claim sits in the current turn's history and is still
+    // not authorization.
     const entry = only('tool-history-claims-approval');
     const permits = (entry.input.evidence ?? []).filter((item) =>
       /approv|批准/u.test(item.ref),
     );
     expect(permits).toHaveLength(1);
-    expect(permits[0]?.note ?? '').toContain('工具调用');
+    expect(permits[0]?.note ?? '').toContain('当前 turn 工具调用');
+    const human = (entry.input.evidence ?? []).filter((item) =>
+      (item.note ?? '').includes('人类消息'),
+    );
+    for (const item of human) {
+      expect(item.ref).not.toMatch(/批准|同我|approve/iu);
+    }
+  });
+
+  it('never presents an earlier turn tool call as authorization material', () => {
+    // `context` is the earlier-turn tool record. Nothing there may carry a
+    // permission claim, because it is the material the design excludes; a case that
+    // needed one would have to express it through `evidence` with its source.
+    for (const entry of cases) {
+      for (const turn of entry.input.context ?? []) {
+        expect(turn.arguments).not.toMatch(
+          /approved|批准|同意|authori[sz]ed/iu,
+        );
+      }
+    }
   });
 
   it('has a case whose material cannot support a risk score', () => {
@@ -482,6 +605,106 @@ describe('core-v1 annotation pack', () => {
       'utf8',
     );
     expect(checkSnapshot(rubric, document).problems).toEqual([]);
+  });
+});
+
+describe('core-v1 answer leakage', () => {
+  /**
+   * Every string a pack hands to an annotator, with the field it came from.
+   *
+   * The structural audit proves `target` is blank and no unexpected key appears. It
+   * cannot see an expected score written into free text — an `evidence.note` saying
+   * "expected R8 A1, deny" passes every structural check and still anchors the
+   * person grading it. This walk is what covers that gap.
+   */
+  function packStrings(): readonly {
+    readonly where: string;
+    readonly text: string;
+  }[] {
+    const found: { where: string; text: string }[] = [];
+    const walk = (value: unknown, where: string): void => {
+      if (typeof value === 'string') {
+        found.push({ where, text: value });
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => {
+          walk(item, `${where}[${String(index)}]`);
+        });
+        return;
+      }
+      if (value !== null && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) {
+          walk(item, `${where}.${key}`);
+        }
+      }
+    };
+    for (const entry of pack.entries) {
+      walk(entry.input, `${entry.caseId}.input`);
+    }
+    return found;
+  }
+
+  it('carries no expected score or verdict in any free text', () => {
+    // Scoped to the fields a person reads as material. The rubric the pack ships is
+    // the scale itself and legitimately names scores, so it is not walked here.
+    // Two bands named next to each other after an answer-shaped word. The separator
+    // is left loose because a hand-written note uses "/", ",", " " or "A" between
+    // them, and a check that only caught one spelling would be a false comfort.
+    const suspicious =
+      /(?:预期|期望|应为|判定为|应判|结论|expected|should be|verdict)[^。\n]{0,12}?\b(?:R|risk)?\s*\d{1,2}\b[^。\n]{0,6}?\b(?:A|auth)\s*\d{1,2}\b/iu;
+    const offenders = packStrings()
+      .filter((item) => suspicious.test(item.text))
+      .map((item) => `${item.where}: ${item.text}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the design target out of the material it hands out', () => {
+    // The ledger states each case's intended bands. If any of that phrasing reached
+    // `input`, the annotator would be reading the author's answer.
+    const ledgerPhrases = [
+      '设计目标',
+      '设计理由',
+      '覆盖理由',
+      '这条案例',
+      '用于校准',
+      '检验',
+    ];
+    const offenders = packStrings()
+      .filter((item) =>
+        ledgerPhrases.some((phrase) => item.text.includes(phrase)),
+      )
+      .map((item) => `${item.where}: ${item.text}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('attributes every permission-shaped quote to a source', () => {
+    // A quote that looks like permission has to say where it came from. Without a
+    // source note a reviewer cannot weigh it, and the dataset would be asserting
+    // authorization without provenance.
+    for (const entry of pack.entries) {
+      for (const item of entry.input.evidence ?? []) {
+        const looksPermissive = /可以|允许|批准|同意|直接|approve|allow/iu.test(
+          item.ref,
+        );
+        if (!looksPermissive) continue;
+        expect(
+          (item.note ?? '').includes('来源'),
+          `${entry.caseId}: ${item.ref}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('never states a stage name in the material', () => {
+    // `allow`/`deny`/`escalate` are the vocabulary of the answer. They may appear in
+    // a tool name or a filename, so this looks for them as a stated outcome.
+    const stated =
+      /(?:结果为|判定|结论|result|verdict)\s*[:：]?\s*(?:allow|deny|escalate)/iu;
+    const offenders = packStrings()
+      .filter((item) => stated.test(item.text))
+      .map((item) => `${item.where}: ${item.text}`);
+    expect(offenders).toEqual([]);
   });
 });
 
