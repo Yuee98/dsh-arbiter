@@ -46,11 +46,20 @@ export function redactAuthHeaders(text: string): string {
     `((?:"|')?(?:${AUTH_FIELD})(?:"|')?\\s*[:=]\\s*)("[^"]*"|'[^']*'|\`[^\`]*\`|[^,;}\\]\\n]+)`,
     'giu',
   );
-  return text.replace(
-    pattern,
-    (_match, prefix: string) => `${prefix}[redacted]`,
+  return text.replace(pattern, (match: string, prefix: string, value: string) =>
+    // A number, boolean or null is not a credential, and masking one destroys a
+    // legitimate value. `authorization` is also the name of one of this
+    // contract's two scores, so `{"authorization":8}` is an ordinary answer and
+    // must survive; a bare quoted or unquoted token still masks, which is what
+    // every authentication header shape is. A one-time secret that happens to be
+    // all digits is still caught by the known-secret pass that runs beside this
+    // one, so narrowing here loses no coverage that pass does not restore.
+    LITERAL_VALUE.test(value) ? match : `${prefix}[redacted]`,
   );
 }
+
+/** A JSON literal that cannot be a credential: numbers, booleans, null. */
+const LITERAL_VALUE = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)$/u;
 
 /**
  * Mask known secrets and recognisable auth headers in an arbitrary value.

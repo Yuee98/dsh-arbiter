@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CAPTURED_CLOUDFLARE } from './helpers/decision-captures.js';
+import { NEW_SCALE_CLOUDFLARE } from './helpers/decision-captures.js';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
@@ -52,14 +52,7 @@ function decisionConfig(): ArbiterConfig {
   });
 }
 
-const VALID_CHAT = JSON.stringify({
-  risk: 1,
-  authorized: 8,
-  secrets: false,
-  destructive: false,
-  egress: false,
-  bulk: false,
-});
+const VALID_CHAT = JSON.stringify({ risk: 1, authorization: 8 });
 
 function streamOf(
   chunks: readonly Record<string, unknown>[],
@@ -82,14 +75,13 @@ function answer(text: string): AsyncIterable<Record<string, unknown>> {
 /**
  * A contracted decision answer.
  *
- * The wire format carries a probability distribution per scored answer and a
- * `noul` probability per boolean probe, as the production parser expects.
+ * The new contract asks two `score` questions and no boolean probes, so this is
+ * the payload a reviewer would actually receive now. The envelope is Cloudflare's
+ * (payload nested under `result`), and it is the same fixture the transport tests
+ * read, so both callers verify one shape rather than two hand-written variants.
  */
 function decisionAnswer(): Response {
-  // A real Cloudflare envelope: the fixture lives in the transport test file and
-  // is reused here so both callers verify the same shapes rather than two
-  // hand-written variants of the protocol.
-  return new Response(JSON.stringify(CAPTURED_CLOUDFLARE), {
+  return new Response(JSON.stringify(NEW_SCALE_CLOUDFLARE), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
@@ -141,7 +133,7 @@ describe('chat probe', () => {
       model: 'deepseek-flash',
     });
     expect(result.backend).toBe('chat');
-    expect(result.protocol).toBe('arbiter-chat-json-v1');
+    expect(result.protocol).toBe('arbiter-chat-json-v2');
     if (result.status !== 'passed') throw new Error('expected a pass');
     expect(result.repairs).toBe(0);
     expect(result.attempts).toHaveLength(1);
@@ -183,14 +175,7 @@ describe('chat probe', () => {
     // but the connection test only asks whether the output contract was met. The
     // public authorization scale starts at 1, where 1 is a prohibition — an answer
     // of 0 names no band and would fail the contract rather than classify as deny.
-    const deny = JSON.stringify({
-      risk: 9,
-      authorized: 1,
-      secrets: true,
-      destructive: true,
-      egress: true,
-      bulk: false,
-    });
+    const deny = JSON.stringify({ risk: 9, authorization: 1 });
     const result = await runReviewerProbe({
       config: chatConfig(),
       llm: { stream: () => answer(deny) },
@@ -200,8 +185,12 @@ describe('chat probe', () => {
     });
     expect(result.status).toBe('passed');
     if (result.status !== 'passed') throw new Error('expected a pass');
-    expect(result.signals.riskClass).toBe('high');
-    expect(result.signals.authClass).toBe('none');
+    if (result.outcome.status !== 'scored') {
+      throw new Error('expected a scored outcome');
+    }
+    expect(result.outcome.risk).toBe(9);
+    expect(result.outcome.authorization).toBe(1);
+    expect(result.outcome.verdict).toBe('review-deny');
   });
 
   test('a provider error fails without consuming a repair attempt', async () => {
