@@ -19,8 +19,6 @@
  *     observation twice" from being written as one observation reused twice.
  */
 
-import { estimateTokenCount } from 'tokenx';
-
 import type { ReviewCase } from '../data/types.js';
 
 import { cellIdOf } from './artifact.js';
@@ -154,42 +152,6 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
     left.length === right.length &&
     left.every((id, index) => id === right[index])
   );
-}
-
-/**
- * The tokens a chat repair adds to the next request, at its worst.
- *
- * Production appends a rejection-and-correction message before each repair attempt, so a
- * cell that fit the input bound on its first attempt can exceed it on its second. The bound
- * has to cover what may actually be sent, not only what was sent first, so admission
- * charges this per remaining repair attempt.
- *
- * The figure is an upper estimate of production's own template with its longest advice: it
- * is deliberately generous, because a bound that under-counts is not a bound.
- */
-export function repairHeadroomTokens(): number {
-  // Production's message is `Your previous answer was rejected: ${repair}` plus a fixed
-  // instruction. The advice text is bounded by the parser's own messages, which are short;
-  // 200 characters covers any of them with room to spare.
-  return estimateTokenCount(
-    `Your previous answer was rejected: ${'x'.repeat(200)}\nReturn only the corrected JSON object.`,
-  );
-}
-
-/**
- * The largest input one cell may send, counting its repair attempts.
- *
- * A chat cell can make up to `attemptCeiling` calls, and every call after the first carries
- * an extra correction message. Decision cells do not repair, so they pay nothing.
- */
-export function inputCeilingOf(parts: {
-  readonly estimatedInputTokens: number;
-  readonly attemptCeiling: number;
-  readonly protocol: RunProtocol;
-}): number {
-  if (parts.protocol !== 'chat') return parts.estimatedInputTokens;
-  const repairs = Math.max(0, parts.attemptCeiling - 1);
-  return parts.estimatedInputTokens + repairs * repairHeadroomTokens();
 }
 
 /**

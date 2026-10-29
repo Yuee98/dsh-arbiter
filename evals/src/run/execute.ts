@@ -82,6 +82,8 @@ export interface CellDeps {
   readonly timedOut: () => boolean;
   /** Wall clock, injected so a test never depends on the real one. */
   readonly now: () => number;
+  /** The run's input bound, enforced on every attempt rather than only at admission. */
+  readonly maxInputTokens: number;
 }
 
 /**
@@ -274,6 +276,8 @@ export async function runCell(parts: {
     signal: deps.signal,
     llm: deps.llm,
     readCredential: deps.readCredential,
+    // Every chat attempt, repairs included, must respect the run's bound.
+    maxInputTokens: deps.maxInputTokens,
   });
   if (!build.ok) {
     return {

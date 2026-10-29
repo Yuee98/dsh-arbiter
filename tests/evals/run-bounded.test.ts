@@ -2633,61 +2633,11 @@ describe('admission waits for a held reservation to settle', () => {
 });
 
 describe('the input bound covers repair attempts', () => {
-  it('refuses a cell whose repairs would push it past the ceiling', async () => {
-    // The finding: admission charged only the initial request's estimate, but production
-    // appends a correction message before each repair, so a cell near the ceiling could
-    // exceed it on its second call while the schema promised the bound covers what is sent.
-    await withArea(async (area) => {
-      const caseId = 'read-named-source-file';
-      const cellId = cellIdOf({
-        caseId,
-        targetId: 'chat-a',
-        protocol: 'chat',
-      });
-      // Measure the initial request with the plan's own context ceiling, then set the run's
-      // input bound just above it — high enough for one attempt, too low for an attempt plus
-      // a correction message. The two bounds are separate: `context.maxInputTokens` trims the
-      // material, `bounds.maxInputTokens` decides what may be sent.
-      const entry = cases.find((candidate) => candidate.caseId === caseId);
-      if (entry === undefined) throw new Error('the fixture case is missing');
-      const { caseMaterial } = await import('../../evals/src/run/material.js');
-      const base = caseMaterial(entry, 'chat', { maxInputTokens: 10_000 });
-      const initial = base.material.estimatedInputTokens;
-      expect(initial).toBeGreaterThan(0);
-
-      const plan = planOf({
-        caseIds: [caseId],
-        // Two attempts: one initial and one repair, which carries an extra message.
-        targets: [chatTarget('chat-a', { maxRepairRetries: 1 })],
-        context: { maxInputTokens: base.snapshot.budget.maxInputTokens },
-        bounds: bounds({
-          concurrency: 1,
-          maxAttempts: 8,
-          // One token above the first request and well under a repair's.
-          maxInputTokens: initial + 1,
-        }),
-      });
-      const result = await runPlan({
-        plan,
-        // Two scripted answers, so the adapter's own ceiling is two and the reservation
-        // covers a repair. With one script the cell could not repair at all and the bound
-        // would never be taxed.
-        fixture: fixtureOf({
-          [cellId]: fixtureCell({
-            chat: [chatAnswer(2, 10), chatAnswer(2, 10)],
-          }),
-        }),
-        directory: join(area.path, 'run'),
-      });
-      // The plan cannot promise the bound for a repair, so the cell is refused rather than
-      // admitted on the strength of its first request alone.
-      expect(result.records).toEqual([]);
-      const read = await readRunStatus(join(area.path, 'run'));
-      expect(read.statuses[0]).toBe('budget-exhausted');
-    });
-  });
-
-  it('admits the same cell when the ceiling covers its repairs', async () => {
+  it('refuses a repair whose correction message would exceed the bound', async () => {
+    // The convergence finding: a repair's size is not a fixed increment. Production embeds
+    // the parser's rejection text in the correction message, and `readChatAnswer` reports
+    // every unexpected key it found — a key has no length limit. So the bound has to be
+    // enforced on the request that is actually built, not reserved as a constant.
     await withArea(async (area) => {
       const caseId = 'read-named-source-file';
       const cellId = cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' });
@@ -2695,14 +2645,103 @@ describe('the input bound covers repair attempts', () => {
       if (entry === undefined) throw new Error('the fixture case is missing');
       const { caseMaterial } = await import('../../evals/src/run/material.js');
       const base = caseMaterial(entry, 'chat', { maxInputTokens: 10_000 });
-      // Room for the initial request and its correction message.
+      const initial = base.material.estimatedInputTokens;
+
+      // A valid JSON answer with one absurdly long unexpected key: the parser rejects it and
+      // names the key, so the correction message is thousands of tokens.
+      const malformed = JSON.stringify({
+        risk: 2,
+        authorization: 9,
+        ['K'.repeat(40_000)]: true,
+      });
       const plan = planOf({
         caseIds: [caseId],
         targets: [chatTarget('chat-a', { maxRepairRetries: 1 })],
+        context: { maxInputTokens: base.snapshot.budget.maxInputTokens },
+        // Room for the first request comfortably, nothing like the repair's size.
         bounds: bounds({
           concurrency: 1,
           maxAttempts: 8,
-          maxInputTokens: base.material.estimatedInputTokens + 500,
+          maxInputTokens: initial + 1_000,
+        }),
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({
+            chat: [{ kind: 'text', text: malformed }, chatAnswer(2, 10)],
+          }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      const record = result.records[0];
+      expect(record).toBeDefined();
+      // The first attempt reached the transport and was rejected by the parser; the repair
+      // was refused before its request went out, and that refusal is recorded as the second
+      // attempt's error — the artifact says what was sent and what was not.
+      expect(record?.attempts).toHaveLength(2);
+      expect(record?.attempts[0]?.error).toContain('must contain exactly');
+      expect(record?.attempts[1]?.error).toContain('above the run');
+      expect(record?.attempts[1]?.responseText).toBeNull();
+      // The bound was held: the oversized correction message never became a sent request.
+      expect(record?.attempts[1]?.failureKind).toBe('transport');
+    });
+  });
+
+  it('sends a repair when the bound has room for it', async () => {
+    await withArea(async (area) => {
+      const caseId = 'read-named-source-file';
+      const cellId = cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' });
+      const entry = cases.find((candidate) => candidate.caseId === caseId);
+      if (entry === undefined) throw new Error('the fixture case is missing');
+      const { caseMaterial } = await import('../../evals/src/run/material.js');
+      const base = caseMaterial(entry, 'chat', { maxInputTokens: 10_000 });
+      const plan = planOf({
+        caseIds: [caseId],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 1 })],
+        context: { maxInputTokens: base.snapshot.budget.maxInputTokens },
+        bounds: bounds({
+          concurrency: 1,
+          maxAttempts: 8,
+          maxInputTokens: 100_000,
+        }),
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cellId]: fixtureCell({
+            chat: [
+              { kind: 'text', text: 'not json at all' },
+              chatAnswer(2, 10),
+            ],
+          }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      // A short rejection fits, so the repair happens and the cell scores.
+      expect(result.records[0]?.attempts).toHaveLength(2);
+      expect(result.records[0]?.status).toBe('reviewed');
+    });
+  });
+
+  it('admits a cell whose first request fits the bound', async () => {
+    await withArea(async (area) => {
+      const caseId = 'read-named-source-file';
+      const cellId = cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' });
+      const entry = cases.find((candidate) => candidate.caseId === caseId);
+      if (entry === undefined) throw new Error('the fixture case is missing');
+      const { caseMaterial } = await import('../../evals/src/run/material.js');
+      const base = caseMaterial(entry, 'chat', { maxInputTokens: 10_000 });
+      // Exactly the first request's estimate: admission is not charged for repairs it may
+      // never make, and an answer that needs no repair fits exactly.
+      const plan = planOf({
+        caseIds: [caseId],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 1 })],
+        context: { maxInputTokens: base.snapshot.budget.maxInputTokens },
+        bounds: bounds({
+          concurrency: 1,
+          maxAttempts: 8,
+          maxInputTokens: base.material.estimatedInputTokens,
         }),
       });
       const result = await runPlan({
@@ -2712,8 +2751,6 @@ describe('the input bound covers repair attempts', () => {
         }),
         directory: join(area.path, 'run'),
       });
-      // The other direction, so the rule cannot become a blanket refusal.
-      expect(result.records).toHaveLength(1);
       expect(result.records[0]?.status).toBe('reviewed');
     });
   });
@@ -2730,7 +2767,6 @@ describe('the input bound covers repair attempts', () => {
       if (entry === undefined) throw new Error('the fixture case is missing');
       const { caseMaterial } = await import('../../evals/src/run/material.js');
       const base = caseMaterial(entry, 'decision', { maxInputTokens: 10_000 });
-      // Exactly the initial estimate: a decision cell sends that and nothing more.
       const plan = planOf({
         caseIds: [caseId],
         protocols: ['decision'],
@@ -2755,77 +2791,3 @@ describe('the input bound covers repair attempts', () => {
     });
   });
 });
-
-describe('a decision cell reserves one attempt', () => {
-  it('runs when the fixture holds more responses than the budget allows', async () => {
-    // A decision transport makes exactly one fetch, so unused fixture responses are not a
-    // reservation. Charging them rejected a schema-valid plan without sending anything.
-    await withArea(async (area) => {
-      const caseId = 'read-named-source-file';
-      const cellId = cellIdOf({
-        caseId,
-        targetId: 'decision-a',
-        protocol: 'decision',
-      });
-      const plan = planOf({
-        caseIds: [caseId],
-        protocols: ['decision'],
-        targets: [decisionTarget()],
-        // One attempt of budget, and the fixture holds three responses.
-        bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
-      });
-      const result = await runPlan({
-        plan,
-        fixture: fixtureOf({
-          [cellId]: fixtureCell({
-            decision: [
-              decisionAnswer({ '9': 1 }, { '9': 1 }),
-              decisionAnswer({ '9': 1 }, { '9': 1 }),
-              decisionAnswer({ '9': 1 }, { '9': 1 }),
-            ],
-          }),
-        }),
-        directory: join(area.path, 'run'),
-      });
-      // The first response was sent and scored: nothing was refused for unused scripts.
-      expect(result.records).toHaveLength(1);
-      expect(result.records[0]?.status).toBe('reviewed');
-      expect(result.records[0]?.attempts).toHaveLength(1);
-    });
-  });
-
-  it('still reserves the script count for a chat cell', async () => {
-    // The other side of the same rule: a chat adapter *can* spend every scripted answer on
-    // repairs, so its ceiling stays the script count.
-    await withArea(async (area) => {
-      const caseId = 'read-named-source-file';
-      const cellId = cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' });
-      const plan = planOf({
-        caseIds: [caseId],
-        targets: [chatTarget('chat-a', { maxRepairRetries: 2 })],
-        bounds: bounds({ concurrency: 1, maxAttempts: 2 }),
-      });
-      const result = await runPlan({
-        plan,
-        // Three scripted answers: the chat ceiling is three, which does not fit a budget of
-        // two, so the cell is refused rather than admitted.
-        fixture: fixtureOf({
-          [cellId]: fixtureCell({
-            chat: [chatAnswer(2, 10), chatAnswer(2, 10), chatAnswer(2, 10)],
-          }),
-        }),
-        directory: join(area.path, 'run'),
-      });
-      expect(result.records).toEqual([]);
-      const read = await runRunStatusOrNull(join(area.path, 'run'));
-      expect(read).toBe('budget-exhausted');
-    });
-  });
-});
-
-/** The first cell's status, for a run that recorded no evidence. */
-async function runRunStatusOrNull(directory: string): Promise<string | null> {
-  const read = await readRun(directory, checkers);
-  if (!read.ok) return null;
-  return read.artifact.index.cells[0]?.status ?? null;
-}

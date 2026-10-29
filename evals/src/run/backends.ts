@@ -31,6 +31,8 @@ import {
   offlineChatBackend,
   offlineDecisionBackend,
 } from '../../../src/reviewer/offline.js';
+import { estimateTokenCount } from 'tokenx';
+
 import type { LlmLike } from '../../../src/reviewer/llm.js';
 
 import { credentialRefOf } from './plan.js';
@@ -47,6 +49,8 @@ export interface BackendContext {
   readonly transport: RunTransportName;
   /** The fixture's scripts for this cell; null for a live plan. */
   readonly fixture: FixtureCell | null;
+  /** The run's input bound, which every chat attempt must respect. */
+  readonly maxInputTokens: number;
   /** The caller's lifetime, so an aborted run stops its in-flight request. */
   readonly signal: AbortSignal;
   /** How a live chat call reaches the host's LLM service. */
@@ -67,7 +71,11 @@ export type BackendResult =
  * the production offline adapter is what interprets them: a second reader here
  * would be a second definition of what a scripted refusal means.
  */
-function offlineChat(target: RunTarget, fixture: FixtureCell): BackendResult {
+function offlineChat(
+  target: RunTarget,
+  fixture: FixtureCell,
+  maxInputTokens: number,
+): BackendResult {
   const config = target.chat;
   if (config === null) {
     return {
@@ -85,13 +93,28 @@ function offlineChat(target: RunTarget, fixture: FixtureCell): BackendResult {
       message: `fixture scripts no chat answer for target ${target.targetId}`,
     };
   }
+  const replay = offlineChatBackend({
+    scripts,
+    provider: config.provider,
+    model: config.model,
+  });
+  // The bound applies to the offline replay too: a fixture drives the same production
+  // transport, so a repair it provokes must be measured the same way. Guarding only the live
+  // path would let a test fixture send more than a live run ever could.
   return {
     ok: true,
-    backend: offlineChatBackend({
-      scripts,
-      provider: config.provider,
-      model: config.model,
-    }),
+    backend: {
+      ...replay,
+      transport: {
+        ...replay.transport,
+        llm: boundedStream({
+          llm: replay.transport.llm,
+          maxInputTokens: maxInputTokens,
+          provider: config.provider,
+          model: config.model,
+        }),
+      },
+    },
   };
 }
 
@@ -125,6 +148,49 @@ function offlineDecision(
 }
 
 /**
+ * A chat stream guard that enforces the run's input bound on every attempt.
+ *
+ * Admission can only measure the request it is about to build — the first one. A repair is
+ * built later, inside production's transport, and its size depends on the rejection text
+ * production embeds: `readChatAnswer` reports every unexpected key it found, and a key has
+ * no length limit, so a malformed answer with one very long unexpected member produces a
+ * correction message far larger than any constant allowance.
+ *
+ * The guard therefore measures the messages of *each* call with the same estimator the
+ * renderer uses, and refuses the oversized one before it is sent. A refusal is an error the
+ * transport reports as a failed attempt, which is exactly right: the request was never made,
+ * so the artifact must not record it as an attempt that reached a provider.
+ */
+function boundedStream(parts: {
+  readonly llm: LlmLike;
+  readonly maxInputTokens: number;
+  readonly provider: string;
+  readonly model: string;
+}): LlmLike {
+  return {
+    stream: (options) => {
+      const tokens =
+        estimateTokenCount(options.system) +
+        options.messages.reduce(
+          (sum, message) =>
+            sum +
+            message.content.reduce(
+              (inner, part) => inner + estimateTokenCount(part.text),
+              0,
+            ),
+          0,
+        );
+      if (tokens > parts.maxInputTokens) {
+        throw new RangeError(
+          `refusing to send ${String(tokens)} input tokens from ${parts.provider}/${parts.model}: above the run's ${String(parts.maxInputTokens)} bound`,
+        );
+      }
+      return parts.llm.stream(options);
+    },
+  };
+}
+
+/**
  * The live chat backend for one cell.
  *
  * `provider: "session"` is refused rather than resolved: there is no host session in
@@ -132,7 +198,11 @@ function offlineDecision(
  * was already accepted. Refusing here names the plan's mistake at the place it can
  * still be fixed.
  */
-function liveChat(target: RunTarget, llm: LlmLike | null): BackendResult {
+function liveChat(
+  target: RunTarget,
+  llm: LlmLike | null,
+  maxInputTokens: number,
+): BackendResult {
   const config = target.chat;
   if (config === null) {
     return {
@@ -157,7 +227,12 @@ function liveChat(target: RunTarget, llm: LlmLike | null): BackendResult {
     backend: {
       kind: 'chat',
       transport: {
-        llm,
+        llm: boundedStream({
+          llm,
+          maxInputTokens: maxInputTokens,
+          provider: config.provider,
+          model: config.model,
+        }),
         chat: {
           provider: config.provider,
           model: config.model,
@@ -256,12 +331,12 @@ export function backendFor(
       context.fixture === null
         ? { ok: false, message: 'an offline cell has no fixture entry' }
         : protocol === 'chat'
-          ? offlineChat(target, context.fixture)
+          ? offlineChat(target, context.fixture, context.maxInputTokens)
           : offlineDecision(target, context.fixture);
   } else {
     built =
       protocol === 'chat'
-        ? liveChat(target, context.llm)
+        ? liveChat(target, context.llm, context.maxInputTokens)
         : liveDecision(target, context.readCredential);
   }
   if (!built.ok) return built;
