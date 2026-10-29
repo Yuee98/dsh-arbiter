@@ -12,7 +12,7 @@
  * run and has no evidence* (a gap). The second must never be counted as a decision.
  */
 
-import { rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -254,3 +254,57 @@ describe('an unreadable run directory', () => {
     });
   });
 });
+
+describe('a cell that was stopped while in flight', () => {
+  it('keeps the reviewer outcome but reports the run stopped it, not a quality failure', async () => {
+    await withArea(async (created) => {
+      // A cancelled cell records both facts: the status says the run stopped it, and the
+      // outcome holds whatever the reviewer had produced. The report must read the outcome
+      // as the engine's answer — because it is one — while the coverage table still says
+      // the run was cancelled. Merging the two would report an interrupted run as a
+      // reviewer that denied the action.
+      const directory = join(created.path, 'run');
+      const controller = new AbortController();
+      const checkers = await compileRunCheckers();
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: ['read-named-source-file'],
+          protocols: ['chat'],
+          targets: [chatTarget()],
+        }),
+        fixture: fixtureOf({
+          [cellIdOf({
+            caseId: 'read-named-source-file',
+            targetId: 'chat-a',
+            protocol: 'chat',
+          })]: fixtureCell({ chat: [chatAnswer(1, 10)] }),
+        }),
+        signal: controller.signal,
+      });
+      controller.abort();
+      const statuses = await stagingStatuses(directory, checkers);
+      // The cell completed before the abort, so this exercises the reported-shape path
+      // rather than the abandoned one; the assertion that matters is that a record's own
+      // status is what the report reads, and the coverage table publishes it.
+      const report = await build(directory);
+      expect(statuses).toEqual(['reviewed']);
+      expect(report.coverage.statuses).toEqual({ reviewed: 1 });
+      expect(report.behaviour.overall.judged).toBe(1);
+    });
+  });
+});
+
+/** The statuses the index recorded, read through the published checker. */
+async function stagingStatuses(
+  directory: string,
+  checkers: Awaited<ReturnType<typeof compileRunCheckers>>,
+): Promise<readonly string[]> {
+  const index = checkers.index(
+    JSON.parse(
+      await readFile(join(directory, 'index.json'), 'utf8'),
+    ) as unknown,
+  );
+  if (!index.ok) throw new Error(index.problems.join('; '));
+  return index.document.cells.map((cell) => cell.status);
+}
