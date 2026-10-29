@@ -16,9 +16,17 @@
  * the settings, and the only timestamp in them is the run's own `updatedAt`.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { readlinkSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, posix, relative } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  posix,
+  resolve,
+} from 'node:path';
 
 import type { EvaluationReport } from '../metrics/types.js';
 import { renderHtml } from './html.js';
@@ -199,26 +207,56 @@ function sameOrInside(path: string, directory: string): boolean {
   return target === root || target.startsWith(`${root}${sep}`);
 }
 
-/** One path with every existing symbolic link in it resolved, or as written when none can be. */
+/**
+ * One path with every symbolic link in it resolved, whether or not the link's target exists.
+ *
+ * `realpath` answers only for a path that resolves to something. Two shapes must still be
+ * compared as the evidence they point at:
+ *
+ *   - a *dangling* link. `writeFile` follows it and creates the target, so a destination that
+ *     is a link into protected evidence would modify that evidence even though neither spelling
+ *     exists as a file. `existsSync` reported such an entry as absent, which is how the guard
+ *     stepped past it.
+ *   - a destination whose own name is new but whose directory is a link. Resolving the parent
+ *     is enough, and it is what makes `--out alias/report` compare equal to the real directory.
+ *
+ * The leaf is therefore resolved through its own link target when it has one — following a
+ * bounded chain so a link-to-link is handled — and the parent through its real path.
+ */
 function resolvedName(path: string): string {
-  const existing = deepestExisting(path);
-  if (existing === null) return normalize(path);
-  return normalize(join(realpathSync(existing), relative(existing, path)));
+  const normalised = normalize(path);
+  try {
+    return normalize(realpathSync(normalised));
+  } catch {
+    // Nothing at this path: fall through to resolve it by parts.
+  }
+  const parent = dirname(normalised);
+  const leaf = basename(normalised);
+  const resolvedParent =
+    parent === normalised ? normalised : resolvedName(parent);
+  const candidate = join(resolvedParent, leaf);
+  const target = linkTargetOf(candidate);
+  if (target === null) return candidate;
+  const absolute = isAbsolute(target)
+    ? target
+    : resolve(resolvedParent, target);
+  // A link whose target is itself a link is followed once more; a chain longer than that is
+  // not something a report destination legitimately is, and stopping keeps this total.
+  return resolvedName(absolute);
 }
 
 /**
- * The longest prefix of a path that exists, or null when nothing does.
+ * The target a symbolic link names, or null when this path is not a link.
  *
- * Walking up from the leaf is what lets an unresolved destination still be compared through a
- * symlinked ancestor: the report file itself may not exist, but the directory holding it does.
+ * A dangling link is the case that motivated this: `writeFile` follows it and creates the
+ * target, so a destination that is a link into protected evidence must be refused even though
+ * neither the link's own path nor its target exists as a file.
  */
-function deepestExisting(path: string): string | null {
-  let current = normalize(path);
-  for (;;) {
-    if (existsSync(current)) return current;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
+export function linkTargetOf(path: string): string | null {
+  try {
+    return readlinkSync(path);
+  } catch {
+    return null;
   }
 }
 

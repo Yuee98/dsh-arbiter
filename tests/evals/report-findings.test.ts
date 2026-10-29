@@ -1689,3 +1689,119 @@ describe('Codex review: a symlinked path cannot hide an evidence collision', () 
     });
   });
 });
+
+describe('Codex review: a dangling symlink into evidence is refused', () => {
+  it('rejects an output that is a dangling link into the dataset cases', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const original = await committedCase('read-named-source-file');
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+      });
+      // The report's JSON document is `<prefix>.json`, so the link has to sit at that exact
+      // name: a link whose target does not exist yet, pointing inside the protected cases
+      // directory. `writeFile` follows it and would create the target, so the guard has to
+      // refuse it even though neither spelling exists as a file.
+      const link = `${join(created.path, 'injected')}.json`;
+      const { symlink } = await import('node:fs/promises');
+      await symlink(join(dataset, 'cases/injected-case.json'), link);
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: link.replace(/\.json$/u, ''),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      // No report document was created at the link's target.
+      await expect(
+        readFile(join(dataset, 'cases/injected-case.json'), 'utf8'),
+      ).rejects.toThrow();
+      // And the case the dataset already had is untouched.
+      expect(
+        await readFile(
+          join(dataset, 'cases/read-named-source-file.json'),
+          'utf8',
+        ),
+      ).toBe(JSON.stringify(original, null, 2) + '\n');
+    });
+  });
+
+  it('rejects a dangling link into the run records directory', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const link = `${join(created.path, 'records-link')}.json`;
+      const { symlink } = await import('node:fs/promises');
+      await symlink(join(directory, 'records/injected.json'), link);
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: link.replace(/\.json$/u, ''),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      await expect(
+        readFile(join(directory, 'records/injected.json'), 'utf8'),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('still allows a dangling link that points outside the evidence', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const link = `${join(created.path, 'ordinary-report')}.json`;
+      const { symlink, mkdir } = await import('node:fs/promises');
+      // The link's target directory exists but the file does not: the ordinary "write a new
+      // report through a link" case.
+      await mkdir(join(created.path, 'targets'), { recursive: true });
+      await symlink(join(created.path, 'targets/ordinary'), link);
+      const err: string[] = [];
+      const out: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: (line) => out.push(line),
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: link.replace(/\.json$/u, ''),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: false,
+        },
+      );
+      // The guard is about evidence, not about links: a link into a scratch directory is an
+      // ordinary destination and must keep working.
+      expect(err.join('\n')).not.toContain('lies inside evidence');
+      expect(code).toBe(0);
+      // `writeFile` replaces the link rather than following it, so the document lands at the
+      // destination's own name. What this test pins is the guard's decision, not the kernel's
+      // link semantics.
+      await expect(readFile(link, 'utf8')).resolves.toBeTruthy();
+    });
+  });
+});
