@@ -214,6 +214,24 @@ describe('exact-half arithmetic', () => {
     expect(outcome.verdict).toBe('review-escalate');
   });
 
+  test('the reported half-boundary distribution stays exactly half', () => {
+    // Reported on the PR: masses 0.1, 0.2, 0.15, 0.05 at levels 0-3 and 0.5 at
+    // level 9. Mathematically F(3) is exactly one half; JavaScript sums the first
+    // four as 0.5000000000000001, which a naive comparison would call decisive.
+    const reported = dist({
+      '0': 0.1,
+      '1': 0.2,
+      '2': 0.15,
+      '3': 0.05,
+      '9': 0.5,
+    });
+    expect(0.1 + 0.2 + 0.15 + 0.05).toBeGreaterThan(0.5);
+    // Risk requires strictly more than half, so it continues to the top band.
+    expect(bandFromNative(reported, 'risk')).toBe(10);
+    // Authorization accepts one half, so it stops at level 3 (public band 4).
+    expect(bandFromNative(reported, 'authorization')).toBe(4);
+  });
+
   test('a probability in exponent form still counts toward the median', () => {
     // `String(1e-7)` is "1e-7", so a parser that only accepted plain decimals
     // silently dropped this value and read F(1) as 0.4999999 instead of 0.5.

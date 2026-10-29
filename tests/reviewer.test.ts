@@ -516,8 +516,24 @@ describe('credential redaction on a malformed answer', () => {
     JSON.stringify({
       model: 'clef',
       answers: {
-        // An invalid value in a valid-looking field: the value is the secret.
-        risk: { type: 'score', probabilities: { '0': SECRET }, score: 1 },
+        // A complete ten-level key set so this exercises the *value* check rather
+        // than stopping at the key-set check: the secret sits in a value position.
+        risk: {
+          type: 'score',
+          probabilities: {
+            '0': SECRET,
+            '1': 0,
+            '2': 0,
+            '3': 0,
+            '4': 0,
+            '5': 0,
+            '6': 0,
+            '7': 0,
+            '8': 0,
+            '9': 0,
+          },
+          score: 1,
+        },
         authorized: { type: 'score', probabilities: { 0: 1 }, score: 1 },
         secrets: { type: 'noul', noul: 0.01 },
         destructive: { type: 'noul', noul: 0.01 },
