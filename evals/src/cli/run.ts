@@ -1,8 +1,8 @@
 /**
  * The evals command line's commands.
  *
- * Five offline data commands, four run commands, one report command and three
- * experiment commands:
+ * Five offline data commands, four run commands, one report command, one replay
+ * command and three experiment commands:
  *
  *   check-all  validate every dataset in the repository, plus the rubric snapshot
  *   check      validate one dataset and report problems, without writing anything
@@ -28,6 +28,10 @@
  * `report` is the opposite of `run`: it only reads, and a report rebuilt from two copies
  * of one run directory is byte-identical. That is why it may be called from a check even
  * though `run` may not.
+ *
+ * `replay` reads the same evidence and writes to a *different* directory: the source run
+ * is opened read-only, and each variant's derivation is a complete run directory plus a
+ * lineage. It never re-dispatches, so a saved answer is the only thing it can re-read.
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -56,6 +60,13 @@ import {
   showRun,
 } from '../run/commands.js';
 import type { RunIo } from '../run/commands.js';
+import {
+  isReplayCommand,
+  parseReplayCommand,
+  REPLAY_USAGE,
+  replayRun,
+} from '../replay/command.js';
+import type { ReplayCommand } from '../replay/command.js';
 import {
   isReportCommand,
   parseReportCommand,
@@ -99,7 +110,11 @@ export interface Command {
  * been read.
  */
 export type ParsedCommand =
-  Command | RunCommandLine | ReportCommand | ExperimentCommandLine;
+  | Command
+  | RunCommandLine
+  | ReportCommand
+  | ReplayCommand
+  | ExperimentCommandLine;
 
 /** The run commands' own command line shape, re-exported for callers. */
 import type { RunCommandLine } from './run-commands.js';
@@ -119,6 +134,8 @@ const USAGE = [
   RUN_USAGE,
   '',
   REPORT_USAGE,
+  '',
+  REPLAY_USAGE,
   '',
   EXPERIMENT_USAGE,
 ].join('\n');
@@ -173,6 +190,13 @@ export function parseCommand(argv: readonly string[]): ParsedCommand | string {
     // The report command has its own flags for the same reason: `--write` on `report`
     // would be accepted by a shared parser and then do nothing.
     return parseReportCommand(
+      [first, ...rest].filter((entry) => entry !== undefined),
+    );
+  }
+  if (isReplayCommand(name)) {
+    // The replay command's flags describe axes rather than files, so no other
+    // command's parser can read them.
+    return parseReplayCommand(
       [first, ...rest].filter((entry) => entry !== undefined),
     );
   }
@@ -536,7 +560,11 @@ export async function runCli(
     return 2;
   }
   if ('directory' in command) {
-    return reportRun(io, command);
+    // Both offline read commands name a run directory; their own flag sets decide
+    // which one the caller invoked, so the shape is what distinguishes them here.
+    return 'variants' in command
+      ? replayRun(io, command)
+      : reportRun(io, command);
   }
   if ('plan' in command) {
     return runCommand(io, command);
