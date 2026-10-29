@@ -139,6 +139,58 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 - 费用是状态：`cost.amount` 恒为 `null`，报告**不输出费用合计**。
 - 超时／取消时未报告的预留 attempt 单列，不编造 token 数。
 
+## 离线回放
+
+```sh
+pnpm evals replay <运行目录> --out <派生父目录>                 # 用生产同一套阈值重算（应与原结果一致）
+pnpm evals replay <运行目录> --out <派生父目录> --threshold-risk at-least
+pnpm evals replay <运行目录> --out <派生父目录> --mode no-ask --channel unavailable
+pnpm evals replay <运行目录> --variants <变体.json> --out <派生父目录>
+```
+
+`replay` 只读源运行目录，把每个变体写成一个**独立的派生运行目录**（`plan.json`／`index.json`／`records/`／`fixture.json`／`lineage.json`）并在其中用既有报告接口重建三层报告。它不派发、不解析凭据、不调用模型：**保存的响应是它唯一能读的东西**。
+
+### 三个轴，且只有三个
+
+| 轴                         | 取值                                                           | 默认（= 生产）                    |
+| -------------------------- | -------------------------------------------------------------- | --------------------------------- |
+| `answer`                   | `response-text`／`recorded-parse`                              | `response-text`                   |
+| `thresholds.risk`          | `strict`／`at-least`                                           | `strict`（累计质量 **>** 一半）   |
+| `thresholds.authorization` | `strict`／`at-least`                                           | `at-least`（累计质量 **≥** 一半） |
+| `settlement`               | `mode`：`ask`／`no-ask`；`channel`：`available`／`unavailable` | `ask`／`available`                |
+
+轴值就是变体身份：目录名是三条轴的可读拼接（`text-strict-at-least-ask-available`），`digest` 是三条轴的摘要，`description` 不参与身份。**共同矩阵不是轴**：`requiredAuthorizationFor` 只有一张表，生产没有第二张，所以回放不把它当旋钮——那会是「与被测引擎并列的第二个引擎」，而新的放行规则属于窗口二的产品裁决。
+
+### 为什么不是复制判定逻辑
+
+| 步骤       | 复用的是                                                                       |
+| ---------- | ------------------------------------------------------------------------------ |
+| 读答案     | `src/reviewer/signals.ts` 的 `readChatAnswer`／`readDecisionAnswer`            |
+| 选档       | `src/review-contract/normalize.ts` 的 `bandFrom`（含精确十进制累加与一半判定） |
+| 判定位     | `src/review-contract/matrix.ts` 的 `scoreReview`                               |
+| 材料可用性 | `evaluateReview`／`materialAvailability`（M0 的缺口语义）                      |
+| 重建报告   | `evals/src/metrics` 与 `evals/src/report`，读派生目录本身                      |
+
+同一变体命中生产阈值时，回放直接调用 `evaluateReview`，所以「同版本重现原结果」是**构造上成立**而不是两次实现互相比对的结果；`tests/evals/replay-thresholds.test.ts` 同时验证三层报告逐段相等。
+
+### 故障优先级
+
+- HTTP 失败、`success:false`（即便同时带完整 answers）、传输失败、解析失败：**在任何阈值／模式下都保持故障**。派生报告照旧把技术结果单列、保留已报告 usage，未知用量仍是 `null`。
+- 原文被遮蔽到无法解析（见下节「已知上游限制」）：该格标 `not-replayable` 并写明原因，**保留原判定**、不修补、不参与派生比较；换 `--answer recorded-parse` 可读适配器自己的解析结果。
+- 材料有阻塞缺口（`insufficient-material`）：阈值不适用，结果不变。
+
+### 不变量
+
+- 源运行目录与数据集**逐字节不变**；派生目录不得位于源内、不得等于源、不得包含源。
+- 派生索引复刻源的 `spent`、attempt 与时间戳：回放没有新增请求，也就没有新增消耗。
+- `labels/` 只读。派生报告按**同一份**人类参考比较引擎答案；标签不因回放而改变。
+- 同一变体的两次回放产出逐字节相同的派生文档（除 `lineage.json` 里记录的目标目录名）。
+- 每个格子恰好出现一次：能重算的带新结果，不能的带原判定与原因。
+
+### lineage
+
+`lineage.json` 记录：变体三轴与 `variantId`／`digest`、生产契约版本（重算实际运行的那份）、源 run id／plan 哈希／数据集摘要／版本四项、**读到的每个源文档及其实摘的 sha256**、派生目录与报告文件、逐格 disposition（`re-derived`／`kept`／`not-replayable`／`no-record`）、该格的 attempt id 与响应原文摘要、以及「源版本与运行版本不一致」等说明。拿着 lineage 可以 `sha256sum` 复核源文件是否仍是派生时那份。
+
 ## 数据分层
 
 一个数据集是一个目录：
@@ -278,6 +330,7 @@ evals/
   src/cli/           命令解析与命令实现
   src/metrics/       报告的三层指标、分组、逐例证据与可比性规则
   src/report/        Markdown／HTML／JSON 渲染、写出与 report 命令
+  src/replay/        离线回放的变体、重算、派生目录与 replay 命令
   src/cli.ts         入口（先装 loader hook 再加载其余模块）
   src/cli/register.ts 安装 loader hook（整个仓库唯一按 .ts 扩展名 import 的文件）
 tests/evals/         上述行为的测试
@@ -298,15 +351,19 @@ tests/evals/         上述行为的测试
 
 ## 已知上游限制
 
-`src/reviewer/redact.ts` 的 `redactAuthHeaders` 只豁免「`"authorization"` + 未加引号数字」。decision 协议的答案体是 `"authorization": {"type":"score",…}`，值是对象，于是被当成 header 改写为 `[redacted]`，使 `ReviewAttempt.responseText` 变成非法 JSON。
+`src/reviewer/redact.ts` 的 `redactAuthHeaders` 会重建 decision 的分数对象，但它只认**结构完整**的那种：`{"type":"score","probabilities":{…}}`。因此下面两种答案在遮蔽后会变成非法 JSON：
+
+- 答案成员缺 `"type":"score"` 标记（`"authorization": {"probabilities":{…}}`）——它不满足分数对象的判定，被当成 header 改写为 `[redacted]`；
+- 保留成员（如 `legend`）的字符串值里出现 `Authorization: …` 之类 header 形状的文本——脱敏后的值没有配对的引号，字符串被截断。
 
 影响范围：**判定与分数不受影响**（解析器读未遮蔽原文，`parsed` 完好，用量按数字字段归一化照常）。受影响的是记录里的 decision 原文可解析性，以及由它派生的 `target.responseModel`（此时为 `null`，而不是回落到配置的 model 名称）。
+
+这直接限定了离线回放的边界：读 `--answer response-text` 时，这类格子标为 `not-replayable` 并保留原判定，不修补文本；换 `--answer recorded-parse` 读适配器自己的解析结果即可重算。这是设计允许的取舍——遮蔽发生在写记录之前，回放只能基于遮蔽后的文本，不能反过来要求记录保存未遮蔽原文。
 
 这是 `src/` 侧缺陷，不在本目录修复；运行器如实保存适配器输出，不做第二次脱敏。
 
 ## 未完成事项
 
-- 报告见上节；实验配置见「候选与消融」与 `evals/experiments/`。
-- 离线回放由 RQ-20 交付，本目录不包含它。
+- 报告、离线回放与实验配置分别见「报告」「离线回放」与「候选与消融」；`evals/experiments/` 存放冻结的候选矩阵。
 - 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。
 - 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。
