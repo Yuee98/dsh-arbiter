@@ -178,6 +178,34 @@ export function redactAuthHeaders(text: string): string {
 }
 
 /**
+ * Drop every span contained in another.
+ *
+ * The extraction walks the text left to right, so a nested candidate would move the
+ * cursor backwards — and the `slice` that closes the outer span would then reintroduce
+ * the original text that follows the inner one, which is arbitrary member text that
+ * was never sanitized. Only an outermost object is rebuilt; anything inside it is
+ * handled by that rebuild as an ordinary untrusted member.
+ */
+function outermostSpans(
+  spans: readonly (readonly [number, number])[],
+): readonly (readonly [number, number])[] {
+  // Sorted by start, then by the longer span first, so an outer span is always seen
+  // before the candidates it contains.
+  const ordered = [...spans].sort((left, right) =>
+    left[0] === right[0] ? right[1] - left[1] : left[0] - right[0],
+  );
+  const kept: (readonly [number, number])[] = [];
+  let reach = -1;
+  for (const span of ordered) {
+    // A span starting before the end of the previous one is inside it.
+    if (span[0] < reach) continue;
+    kept.push(span);
+    reach = span[1];
+  }
+  return kept;
+}
+
+/**
  * Replace every verified score object with an opaque token.
  *
  * The rebuilt object keeps only the members a score answer may carry; every other
@@ -190,7 +218,7 @@ function extractScoreObjects(text: string): {
   readonly restored: readonly (readonly [string, string])[];
 } {
   const restored: (readonly [string, string])[] = [];
-  const spans = scoreObjectSpans(text);
+  const spans = outermostSpans(scoreObjectSpans(text));
   if (spans.length === 0) return { masked: text, restored };
   let out = '';
   let cursor = 0;

@@ -1422,6 +1422,45 @@ describe('the score object is exempt while every header still masks', () => {
     ).not.toContain('PRIVATE_TOKEN');
   });
 
+  test('a score object nested inside another does not leak the outer tail', () => {
+    // Extraction walks left to right, so a *nested* candidate would move the cursor
+    // backwards and the slice closing the outer span would reintroduce the original
+    // text after the inner one — arbitrary member text that was never sanitized.
+    // Only the outermost object is rebuilt; what is inside it is ordinary untrusted
+    // member data.
+    const nested =
+      '{"authorization":{"type":"score","probabilities":{"9":1},"authorization":{"type":"score","probabilities":{"9":1}},"value":"Bearer PRIVATE_TOKEN"}}';
+    expect(redactAuthHeaders(nested)).not.toContain('PRIVATE_TOKEN');
+    // The outer object is still rebuilt rather than discarded.
+    expect(redactAuthHeaders(nested)).toContain('"probabilities":{"9":1}');
+
+    // Two sibling objects at the same level are both rebuilt independently.
+    const siblings =
+      '{"a":{"authorization":{"type":"score","probabilities":{"9":1}}},"b":{"authorization":{"type":"score","probabilities":{"8":1}}}}';
+    const masked = redactAuthHeaders(siblings);
+    expect(() => JSON.parse(masked) as unknown).not.toThrow();
+    expect(masked).toContain('"probabilities":{"8":1}');
+  });
+
+  test('a nested score object masks end to end', async () => {
+    const result = await review({
+      snapshot: snapshot(),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'text',
+            text: '{"risk":2,"authorization":{"type":"score","probabilities":{"9":1},"authorization":{"type":"score","probabilities":{"9":1}},"value":"Bearer sk-nested"}}',
+          },
+        ],
+      }),
+    });
+    const attempt = result.attempts[0];
+    if (attempt === undefined) throw new Error('no attempt was recorded');
+    expect(attempt.responseText ?? '').not.toContain('sk-nested');
+  });
+
   test('a valid score answer with trailing whitespace stays readable', () => {
     // The unquoted branch consumes the blanks that follow a value, so a real answer
     // written as `…} }` reaches the check with trailing whitespace. Matching it
