@@ -4,7 +4,6 @@ import type { AttemptFailureKind, ReviewAttempt } from './attempt.js';
 import { review, type DecisionBackend, type ChatBackend } from './service.js';
 import type { LlmLike } from './llm.js';
 import { CHAT_PROTOCOL, DECISION_PROTOCOL } from './contract.js';
-import { redact, redactAuthHeaders, redactValue } from './redact.js';
 
 /**
  * The fixed synthetic probe input.
@@ -215,22 +214,24 @@ function elapsed(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
 }
 
-function attemptOf(
-  record: ReviewAttempt,
-  secrets: readonly string[],
-): ProbeAttempt {
-  const clean = (text: string): string =>
-    redact(redactAuthHeaders(text), secrets);
+/**
+ * The connection test's view of one attempt.
+ *
+ * The record arrives already masked: `review()` applies the masking boundary to
+ * every attempt, including the credential the transport reported sending. Masking
+ * it a second time here would be one more place the rule has to be right, so this
+ * projection only selects and renames fields.
+ */
+function attemptOf(record: ReviewAttempt): ProbeAttempt {
   return {
     attempt: record.attempt,
     backend: record.backend,
     protocol: record.protocol,
     durationMs: record.durationMs,
-    request: redactValue(record.request, secrets),
-    responseText:
-      record.responseText === null ? null : clean(record.responseText),
-    parsed: redactValue(record.parsed, secrets),
-    error: record.error === null ? null : clean(record.error),
+    request: record.request,
+    responseText: record.responseText,
+    parsed: record.parsed,
+    error: record.error,
   };
 }
 
@@ -409,7 +410,7 @@ async function runChat(
       signal,
       backend,
     });
-    const attempts = result.attempts.map((record) => attemptOf(record, []));
+    const attempts = result.attempts.map((record) => attemptOf(record));
     if (result.outcome.status === 'scored') {
       // A cancel that raced the answer still wins: the user ended this run and
       // must not be shown a pass they cancelled.
@@ -511,14 +512,13 @@ async function runDecision(
     return failedResult(config, startedAt, resolved.failure, []);
   }
   const { secret } = resolved;
-  const secrets = secret === undefined ? [] : [secret];
   const backend: DecisionBackend = {
     kind: 'decision',
     transport: {
       fetch,
       credentials,
-      // The value resolved above is the one this run sends, so the secret that
-      // authenticates the request is exactly the one redacted from its answer.
+      // The value resolved above is the one this run sends, which is also the one
+      // the service masks out of every attempt it returns.
       ...(secret === undefined
         ? {}
         : { preResolvedCredential: { value: secret } }),
@@ -533,9 +533,7 @@ async function runDecision(
       signal,
       backend,
     });
-    const attempts = result.attempts.map((record) =>
-      attemptOf(record, secrets),
-    );
+    const attempts = result.attempts.map((record) => attemptOf(record));
     if (result.outcome.status === 'scored') {
       if (callerCancelled(signal)) {
         return failedResult(config, startedAt, 'cancelled', attempts);
@@ -556,7 +554,7 @@ async function runDecision(
         ? 'cancelled'
         : classify({
             attempts,
-            error: redact(outcomeError(result.outcome), secrets),
+            error: outcomeError(result.outcome),
             httpStatus: httpStatusOf(attempts),
             failureKind: lastFailureKind(result.attempts),
           }),
