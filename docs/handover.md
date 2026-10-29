@@ -103,8 +103,8 @@ DSH_E2E_VERSION=0.2.1-rc.3 pnpm test:e2e:dsh
 | 文件 | 职责 |
 |---|---|
 | `src/config/rules.ts` | 规则 schema 校验（`RuleTarget` / `RuleCondition` / `RuleScope`） |
-| `src/config/format.ts` | 格式注册表（`arbiter-config-v1` / `v2`），未知格式报错 |
-| `src/config/legacy.ts` | v1 旧格式解析与**可证明等价**的转换 |
+| `src/config/format.ts` | 唯一的 `arbiter-config-v3` 声明；退役与未知格式报错 |
+| `src/config/document.ts` | 整份文档解析：各 section 与规则 |
 | `src/rules/compile.ts` | 编译规则 → 求值器；条件级 match / no-match / **unknown** |
 | `src/rules/match.ts` | `evaluateCall()`：规则求值、优先级、覆盖判定 |
 | `src/rules/selector.ts` | RFC 9535 JSONPath，保留 JSON 类型 |
