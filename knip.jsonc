@@ -8,6 +8,12 @@
     // it after RQ-04's switch and the evals subproject imports it directly, so its
     // surface is deliberately larger than today's in-tree callers.
     "src/review-contract/index.ts",
+    // The reviewer barrel is a public module boundary for two reasons: the frozen
+    // R1-R9 regression script imports `lib/reviewer.js` by name, and the new
+    // reviewer service in it is what RQ-04 wires into the gate and RQ-10 calls
+    // from the evals runner. Both make its surface larger than today's in-tree
+    // callers, the same reason the review contract has its own entry.
+    "src/reviewer.ts",
     "scripts/repair-session.ts",
     "tests/e2e/**/*.spec.ts",
     // Loaded by the isolated host as a plugin module, not imported by a test.

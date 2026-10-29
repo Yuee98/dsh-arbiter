@@ -26,12 +26,12 @@ export {
   renderSystem,
   renderUser,
 } from './reviewer/legacy/prompt.js';
+export { runChatReviewer } from './reviewer/legacy/chat.js';
 export {
   extractJsonObject,
   parseChatText,
   parseDecisionResponse,
   signalsFromChat,
 } from './reviewer/legacy/signals.js';
-export { runChatReviewer } from './reviewer/legacy/chat.js';
 export { runDecisionReviewer } from './reviewer/legacy/decision.js';
 export { PROBE_SNAPSHOT, runReviewerProbe } from './reviewer/diagnostic.js';
