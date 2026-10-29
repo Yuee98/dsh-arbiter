@@ -106,8 +106,8 @@ const SNAPSHOT: ReviewSnapshot = {
 
 /** The block labels in submission order. */
 const MATERIAL_ORDER = [
-  'ENVIRONMENT',
   'POLICY_AND_GUIDANCE',
+  'ENVIRONMENT',
   'HUMAN_AUTHORIZATION',
   'TURN_TOOL_HISTORY',
   'PRIOR_VERDICTS',
@@ -280,8 +280,8 @@ describe('the material order', () => {
     const user = renderChatUser(SNAPSHOT);
     const action = user.indexOf('PENDING_ACTION');
     for (const label of [
-      'ENVIRONMENT',
       'POLICY_AND_GUIDANCE',
+      'ENVIRONMENT',
       'HUMAN_AUTHORIZATION',
       'TURN_TOOL_HISTORY',
       'PRIOR_VERDICTS',

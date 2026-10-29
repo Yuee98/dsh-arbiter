@@ -1,10 +1,12 @@
 /**
  * The per-call material, in the one order both protocols submit it.
  *
- * The order is the design's: the stable contract first (in `contract.ts`), then
- * what may constrain this call, then what happened in this turn, then the action
- * itself with its facts and completeness report. Semantic material precedes the
- * action because a reader grades the action against it, not the other way round.
+ * The order is the design's (`docs/milestones/review-quality-and-evals.md` 2.4):
+ * the stable contract first (in `contract.ts`), then the source-labelled policy
+ * and environment, then the effective human permission and restrictions, then this
+ * turn's tool history, then the action itself with its facts, hint and the dynamic
+ * completeness report. Semantic material precedes the action because a reader
+ * grades the action against it, not the other way round.
  *
  * Two rules hold throughout:
  *
@@ -183,8 +185,10 @@ function completenessBlock(snapshot: ReviewSnapshot): string {
  */
 export function renderMaterial(snapshot: ReviewSnapshot): string {
   return [
-    environmentBlock(snapshot),
+    // The design's order: the source-labelled policy and environment come first,
+    // then the human permission and restrictions they are read against.
     policyBlock(snapshot),
+    environmentBlock(snapshot),
     authorizationBlock(snapshot),
     turnHistoryBlock(snapshot),
     priorVerdictsBlock(snapshot),
