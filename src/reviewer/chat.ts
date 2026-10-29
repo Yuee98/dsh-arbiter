@@ -43,6 +43,15 @@ export interface ChatTransportContext {
   readonly signal: AbortSignal;
   /** Omitted to inherit the host's own chain; see {@link StreamOptionsLike}. */
   readonly reasoningEffort?: string;
+  /**
+   * How to read one answer, or omitted for the production reader.
+   *
+   * The one thing an experiment may substitute. It is a function rather than a flag so
+   * the production path has no branch to take: absent means `readChatAnswer`, and a
+   * candidate B package passes a wrapper that removes its extra member first. The parser
+   * of the two score members is still the production one in either case.
+   */
+  readonly readAnswer?: (text: string) => ParsedAnswer;
 }
 
 /** One review's chat outcome: the attempts made and the answer that read. */
@@ -156,6 +165,56 @@ function routeFailure(error: string): ChatTransportResult {
   return { attempts: [], answer: null, rejection: null, error, secrets: [] };
 }
 
+/**
+ * One attempt's failed record, and why it ended the call.
+ *
+ * Separated from the loop so the loop's own branching stays about control flow: this
+ * function is the one place a transport failure is described, and it is deliberately the
+ * only place that reads `ChatStreamError`'s fields.
+ */
+function transportFailure(parts: {
+  readonly error: unknown;
+  readonly callId: string;
+  readonly attempt: number;
+  readonly route: ChatRoute;
+  readonly request: ChatRequest;
+  readonly messages: StreamOptionsLike['messages'];
+  readonly startedAt: number;
+  readonly timedOut: boolean;
+  readonly timeoutMs: number;
+}): { readonly attempt: ReviewAttempt; readonly failure: string } {
+  const message =
+    parts.error instanceof Error ? parts.error.message : String(parts.error);
+  // A provider may abort for its own reasons, so the timer's own state — not the error's
+  // name — is what proves this attempt timed out.
+  const failure = parts.timedOut
+    ? `reviewer request timed out after ${String(parts.timeoutMs)}ms`
+    : message;
+  const streamError =
+    parts.error instanceof ChatStreamError ? parts.error : null;
+  return {
+    failure,
+    attempt: attemptRecord({
+      callId: parts.callId,
+      attempt: parts.attempt,
+      route: parts.route,
+      request: parts.request,
+      messages: parts.messages,
+      startedAt: parts.startedAt,
+      responseText: null,
+      parsed: null,
+      error: failure,
+      // A stream that failed is a transport outcome unless the provider declared the
+      // failure itself, which `ChatStreamError` records.
+      failureKind: streamError === null ? 'transport' : streamError.kind,
+      // A provider that fails its own call may still have reported usage before doing
+      // so, and a billed failure is exactly the attempt an operator needs to see.
+      // Nothing else about the failure is reused.
+      rawUsage: streamError === null ? null : streamError.usage,
+    }),
+  };
+}
+
 export async function runChatTransport(
   ctx: ChatTransportContext,
   request: ChatRequest,
@@ -167,7 +226,7 @@ export async function runChatTransport(
   } catch (error) {
     return routeFailure(error instanceof Error ? error.message : String(error));
   }
-
+  const readAnswer = ctx.readAnswer ?? readChatAnswer;
   const attempts: ReviewAttempt[] = [];
   let repair: string | null = null;
   let rejection: (ParsedAnswer & { readonly ok: false }) | null = null;
@@ -180,7 +239,7 @@ export async function runChatTransport(
     const options = streamOptions(route, request, messages, ctx, attemptSignal);
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
-      const answer = readChatAnswer(collected.text);
+      const answer = readAnswer(collected.text);
       attempts.push(
         attemptRecord({
           callId,
@@ -203,36 +262,26 @@ export async function runChatTransport(
       repair = answer.error;
       rejection = answer;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      // A provider may abort for its own reasons, so the timer's own state — not
-      // the error's name — is what proves this attempt timed out.
-      const failure =
-        attemptTimeout.aborted && !ctx.signal.aborted
-          ? `reviewer request timed out after ${String(ctx.chat.timeoutMs)}ms`
-          : message;
-      attempts.push(
-        attemptRecord({
-          callId,
-          attempt,
-          route,
-          request,
-          messages,
-          startedAt,
-          responseText: null,
-          parsed: null,
-          error: failure,
-          // A stream that failed is a transport outcome unless the provider
-          // declared the failure itself, which `ChatStreamError` records.
-          failureKind:
-            error instanceof ChatStreamError ? error.kind : 'transport',
-          // A provider that fails its own call may still have reported usage
-          // before doing so, and a billed failure is exactly the attempt an
-          // operator needs to see. Nothing else about the failure is reused.
-          rawUsage: error instanceof ChatStreamError ? error.usage : null,
-        }),
-      );
+      const failed = transportFailure({
+        error,
+        callId,
+        attempt,
+        route,
+        request,
+        messages,
+        startedAt,
+        timedOut: attemptTimeout.aborted && !ctx.signal.aborted,
+        timeoutMs: ctx.chat.timeoutMs,
+      });
+      attempts.push(failed.attempt);
       // Provider failures are not retried; only format failures are.
-      return { attempts, answer: null, rejection, error: failure, secrets: [] };
+      return {
+        attempts,
+        answer: null,
+        rejection,
+        error: failed.failure,
+        secrets: [],
+      };
     }
   }
   return {

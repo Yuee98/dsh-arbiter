@@ -35,11 +35,7 @@ import {
   runDecisionTransport,
   type DecisionTransportContext,
 } from './decision.js';
-import {
-  renderChatRequest,
-  renderChatUser,
-  renderDecisionRequest,
-} from './prompt.js';
+import { PRODUCTION_PACKAGE, type ReviewPackage } from './package.js';
 import { redact, redactAuthHeaders } from './redact.js';
 import { aggregateUsage, type UsageAggregate } from './usage.js';
 
@@ -117,36 +113,63 @@ function outcomeOf(
  * A transport failure and a malformed answer both end as `review-failure`, but
  * they are not conflated: the reason names which happened, because the difference
  * decides whether a person is asked about a broken reviewer or a confused one.
+ *
+ * The package is production's, always. An experiment renders its own package and calls
+ * {@link reviewWith}; a caller of this function cannot select a variant, which is what
+ * makes "the experiment did not change production" a property of the signature.
  */
 export async function review(request: ReviewRequest): Promise<ReviewResult> {
-  const { snapshot, callId, signal } = request;
-  const transport = await runTransport(request, snapshot, callId, signal);
-  // One masking boundary, applied to every attempt before it is exposed. A
-  // consumer storing or reporting these records must not have to know which field
-  // can carry a credential, and two consumers implementing that rule separately is
-  // how a boundary leaks.
-  const attempts = transport.attempts.map((attempt) =>
-    maskAttempt(attempt, transport.secrets),
-  );
-  return {
-    protocol: transport.protocol,
-    attempts,
-    usage: usageOf(attempts),
-    outcome:
-      transport.answer === null
-        ? failureOutcome(
-            // The reason quotes provider text, so it crosses the same boundary as
-            // the attempt's own error. Masking it here means a caller never has to
-            // remember that the two fields carry the same risk.
-            redact(
-              redactAuthHeaders(
-                transport.error ?? 'the reviewer produced no answer',
+  return reviewWith(PRODUCTION_PACKAGE)(request);
+}
+
+/**
+ * The service for one package: a review function that renders and reads as that package.
+ *
+ * Everything downstream of the read is shared: the masking boundary, the usage
+ * aggregate and the outcome mapping are this module's own code, whatever package
+ * produced the scores. A variant therefore cannot report a different outcome for the
+ * same two bands, and the probe it collected is carried beside the result rather than
+ * folded into it.
+ */
+export function reviewWith(
+  pkg: ReviewPackage,
+): (request: ReviewRequest) => Promise<ReviewResult> {
+  return async (request) => {
+    const { snapshot, callId, signal } = request;
+    const transport = await runTransport(
+      pkg,
+      request,
+      snapshot,
+      callId,
+      signal,
+    );
+    // One masking boundary, applied to every attempt before it is exposed. A
+    // consumer storing or reporting these records must not have to know which field
+    // can carry a credential, and two consumers implementing that rule separately is
+    // how a boundary leaks.
+    const attempts = transport.attempts.map((attempt) =>
+      maskAttempt(attempt, transport.secrets),
+    );
+    return {
+      protocol: transport.protocol,
+      attempts,
+      usage: usageOf(attempts),
+      outcome:
+        transport.answer === null
+          ? failureOutcome(
+              // The reason quotes provider text, so it crosses the same boundary as
+              // the attempt's own error. Masking it here means a caller never has to
+              // remember that the two fields carry the same risk.
+              redact(
+                redactAuthHeaders(
+                  transport.error ?? 'the reviewer produced no answer',
+                ),
+                transport.secrets,
               ),
-              transport.secrets,
-            ),
-            transport.rejection?.partial ?? NO_PARTIAL,
-          )
-        : outcomeOf(snapshot, transport.answer.scores),
+              transport.rejection?.partial ?? NO_PARTIAL,
+            )
+          : outcomeOf(snapshot, transport.answer.scores),
+    };
   };
 }
 
@@ -179,17 +202,25 @@ interface TransportRun {
   readonly secrets: readonly string[];
 }
 
-/** Run whichever transport this request names. */
+/**
+ * Run whichever transport this request names.
+ *
+ * The package is passed in, not re-derived: rendering and reading are the two halves a
+ * variant is allowed to change, and they have to change together or a variant could ask
+ * one question and read the answer to another.
+ */
 async function runTransport(
+  pkg: ReviewPackage,
   request: ReviewRequest,
   snapshot: ReviewSnapshot,
   callId: string,
   signal: AbortSignal,
 ): Promise<TransportRun> {
   if (request.backend.kind === 'chat') {
+    const rendered = pkg.renderChat(snapshot);
     const result = await runChatTransport(
-      { ...request.backend.transport, signal },
-      renderChatRequest(snapshot),
+      { ...request.backend.transport, signal, readAnswer: pkg.readChat },
+      rendered,
       callId,
     );
     return {
@@ -204,8 +235,8 @@ async function runTransport(
     };
   }
   const result = await runDecisionTransport(
-    { ...request.backend.transport, signal },
-    renderDecisionRequest(renderChatUser(snapshot)),
+    { ...request.backend.transport, signal, readAnswer: pkg.readDecision },
+    pkg.renderDecision(snapshot),
     callId,
   );
   return {
