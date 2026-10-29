@@ -2681,7 +2681,7 @@ describe('the input bound covers repair attempts', () => {
       // attempt's error — the artifact says what was sent and what was not.
       expect(record?.attempts).toHaveLength(2);
       expect(record?.attempts[0]?.error).toContain('must contain exactly');
-      expect(record?.attempts[1]?.error).toContain('above the run');
+      expect(record?.attempts[1]?.error).toContain('would exceed the run');
       expect(record?.attempts[1]?.responseText).toBeNull();
       // The bound was held: the oversized correction message never became a sent request.
       expect(record?.attempts[1]?.failureKind).toBe('transport');
@@ -2788,6 +2788,67 @@ describe('the input bound covers repair attempts', () => {
       });
       expect(result.records).toHaveLength(1);
       expect(result.records[0]?.status).toBe('reviewed');
+    });
+  });
+});
+
+describe('a pre-send refusal is not a model attempt', () => {
+  it('does not spend budget or count usage for a request it never sent', async () => {
+    // The finding: production turns any thrown stream into an attempt record, so a request
+    // the runner refused *before* invoking the transport was counted as a model call —
+    // inflating the attempt count, polluting the usage denominator, and spending budget a
+    // run still had.
+    await withArea(async (area) => {
+      const caseIds = ['read-named-source-file', 'read-repo-index-with-cache'];
+      const cells = caseIds.map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      const entry = cases.find((candidate) => candidate.caseId === caseIds[0]);
+      if (entry === undefined) throw new Error('the fixture case is missing');
+      const { caseMaterial } = await import('../../evals/src/run/material.js');
+      const base = caseMaterial(entry, 'chat', { maxInputTokens: 10_000 });
+      // A valid JSON answer with one absurdly long unexpected key: the parser rejects it and
+      // names the key, so the repair it provokes is far larger than the bound.
+      const malformed = JSON.stringify({
+        risk: 2,
+        authorization: 9,
+        ['K'.repeat(40_000)]: true,
+      });
+      const plan = planOf({
+        caseIds,
+        targets: [chatTarget('chat-a', { maxRepairRetries: 1 })],
+        context: { maxInputTokens: base.snapshot.budget.maxInputTokens },
+        // Two attempts for two cells: the refused repair must give its allowance back for
+        // the second cell to run at all.
+        bounds: bounds({
+          concurrency: 1,
+          maxAttempts: 2,
+          maxInputTokens: base.material.estimatedInputTokens + 1_000,
+        }),
+      });
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [cells[0] ?? '']: fixtureCell({
+            chat: [{ kind: 'text', text: malformed }, chatAnswer(2, 10)],
+          }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(3, 9)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+
+      // The first cell keeps the parser's rejection as its only sent attempt, and keeps the
+      // bound refusal as a separate, unsent entry.
+      const first = result.records.find((record) => record.cellId === cells[0]);
+      expect(first?.attempts).toHaveLength(2);
+      expect(first?.attempts[1]?.error).toContain('refusing to send');
+      // Usage covers what was sent: one attempt, not two.
+      expect(first?.usage?.attempts).toBe(1);
+      // And the second cell ran, because the refused request cost no budget.
+      const second = result.records.find(
+        (record) => record.cellId === cells[1],
+      );
+      expect(second?.status).toBe('reviewed');
     });
   });
 });

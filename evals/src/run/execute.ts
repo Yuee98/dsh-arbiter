@@ -31,7 +31,7 @@ import { aggregateUsage } from '../../../src/reviewer/usage.js';
 import { inputHashOf } from '../data/eligibility.js';
 import type { ReviewCase } from '../data/types.js';
 
-import { backendFor } from './backends.js';
+import { backendFor, PRESEND_PREFIX } from './backends.js';
 import type { BackendContext } from './backends.js';
 import type { CaseMaterial } from './material.js';
 import { CELL_RECORD_VERSION } from './types.js';
@@ -101,6 +101,21 @@ function attemptKind(attempt: number): RunAttempt['kind'] {
 /** One production attempt, tagged with how it came to exist. */
 function tagged(attempt: ReviewAttempt): RunAttempt {
   return { ...attempt, kind: attemptKind(attempt.attempt) };
+}
+
+/**
+ * Whether an attempt represents a request that was actually sent.
+ *
+ * Production reports every throw from a stream as a transport attempt, including one this
+ * runner threw *before* invoking the transport to enforce the run's input bound. That entry
+ * is a real refusal but not a model call: counting it would inflate the attempt count, put a
+ * request nobody made into the usage denominator, and spend budget the run still has.
+ *
+ * `PRESEND_PREFIX` is the marker, and it is exported rather than inlined so the two sides
+ * cannot drift: production keeps only the message, so the message has to carry the fact.
+ */
+export function wasSent(attempt: RunAttempt): boolean {
+  return !(attempt.error ?? '').startsWith(PRESEND_PREFIX);
 }
 
 /** A non-array object, for narrowing a parsed body without asserting its type. */
@@ -360,6 +375,7 @@ function recordOf(parts: {
   readonly abandonment?: CellAbandonment;
 }): CellRecord {
   const { deps } = parts;
+  const sent = parts.attempts.filter(wasSent);
   return {
     documentVersion: CELL_RECORD_VERSION,
     runId: deps.runId,
@@ -372,7 +388,7 @@ function recordOf(parts: {
     target: targetRecordOf(
       deps.target,
       deps.protocol,
-      parts.attempts,
+      sent,
       tierOf(deps.target, deps.protocol),
     ),
     material: parts.material.material,
@@ -380,11 +396,14 @@ function recordOf(parts: {
     stopReason: parts.stopReason,
     outcome: parts.outcome,
     attempts: parts.attempts,
+    // Usage covers the requests that were sent. A pre-send refusal carries no provider
+    // payload and no attempt, so including it would put a request nobody made into the
+    // coverage denominator.
     usage:
-      parts.attempts.length === 0
+      sent.length === 0
         ? null
         : aggregateUsage(
-            parts.attempts.map((attempt) => ({
+            sent.map((attempt) => ({
               attemptId: attempt.attemptId,
               usage: attempt.normalizedUsage,
             })),

@@ -148,6 +148,15 @@ function offlineDecision(
 }
 
 /**
+ * The prefix a pre-send refusal carries.
+ *
+ * Production's transport turns any thrown stream into an attempt record, keeping only the
+ * message. A refused request is therefore indistinguishable from a sent one unless the
+ * message says so, so the marker lives in one exported place and both sides read it.
+ */
+export const PRESEND_PREFIX = 'refusing to send ';
+
+/**
  * A chat stream guard that enforces the run's input bound on every attempt.
  *
  * Admission can only measure the request it is about to build — the first one. A repair is
@@ -181,8 +190,12 @@ function boundedStream(parts: {
           0,
         );
       if (tokens > parts.maxInputTokens) {
+        // The prefix is a contract, not decoration: production records a thrown stream as a
+        // transport attempt and copies the message into `error`, so this is the only channel
+        // that survives into the artifact. `PRESEND_PREFIX` is what the runner checks to know
+        // the request was never sent, and therefore must not consume budget or usage.
         throw new RangeError(
-          `refusing to send ${String(tokens)} input tokens from ${parts.provider}/${parts.model}: above the run's ${String(parts.maxInputTokens)} bound`,
+          `${PRESEND_PREFIX}${String(tokens)} input tokens from ${parts.provider}/${parts.model} would exceed the run's ${String(parts.maxInputTokens)} bound`,
         );
       }
       return parts.llm.stream(options);

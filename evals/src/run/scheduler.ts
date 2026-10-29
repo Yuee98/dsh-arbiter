@@ -38,6 +38,7 @@ import type { ReviewCase } from '../data/types.js';
 import { runCell, timedOutRecord } from './execute.js';
 import type { CellDeps } from './execute.js';
 import { caseMaterial } from './material.js';
+import { wasSent } from './execute.js';
 import { attemptCeilingOf } from './plan.js';
 import type { PlannedCell } from './plan.js';
 import type {
@@ -519,7 +520,10 @@ async function runUnderTimeout(parts: {
       cellId: parts.cell.cellId,
       record: bounded.settled.record,
       status: bounded.settled.record.status,
-      attempts: bounded.settled.record.attempts.length,
+      // Only the requests that were sent consume the budget. A pre-send refusal is a real
+      // outcome but no request, so its allowance goes back to the run — otherwise a refused
+      // repair would cost a cell that could still have run.
+      attempts: bounded.settled.record.attempts.filter(wasSent).length,
       stopReason: bounded.settled.record.stopReason,
     },
     abandoned: false,
