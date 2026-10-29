@@ -10,7 +10,7 @@ function isRecord(value) {
 export function moduleLayer(file) {
   if (file.startsWith('src/client/')) return 'browser';
   if (
-    /^src\/(?:types\.ts$|policy\.ts$|(?:shared|domain|rules|shell|policy)\/)/u.test(
+    /^src\/(?:types\.ts$|policy\.ts$|review-contract\/|(?:shared|domain|rules|shell|policy)\/)/u.test(
       file,
     )
   )
