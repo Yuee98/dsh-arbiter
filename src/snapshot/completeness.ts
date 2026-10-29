@@ -31,6 +31,7 @@ import type {
   MaterialGap,
 } from '../review-contract/index.js';
 import type { MaterialCompleteness, MaterialGapItem } from '../types.js';
+import type { ProtectedOriginal } from './evidence.js';
 
 /**
  * Truncation is reported, never promoted into a material failure.
@@ -62,14 +63,19 @@ export interface CompletenessInput {
   /** Whether the truncated evidence included this session's or the parent's words. */
   readonly truncatedHumanEvidence: boolean;
   /**
-   * Protected evidence the configured capacity could not carry.
+   * The actual sources of the protected originals a legal capacity could not
+   * carry, or an empty list.
    *
    * Protected items are this session's newest human statement and the newest
    * parent original — the instructions a review must not score without. When a
    * legal capacity cannot hold them, the review is missing a required original
-   * rather than a redundant one, so this blocks like an unreadable source does.
+   * rather than a redundant one, so this blocks like a lost source does.
+   *
+   * The source is carried per dropped item rather than assumed: the message must
+   * name the source that is actually absent, so a reader can tell a parent
+   * original excluded by capacity from this session's own unreadable log.
    */
-  readonly protectedEvidenceDropped: boolean;
+  readonly protectedEvidenceDropped: readonly ProtectedOriginal[];
   readonly historyTruncated: boolean;
   readonly sessionReadable: boolean;
   readonly sessionError: string | null;
@@ -150,16 +156,21 @@ function sessionItems(input: CompletenessInput): MaterialGapItem[] {
       ),
     );
   }
-  if (input.protectedEvidenceDropped) {
+  for (const drop of input.protectedEvidenceDropped) {
+    // Critical truncation, not a read failure: the text exists and was read, but
+    // this capacity cannot submit it. It blocks because the missing item is a
+    // required original, which is what makes it different from an ordinary
+    // capacity cut.
     out.push(
       item(
-        'session-human',
-        'unreadable',
-        "the configured evidence capacity cannot carry both this session's newest human statement and the newest direct-parent original, so a required authorization original is unavailable",
+        drop.source,
+        'truncated',
+        `the configured evidence capacity cannot carry the newest ${drop.source} original, so a required authorization original was not submitted: ${drop.reason}`,
         true,
       ),
     );
-  } else if (input.truncatedHumanEvidence) {
+  }
+  if (input.truncatedHumanEvidence) {
     out.push(
       item(
         'session-human',

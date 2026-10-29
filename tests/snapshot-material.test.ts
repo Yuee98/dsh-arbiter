@@ -996,9 +996,18 @@ describe('protected authorization originals survive every cut', () => {
     expect(built.snapshot.evidence).toHaveLength(1);
     expect(built.snapshot.evidence[0]?.text).toContain('stop: do not delete');
     expect(built.snapshot.completeness.status).toBe('insufficient');
-    expect(built.snapshot.completeness.gaps.map((gap) => gap.source)).toContain(
-      'session-human',
+    // The absent original is the parent's, excluded by capacity — not this
+    // session's, whose log was read fine and whose withdrawal was kept. The
+    // report must name the source actually missing, and the cause is a critical
+    // truncation rather than a failed read.
+    expect(built.snapshot.completeness.gaps).toEqual([
+      expect.objectContaining({ source: 'parent-human' }),
+    ]);
+    const drop = built.snapshot.completeness.items.find(
+      (entry) => entry.source === 'parent-human',
     );
+    expect(drop?.kind).toBe('truncated');
+    expect(drop?.blocking).toBe(true);
   });
 
   test('budget trimming never drops the withdrawal for a newer parent message', async () => {

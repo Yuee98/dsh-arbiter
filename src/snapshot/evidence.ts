@@ -500,17 +500,44 @@ export interface EvidenceLimits {
  * turns it into a blocking gap: a legally configured capacity that cannot
  * represent the required originals is a critical loss, not an ordinary cut.
  */
+/** A protected original that capacity could not carry, and where it came from. */
+export interface ProtectedOriginal {
+  readonly source: 'session-human' | 'parent-human';
+  /** A short description of the instruction that was not submitted. */
+  readonly reason: string;
+}
+
+/**
+ * Classify a protected item by its own source layer.
+ *
+ * A relay is never protected, so this only has to separate this session's human
+ * input from the direct parent's. The fallback keeps an unexpected kind from
+ * being silently reported as this session's material.
+ */
+function originOf(item: EvidenceItem): ProtectedOriginal['source'] {
+  return item.source.kind === 'parent-human' ? 'parent-human' : 'session-human';
+}
+
+function protectedDropOf(item: EvidenceItem): ProtectedOriginal {
+  return {
+    source: originOf(item),
+    reason: `the newest ${originOf(item)} statement (${String(item.text.length)} characters) was excluded by the configured evidence capacity`,
+  };
+}
+
 export interface EvidenceSelection {
   readonly evidence: EvidenceItem[];
   readonly truncated: boolean;
   /**
-   * Protected items this capacity could not carry.
+   * Protected items this capacity could not carry, with their real source.
    *
    * Non-empty only when protected items outnumber the available slots. It is
    * separate from `truncated` because an ordinary capacity cut is not a
-   * material failure while losing a protected original is.
+   * material failure while losing a protected original is. The source travels
+   * with each item so the report names the material actually absent instead of
+   * borrowing this session's name for a parent original.
    */
-  readonly protectedDropped: readonly EvidenceItem[];
+  readonly protectedDropped: readonly ProtectedOriginal[];
 }
 
 export function mergeEvidence(
@@ -538,7 +565,9 @@ export function mergeEvidence(
     ...reserved,
   ];
   const carried = protectedItems.slice(0, maxItems);
-  const protectedDropped = protectedItems.slice(maxItems);
+  const protectedDropped = protectedItems
+    .slice(maxItems)
+    .map((item) => protectedDropOf(item));
   const carriedSet = new Set(carried);
   const rest = [
     ...newestFirst(sessionHuman),

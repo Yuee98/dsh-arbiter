@@ -246,7 +246,7 @@ function describeMaterial(
   const { evidence, log, window } = options;
   return {
     truncatedHumanEvidence: evidence.truncatedHumanEvidence,
-    protectedEvidenceDropped: evidence.merged.protectedDropped.length > 0,
+    protectedEvidenceDropped: evidence.merged.protectedDropped,
     historyTruncated: options.truncated,
     sessionReadable: log.readable,
     sessionError: log.error,

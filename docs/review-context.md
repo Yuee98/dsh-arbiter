@@ -532,7 +532,18 @@ maxInputTokens = 10000     # 宣告值 = 实际截断值，无隐藏边际
 | `unrelated` | 当前 turn 之外的材料被有意排除 | 否 |
 | `summarized` | 存在有损压缩摘要（原文仍在日志里） | 否 |
 
-**只有 `unreadable` 阻断**。它是有界补取也补不回来、任何答案都不能建立在之上的损失，因此 `status = insufficient`，`gaps[]` 恰好列出这些来源，`materialAvailabilityOf()` 直接映射成 review contract 的 `insufficient`。`known-empty` 是**事实而非故障**：读取成功但没有许可就是 A2 的正常情形；未配置 policy 来源同理，不因"没配"变成故障。`truncated` 是输入事实（见[当前动作截断契约](#pending-action-truncation)），`unrelated` 是正常淘汰，两者都只报告、不阻断——普通无关历史丢失不应一律阻断审查。
+**阻断有两种，且按来源与原因分别报告**：
+
+| 情形 | `source` | `kind` | `blocking` |
+|---|---|---|---|
+| 应有答复的来源没有答复 | 该来源自身 | `unreadable` | 是 |
+| 关键授权原文存在但合法容量装不下 | **实际缺失的那一层** | `truncated` | 是 |
+| 当前动作／工具参数／普通证据被裁剪 | 对应来源 | `truncated` | 否 |
+| 当前 turn 之外的调用被排除 | `tool-window` | `unrelated` | 否 |
+
+第二种是[保位对](#design-5-2-3-2)的容量冲突：本会话最新人类陈述与最新直接父会话原文都是审查不能缺少的原文，`evidenceMaxItems = 1` 这类合法配置可能只装得下一条。它属于**关键裁剪而非读取失败**，所以 `kind: 'truncated'`、`blocking: true`；同时 `source` 必须是真正没被送审的那一层——父会话原文被容量排除时报告 `parent-human`，不能借用 `session-human` 的名字，因为后者的日志读取成功、其陈述也已保留。`gaps[]` 恰好列出这些来源，`materialAvailabilityOf()` 直接映射成 review contract 的 `insufficient`。
+
+`known-empty` 是**事实而非故障**：读取成功但没有许可就是 A2 的正常情形；未配置 policy 来源同理，不因"没配"变成故障。普通 `truncated` 是输入事实（见[当前动作截断契约](#pending-action-truncation)），`unrelated` 是正常淘汰，两者都只报告、不阻断——普通无关历史丢失不应一律阻断审查。
 
 **缩略影响审阅者而非结论**：`blocking` 只由读数的一方设置，reviewer 不能把它变成 finding。`gate` 在没有任何模型请求的情况下把 `insufficient` 记为 `review-escalate`（`insufficient_material: <sources>`），因为人工可以补上日志补不出的东西；调用、解析、非法输出等故障仍走 `error-escalate`，两者阶段结果不同。
 
