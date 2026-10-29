@@ -250,22 +250,25 @@ export function targetOf(plan: RunPlan, targetId: string): RunTarget | null {
  * itself enforces — one attempt plus its repair retries — so the bound can never be
  * exceeded by a repair loop the runner did not anticipate.
  *
- * An offline cell is additionally bounded by its own script: the production offline
- * adapter derives its repair budget from the number of scripted answers it was given, so
- * a fixture with one script can answer one attempt. Reserving more than that would strand
- * budget the run could never spend.
+ * An offline cell is bounded by its own script instead, not by the plan's number. The
+ * production offline adapter does not honour `maxRepairRetries`: it sets its own to
+ * `scripts.length - 1`, so a fixture with three answers can make three attempts even when
+ * the plan declared one retry. The reservation has to be the adapter's ceiling, which is
+ * the script count — taking the smaller of the two would under-reserve a cell that can
+ * legitimately spend more, and the run's bound would then be exceeded rather than held.
  */
 export function attemptCeilingOf(
   target: RunTarget,
   protocol: RunProtocol,
   options: { readonly scripted?: number } = {},
 ): number {
-  const transportCeiling =
-    protocol === 'chat'
-      ? 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0)
-      : 1;
-  if (options.scripted === undefined) return transportCeiling;
-  return Math.max(1, Math.min(transportCeiling, options.scripted));
+  if (options.scripted !== undefined) {
+    // The adapter's own rule, mirrored: one attempt per scripted answer.
+    return Math.max(1, options.scripted);
+  }
+  return protocol === 'chat'
+    ? 1 + Math.max(0, target.chat?.maxRepairRetries ?? 0)
+    : 1;
 }
 
 /**

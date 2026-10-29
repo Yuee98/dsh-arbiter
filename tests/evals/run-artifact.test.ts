@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  RECORDLESS_STATUSES,
   cellIdOf as identityOf,
   cellSucceeded,
   planDigest,
@@ -735,3 +736,87 @@ function recordWithScore(risk: number, authorization: number): CellRecord {
   }
   return checked.document;
 }
+
+describe('a dispatched failure is a gap when its record is gone', () => {
+  it('reports a failed cell with no record instead of treating it as settled', () => {
+    // RQ10-B09: `failed` is a dispatched status, so its evidence must exist. Reading such a
+    // cell as settled would let a persisted failure disappear from a report's population
+    // without the reader saying so.
+    const plan = planOf();
+    const cellId = cellIdOf({
+      caseId: 'read-named-source-file',
+      targetId: 'chat-a',
+      protocol: 'chat',
+    });
+    const index = {
+      documentVersion: 'eval-run-index-v1',
+      runId: 'run-1',
+      createdAt: '2026-10-29T00:00:00.000Z',
+      updatedAt: '2026-10-29T00:00:00.000Z',
+      status: 'complete',
+      plan,
+      planHash: planDigest(plan),
+      dataset: {
+        datasetId: 'core-v1',
+        digest: 'sha256:' + '0'.repeat(64),
+        caseCount: 1,
+        caseIds: plan.caseIds,
+      },
+      versions: {
+        contract: 'c',
+        prompt: 'p',
+        usageMapping: 'u',
+        plan: RUN_PLAN_VERSION,
+        artifact: 'eval-run-artifact-v1',
+        implementation: 'i',
+        node: '24.0.0',
+      },
+      transport: 'offline',
+      bounds: plan.bounds,
+      spent: {
+        cellsStarted: 1,
+        cellsCompleted: 1,
+        cellsPlanned: 1,
+        attempts: 1,
+        estimatedInputTokens: 10,
+        reportedOutputTokens: null,
+      },
+      cells: [
+        {
+          cellId,
+          caseId: 'read-named-source-file',
+          targetId: 'chat-a',
+          protocol: 'chat',
+          repeat: 1,
+          record: recordPathOf(cellId),
+          status: 'failed',
+          attempts: 1,
+          stopReason: 'the reviewer produced no answer',
+        },
+      ],
+      resumed: [],
+      notes: [],
+    };
+    return withArea(async (area) => {
+      await area.write(RUN_FILES.plan, plan);
+      await area.write(RUN_FILES.index, index);
+      const read = await readRun(area.path, checkers);
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      // The record is missing, so the failure is reported as a gap.
+      expect(read.artifact.missing.map((cell) => cell.cellId)).toEqual([
+        cellId,
+      ]);
+    });
+  });
+
+  it('treats a recordless refusal as settled rather than as a gap', () => {
+    // The other side of the same rule: an unsupported pairing or an exhausted budget never
+    // produced an attempt, so having no record is the expected shape of that status.
+    expect(RECORDLESS_STATUSES.has('unsupported')).toBe(true);
+    expect(RECORDLESS_STATUSES.has('budget-exhausted')).toBe(true);
+    expect(RECORDLESS_STATUSES.has('unresolvable')).toBe(true);
+    expect(RECORDLESS_STATUSES.has('failed')).toBe(false);
+    expect(RECORDLESS_STATUSES.has('reviewed')).toBe(false);
+  });
+});

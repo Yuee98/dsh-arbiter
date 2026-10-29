@@ -620,12 +620,41 @@ export async function inspectResume(
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  // The comparison has to be against the plan a run would freeze, not the authored
+  // document: a plan that omits `caseIds` resolves to a different value, and comparing the
+  // raw form would report a legitimate continuation as a drifted plan.
+  const problems = planProblems(read.plan, { selectionKnown: false });
+  if (problems.length > 0) {
+    for (const problem of problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const dataset = await loadDataset(io, read.plan.datasetPath);
+  if (!dataset.ok) {
+    for (const problem of dataset.problems) io.err(`problem ${problem}`);
+    return 1;
+  }
+  const unknown = unknownCaseIds(read.plan, dataset.dataset.cases);
+  if (unknown.length > 0) {
+    io.err(
+      `problem the plan names ${String(unknown.length)} case(s) this dataset does not publish: ${unknown.join(', ')}`,
+    );
+    return 1;
+  }
+  const resolvedPlan = withResolvedCases(
+    read.plan,
+    resolveCases(read.plan, dataset.dataset.cases),
+  );
   const directory = resolve(
     io.root,
     command.directory ??
-      defaultRunDirectory(read.plan.datasetId, command.planPath),
+      defaultRunDirectory(resolvedPlan.datasetId, command.planPath),
   );
-  const existing = await readExisting(directory, read.plan, checkers);
+  const existing = await readExisting(
+    directory,
+    resolvedPlan,
+    checkers,
+    dataset.dataset.digest,
+  );
   if (!existing.ok) {
     for (const problem of existing.problems) io.err(`problem ${problem}`);
     return 1;

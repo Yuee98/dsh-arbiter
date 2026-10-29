@@ -19,6 +19,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { runCli } from '../../evals/src/cli/run.js';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -57,6 +58,8 @@ import {
 
 const checkers = await compileRunCheckers();
 const repository = new URL('../../', import.meta.url).pathname;
+/** The repository root, which a command resolves a plan's dataset against. */
+const REPOSITORY_ROOT = repository;
 
 /**
  * The committed `core-v1` cases, read the way the runner reads them.
@@ -110,6 +113,32 @@ async function runPlanInReadonly(parts: {
     plan: parts.plan,
     fixture: parts.fixture,
   });
+}
+
+/**
+ * The spend and cell statuses a run directory recorded.
+ *
+ * Read as a plain document rather than through the checker, because these assertions are
+ * about what the writer produced: a reader that validated first would fail the test with a
+ * schema problem instead of the behavioural difference being tested.
+ */
+async function readRunStatus(directory: string): Promise<{
+  readonly attempts: number;
+  readonly statuses: readonly string[];
+}> {
+  const read = await readRun(directory, checkers);
+  if (!read.ok) {
+    throw new Error(read.problems.map((problem) => problem.message).join('; '));
+  }
+  return {
+    attempts: read.artifact.index.spent.attempts,
+    statuses: read.artifact.index.cells.map((cell) => cell.status),
+  };
+}
+
+/** The absolute path of a document inside one temporary area. */
+function at2(area: { readonly path: string }, name: string): string {
+  return `${area.path}/${name}`;
 }
 
 /** A non-array object, for narrowing a parsed document without asserting its type. */
@@ -1643,6 +1672,190 @@ describe('corrections from review', () => {
       // Each record says the request was sent and may have been billed, so its empty
       // attempt list is not read as "nothing happened".
       expect(records[0]?.notes.join(' ')).toContain('may have been sent');
+    });
+  });
+});
+
+describe('corrections from the second review', () => {
+  it('charges an abandoned request against a continuation budget', async () => {
+    // RQ10-B03 second pass: the abandoned request is sent and may be billed, so a
+    // continuation must not treat the run as having spent nothing on it.
+    await withArea(async (area) => {
+      const directory = join(area.path, 'run');
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        targets: [
+          {
+            targetId: 'chat-slow',
+            provider: 'test-provider',
+            model: 'test-model',
+            modelVersion: null,
+            chat: {
+              provider: 'test-provider',
+              model: 'test-model',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 60_000,
+              maxRepairRetries: 0,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+        // One attempt of budget, which the abandoned request consumes. Charging it is what
+        // leaves the continuation with nothing; without the charge it would see a full
+        // allowance and start a second request.
+        bounds: bounds({ concurrency: 1, timeoutMs: 20, maxAttempts: 1 }),
+      });
+      const created = await createRun({
+        directory,
+        runId: 'test-run',
+        plan,
+        cases,
+        datasetDigest: datasetDigestOfCoreV1,
+        versions,
+        now: () => 0,
+      });
+      if (!created.ok) throw new Error(created.problems.join('; '));
+      const hung: LlmLike = {
+        stream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () =>
+              new Promise<IteratorResult<Record<string, unknown>>>(() => {
+                // Never settles.
+              }),
+          }),
+        }),
+      };
+      await resumeRun({
+        directory,
+        existing: { index: created.index, records: [] },
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: hung,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: false,
+        now: () => 1_000,
+      });
+      const first = await recordsOf(directory);
+      expect(first).toHaveLength(1);
+      expect(first[0]?.attempts).toEqual([]);
+      expect(first[0]?.notes.length ?? 0).toBeGreaterThan(0);
+
+      // A continuation sees one abandoned request, so nothing of the budget remains.
+      const read = await readExisting(directory, plan, checkers);
+      if (!read.ok) throw new Error(read.problems.join('; '));
+      const resumed = await resumeRun({
+        directory,
+        existing: read.existing,
+        cases,
+        fixture: fixtureOf({}),
+        versions,
+        checkers,
+        llm: null,
+        readCredential: () => undefined,
+        signal: new AbortController().signal,
+        continuation: true,
+        now: () => 2_000,
+      });
+      // The abandoned request counted, so the second cell could not be reserved and the
+      // run stopped instead of spending a fresh allowance.
+      expect(resumed.dispatch.stoppedBy).toBe('budget-exhausted');
+    });
+  });
+
+  it('reserves the offline adapter own attempt ceiling, not the plan number', async () => {
+    // RQ10-B04: the production offline adapter sets maxRepairRetries to
+    // scripts.length - 1, so a three-script fixture can make three attempts whatever the
+    // plan declared. Under-reserving let such a cell exceed the run's bound.
+    await withArea(async (area) => {
+      const plan = planOf({
+        caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        targets: [chatTarget('chat-a', { maxRepairRetries: 0 })],
+        // Three attempts of budget: enough for one three-script cell and nothing else.
+        bounds: bounds({ concurrency: 1, maxAttempts: 3 }),
+      });
+      const cells = cellGrid(plan).cells;
+      const first = cells[0];
+      if (first === undefined) throw new Error('the plan produced no cell');
+      const result = await runPlan({
+        plan,
+        fixture: fixtureOf({
+          [first.cellId]: fixtureCell({
+            // Three answers, so the adapter will allow three attempts.
+            chat: [
+              { kind: 'text', text: 'not json' },
+              { kind: 'text', text: 'still not json' },
+              chatAnswer(2, 10),
+            ],
+          }),
+          [cells[1]?.cellId ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+        directory: join(area.path, 'run'),
+      });
+      // The first cell really did spend its three attempts, which is only possible if the
+      // reservation matched the adapter's ceiling rather than the plan's zero retries.
+      expect(result.records[0]?.attempts).toHaveLength(3);
+      // And the run held its bound: the second cell never became affordable, so the
+      // directory says so rather than starting a fourth attempt it had not budgeted.
+      expect(result.records).toHaveLength(1);
+      const read = await readRunStatus(join(area.path, 'run'));
+      expect(read.attempts).toBe(3);
+      // The second cell is not affordable at this bound, so it is refused rather than
+      // started. Which refusal it takes depends on whether its ceiling or its payload is
+      // what does not fit, and either way the run states it instead of silently dropping
+      // the cell.
+      expect(read.statuses[1]).toBe('budget-exhausted');
+    });
+  });
+
+  it('compares a continuation against the resolved plan, not the authored one', async () => {
+    // RQ10-B07: a plan may omit caseIds and let the split choose, so the frozen plan is the
+    // resolved value. Comparing the authored document would report a legitimate
+    // continuation as a drifted plan.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-a',
+        protocol: 'chat',
+      });
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cellId]: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      const authored: Record<string, unknown> = {
+        ...planOf(),
+        fixture: at2(area, 'fixture.json'),
+      };
+      delete authored['caseIds'];
+      await area.write('plan.json', authored);
+      const first = await runCli(
+        ['run', at2(area, 'plan.json'), '--dir', at2(area, 'run')],
+        { root: REPOSITORY_ROOT, out: () => undefined, err: () => undefined },
+      );
+      // The run itself may stop on an unscripted cell; what matters is that `resume`
+      // accepts the same authored plan afterwards.
+      expect([0, 1]).toContain(first);
+      const err: string[] = [];
+      const code = await runCli(
+        ['resume', at2(area, 'plan.json'), '--dir', at2(area, 'run')],
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+      );
+      expect(err.join('\n')).not.toContain(
+        'does not match the run it would continue',
+      );
+      expect([0, 1]).toContain(code);
     });
   });
 });

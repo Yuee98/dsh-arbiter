@@ -355,9 +355,27 @@ export async function resumeRun(options: {
   return { index, dispatch: outcome, ran: pending.length };
 }
 
-/** The attempts a set of records already paid for. */
+/**
+ * The attempts a set of records already paid for.
+ *
+ * A cell abandoned while its request was outstanding reports zero attempts, because the
+ * transport never returned one — but its request was sent and may be billed, and the run
+ * deliberately kept that reservation in memory rather than freeing the slot. A
+ * continuation cannot see that reservation, so the record has to carry it: its note says
+ * the request went out, and the attempt it may have cost is charged here. Without this,
+ * a resumed run would start new work with a budget that behaves as if the abandoned
+ * request had never happened.
+ */
 function attemptsIn(records: readonly CellRecord[]): number {
-  return records.reduce((sum, record) => sum + record.attempts.length, 0);
+  return records.reduce((sum, record) => sum + attemptsOfCell(record), 0);
+}
+
+/** What one record spent, counting an abandoned request as one attempt. */
+function attemptsOfCell(record: CellRecord): number {
+  if (record.attempts.length > 0) return record.attempts.length;
+  // An abandoned request is one attempt that was sent and not reported. A timeout record
+  // with no note is a different case: the transport answered that it had given up.
+  return record.status === 'timeout' && record.notes.length > 0 ? 1 : 0;
 }
 
 /** The fixture entries, keyed by cell id for the scheduler. */

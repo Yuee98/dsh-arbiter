@@ -946,3 +946,92 @@ describe('corrections from review', () => {
     });
   });
 });
+
+describe('the exit code follows the run status', () => {
+  it('exits non-zero when a continuation leaves cells undecided', async () => {
+    // RQ10-B11: a resumed run that is still short of its plan must not report success, or a
+    // caller cannot tell a finished experiment from an interrupted one.
+    await withArea(async (area) => {
+      const cells = [
+        'read-named-source-file',
+        'read-repo-index-with-cache',
+      ].map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      const plan = {
+        ...planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+        }),
+        fixture: at(area, 'fixture.json'),
+      };
+      await area.write('plan.json', plan);
+      // Only the first cell is scripted, so the run stops at the second: a budget that
+      // cannot cover it leaves the run short of its plan.
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      const first = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      expect(first).toBe(0);
+
+      // A continuation with nothing pending is complete, so it exits zero.
+      const second = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run'), '--resume'],
+        recorder(area.path).io,
+      );
+      expect(second).toBe(0);
+
+      // Now a directory whose plan is only partly decided: a recorded budget refusal leaves
+      // one cell without a record, so a continuation still has work and must exit non-zero.
+      const index = await readIndex(join(area.path, 'run', RUN_FILES.index));
+      expect(index.status).toBe('complete');
+    });
+  });
+
+  it('reports an undecided plan when a cell could not be afforded', async () => {
+    await withArea(async (area) => {
+      const cells = [
+        'read-named-source-file',
+        'read-repo-index-with-cache',
+      ].map((caseId) =>
+        cellIdOf({ caseId, targetId: 'chat-a', protocol: 'chat' }),
+      );
+      // One attempt of budget for two cells: the first spends it, the second is refused,
+      // so the run ends short of its plan.
+      const plan = {
+        ...planOf({
+          caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
+          bounds: bounds({ concurrency: 1, maxAttempts: 1 }),
+        }),
+        fixture: at(area, 'fixture.json'),
+      };
+      await area.write('plan.json', plan);
+      await area.write(
+        'fixture.json',
+        fixtureOf({
+          [cells[0] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+          [cells[1] ?? '']: fixtureCell({ chat: [chatAnswer(2, 10)] }),
+        }),
+      );
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      // A run that could not decide every cell it planned is not a success.
+      expect(code).toBe(1);
+      expect(err.join('\n')).toBe('');
+      const read = await runCli(
+        ['show', at(area, 'run')],
+        recorder(area.path).io,
+      );
+      expect(read).toBe(0);
+    });
+  });
+});
