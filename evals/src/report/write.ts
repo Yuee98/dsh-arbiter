@@ -170,41 +170,58 @@ export function destinationsInside(
   paths: readonly string[],
   evidence: readonly EvidencePath[],
 ): readonly string[] {
-  return paths.filter((path) =>
-    evidence.some((entry) =>
-      entry.kind === 'directory'
-        ? sameOrInside(path, entry.path)
-        : samePath(path, entry.path),
-    ),
+  return paths.filter(
+    (path) => !resolvesOutside(path, evidence) || collides(path, evidence),
   );
 }
 
 /**
- * Whether two paths name the same file, following symbolic links on what exists.
+ * Whether this destination is provably outside every protected path.
  *
- * A lexical comparison is not enough: a run held at `real-run` and reached through a symlink
- * `alias` has two spellings for one `index.json`, and only one of them matched the protected
- * path. A write through the other spelling would replace the record while the guard reported
- * nothing. So each existing path is resolved to its real location first.
- *
- * A destination that does not exist yet cannot be resolved, and that is correct: it is a new
- * report file. Its *parent* is resolved instead, so a symlinked directory cannot hide a
- * collision either. The comparison stays true when nothing resolves.
+ * A destination whose own resolution failed is not provably anything: the operating system may
+ * still follow it into evidence. A protected path that fails to resolve is a different matter
+ * — that is the *evidence* being unreachable, and refusing every write because a dataset holds
+ * a cyclic directory would make a damaged dataset unreportable. So only the destination's
+ * resolution is a condition of writing.
  */
-function samePath(left: string, right: string): boolean {
-  return resolvedName(left) === resolvedName(right);
+function resolvesOutside(
+  path: string,
+  evidence: readonly EvidencePath[],
+): boolean {
+  // Only the destination's own resolution matters. A protected path that fails to resolve is
+  // the *evidence* being unreachable — a dataset with a cyclic directory — and refusing every
+  // write because of that would make a damaged dataset unreportable.
+  return evidence.length === 0 ? true : resolvePath(path).ok;
+}
+
+/** Whether a destination that did resolve names a protected path or sits inside one. */
+function collides(path: string, evidence: readonly EvidencePath[]): boolean {
+  const resolved = resolvePath(path);
+  if (!resolved.ok) return true;
+  return evidence.some((entry) => {
+    const protectedPath = resolvedEvidence(entry);
+    if (protectedPath === null) return false;
+    if (entry.kind === 'file') return resolved.path === protectedPath;
+    // A directory match is exact or prefix-with-separator, so `/run` does not match
+    // `/runaway`.
+    return (
+      resolved.path === protectedPath ||
+      resolved.path.startsWith(`${protectedPath}${posix.sep}`)
+    );
+  });
 }
 
 /**
- * Whether one path is a directory or sits inside it, with symlinks resolved on both sides.
+ * One protected path, resolved when it can be.
  *
- * The trailing separator in the containment test is what stops `/run` matching `/runaway`.
+ * A protected path that cannot be resolved is skipped rather than treated as matching
+ * everything: the evidence itself is unreachable, which the report already says in its notes,
+ * and a guard that failed closed on the evidence side would refuse to write any report about a
+ * dataset with a cyclic directory.
  */
-function sameOrInside(path: string, directory: string): boolean {
-  const target = resolvedName(path);
-  const root = resolvedName(directory);
-  const sep = posix.sep;
-  return target === root || target.startsWith(`${root}${sep}`);
+function resolvedEvidence(entry: EvidencePath): string | null {
+  const resolved = resolvePath(entry.path);
+  return resolved.ok ? resolved.path : null;
 }
 
 /**
@@ -215,23 +232,26 @@ function sameOrInside(path: string, directory: string): boolean {
  *
  *   - a *dangling* link. `writeFile` follows it and creates the target, so a destination that
  *     is a link into protected evidence would modify that evidence even though neither spelling
- *     exists as a file. `existsSync` reported such an entry as absent, which is how the guard
- *     once stepped past it.
+ *     exists as a file.
  *   - a destination whose own name is new but whose directory is a link. Resolving the parent
  *     is enough, and it is what makes `--out alias/report` compare equal to the real directory.
  *
- * The traversal is bounded rather than trusting a chain to end. A cyclic link — including a
- * dataset directory linked to itself, which a damaged dataset is allowed to contain — would
- * otherwise recurse until the stack overflows, and a report that crashes on a damaged dataset
- * cannot describe it. Revisiting a path, or exceeding the hop limit, yields the path as written:
- * an unresolved answer, which is the conservative one for a containment test, because it can
- * only make a caller compare two shorter strings rather than miss a collision.
+ * Resolution can fail, and failure is a third answer rather than a silent "outside". A cyclic
+ * link, or a chain longer than `MAX_LINK_HOPS`, leaves a path the operating system can still
+ * follow: a 34-link chain is perfectly writable, and treating the point where this walk gave up
+ * as proof the destination is harmless would let the write land inside protected evidence. So
+ * the caller is told resolution failed, and a containment check refuses what it cannot resolve.
  */
-function resolvedName(path: string): string {
+function resolvePath(path: string): ResolvedPath {
   return resolveWithCycleGuard(path, new Set<string>(), 0);
 }
 
-/** How many link hops a destination may take before it is treated as unresolved. */
+/** A path this module could resolve, or the reason it could not. */
+type ResolvedPath =
+  | { readonly ok: true; readonly path: string }
+  | { readonly ok: false; readonly reason: string };
+
+/** How many link hops a destination may take before it is treated as unresolvable. */
 const MAX_LINK_HOPS = 32;
 
 /** The resolver's body, carrying the visited set and hop count across one traversal. */
@@ -239,12 +259,20 @@ function resolveWithCycleGuard(
   path: string,
   visited: Set<string>,
   hops: number,
-): string {
+): ResolvedPath {
   const normalised = normalize(path);
-  if (visited.has(normalised) || hops > MAX_LINK_HOPS) return normalised;
+  if (visited.has(normalised)) {
+    return { ok: false, reason: `${normalised} links back to itself` };
+  }
+  if (hops > MAX_LINK_HOPS) {
+    return {
+      ok: false,
+      reason: `${normalised} needs more than ${String(MAX_LINK_HOPS)} link hops`,
+    };
+  }
   visited.add(normalised);
   try {
-    return normalize(realpathSync(normalised));
+    return { ok: true, path: normalize(realpathSync(normalised)) };
   } catch {
     // Nothing resolves here: fall through and resolve the path by parts.
   }
@@ -252,14 +280,15 @@ function resolveWithCycleGuard(
   const leaf = basename(normalised);
   const resolvedParent =
     parent === normalised
-      ? normalised
+      ? { ok: true as const, path: normalised }
       : resolveWithCycleGuard(parent, visited, hops);
-  const candidate = join(resolvedParent, leaf);
+  if (!resolvedParent.ok) return resolvedParent;
+  const candidate = join(resolvedParent.path, leaf);
   const target = linkTargetOf(candidate);
-  if (target === null) return candidate;
+  if (target === null) return { ok: true, path: candidate };
   const absolute = isAbsolute(target)
     ? target
-    : resolve(resolvedParent, target);
+    : resolve(resolvedParent.path, target);
   return resolveWithCycleGuard(absolute, visited, hops + 1);
 }
 

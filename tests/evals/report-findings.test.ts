@@ -1821,7 +1821,7 @@ describe('Codex review: a cyclic symlink does not crash the report', () => {
       // protected path.
       const { symlink, rm } = await import('node:fs/promises');
       await rm(join(dataset, 'cases'), { recursive: true, force: true });
-      await symlink('.', join(dataset, 'cases'));
+      await symlink('cases', join(dataset, 'cases'));
       const out: string[] = [];
       const err: string[] = [];
       const code = await reportRun(
@@ -1862,7 +1862,7 @@ describe('Codex review: a cyclic symlink does not crash the report', () => {
       });
       const { symlink, rm } = await import('node:fs/promises');
       await rm(join(dataset, 'cases'), { recursive: true, force: true });
-      await symlink('.', join(dataset, 'cases'));
+      await symlink('cases', join(dataset, 'cases'));
       const link = `${join(created.path, 'injected')}.json`;
       await symlink(join(dataset, 'cases/injected.json'), link);
       const err: string[] = [];
@@ -1886,6 +1886,92 @@ describe('Codex review: a cyclic symlink does not crash the report', () => {
       expect(err.join('\n')).not.toContain('Maximum call stack');
       expect(code).toBe(1);
       expect(err.join('\n')).toContain('lies inside evidence');
+    });
+  });
+});
+
+describe('Codex review: a long link chain cannot reach evidence unresolvable', () => {
+  it('refuses a 34-link chain pointing into the dataset cases', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const dataset = await datasetOf(created, {
+        cases: ['read-named-source-file'],
+        labels: [],
+      });
+      const { symlink } = await import('node:fs/promises');
+      // A chain longer than the traversal limit, ending inside protected evidence. The
+      // operating system follows it happily, so treating the point where this module gave up
+      // as proof the destination is harmless would let the write land in the dataset.
+      const total = 34;
+      const links = join(created.path, 'links');
+      await created.dir('links');
+      for (let index = 0; index < total; index += 1) {
+        const next =
+          index === total - 1
+            ? join(dataset, 'cases/injected.json')
+            : join(links, `l${String(index + 1)}.json`);
+        await symlink(next, join(links, `l${String(index)}.json`));
+      }
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(links, 'l0'),
+          dataset,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      // No document was created anywhere along the chain.
+      await expect(
+        readFile(join(dataset, 'cases/injected.json'), 'utf8'),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('refuses a chain into the run records as well', async () => {
+    await withArea(async (created) => {
+      const directory = await runOne(created, 'read-named-source-file', 1, 10);
+      const { symlink } = await import('node:fs/promises');
+      const links = join(created.path, 'link-chain');
+      await created.dir('link-chain');
+      const total = 40;
+      for (let index = 0; index < total; index += 1) {
+        const next =
+          index === total - 1
+            ? join(directory, 'records/injected.json')
+            : join(links, `l${String(index + 1)}.json`);
+        await symlink(next, join(links, `l${String(index)}.json`));
+      }
+      const err: string[] = [];
+      const code = await reportRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(links, 'l0'),
+          dataset: null,
+          mode: 'ask',
+          channel: 'available',
+          force: true,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('lies inside evidence');
+      await expect(
+        readFile(join(directory, 'records/injected.json'), 'utf8'),
+      ).rejects.toThrow();
     });
   });
 });
