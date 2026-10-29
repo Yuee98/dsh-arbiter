@@ -477,7 +477,11 @@ not coverage.
 
 **三种结果（`evaluate.ts`）。** `scored`／`insufficient-material`／`review-failure` 是不同状态：材料缺失保留部分诊断但**不产生判定**，输出或调用失败只报失败字段与原因类。`audit` 同时保留协议原始分布、公共尺度分布和正式档位，供审计与离线回放；均值、confidence 与原始分布只用于记录，不参与任何正式分支。
 
-**过渡边界。** #65 只交付可独立调用的公共模块与这一轮必要的适配修正；旧的 `src/policy.ts` 阈值与 `src/reviewer/` 请求结构由 #67／#68 继续改造。为了让收敛后的十档不至于让低风险 A1 被旧引擎放行，`decideReview()` 前置一条 A1 守卫（规则号 `R0`），它读取 chat 点值与 decision 分布两种形态，只比「授权是否为第 1 档」，不改变阈值、矩阵或模式语义，`R0` 随旧引擎在 #68 一并移除。
+**生产接线（#68）。** `src/policy.ts` 现在只剩「结果 → 结算」的映射：`stageOf()` 把三种结果变成审查阶段，`settleOutcome()` 调 `settle()` 产出宿主动作，`settleRule()` 把确定性规则裁决按 `deny > force-ask > force-review > allow` 结算。阈值（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）、四个探针与 `probeMode` 覆盖、以及 `normal`／`strict`／`progress` 策略**全部删除**，`policy` 配置段只保留 `version`：档位、N0 与矩阵都由 `REVIEW_CONTRACT_VERSION` 命名，第二份数字就是第二个答案。
+
+**两模式（ask／no-ask）。** 两种模式共用同一矩阵，唯一差别是升级时能否开启真人审批。`no-ask` 不是更严格的策略：无 ask、或子任务／宿主没有真实通道时，`review-escalate` 与 `error-escalate` 一律 fallback-deny，模型不能代替人工。旧值不转换——`normal`／`strict` 本是同一引擎加一个通道开关（正是这一对），`progress` 会放宽矩阵本身（设计禁止），因此三者都作为配置错误报出并提示替代值。`force-ask` 同样必须真人：无通道时拒绝，不转入审查。
+
+**记录（#68）。** 新记录只写新形状：`scores`（两项公共分、矩阵要求的最低授权、`verdict`、逐字段 trail 与 `contractVersion`）、`review_stage`、`usage`（原始脱敏载荷加规范化值，逐 attempt 一并保存）与 `decision_rules`；旧的 `signals`／`policy_strategy` 列保留为可空但当前记录不再写入，因此老行如实报告「没有新式评分」而不是默认分。详情 API 与 UI 按同一契约展示；材料缺失或调用失败到达阶段但不产生分数。
 
 <a id="design-5-5-ir"></a>
 

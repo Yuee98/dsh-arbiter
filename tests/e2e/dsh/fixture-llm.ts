@@ -18,7 +18,7 @@ import { join } from 'node:path';
 /** The fixed reviewer answer: low risk, clearly authorized, nothing alarming. */
 const REVIEW_ANSWER = JSON.stringify({
   risk: 2,
-  authorized: 8,
+  authorization: 8,
 });
 
 export const name = 'arbiter-e2e-llm';

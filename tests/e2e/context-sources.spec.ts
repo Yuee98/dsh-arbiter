@@ -705,7 +705,12 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       cwd: workspace,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          // Above the shared contract's own preamble, so the action is the thing
+          // that has to yield rather than the request being unfittable.
+          maxInputTokens: 3_400,
+        },
       },
       facts: null,
       priorVerdicts: [],
@@ -717,7 +722,7 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
       'a real long program is trimmed inside the budget as an input fact',
       large.snapshot.action.truncated !== undefined &&
         large.snapshot.budget.truncatedSegments.includes('ACTION') &&
-        large.snapshot.budget.estimatedInputTokens <= 2_000 &&
+        large.snapshot.budget.estimatedInputTokens <= 3_400 &&
         large.snapshot.missing
           .join(' ')
           .includes('truncated by the input budget'),

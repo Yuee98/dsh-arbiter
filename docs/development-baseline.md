@@ -43,6 +43,8 @@ lint 自检包含真实 TSX 配置及结构、Hooks、可访问性、文案和�
 
 已有 R1–R9 复现脚本保持原样，由 `scripts/check-regressions.ts` 复制到相同目录深度的 `.local/regressions/run-*` 后运行，继续导入当前构建；本轮结果写入该目录，不覆盖历史 `validation` 报告。
 
+共用审查契约的切换（#68）移除了该脚本在模块顶层导入的旧引擎（`lib/policy.js` 的 `decideReview`，以及 `lib/reviewer.js` 的旧 prompt／decision 适配器），因此脚本无法再运行，也不会产出 `results.json`。缺失报告本身不构成通过理由——无关崩溃同样没有文件——所以判定改为**退役引擎探测**：`scripts/check-regressions.ts` 直接检查构建产物，逐项报告那五个符号是否仍被导出。只有证据显示**全部缺失**时才把 R1–R9 记为已退役；任一符号被恢复、构建无法读取、或报告未覆盖全部符号时，该运行仍为必需且必须自行通过。探测与正反例判定位于 `scripts/retired-engine.ts` 与 `scripts/regression-verdict.ts`，三种情形（全缺失／部分存在／全部存在）均有单测。脚本与历史 `results.json` 继续逐字保留作为原型证据。
+
 首版范围收敛（#20）移除离线建议的公开入口后，历史 R8 覆盖的接纳流程不再属于首版：脚本与 `results.json` 保持原样作为历史证据，不按用例名建立豁免，也不删除用例。R8 改为对其 `actual` 观测值做正面断言——候选必须仍为 `pending`、`ruleAdded` 必须为 false、且接纳尝试确实因路由不存在而失败（`acceptError` 有值，且没有 handler 的 JSON 回复）。若接纳路由被恢复并真的生效，R8 会转为通过或记录 `accepted`，该断言随即失败，因此它不可能放过一个原因不同的真实缺陷。R1–R7、R9 仍要求原样通过。当前契约另由 `validation/first-release-scope/2026-10-25/reproduce.mjs`（S1–S3）正面验证：建议端点不存在、尝试接纳不改规则与候选状态、规则测试与日志仍可用且已有审计行保留。判定规则实现于 `scripts/regression-verdict.ts` 并有单测覆盖正反例。
 
 ## 分层测试

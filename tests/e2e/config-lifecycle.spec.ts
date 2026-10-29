@@ -182,7 +182,7 @@ test.describe('configuration lifecycle', () => {
       expect(state.invalidConfigError).toBeNull();
       expect(state.config).toMatchObject({
         enabled: true,
-        modes: { main: 'normal', subagent: 'strict' },
+        modes: { main: 'ask', subagent: 'no-ask' },
         rules: [],
         reviewer: { type: 'chat', chat: { provider: 'session' } },
         audit: { retentionDays: 30, retentionBytes: 1024 ** 3 },
@@ -223,8 +223,8 @@ test.describe('configuration lifecycle', () => {
       await openArbiterConfiguration(page);
       const plugin = page.locator('[data-arbiter-root]');
       const mode = plugin.getByLabel('主会话审批模式', { exact: false });
-      await expect(mode).toHaveValue('normal');
-      await mode.selectOption('progress');
+      await expect(mode).toHaveValue('ask');
+      await mode.selectOption('no-ask');
       await expect(plugin.locator('[data-arbiter-save-status]')).toHaveText(
         '草稿未保存；当前生效配置未改变。',
       );
@@ -252,7 +252,7 @@ test.describe('configuration lifecycle', () => {
       const after = await waitForState(
         dsh,
         (state) =>
-          state.config.modes.main === 'progress' &&
+          state.config.modes.main === 'no-ask' &&
           state.effectiveRevision !== before.effectiveRevision,
       );
       await expect(
@@ -276,7 +276,7 @@ test.describe('configuration lifecycle', () => {
           .locator('[data-arbiter-root]')
           .getByText(new RegExp(`^生效修订 ${after.effectiveRevision}$`)),
       ).toBeVisible();
-      expect((await readState(dsh)).config.modes.main).toBe('progress');
+      expect((await readState(dsh)).config.modes.main).toBe('no-ask');
     },
   );
 
@@ -290,14 +290,14 @@ test.describe('configuration lifecycle', () => {
       await expect(plugin.getByText(/^文件修订 [0-9a-f]{8}$/)).toBeVisible();
 
       await appendPatch(dsh, {
-        modes: { main: 'strict' },
+        modes: { main: 'no-ask' },
         audit: { retentionDays: 14 },
       });
 
       const after = await waitForState(
         dsh,
         (state) =>
-          state.config.modes.main === 'strict' &&
+          state.config.modes.main === 'no-ask' &&
           state.effectiveRevision !== before.effectiveRevision,
       );
       expect(after.config.audit.retentionDays).toBe(14);

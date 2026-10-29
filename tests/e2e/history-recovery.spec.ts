@@ -706,7 +706,7 @@ async function applyBuiltPlugin(options: {
         // single await is the one a real provider would spend on its first byte.
         const answer = JSON.stringify({
           risk: 4,
-          authorized: 1,
+          authorization: 1,
         });
         return {
           [Symbol.asyncIterator]: async function* () {
@@ -886,7 +886,7 @@ interface HistoryLike {
 function arbiterConfig(): Record<string, unknown> {
   return {
     audit: { enabled: false },
-    modes: { main: 'normal', subagent: 'strict' },
+    modes: { main: 'ask', subagent: 'no-ask' },
     // One deterministic rule: the E2E asserts that a real decision reaches the log,
     // so the call must be decided without a reviewer or an approval channel.
     rules: [

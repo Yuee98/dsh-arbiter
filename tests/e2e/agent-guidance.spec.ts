@@ -132,11 +132,11 @@ async function saveConfig(
 
 async function setMainMode(
   host: DshHost,
-  mode: 'normal' | 'strict' | 'progress',
+  mode: 'ask' | 'no-ask',
 ): Promise<void> {
   await saveConfig(host, (config) => ({
     ...config,
-    modes: { main: mode, subagent: 'strict' },
+    modes: { main: mode, subagent: 'no-ask' },
   }));
   // A save returning 200 is not the same as the mode being in effect; read the
   // effective configuration back before a call is made under it.
@@ -782,7 +782,9 @@ test.describe('standing agent guidance', () => {
       const warmup = await sessionWithMarker(host, 'GUIDE-ASK-WARMUP');
       await enableSession(host, warmup.sessionId);
 
-      for (const mode of ['normal', 'strict', 'progress'] as const) {
+      // Both modes keep the host's own ask tool working: the plugin's mode governs
+      // only whether it opens its own approval, never whether the agent may ask.
+      for (const mode of ['ask', 'no-ask'] as const) {
         await setMainMode(host, mode);
         await openHost(page, host);
         const marker = `GUIDE-ASK-${mode.toUpperCase()}`;
