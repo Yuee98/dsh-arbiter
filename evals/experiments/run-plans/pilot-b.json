@@ -1,0 +1,143 @@
+{
+  "planVersion": "eval-run-plan-v1",
+  "datasetId": "core-v1",
+  "datasetPath": "evals/datasets/core-v1",
+  "transport": "live",
+  "protocols": ["chat", "decision"],
+  "targets": [
+    {
+      "targetId": "clef-local",
+      "provider": "clef-local",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef",
+        "apiKeyRef": "",
+        "timeoutMs": 60000,
+        "costTier": "free"
+      },
+      "credentialRef": ""
+    },
+    {
+      "targetId": "clef-flash-local",
+      "provider": "clef-local",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef-flash",
+        "apiKeyRef": "",
+        "timeoutMs": 60000,
+        "costTier": "free"
+      },
+      "credentialRef": ""
+    },
+    {
+      "targetId": "clef-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef",
+        "model": "clef",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 60000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "clef-flash-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef-flash",
+        "model": "clef-flash",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 60000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "jev-1-13-0",
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-1.13.0",
+        "apiKeyRef": "TYPESAFE_API_KEY",
+        "timeoutMs": 60000,
+        "costTier": "paid"
+      },
+      "credentialRef": "TYPESAFE_API_KEY"
+    },
+    {
+      "targetId": "deepseek-v4-1-flash",
+      "provider": "deepseek-account",
+      "model": "deepseek-flash",
+      "modelVersion": null,
+      "chat": {
+        "provider": "deepseek-account",
+        "model": "deepseek-flash",
+        "temperature": 0,
+        "maxTokens": 10000,
+        "timeoutMs": 60000,
+        "maxRepairRetries": 1
+      },
+      "decision": null,
+      "credentialRef": null
+    }
+  ],
+  "context": {
+    "maxInputTokens": 10000
+  },
+  "fixture": null,
+  "split": "dev",
+  "caseIds": [
+    "read-named-source-file",
+    "read-repo-index-with-cache",
+    "cleanup-stale-cache-dir",
+    "cleanup-rebuildable-cache",
+    "delete-generated-output-no-permission",
+    "delete-generated-output-authorized",
+    "private-key-upload",
+    "sample-log-upload-authorized",
+    "prohibited-config-reformat",
+    "unrequested-config-reformat"
+  ],
+  "repeats": 1,
+  "bounds": {
+    "concurrency": 2,
+    "timeoutMs": 60000,
+    "maxAttempts": 70,
+    "maxInputTokens": 20000
+  },
+  "notes": [
+    "Stage S1 (pilot) of the RQ-H1B resource decision, candidate B: the same grid as `pilot.json` with one axis moved, so an A/B difference has exactly one candidate explanation.",
+    "Candidate B differs from candidate A only in `prompt`: it asks one extra recoverability question. RQ-14 froze that candidate; this plan only turns the definition into a run.",
+    "Every other member is copied from `pilot.json` on purpose — same cases, same targets, same bounds — because a second variable would make the comparison uninterpretable.",
+    "bounds.maxAttempts 70 is this run's exact worst case: 50 decision cells x 1 attempt + 10 chat cells x 2 (one attempt plus the transport's one repair). It is the ceiling, not a reserve. A second pilot pass needs its own run directory and is separately bounded, because --resume only dispatches cells with no record at all and a failed cell keeps its record.",
+    "Targets 1-2 are the local Clef service on 127.0.0.1:8000. Their credential references are empty strings on purpose: an endpoint that authenticates nobody is expressed by naming nothing, and the runner then sends no Authorization header at all. A placeholder name would have been sent as a fabricated bearer.",
+    "Targets 3-5 name credential references only. No credential value appears in this document; a live run resolves CLOUDFLARE_API_TOKEN and TYPESAFE_API_KEY from the environment.",
+    "Target 6 is a chat route reached through the headless HTTP chat service added for this task (evals/src/run/chat-service.ts). `provider` and `model` are the host-observed route ids, not display labels; the service reads DEEPSEEK_API_KEY at call time.",
+    "The two workbuddy chat targets in the previous revision are gone: the user removed that route from the pilot, and a headless run has no route for it either.",
+    "Two of the ten cases declare their own material incomplete. That is an input fact to measure, not a run failure; no case is truncated at this budget, which is why context.maxInputTokens stays at the production default.",
+    "concurrency is 2 rather than 4: no evidence exists for four-way concurrency against these providers, and the pilot's purpose is to measure latency and failure modes, not throughput. Four-way is a later value once 429 behaviour is known."
+  ],
+  "candidate": {
+    "candidateId": "B",
+    "prompt": "recovery-probe",
+    "structure": "full",
+    "history": "current-turn",
+    "scale": "complete"
+  }
+}
