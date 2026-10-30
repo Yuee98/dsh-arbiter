@@ -30,6 +30,8 @@ import { compileCheckers } from '../../../evals/src/data/schemas.js';
 import { datasetDigest } from '../../../evals/src/annotation/summary.js';
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 
+import { objectsAt, readJson, textAt } from './replay.js';
+
 /** The repository root. */
 export const REPOSITORY_ROOT = fileURLToPath(
   new URL('../../../', import.meta.url),
@@ -90,13 +92,21 @@ export const VERSIONS: RunVersions = {
   node: '24.21.0',
 };
 
-/** The committed dataset, read the way the runner reads it. */
-export async function coreCases(): Promise<{
+/**
+ * The committed dataset, read the way the runner reads it.
+ *
+ * `path` defaults to the committed dataset. A test that asserts on an *unlabelled*
+ * dataset passes a copy without `labels/`, so it no longer depends on whether the
+ * committed one has been adjudicated yet.
+ */
+export async function coreCases(
+  path: string = join(REPOSITORY_ROOT, CORE_DATASET),
+): Promise<{
   readonly cases: readonly ReviewCase[];
   readonly digest: string;
 }> {
   const checkers = await compileCheckers();
-  const raw = await readDataset(join(REPOSITORY_ROOT, CORE_DATASET));
+  const raw = await readDataset(path);
   const inspection = inspectDataset(raw, checkers, {
     contract: REVIEW_CONTRACT_VERSION,
     rubric: 'review-rubric-v1',
@@ -107,6 +117,30 @@ export async function coreCases(): Promise<{
   };
 }
 
+/**
+ * A copy of the committed dataset carrying no labels.
+ *
+ * The committed `core-v1` is the user's adjudicated dataset, so once labels exist a
+ * test that asserts "no reference is known" over it is asserting something about the
+ * repository state rather than about the report. Copying the manifest and cases into
+ * a temporary directory gives those tests a dataset whose contents they own.
+ */
+export async function unlabelledCoreDataset(created: Area): Promise<string> {
+  const source = join(REPOSITORY_ROOT, CORE_DATASET);
+  // Read through the same narrowing accessor the other helpers use, rather than
+  // asserting a shape onto a parsed value.
+  const manifest = await readJson(join(source, 'manifest.json'));
+  await created.write('dataset/manifest.json', manifest);
+  for (const entry of objectsAt(manifest, 'cases')) {
+    const caseId = textAt(entry, 'caseId');
+    await created.write(
+      `dataset/cases/${caseId}.json`,
+      await readJson(join(source, 'cases', `${caseId}.json`)),
+    );
+  }
+  return join(created.path, 'dataset');
+}
+
 /** Run one plan to completion inside a directory, and hand back the directory. */
 export async function runPlan(parts: {
   readonly directory: string;
@@ -114,9 +148,11 @@ export async function runPlan(parts: {
   readonly fixture: RunFixture;
   /** A caller that wants the run to stop early, so a cell is left unwritten. */
   readonly signal?: AbortSignal;
+  /** The dataset to freeze this run against; the committed one by default. */
+  readonly datasetPath?: string;
 }): Promise<string> {
   const checkers = await compileRunCheckers();
-  const loaded = await coreCases();
+  const loaded = await coreCases(parts.datasetPath);
   const created = await createRun({
     directory: parts.directory,
     runId: 'report-run',

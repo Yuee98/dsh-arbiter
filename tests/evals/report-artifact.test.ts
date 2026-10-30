@@ -46,6 +46,7 @@ import {
   REPOSITORY_ROOT,
   VERSIONS,
   runPlan,
+  unlabelledCoreDataset,
   withArea,
 } from './helpers/report-run.js';
 import type { Area } from './helpers/report-run.js';
@@ -65,18 +66,23 @@ function chatFixture(
 }
 
 /** The settings a test builds a report with, joined against the committed dataset. */
-function settings() {
+function settings(datasetPath: string) {
   return {
     ...defaultSettings(REPOSITORY_ROOT),
-    dataset: { kind: 'path', path: CORE_DATASET } as const,
+    // Never the committed `core-v1`: these tests assert what a report says about a
+    // run, and that must not change because the user finished adjudicating the real
+    // dataset. The run's own copy is what it was frozen against.
+    dataset: { kind: 'path', path: datasetPath } as const,
   };
 }
 
-/** Run two cases through chat and return the run directory. */
+/** Run two cases through chat against an unlabelled copy of the dataset. */
 async function twoCaseRun(created: Area): Promise<string> {
+  const datasetPath = await unlabelledCoreDataset(created);
   const directory = join(created.path, 'run');
   await runPlan({
     directory,
+    datasetPath,
     plan: planOf({
       caseIds: ['read-named-source-file', 'read-repo-index-with-cache'],
       protocols: ['chat'],
@@ -118,9 +124,12 @@ async function build(
   directory: string,
   options: { readonly dataset?: string | null } = {},
 ): Promise<EvaluationReport> {
+  // `twoCaseRun` writes its dataset beside the run, so the default is the copy the
+  // run was frozen against rather than the committed, already-adjudicated one.
+  const sibling = join(directory, '..', 'dataset');
   const dataset =
     options.dataset === undefined
-      ? ({ kind: 'path', path: CORE_DATASET } as const)
+      ? ({ kind: 'path', path: sibling } as const)
       : options.dataset === null
         ? ({ kind: 'none' } as const)
         : ({ kind: 'path', path: options.dataset } as const);
@@ -132,7 +141,7 @@ async function build(
   if (!read.ok) throw new Error(read.problems.join('; '));
   return buildReport({
     observation: read.observation,
-    settings: { ...settings(), dataset },
+    settings: { ...settings(sibling), dataset },
   });
 }
 
@@ -331,15 +340,16 @@ async function buildReportFor(
   mode: 'ask' | 'no-ask',
   channel: 'available' | 'unavailable',
 ): Promise<EvaluationReport> {
+  const sibling = join(directory, '..', 'dataset');
   const read = await observeRun({
     directory,
     root: REPOSITORY_ROOT,
-    dataset: { kind: 'path', path: CORE_DATASET },
+    dataset: { kind: 'path', path: sibling },
   });
   if (!read.ok) throw new Error(read.problems.join('; '));
   return buildReport({
     observation: read.observation,
-    settings: { ...settings(), mode, channel },
+    settings: { ...settings(sibling), mode, channel },
   });
 }
 
@@ -631,7 +641,8 @@ describe('the report command writes three documents and refuses to clobber', () 
         {
           directory,
           output: null,
-          dataset: CORE_DATASET,
+          // The run's own copy, which carries no labels by construction.
+          dataset: join(directory, '..', 'dataset'),
           mode: 'ask',
           channel: 'available',
           force: false,
@@ -742,7 +753,7 @@ describe('the report reads through the published consumer interface', () => {
       // runner did; the report resolves it against the root it was given.
       const read = await reportForRun({
         directory,
-        settings: settings(),
+        settings: settings(join(directory, '..', 'dataset')),
       });
       expect(read.ok).toBe(true);
       if (!read.ok) return;
