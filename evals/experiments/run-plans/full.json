@@ -1,0 +1,153 @@
+{
+  "planVersion": "eval-run-plan-v1",
+  "datasetId": "core-v1",
+  "datasetPath": "evals/datasets/core-v1",
+  "transport": "live",
+  "protocols": ["chat", "decision"],
+  "targets": [
+    {
+      "targetId": "clef-local",
+      "provider": "clef-local",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef",
+        "apiKeyRef": "",
+        "timeoutMs": 30000,
+        "costTier": "free"
+      },
+      "credentialRef": null
+    },
+    {
+      "targetId": "clef-flash-local",
+      "provider": "clef-local",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef-flash",
+        "apiKeyRef": "",
+        "timeoutMs": 30000,
+        "costTier": "free"
+      },
+      "credentialRef": null
+    },
+    {
+      "targetId": "clef-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef",
+        "model": "clef",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "clef-flash-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef-flash",
+        "model": "clef-flash",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "jev-1-13-0",
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-1.13.0",
+        "apiKeyRef": "TYPESAFE_API_KEY",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "TYPESAFE_API_KEY"
+    },
+    {
+      "targetId": "deepseek-v4-1-flash",
+      "provider": "deepseek-account",
+      "model": "deepseek-flash",
+      "modelVersion": null,
+      "chat": {
+        "provider": "deepseek-account",
+        "model": "deepseek-flash",
+        "temperature": 0,
+        "maxTokens": 10000,
+        "timeoutMs": 30000,
+        "maxRepairRetries": 1
+      },
+      "decision": null,
+      "credentialRef": null
+    },
+    {
+      "targetId": "workbuddy-glm-5-3-flash",
+      "provider": "workbuddy",
+      "model": "glm-5.3-flash",
+      "modelVersion": null,
+      "chat": {
+        "provider": "workbuddy",
+        "model": "glm-5.3-flash",
+        "temperature": 0,
+        "maxTokens": 10000,
+        "timeoutMs": 30000,
+        "maxRepairRetries": 1
+      },
+      "decision": null,
+      "credentialRef": null
+    }
+  ],
+  "context": {
+    "maxInputTokens": 10000
+  },
+  "fixture": null,
+  "split": "dev",
+  "caseIds": [
+    "authenticated-internal-api-call",
+    "cleanup-rebuildable-cache",
+    "cleanup-stale-cache-dir",
+    "delete-generated-output-authorized",
+    "delete-generated-output-no-permission",
+    "delete-generated-output-restorable",
+    "delete-uncommitted-drafts",
+    "private-key-upload",
+    "prohibited-config-reformat",
+    "read-named-source-file",
+    "read-repo-index-with-cache",
+    "sample-log-upload-authorized",
+    "unrequested-config-reformat"
+  ],
+  "repeats": 2,
+  "bounds": {
+    "concurrency": 4,
+    "timeoutMs": 30000,
+    "maxAttempts": 234,
+    "maxInputTokens": 20000
+  },
+  "notes": [
+    "Stage S2 (full) of the RQ-H1B resource decision. This document describes ONE candidate; the frozen RQ-14 matrix compares six.",
+    "Selection is the dataset's dev split (13 cases) written out explicitly, because it is the split the RQ-14 matrix froze. The holdout split stays unused here: it is reserved for the final-candidate validation.",
+    "Measured at context 10000: 37385 chat input tokens and 38568 decision input tokens per repeat; the largest single request is 3084.",
+    "One candidate's grid is 13 cases x 7 targets x 2 protocols x 2 repeats = 364 cells, of which 182 are supported. 52 cells per target is the matrix's own 52 = 13 cases x 2 protocols x 2 repeats.",
+    "One candidate's planned input is 2 x 2 x 37385 + 5 x 2 x 38568 = 535220 estimated input tokens.",
+    "bounds.maxAttempts 234 = 130 decision cells x 1 attempt + 52 chat cells x 2. A run cannot exceed it, so the six-candidate comparison is six runs of this shape, not one run with a larger bound.",
+    "A run plan has no candidate axis: the runner calls the production review package, which is candidate A of the RQ-14 matrix. Comparing A against B needs the experimental entry point that renders a variant, so only candidate A is reachable through this document.",
+    "The pilot gates this stage. Starting it before the pilot reports every target connected would spend the full budget to re-learn a connectivity failure."
+  ]
+}

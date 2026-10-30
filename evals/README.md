@@ -367,5 +367,5 @@ tests/evals/         上述行为的测试
 ## 未完成事项
 
 - 报告、离线回放与实验配置分别见「报告」「离线回放」与「候选与消融」；`evals/experiments/` 存放冻结的候选矩阵。
-- 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。
+- 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。窗口一冻结的 target 与预算见 `evals/experiments/run-plans/` 与[资源决定](../validation/review-quality/resource-decision.md)，其中记录了今天仍阻塞 live 运行的三项能力边界（本地服务空凭据引用、chat 无宿主 LLM 入口、候选轴不在 run plan 内）。
 - 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。

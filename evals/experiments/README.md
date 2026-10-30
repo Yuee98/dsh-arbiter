@@ -9,7 +9,10 @@ evals/experiments/
   rq14-matrix.json            冻结实验定义（候选、阶梯、缓存工作负载、上限）
   record.json                 由定义生成并提交的记录（身份、差异、实测预算）
   schema/experiment.schema.json  定义自己的 JSON Schema（不是运行器文档 schema）
+  run-plans/                  RQ-H1B 的冻结运行计划（target、预算、bounds），供 RQ-15 调用
 ```
+
+`run-plans/` 属于 RQ-H1B（`resource-decision.md`），不是候选矩阵：它点名真实 target 与预算上限，`pnpm evals:plan` 可以直接展开；而 `experiments` 的三个命令只认同目录下的实验定义。两者是不同的文档类型，不要混用——一个说「跑什么配置」，一个说「用哪个模型、花多少」。它们的目的、取值与阻塞项见[窗口一资源决定](../../validation/review-quality/resource-decision.md)。
 
 `record.json` 由 `pnpm evals:experiments record evals/experiments/rq14-matrix.json` 生成，`definitionDigest` 与定义文件绑定；改定义必须重生成记录，测试会检查两者一致。
 
