@@ -162,6 +162,118 @@ describe('a variants document is read, not repaired', () => {
   });
 });
 
+describe('a misspelled axis is refused instead of silently ignored', () => {
+  /**
+   * The failure this guards against is not a crash: it is a derivation that quietly
+   * measures something else. Dropping an unknown member leaves that axis at its
+   * production default, so the derived run is byte-identical to the default variant's
+   * while its name and its caller's intent claim an experiment. Nothing downstream can
+   * tell the two apart, which is why each layer is checked at its own level.
+   */
+  const misspellings: readonly (readonly [string, unknown, string])[] = [
+    [
+      'thresholds.auth',
+      { thresholds: { auth: 'strict' } },
+      'thresholds does not take auth',
+    ],
+    [
+      'thresholds.authorisation',
+      { thresholds: { authorisation: 'at-least' } },
+      'thresholds does not take authorisation',
+    ],
+    [
+      'thresholds.risk and a typo',
+      { thresholds: { risk: 'at-least', authorisation: 'strict' } },
+      'thresholds does not take authorisation',
+    ],
+    [
+      'settlement.mode_',
+      { settlement: { mode_: 'no-ask' } },
+      'settlement does not take mode_',
+    ],
+    [
+      'settlement.channels',
+      { settlement: { channels: 'unavailable' } },
+      'settlement does not take channels',
+    ],
+    [
+      'variant.tresholds',
+      { tresholds: { risk: 'at-least' } },
+      'a variant does not take tresholds',
+    ],
+    [
+      'variant.answr',
+      { answr: 'recorded-parse' },
+      'a variant does not take answr',
+    ],
+    ['variant.extra', { extra: 1 }, 'a variant does not take extra'],
+  ];
+
+  it.each(misspellings)(
+    'refuses %s and names the accepted spellings',
+    (_label, entry, expected) => {
+      const parsed = parseVariants(documentOf([entry]));
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problems.join('\n')).toContain(expected);
+    },
+  );
+
+  it('refuses an unknown member of the document itself', () => {
+    const parsed = parseVariants({
+      variantsVersion: REPLAY_VARIANTS_VERSION,
+      variants: [{}],
+      variant: [{ thresholds: { risk: 'at-least' } }],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problems.join('\n')).toContain(
+      'a variants document does not take variant',
+    );
+  });
+
+  it('tells the caller what it does accept, so the fix is one line', () => {
+    const parsed = parseVariants(
+      documentOf([{ thresholds: { auth: 'strict' } }]),
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    // Naming the accepted spellings is what turns a silent fallback into an edit.
+    expect(parsed.problems.join('\n')).toContain(
+      'it accepts risk, authorization',
+    );
+  });
+
+  it('still accepts a fully correct document, so the check is not blanket', () => {
+    const parsed = parseVariants(
+      documentOf([
+        {
+          description: 'named axes',
+          answer: 'recorded-parse',
+          thresholds: { risk: 'at-least', authorization: 'strict' },
+          settlement: { mode: 'no-ask', channel: 'unavailable' },
+        },
+      ]),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.variants[0]?.variantId).toBe(
+      'parsed-at-least-strict-no-ask-unavailable',
+    );
+  });
+
+  it('would otherwise have produced the production variant from a typo', () => {
+    // The regression's discriminating half: this is what the pre-fix parser did with
+    // `{"thresholds":{"auth":"strict"}}` — it returned the production variant, so the
+    // derivation was indistinguishable from an intentional replay of the default. The
+    // assertion is on the *refusal* because producing this value is the defect.
+    const parsed = parseVariants(
+      documentOf([{ thresholds: { auth: 'strict' } }]),
+    );
+    expect(parsed.ok).toBe(false);
+  });
+});
+
 describe('the replay command line', () => {
   it('parses a run directory with no flags as the production variant', () => {
     const parsed = parseCommand(['replay', 'run-a']);

@@ -664,16 +664,17 @@ describe('the derivation is traceable to its source', () => {
 
   it('reports an unreadable dataset as undetermined rather than as unchanged', async () => {
     await withArea(async (created) => {
-      const directory = await decisionRun(join(created.path, 'run'), {
-        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
-      });
-      // Point the plan's dataset at a directory that holds nothing, so the comparison
-      // cannot run. Silence here would be read as "unchanged".
-      const plan = await readJson(join(directory, 'plan.json'));
-      await created.write('run/plan.json', {
-        ...plan,
-        datasetPath: 'evals/datasets/does-not-exist',
-      });
+      // The plan is written with a dataset path that holds nothing, so the comparison
+      // cannot run. Writing the run against that path — rather than editing plan.json
+      // afterwards — keeps the index and the plan consistent, which the reader now
+      // requires: a derived plan edited in place is refused as a run whose documents
+      // disagree about which plan produced it.
+      const directory = await runAgainst(
+        join(created.path, 'run'),
+        'evals/datasets/does-not-exist',
+        { '4': 0.9, '5': 0.1 },
+        { '8': 0.9, '9': 0.1 },
+      );
       const err: string[] = [];
       const code = await replayRun(
         {

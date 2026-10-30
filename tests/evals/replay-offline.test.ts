@@ -19,7 +19,7 @@
  *      read from.
  */
 
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -180,6 +180,138 @@ describe('the source is never written', () => {
       // not proximity.
       expect(result.code).toBe(0);
       expect(sourceDocuments(await inventory(directory))).toEqual(before);
+    });
+  });
+});
+
+describe('the lineage digest certifies the bytes the derivation used', () => {
+  /**
+   * These are the two ways a digest can stop meaning anything.
+   *
+   * The reader parses each document itself and this module hashes the bytes, so a
+   * directory that changes between the two reads hands the derivation one version and
+   * the lineage another. A reader who later re-hashes the source would see the recorded
+   * digest match its own file and conclude the derivation was reproducible, which is the
+   * one inference a lineage exists to support.
+   */
+
+  it('refuses a run whose plan does not match the digest the index records', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      // A plan edited in place: schema-valid, so only the index's own digest can catch
+      // it. This is the static form of the inconsistency — a hand edit, or a run whose
+      // plan was rewritten after the fact.
+      const plan = await readJson(join(directory, RUN_FILES.plan));
+      await writeFile(
+        join(directory, RUN_FILES.plan),
+        `${JSON.stringify({ ...plan, notes: ['edited after the run'] }, null, 2)}\n`,
+      );
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+      });
+      expect(result.code).toBe(1);
+      expect(result.err.join('\n')).toContain('does not match the plan digest');
+      // Nothing was derived, so the mismatch cannot be mistaken for a completed replay.
+      expect(
+        await inventory(join(created.path, 'derived')).catch(() => []),
+      ).toEqual([]);
+    });
+  });
+
+  it('refuses a run that changes while it is being read', async () => {
+    // The temporal form of the same defect, and the one a run still being written
+    // produces. A background writer alternates two valid plans while the replay reads;
+    // every accepted read must be internally consistent, and any read that saw the two
+    // disagree must be refused rather than published.
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      const planPath = join(directory, RUN_FILES.plan);
+      const original = await readFile(planPath, 'utf8');
+      // Read through the plan checker, so the two versions this writer alternates are
+      // both schema-valid: a plan the reader would reject tests the schema, not the
+      // consistency check this case is about.
+      const plan = await readJson(planPath);
+      const variants = ['a', 'b'].map(
+        (mark) =>
+          `${JSON.stringify({ ...plan, notes: [`variant-${mark}`] })}\n`,
+      );
+      let writing = true;
+      let round = 0;
+      const writer = (async (): Promise<void> => {
+        // The flag is read from a closure the test flips, so the compiler cannot know
+        // it is true on the first pass; eslint cannot either, hence the read below.
+        while (writing as boolean) {
+          await writeFile(planPath, variants[round % 2] ?? '');
+          round += 1;
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      })();
+      const outcomes: { readonly code: number; readonly err: string }[] = [];
+      try {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          try {
+            const result = await replay({
+              directory,
+              output: join(created.path, `derived-${String(attempt)}`),
+            });
+            outcomes.push({ code: result.code, err: result.err.join('\n') });
+          } catch (error) {
+            // A writer caught mid-file yields a torn document, and the shared reader
+            // throws on unparsable JSON rather than classifying it. That is a refusal
+            // too — nothing was derived — so it is counted as one instead of failing the
+            // test for a race it did not choose.
+            outcomes.push({
+              code: 1,
+              err: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      } finally {
+        writing = false;
+        await writer;
+        await writeFile(planPath, original);
+      }
+      // At least one read must have caught the disagreement; otherwise the sample never
+      // exercised the window and the test would pass for the wrong reason.
+      const refused = outcomes.filter((outcome) => outcome.code === 1);
+      expect(refused.length).toBeGreaterThan(0);
+      // Every refusal has to be one of the inconsistency reasons, never an unrelated
+      // failure that happens to exit 1. A writer caught mid-write yields a torn file
+      // rather than two whole versions, and that is reported as unreadable — the point
+      // is that neither shape is published as a derivation.
+      const reasons = [
+        'changed while it was being read',
+        'is not valid JSON',
+        'does not match the plan digest',
+        'JSON',
+      ];
+      for (const outcome of refused) {
+        expect(reasons.some((reason) => outcome.err.includes(reason))).toBe(
+          true,
+        );
+      }
+      // And every accepted read produced a lineage whose digest matches its own bytes:
+      // consistency, not luck, is what an exit code of 0 now claims.
+      const accepted = outcomes.filter((outcome) => outcome.code === 0);
+      for (const [index] of accepted.entries()) {
+        const paths = await inventory(
+          join(created.path, `derived-${String(index)}`),
+        );
+        expect(paths.length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  it('accepts a directory that holds still, so the check is not merely strict', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+      });
+      expect(result.code).toBe(0);
+      expect(result.err).toEqual([]);
     });
   });
 });

@@ -44,6 +44,66 @@ const ANSWER_CANDIDATES: readonly AnswerCandidate[] = [
 /** The two comparisons a threshold may name. */
 const THRESHOLD_RULES: readonly ThresholdRule[] = ['strict', 'at-least'];
 
+/**
+ * The member names each layer accepts, and nothing else.
+ *
+ * A misspelled axis is the most likely mistake a person makes in a variants file, and
+ * it is the one a lenient reader handles worst: dropping the member leaves the axis at
+ * its production default, so `{"thresholds":{"auth":"at-least"}}` produces exactly the
+ * derivation the production variant produces, published under a name that claims the
+ * caller asked for an experiment. Nothing downstream can tell that apart from a
+ * deliberate replay of the default, so the document has to be refused here.
+ *
+ * These lists are the single place the accepted names are stated; `statedVariantOf`,
+ * `thresholdPairOf` and `settlementOfStated` each check their own list before reading
+ * a member, so a name cannot be accepted by one layer and forgotten by another.
+ */
+const VARIANT_MEMBERS: readonly string[] = [
+  'description',
+  'answer',
+  'thresholds',
+  'settlement',
+];
+const THRESHOLD_MEMBERS: readonly string[] = ['risk', 'authorization'];
+const SETTLEMENT_MEMBERS: readonly string[] = ['mode', 'channel'];
+/** The document's own members, checked once rather than per variant. */
+const DOCUMENT_MEMBERS: readonly string[] = [
+  'variantsVersion',
+  'description',
+  'variants',
+];
+
+/**
+ * The members of `value` that `allowed` does not name, in the order they appear.
+ *
+ * Sorted so the message is stable: two people reporting the same typo should be able
+ * to diff their output.
+ */
+function unknownMembers(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): readonly string[] {
+  return Object.keys(value)
+    .filter((key) => !allowed.includes(key))
+    .sort();
+}
+
+/**
+ * The problem an unknown member causes, or null when every member is known.
+ *
+ * The message names the accepted spellings, because the mistake is almost always one
+ * of them and a list turns a silent fallback into a one-line fix.
+ */
+function unknownMemberProblem(parts: {
+  readonly layer: string;
+  readonly value: Record<string, unknown>;
+  readonly allowed: readonly string[];
+}): string | null {
+  const unknown = unknownMembers(parts.value, parts.allowed);
+  if (unknown.length === 0) return null;
+  return `${parts.layer} does not take ${unknown.join(', ')}; it accepts ${parts.allowed.join(', ')}`;
+}
+
 /** The two ask policies and the two channel states a settlement may name. */
 const ASK_POLICIES: readonly AskPolicy[] = ['ask', 'no-ask'];
 const CHANNELS: readonly SettlementChoice['channel'][] = [
@@ -225,6 +285,15 @@ export function parseVariants(document: unknown): VariantsParse {
   if (document === null || typeof document !== 'object') {
     return { ok: false, problems: ['the variants document is not an object'] };
   }
+  // `typeof` already excluded every non-object, so this narrowing needs no cast: a
+  // document that is an array is not a variants document either, which the member check
+  // reports as the unknown keys of an array.
+  const unknown = unknownMemberProblem({
+    layer: 'a variants document',
+    value: isRecord(document) ? document : { 'not-an-object': true },
+    allowed: DOCUMENT_MEMBERS,
+  });
+  if (unknown !== null) return { ok: false, problems: [unknown] };
   const version = fieldOf(document, 'variantsVersion');
   if (version !== REPLAY_VARIANTS_VERSION) {
     return {
@@ -327,6 +396,12 @@ function statedVariantOf(
   entry: unknown,
 ): { readonly stated: StatedVariant } | { readonly problem: string } {
   if (!isRecord(entry)) return { problem: 'is not an object' };
+  const unknown = unknownMemberProblem({
+    layer: 'a variant',
+    value: entry,
+    allowed: VARIANT_MEMBERS,
+  });
+  if (unknown !== null) return { problem: unknown };
   const description = fieldOf(entry, 'description');
   if (description !== undefined && typeof description !== 'string') {
     return { problem: 'description must be a string' };
@@ -374,6 +449,12 @@ function thresholdPairOf(value: unknown):
   | { readonly problem: string } {
   if (value === undefined) return { value: null };
   if (!isRecord(value)) return { problem: 'thresholds must be an object' };
+  const unknown = unknownMemberProblem({
+    layer: 'thresholds',
+    value,
+    allowed: THRESHOLD_MEMBERS,
+  });
+  if (unknown !== null) return { problem: unknown };
   const risk = optionalString(value, 'risk');
   if (typeof risk !== 'string' && risk !== null) return risk;
   const authorization = optionalString(value, 'authorization');
@@ -399,6 +480,12 @@ function settlementOfStated(value: unknown):
   | { readonly problem: string } {
   if (value === undefined) return { value: null };
   if (!isRecord(value)) return { problem: 'settlement must be an object' };
+  const unknown = unknownMemberProblem({
+    layer: 'settlement',
+    value,
+    allowed: SETTLEMENT_MEMBERS,
+  });
+  if (unknown !== null) return { problem: unknown };
   const mode = optionalString(value, 'mode');
   if (typeof mode !== 'string' && mode !== null) return mode;
   const channel = optionalString(value, 'channel');
