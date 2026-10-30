@@ -128,13 +128,18 @@ export function decisionForCase(
 export async function decisionRun(
   directory: string,
   cells: Readonly<Record<string, FixtureResponse>>,
+  datasetPath?: string,
 ): Promise<string> {
   return runPlan({
     directory,
+    ...(datasetPath === undefined ? {} : { datasetPath }),
     plan: planOf({
       caseIds: Object.keys(cells).map((cellId) => cellId.split('~')[0] ?? ''),
       protocols: ['decision'],
       targets: [decisionTarget()],
+      // The plan records the dataset the run is frozen against, and replay reports
+      // against the recorded path, so an unlabelled copy has to be named here too.
+      ...(datasetPath === undefined ? {} : { datasetPath }),
     }),
     fixture: fixtureOf(
       Object.fromEntries(

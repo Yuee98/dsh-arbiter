@@ -28,7 +28,11 @@ import type { EvaluationReport } from '../../evals/src/metrics/types.js';
 import type { ReviewOutcome } from '../../src/review-contract/index.js';
 import { REPLAY_FILES } from '../../evals/src/replay/write.js';
 
-import { REPOSITORY_ROOT, withArea } from './helpers/report-run.js';
+import {
+  REPOSITORY_ROOT,
+  unlabelledCoreDataset,
+  withArea,
+} from './helpers/report-run.js';
 import {
   cellRecordOf,
   chatCellOf,
@@ -99,6 +103,7 @@ async function reportFileOf(
     readonly mode: 'ask' | 'no-ask';
     readonly channel: 'available' | 'unavailable';
   },
+  datasetPath?: string,
 ): Promise<EvaluationReport> {
   const read = await reportForRun({
     directory,
@@ -106,6 +111,9 @@ async function reportFileOf(
       ...defaultSettings(REPOSITORY_ROOT),
       mode: settings.mode,
       channel: settings.channel,
+      ...(datasetPath === undefined
+        ? {}
+        : { dataset: { kind: 'path' as const, path: datasetPath } }),
     },
   });
   if (!read.ok) throw new Error(read.problems.join('; '));
@@ -381,9 +389,19 @@ describe('a changed mode changes the settlement, not the score', () => {
 
   it('leaves a scored allowance an allowance under every mode', async () => {
     await withArea(async (created) => {
-      const directory = await decisionRun(join(created.path, 'run'), {
-        [CELL]: decisionForCase({ '1': 0.9, '2': 0.1 }, { '9': 0.9, '8': 0.1 }),
-      });
+      // The point of this test is what a report says when no reference exists, so
+      // it runs against a copy without labels rather than the adjudicated dataset.
+      const datasetPath = await unlabelledCoreDataset(created);
+      const directory = await decisionRun(
+        join(created.path, 'run'),
+        {
+          [CELL]: decisionForCase(
+            { '1': 0.9, '2': 0.1 },
+            { '9': 0.9, '8': 0.1 },
+          ),
+        },
+        datasetPath,
+      );
       await replay({
         directory,
         output: join(created.path, 'derived'),
@@ -393,6 +411,7 @@ describe('a changed mode changes the settlement, not the score', () => {
       const report = await reportFileOf(
         join(created.path, 'derived/text-strict-at-least-no-ask-unavailable'),
         { mode: 'no-ask', channel: 'unavailable' },
+        datasetPath,
       );
       expect(report.settlement.overall.allow).toBe(1);
       expect(report.settlement.overall.fallbackDeny).toBe(0);
