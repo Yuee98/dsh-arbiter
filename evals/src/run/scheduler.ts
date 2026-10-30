@@ -35,6 +35,9 @@
 
 import type { ReviewCase } from '../data/types.js';
 
+import type { ReviewPackage } from '../../../src/reviewer/package.js';
+
+import { candidateOf } from './candidate.js';
 import { runCell, timedOutRecord } from './execute.js';
 import type { CellDeps } from './execute.js';
 import { caseMaterial } from './material.js';
@@ -196,12 +199,17 @@ class Budget {
  * The grid is walked in plan order by a fixed pool of workers, so the order cells
  * *start* in is deterministic while their completion order is not. Each worker takes
  * the next unclaimed cell, so no cell is dispatched twice and no cell is skipped.
+ *
+ * The plan's package is resolved once, here, and handed to every cell. Resolving it per
+ * cell would let two cells of one run disagree about what they measured if the resolution
+ * were ever expensive enough to memoise differently, and one run is one experiment.
  */
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchOutcome> {
   const now = options.now ?? (() => Date.now());
   const budget = new Budget(options.plan, options.alreadySpentAttempts ?? 0);
+  const pkg = candidateOf(options.plan).pkg;
   const results: DispatchResult[] = [];
   const state = {
     cursor: 0,
@@ -269,7 +277,7 @@ export async function dispatch(
         });
         continue;
       }
-      const prepared = prepare(cell, options);
+      const prepared = prepare(cell, options, pkg);
       if ('reason' in prepared) {
         // Nothing was sent, so there is no record and no attempt. Calling this `failed`
         // would put it in the population of dispatched failures whose evidence a reader
@@ -335,6 +343,7 @@ export async function dispatch(
         material,
         options,
         now,
+        pkg,
         reservedAttempts: ceiling,
       });
       state.inFlight -= 1;
@@ -400,10 +409,15 @@ interface Prepared {
  * Building the material before the budget check is what makes the input bound a real
  * comparison rather than an estimate about an estimate: the check reads the same
  * number the request would carry.
+ *
+ * The package comes from the plan, so the estimate the budget charges is the estimate of
+ * the request this cell will actually send. A candidate that renders differently therefore
+ * reports its own size, and the input bound stays a bound on what went out.
  */
 function prepare(
   cell: PlannedCell,
   options: DispatchOptions,
+  pkg: ReviewPackage,
 ): Prepared | { readonly reason: string } {
   const caseEntry = options.cases.get(cell.caseId);
   if (caseEntry === undefined) {
@@ -419,6 +433,7 @@ function prepare(
   }
   const material = caseMaterial(caseEntry, cell.protocol, {
     maxInputTokens: options.plan.context.maxInputTokens,
+    pkg,
   });
   return { caseEntry, target, material };
 }
@@ -442,6 +457,8 @@ async function runUnderTimeout(parts: {
   readonly material: Prepared['material'];
   readonly options: DispatchOptions;
   readonly now: () => number;
+  /** The package this run measures, resolved once by the dispatcher. */
+  readonly pkg: ReviewPackage;
   /** The reservation this cell holds, recorded if the call is abandoned. */
   readonly reservedAttempts: number;
 }): Promise<{ readonly result: DispatchResult; readonly abandoned: boolean }> {
@@ -462,6 +479,7 @@ async function runUnderTimeout(parts: {
     timedOut: () => timeout.aborted && !parts.options.signal.aborted,
     now: parts.now,
     maxInputTokens: parts.options.plan.bounds.maxInputTokens,
+    pkg: parts.pkg,
   } as const;
   const startedAt = parts.now();
   const call = runCell({

@@ -36,6 +36,7 @@ import {
   writeJson,
 } from './artifact.js';
 import { chatRouteProblems } from './chat-service.js';
+import { candidateOf, candidateSummary } from './candidate.js';
 import { createRun, readExisting, resumeRun } from './lifecycle.js';
 import {
   cellGrid,
@@ -365,6 +366,9 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     `bounds concurrency ${String(plan.bounds.concurrency)}, timeoutMs ${String(plan.bounds.timeoutMs)}, maxAttempts ${String(plan.bounds.maxAttempts)}, maxInputTokens ${String(plan.bounds.maxInputTokens)}`,
   );
   io.out(`transport ${plan.transport}`);
+  // Which package the cells render and read with, before anything is sent. A comparison
+  // whose plan does not say this cannot be told apart from a baseline run afterwards.
+  io.out(`package ${candidateSummary(candidateOf(resolvedPlan))}`);
   if (plan.fixture !== null) {
     const fixture = await readFixture(
       fixturePathOf(resolve(io.root, command.planPath), plan.fixture),

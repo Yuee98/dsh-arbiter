@@ -149,7 +149,34 @@ export interface RunPlan {
   readonly bounds: RunBounds;
   readonly context: { readonly maxInputTokens: number };
   readonly fixture: string | null;
+  /**
+   * The package variant this plan measures, as its own axes.
+   *
+   * Omitted means the production package, which is the same thing as declaring every axis
+   * at its baseline. It is a member rather than an implicit constant because a plan is the
+   * freeze of an experiment: two candidates are two plans, and a run records which one it
+   * measured so a report cannot compare a candidate's cells with production's and attribute
+   * the difference to a target.
+   */
+  readonly candidate?: PlanCandidate;
   readonly notes: readonly string[];
+}
+
+/**
+ * The candidate a plan measures, as the four axes the variant vocabulary defines.
+ *
+ * Named by axes rather than by an id alone: an id is derived, so a plan that carried only
+ * an id could name a package this build does not have. The axes make the plan
+ * self-describing and let the runner derive the id and compare it with the recorded
+ * experiment matrix.
+ */
+export interface PlanCandidate {
+  /** A stable short name for the candidate, used in the run's own output. */
+  readonly candidateId: string;
+  readonly prompt: 'no-probe' | 'recovery-probe';
+  readonly structure: 'full' | 'compact' | 'compact-no-audit';
+  readonly history: 'current-turn' | 'none';
+  readonly scale: 'complete' | 'labels';
 }
 
 /** Which split a plan selects, or every case. */

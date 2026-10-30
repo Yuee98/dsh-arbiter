@@ -1,5 +1,5 @@
 /**
- * The wiring gaps RQ-15 had to close before a real pilot could run.
+ * The three wiring gaps RQ-15 had to close before a real pilot could run.
  *
  * Each section states the *capability* rather than the implementation, because that is
  * what the resource decision recorded as missing:
@@ -8,6 +8,8 @@
  *         is ever sent on its behalf.
  *   §4.2  a headless run reaches a chat model through its own HTTP service, with the
  *         provider's real usage recorded and the credential never leaving the adapter.
+ *   §4.3  a plan can name a candidate, and the cells are rendered and read by that
+ *         candidate's package rather than production's.
  *
  * Nothing here reaches a network or a provider: the chat service takes its fetch, and the
  * decision cells are answered by a scripted socket.
@@ -30,9 +32,12 @@ import {
   chatRouteProblems,
   headlessChatService,
 } from '../../evals/src/run/chat-service.js';
+import { candidateOf } from '../../evals/src/run/candidate.js';
+import { PRODUCTION_VARIANT } from '../../src/reviewer/variant.js';
 import { coreCases, VERSIONS } from './helpers/report-run.js';
 import {
   cellIdOf,
+  chatAnswer,
   chatTarget,
   decisionAnswer,
   decisionTarget,
@@ -489,5 +494,95 @@ describe('§4.2 a headless run reaches a chat model through its own service', ()
         }
       })(),
     ).rejects.toThrow(/without a finish reason/u);
+  });
+});
+
+describe('§4.3 a plan can name the package it measures', () => {
+  it('measures production’s own package object when the plan names no candidate', () => {
+    const resolved = candidateOf(planOf());
+    expect(resolved.candidateId).toBeNull();
+    expect(resolved.isBaseline).toBe(true);
+    expect(resolved.variantId).toBe(PRODUCTION_VARIANT.variantId);
+  });
+
+  it('derives the candidate package from the plan’s axes', () => {
+    const resolved = candidateOf(
+      planOf({
+        candidate: {
+          candidateId: 'B',
+          prompt: 'recovery-probe',
+          structure: 'full',
+          history: 'current-turn',
+          scale: 'complete',
+        },
+      }),
+    );
+    expect(resolved.candidateId).toBe('B');
+    expect(resolved.variantId).toBe(
+      'rq14/recovery-probe.complete.current-turn.full',
+    );
+    expect(resolved.isBaseline).toBe(false);
+    expect(resolved.pkg.asksProbe).toBe(true);
+  });
+
+  it('refuses a candidate whose axes are all at their baseline', () => {
+    const problems = planProblems(
+      planOf({
+        candidate: {
+          candidateId: 'A-lookalike',
+          prompt: 'no-probe',
+          structure: 'full',
+          history: 'current-turn',
+          scale: 'complete',
+        },
+      }),
+    );
+    expect(problems.join('\n')).toContain(
+      'declares every axis at its baseline',
+    );
+  });
+
+  it('renders and reads a cell with the candidate’s package, not production’s', async () => {
+    // The fingerprint is the evidence: two candidates over one case produce different
+    // requests, which is the whole point of the axis.
+    await withArea(async (area) => {
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'chat-candidate',
+        protocol: 'chat',
+      });
+      const fixture = fixtureOf({
+        [cellId]: fixtureCell({ chat: [chatAnswer(2, 9)] }),
+      });
+      const baseline = await dispatchPlan({
+        directory: join(area.path, 'baseline'),
+        plan: planOf(),
+        fixture,
+        llm: null,
+        readCredential: () => undefined,
+      });
+      const candidate = await dispatchPlan({
+        directory: join(area.path, 'candidate'),
+        plan: planOf({
+          candidate: {
+            candidateId: 'B',
+            prompt: 'recovery-probe',
+            structure: 'full',
+            history: 'current-turn',
+            scale: 'complete',
+          },
+        }),
+        fixture,
+        llm: null,
+        readCredential: () => undefined,
+      });
+      // Different request for the same case: the probe moved the prompt.
+      expect(candidate[0]?.material?.promptFingerprint).not.toBe(
+        baseline[0]?.material?.promptFingerprint,
+      );
+      // A baseline plan's fingerprint is the production renderer's, so a candidate cannot
+      // differ for a reason other than its own axes.
+      expect(baseline[0]?.material?.promptFingerprint).toBeTruthy();
+    });
   });
 });

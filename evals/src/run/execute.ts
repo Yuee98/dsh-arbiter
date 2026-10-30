@@ -24,8 +24,9 @@
  * card, and writing `0` would read as a free call.
  */
 
-import { review } from '../../../src/reviewer/service.js';
+import { reviewWith } from '../../../src/reviewer/service.js';
 import type { ReviewAttempt } from '../../../src/reviewer/attempt.js';
+import type { ReviewPackage } from '../../../src/reviewer/package.js';
 import { aggregateUsage } from '../../../src/reviewer/usage.js';
 
 import { inputHashOf } from '../data/eligibility.js';
@@ -84,6 +85,15 @@ export interface CellDeps {
   readonly now: () => number;
   /** The run's input bound, enforced on every attempt rather than only at admission. */
   readonly maxInputTokens: number;
+  /**
+   * The package this cell renders and reads with.
+   *
+   * Required rather than optional: a cell that fell back to production's package would
+   * measure the wrong candidate while its record still named the right one, which is the
+   * one failure an A/B comparison cannot detect afterwards. The scheduler resolves it once
+   * from the plan, so every cell of one run uses one package.
+   */
+  readonly pkg: ReviewPackage;
 }
 
 /**
@@ -313,9 +323,12 @@ export async function runCell(parts: {
       }),
     };
   }
-  let result: Awaited<ReturnType<typeof review>>;
+  let result: Awaited<ReturnType<ReturnType<typeof reviewWith>>>;
   try {
-    result = await review({
+    // The plan's package, not production's. `review()` hard-codes the production package,
+    // which is why a candidate could not be measured before: the only way to name one is
+    // to build the service for it here.
+    result = await reviewWith(deps.pkg)({
       snapshot: parts.material.snapshot,
       callId: parts.cellId,
       signal: deps.signal,

@@ -105,6 +105,41 @@
             }
           ]
         },
+        "candidate": {
+          "description": "The package variant this plan measures, as the four independent axes. Omitted means the production package, which is the same thing as every axis at its baseline. It is a member rather than an implicit constant because a plan freezes one experiment: two candidates are two plans, and the run records which one it measured so a report cannot compare one candidate's cells with another's and attribute the difference to a target.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidateId",
+            "prompt",
+            "structure",
+            "history",
+            "scale"
+          ],
+          "properties": {
+            "candidateId": {
+              "description": "The candidate's own short name, as the frozen experiment matrix spells it (A, B, C1…). Case-sensitive on purpose: this is a label for a package, never part of a file name, and copying the matrix's id keeps a run traceable to the experiment that defined it.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            },
+            "prompt": {
+              "type": "string",
+              "enum": ["no-probe", "recovery-probe"]
+            },
+            "structure": {
+              "type": "string",
+              "enum": ["full", "compact", "compact-no-audit"]
+            },
+            "history": {
+              "type": "string",
+              "enum": ["current-turn", "none"]
+            },
+            "scale": {
+              "type": "string",
+              "enum": ["complete", "labels"]
+            }
+          }
+        },
         "notes": {
           "type": "array",
           "items": {

@@ -29,11 +29,8 @@ import type {
   EvidenceRole,
   ReviewSnapshot,
 } from '../../../src/types.js';
-import {
-  renderChatRequest,
-  renderChatUser,
-  renderDecisionRequest,
-} from '../../../src/reviewer/prompt.js';
+import { PRODUCTION_PACKAGE } from '../../../src/reviewer/package.js';
+import type { ReviewPackage } from '../../../src/reviewer/package.js';
 import { evaluateCall } from '../../../src/rules/match.js';
 import { truncateSnapshot } from '../../../src/snapshot/budget.js';
 import {
@@ -56,7 +53,14 @@ import type { CellMaterial, RunProtocol } from './types.js';
 /** The rendered request one protocol submits, plus the snapshot behind it. */
 export interface CaseMaterial {
   readonly snapshot: ReviewSnapshot;
-  /** The exact submitted request for this protocol. */
+  /**
+   * The exact request this protocol submits under the package that will send it.
+   *
+   * Rendered by the same package the review will use, not by production's renderer on the
+   * side: a fingerprint or an estimate taken from a different renderer would describe a
+   * request no cell ever sends, and the repair guard's input bound would then measure the
+   * wrong bytes.
+   */
   readonly request: unknown;
   readonly material: CellMaterial;
 }
@@ -265,17 +269,26 @@ function authorityOf(entry: Evidence): {
  * Build one case's material for one protocol.
  *
  * The snapshot is assembled from the case, trimmed by the production budget, then
- * rendered by the production renderer for the protocol asked. Both outputs are
+ * rendered by the package's own renderer for the protocol asked. Both outputs are
  * kept: the snapshot is what the attempt replays, and the rendered request is what
  * the fingerprint names. Computing the fingerprint once here rather than per
  * attempt is what makes "two attempts with the same fingerprint sent the same
  * request" a fact rather than a hope.
+ *
+ * `pkg` defaults to production's, so a caller with no candidate measures exactly what it
+ * measured before. A candidate is passed explicitly and renders through the same
+ * snapshot: the comparison is about presentation and reading, never about the material.
  */
 export function caseMaterial(
   caseEntry: ReviewCase,
   protocol: RunProtocol,
-  options: { readonly maxInputTokens: number },
+  options: {
+    readonly maxInputTokens: number;
+    /** The package this cell will send with; production's when omitted. */
+    readonly pkg?: ReviewPackage;
+  },
 ): CaseMaterial {
+  const pkg = options.pkg ?? PRODUCTION_PACKAGE;
   const input = caseEntry.input;
   const guidance = caseGuidance(
     input.policy.projectRules,
@@ -350,10 +363,13 @@ export function caseMaterial(
     completenessInput,
   );
   const snapshot = rendered.snapshot;
+  // The package's own renderer, so the fingerprint, the estimate and the request the
+  // transport will send are one value. `estimatedInputTokens` is read from it rather than
+  // recomputed: a second estimate here could disagree with what the provider receives.
   const request =
     protocol === 'chat'
-      ? renderChatRequest(snapshot)
-      : renderDecisionRequest(renderChatUser(snapshot));
+      ? pkg.renderChat(snapshot)
+      : pkg.renderDecision(snapshot);
   const promptFingerprint = digestOf({ protocol, request });
   return {
     snapshot,
