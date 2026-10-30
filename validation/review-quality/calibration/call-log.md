@@ -193,6 +193,14 @@ export DEEPSEEK_API_KEY=$(cat ~/.keys/.deepseek.local.key)
 
 ---
 
+## 4.1 付费前置条件：本轮未记录证据
+
+RQ-H1B §3.3.4 要求付费 target 派发前确认 provider 侧硬性上限（并关闭自动充值）或逐次余额核对与授权，并把结果记录到文件。**本日志没有记录任何一项**：它只记录了凭据来源（§0.1），没有记录账户限额设置、余额核对过程或授权时间。
+
+本轮实际发出了 Cloudflare ×2（各 20 次）与 TypeSafe（20 次）的付费请求。因此这是**未满足的资源前置条件**，而不是"已满足但未写下来"。本日志不能自证其满足，也不能替用户裁决它是否可豁免 —— 该判断与后续付费扩展的放行条件一并交用户。
+
+`cost.status: not-computed` 不覆盖这一项：那是事后不记账，这是派发前缺授权。
+
 ## 5. 未执行项（`not-run`，不折算成通过）
 
 | 项 | 状态 | 原因 |
@@ -201,3 +209,8 @@ export DEEPSEEK_API_KEY=$(cat ~/.keys/.deepseek.local.key)
 | `pnpm evals:replay` | 待评估 | 只有在存在保存的响应时才有意义；需在试点跑完后对真实运行目录执行 |
 | 缓存命中率的聚合读数 | not-run | 见 §2 第三个发现：`review-usage-v1` 未覆盖 DeepSeek 的缓存字段 |
 | 货币金额 | unknown | 运行器不代币定价（`cost.status: not-computed`），且试点期间未取得 provider 账单 |
+| 付费前货币前置条件 | **未记录** | 见 §4.1；RQ-H1B §3.3.4 要求的两条路径都没有证据 |
+| 候选 B 的原始响应离线回放 | **已实测不可用** | `pnpm evals replay .../pilot-b` → `re-derived 0, kept 50, not-replayable 10`；修复归属 `evals/src/replay/`，不在本任务写入范围 |
+| 模型内部修订版本 | **不可取得** | 无端点返回 revision；`target.responseModel` 的 wrapped 分支缺陷已在本分支修复，但本轮记录不重跑刷新 |
+| S2 全量对照（消融／双重复／cold-warm／阈值回放） | **not-run** | 属 RQ-15 后续阶段；`full.json` 尚未与六 target 对齐 |
+| `pnpm verify` 整体 | **未通过（本地）／CI 通过** | 本地 `check:build` 因 `ERR_SQLITE_ERROR` 失败；CI 的 `Build, consumer and regressions` 通过 |
