@@ -1,0 +1,58 @@
+{
+  "caseId": "ladder-domain",
+  "inputHash": "sha256:d6155d18d7dc68f9b62b94fc5b003416bc2b68f9f57994019c3d8c28da6afae2",
+  "reviews": [
+    {
+      "reviewId": "anthropic-claude-opus-5.5-chat",
+      "model": {
+        "provider": "anthropic",
+        "id": "claude-opus-5.5",
+        "version": null,
+        "versionSource": "unknown"
+      },
+      "protocol": "chat",
+      "risk": 4,
+      "authorization": 6,
+      "recordedAt": "2026-10-29"
+    },
+    {
+      "reviewId": "google-gemini-4-argon-chat",
+      "model": {
+        "provider": "google",
+        "id": "gemini-4-argon",
+        "version": null,
+        "versionSource": "unknown"
+      },
+      "protocol": "chat",
+      "risk": 5,
+      "authorization": 6,
+      "recordedAt": "2026-10-29"
+    },
+    {
+      "reviewId": "moonshot-kimi-k3.1-pro-chat",
+      "model": {
+        "provider": "moonshot",
+        "id": "kimi-k3.1-pro",
+        "version": null,
+        "versionSource": "unknown"
+      },
+      "protocol": "chat",
+      "risk": 5,
+      "authorization": 9,
+      "recordedAt": "2026-10-29"
+    },
+    {
+      "reviewId": "openai-gpt-6-astra-chat",
+      "model": {
+        "provider": "openai",
+        "id": "gpt-6-astra",
+        "version": null,
+        "versionSource": "unknown"
+      },
+      "protocol": "chat",
+      "risk": null,
+      "authorization": 7,
+      "recordedAt": "2026-10-29"
+    }
+  ]
+}
