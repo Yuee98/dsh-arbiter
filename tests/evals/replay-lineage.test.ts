@@ -1,0 +1,740 @@
+/**
+ * The reference labels a replay must not touch, and the lineage it must publish.
+ *
+ * Two separate guarantees, and both are about what a reader is allowed to conclude:
+ *
+ *   1. **labels do not move.** A replay produces "what would have happened under
+ *      another rule", not a new adjudication. So the derived report is measured
+ *      against the *same* human reference as the original, `labels/` is byte-identical
+ *      afterwards, and a threshold change that moves the engine's band moves it under
+ *      the label rather than the label under it.
+ *   2. **the derivation is traceable.** A derived run names its source run, the source
+ *      documents by digest, the axis values and the contract that re-derived them. A
+ *      reader who has the lineage can tell which rule produced which number, and can
+ *      check that the source has not changed since.
+ */
+
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { inputHashOf } from '../../evals/src/data/eligibility.js';
+import type { ReviewLabel } from '../../evals/src/data/types.js';
+import {
+  defaultSettings,
+  reportForRun,
+} from '../../evals/src/metrics/index.js';
+import type { EvaluationReport } from '../../evals/src/metrics/types.js';
+import { REPLAY_FILES } from '../../evals/src/replay/write.js';
+
+import { replayRun } from '../../evals/src/replay/command.js';
+
+import { readDocument, schemas } from './helpers/documents.js';
+import { REPOSITORY_ROOT, withArea } from './helpers/report-run.js';
+import type { Area } from './helpers/report-run.js';
+import {
+  decisionCellOf,
+  decisionForCase,
+  decisionRun,
+  digestOf,
+  inventory,
+  at,
+  listTextAt,
+  objectAt,
+  objectsAt,
+  readJson,
+  replay,
+  textAt,
+} from './helpers/replay.js';
+import { runPlan } from './helpers/report-run.js';
+import { fixtureCell, fixtureOf, planOf } from './helpers/run.js';
+import { decisionTarget } from './helpers/run.js';
+
+/** The case the labelled tests use. */
+const CASE = 'read-named-source-file';
+
+/** The cell id one decision case produces. */
+const CELL = decisionCellOf(CASE);
+
+/** The label versions the committed manifest declares. */
+const LABEL_VERSIONS = {
+  contract: 'review-contract-v1',
+  rubric: 'review-rubric-v1',
+  policy: 'arbiter-policy-v2',
+} as const;
+
+/** One public score, from a test's own number. */
+function scoreOf(value: number): 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 {
+  const allowed = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+  const found = allowed.find((candidate) => candidate === value);
+  if (found === undefined) {
+    throw new RangeError(`${String(value)} is not a score`);
+  }
+  return found;
+}
+
+/**
+ * A labelled copy of the committed dataset, with one approved label.
+ *
+ * Built by copying the case and manifest rather than by editing the committed
+ * dataset: a test that wrote into `evals/datasets/` would be modifying evidence that
+ * other tests read, and the "labels did not move" assertion below needs a copy that
+ * belongs to this test.
+ */
+async function labelledDataset(
+  created: Area,
+  label: ReviewLabel,
+): Promise<string> {
+  await created.write(
+    'dataset/manifest.json',
+    JSON.parse(
+      await readFile(
+        join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+        'utf8',
+      ),
+    ) as unknown,
+  );
+  await created.write(
+    `dataset/cases/${CASE}.json`,
+    JSON.parse(
+      await readFile(
+        join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+        'utf8',
+      ),
+    ) as unknown,
+  );
+  await created.write(`dataset/labels/${label.caseId}.json`, label);
+  return join(created.path, 'dataset');
+}
+
+/** An approved label pinning one pair, bound to the case's current input hash. */
+async function approvedLabel(
+  risk: number,
+  authorization: number,
+  behaviourReference: ReviewLabel['target']['behaviourReference'],
+): Promise<ReviewLabel> {
+  // Read through the case checker, so the input hash is taken from the document the real
+  // loader accepts rather than from a shape a test assumed.
+  const entry = await readDocument(
+    join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+    schemas.case,
+  );
+  return {
+    caseId: CASE,
+    inputHash: inputHashOf(entry.input),
+    versions: LABEL_VERSIONS,
+    target: {
+      status: 'approved',
+      allowed: {
+        risk: [scoreOf(risk)],
+        authorization: [scoreOf(authorization)],
+      },
+      behaviourReference,
+      rationale: `测试裁决：risk ${String(risk)} / authorization ${String(authorization)}`,
+      decidedBy: 'test',
+      decidedAt: '2026-10-30',
+    },
+  };
+}
+
+/** A decision run against one dataset path, with one scripted answer. */
+async function runAgainst(
+  directory: string,
+  datasetPath: string,
+  risk: Readonly<Record<string, number>>,
+  authorization: Readonly<Record<string, number>>,
+): Promise<string> {
+  return runPlan({
+    directory,
+    plan: planOf({
+      caseIds: [CASE],
+      datasetPath,
+      protocols: ['decision'],
+      targets: [decisionTarget()],
+    }),
+    fixture: fixtureOf({
+      [CELL]: fixtureCell({
+        decision: [decisionForCase(risk, authorization)],
+      }),
+    }),
+  });
+}
+
+/** A report, rebuilt from the directory it describes. */
+async function reportOf(directory: string): Promise<EvaluationReport> {
+  const read = await reportForRun({
+    directory,
+    settings: defaultSettings(REPOSITORY_ROOT),
+  });
+  if (!read.ok) throw new Error(read.problems.join('; '));
+  return read.report;
+}
+
+describe('the reference labels are not changed by a replay', () => {
+  it('leaves the dataset byte-identical and compares against the same label', async () => {
+    await withArea(async (created) => {
+      const label = await approvedLabel(5, 8, 'escalate');
+      const dataset = await labelledDataset(created, label);
+      const directory = await runAgainst(
+        join(created.path, 'run'),
+        dataset,
+        { '3': 0.5, '4': 0.5 },
+        { '7': 0.5, '8': 0.5 },
+      );
+      const before = await inventory(dataset);
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+        thresholdRisk: 'at-least',
+      });
+      expect(result.code).toBe(0);
+      expect(await inventory(dataset)).toEqual(before);
+      const report = await reportOf(
+        join(created.path, 'derived/text-at-least-at-least-ask-available'),
+      );
+      // The same reference, read from the same file, and still gold.
+      expect(report.diagnostics.labels.gold).toBe(1);
+      expect(report.diagnostics.labels.rows[0]?.reference).toBe('escalate');
+      expect(report.diagnostics.labels.rows[0]?.decidedBy).toBe('test');
+      expect(report.diagnostics.labels.rows[0]?.rationale).toBe(
+        label.target.rationale,
+      );
+    });
+  });
+
+  it('moves the engine answer under the label instead of editing the label', async () => {
+    await withArea(async (created) => {
+      // The reference asks for an escalation. The stored answer reaches it; the
+      // replay's lower risk band allows the call, which is a false allow against the
+      // *same* reference. If the replay had written a label of its own, the derived
+      // report would count a match instead.
+      const label = await approvedLabel(5, 8, 'escalate');
+      const dataset = await labelledDataset(created, label);
+      const directory = await runAgainst(
+        join(created.path, 'run'),
+        dataset,
+        { '3': 0.5, '4': 0.5 },
+        { '7': 0.5, '8': 0.5 },
+      );
+      await replay({
+        directory,
+        output: join(created.path, 'derived'),
+        thresholdRisk: 'at-least',
+      });
+      const report = await reportOf(
+        join(created.path, 'derived/text-at-least-at-least-ask-available'),
+      );
+      expect(report.examples[0]?.labelStatus).toBe('gold');
+      expect(report.examples[0]?.classification).toBe('false-allow');
+      expect(report.behaviour.overall.matched).toBe(0);
+      expect(report.behaviour.overall.falseAllow).toBe(1);
+      // The diff names the reference, and the reference is the user's decision.
+      const behaviour = report.differences.filter(
+        (difference) => difference.kind === 'behaviour',
+      );
+      expect(behaviour[0]?.expected).toBe('escalate');
+      expect(behaviour[0]?.observed).toBe('allow');
+    });
+  });
+});
+
+describe('the derivation is traceable to its source', () => {
+  it('names the source run, its documents and the axis values it used', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.6, '5': 0.4 }, { '7': 0.6, '8': 0.4 }),
+      });
+      await replay({
+        directory,
+        output: join(created.path, 'derived'),
+        thresholdAuthorization: 'strict',
+        mode: 'no-ask',
+      });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-strict-no-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'documentVersion')).toBe('eval-replay-lineage-v1');
+      expect(textAt(lineage, 'replay.implementation')).toBe('eval-replayer-v1');
+      expect(objectAt(lineage, 'replay.thresholds')).toEqual({
+        risk: 'strict',
+        authorization: 'strict',
+      });
+      expect(objectAt(lineage, 'replay.settlement')).toEqual({
+        mode: 'no-ask',
+        channel: 'available',
+      });
+      // The matrix is a recorded fact, not an axis: a replay never varies it.
+      expect(textAt(lineage, 'replay.matrix')).toBe('shared');
+      expect(textAt(lineage, 'replay.contract')).toBe('review-contract-v1');
+      expect(textAt(lineage, 'replay.digest')).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(textAt(lineage, 'source.runId')).toBe('report-run');
+      expect(textAt(lineage, 'source.planHash')).toMatch(/^sha256:/);
+      expect(textAt(lineage, 'source.dataset.datasetId')).toBe('core-v1');
+      // Every document the replay read, at the digest it read it at.
+      expect(
+        objectsAt(lineage, 'source.files').map((file) => textAt(file, 'path')),
+      ).toEqual(['index.json', 'plan.json', `records/${CELL}.json`]);
+      expect(at(lineage, 'derived.report')).toEqual([
+        'report.json',
+        'report.md',
+        'report.html',
+      ]);
+      const cell = objectsAt(lineage, 'cells')[0];
+      if (cell === undefined) throw new Error('the lineage has no cell row');
+      expect(textAt(cell, 'cellId')).toBe(CELL);
+      expect(textAt(cell, 'attemptId')).toBe(`${CELL}:model:1`);
+      expect(textAt(cell, 'responseDigest')).toMatch(/^sha256:/);
+      expect(textAt(cell, 'record.path')).toBe(`records/${CELL}.json`);
+      expect(textAt(cell, 'record.digest')).toMatch(/^sha256:/);
+      // The stored and derived facts sit beside each other, so a reader can see what
+      // moved without re-running anything.
+      expect(objectAt(cell, 'stored')).toMatchObject({ risk: 5 });
+      expect(objectAt(cell, 'derived')).toMatchObject({ risk: 5 });
+      expect(at(cell, 'changed')).toBe(false);
+    });
+  });
+
+  it('matches the digest of the file it names', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      await replay({ directory, output: join(created.path, 'derived') });
+      const derived = join(
+        created.path,
+        'derived/text-strict-at-least-ask-available',
+      );
+      const lineage = await readJson(join(derived, REPLAY_FILES.lineage));
+      const record = objectsAt(lineage, 'source.files').find(
+        (file) => textAt(file, 'path') === `records/${CELL}.json`,
+      );
+      expect(record === undefined ? null : textAt(record, 'digest')).toBe(
+        await digestOf(join(directory, 'records', `${CELL}.json`)),
+      );
+    });
+  });
+
+  it('states that a changed prompt needs a new request rather than a replay', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      // A run produced by another prompt is still a valid input — the answers are
+      // there — but those answers are not evidence about what today's prompt would
+      // produce, and only a new request can be. Recording the old version alone would
+      // leave a reader to make that inference unaided.
+      const index = await readJson(join(directory, 'index.json'));
+      await created.write('run/index.json', {
+        ...index,
+        versions: {
+          ...objectAt(index, 'versions'),
+          prompt: 'review-prompt-v0',
+        },
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Reported where a person will see it, not only in a JSON document.
+      expect(err.join('\n')).toContain('prompt review-prompt-v0');
+      expect(err.join('\n')).toContain('cannot be measured by replaying');
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      // The source's own version is preserved as provenance...
+      expect(textAt(lineage, 'source.versions.prompt')).toBe(
+        'review-prompt-v0',
+      );
+      // ...and the note says what that means for the reader.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        'prompt 版本是 review-prompt-v0',
+      );
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '要测量新 prompt 必须重新发起请求',
+      );
+    });
+  });
+
+  it('records the dataset the run used, so a changed dataset is visible', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      await replay({ directory, output: join(created.path, 'derived') });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'source.dataset.datasetId')).toBe('core-v1');
+      expect(textAt(lineage, 'source.dataset.digest')).toMatch(/^sha256:/);
+      // A changed dataset cannot move a derived score — the answers are saved — and the
+      // note says so, so nobody reads the derivation as evidence about new material.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '数据集变化不会改变派生分数',
+      );
+    });
+  });
+
+  it('warns that a changed input needs a new request, on a dataset with no labels', async () => {
+    await withArea(async (created) => {
+      // A labelled dataset would let the report layer notice a mismatch, so a test that
+      // relied on labels would not prove the warning works where nothing else can catch
+      // it. This dataset has cases and no labels at all.
+      await created.write(
+        'dataset/manifest.json',
+        JSON.parse(
+          await readFile(
+            join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+            'utf8',
+          ),
+        ) as unknown,
+      );
+      // Read through the case checker, so the member this test edits is one the schema
+      // actually allows: an input key outside it would drop the case from the dataset and
+      // the comparison would silently have nothing to compare.
+      const original = await readDocument(
+        join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+        schemas.case,
+      );
+      // The dataset starts as the committed one, so the run records the fingerprint of
+      // the material it actually submitted.
+      await created.write(`dataset/cases/${CASE}.json`, original);
+      const dataset = join(created.path, 'dataset');
+      const directory = await runAgainst(
+        join(created.path, 'run'),
+        dataset,
+        { '4': 0.9, '5': 0.1 },
+        { '8': 0.9, '9': 0.1 },
+      );
+      // `hint` is a reviewed input member, so the changed case still parses: a case the
+      // schema rejects would silently drop out of the comparison instead of being
+      // reported as changed.
+      await created.write(`dataset/cases/${CASE}.json`, {
+        ...original,
+        input: {
+          ...original.input,
+          hint: 'material that changed after the run',
+        },
+      });
+
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      const warnings = err.join('\n');
+      // The warning names the case, says the saved answer came from earlier material,
+      // and says what would actually measure the change.
+      expect(warnings).toContain(CASE);
+      expect(warnings).toContain('case input(s) changed since the run');
+      expect(warnings).toContain('requires a new request');
+      // And it is not the label diagnostic standing in for an input check.
+      expect(warnings).not.toContain('label');
+
+      // The warning has to be *persisted*: the derived lineage is what a later reader
+      // consults, and a diagnostic that lived only on a terminal is gone once it closes.
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'inputs.status')).toBe('compared');
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(true);
+      const drifted = objectsAt(lineage, 'inputs.drifted');
+      expect(drifted).toHaveLength(1);
+      expect(textAt(drifted[0] ?? {}, 'caseId')).toBe(CASE);
+      expect(textAt(drifted[0] ?? {}, 'recorded')).toMatch(/^sha256:/);
+      expect(textAt(drifted[0] ?? {}, 'current')).toMatch(/^sha256:/);
+      // The two fingerprints differ, which is what makes the case drift.
+      expect(textAt(drifted[0] ?? {}, 'current')).not.toBe(
+        textAt(drifted[0] ?? {}, 'recorded'),
+      );
+      // And the note names the case rather than describing the possibility.
+      const notes = listTextAt(lineage, 'notes').join('\n');
+      expect(notes).toContain(CASE);
+      expect(notes).toContain('要测量必须重新发起请求');
+    });
+  });
+
+  it('records a clean comparison only when every recorded case was compared', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      await replay({ directory, output: join(created.path, 'derived') });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'inputs.status')).toBe('compared');
+      expect(at(lineage, 'inputs.drifted')).toEqual([]);
+      expect(at(lineage, 'inputs.unverified')).toEqual([]);
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(false);
+      // The note says the comparison covered every case, not merely that it found no
+      // drift.
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        '当前输入 hash 与保存时一致',
+      );
+    });
+  });
+
+  it('reports a partially unreadable dataset as unverified, not as unchanged', async () => {
+    await withArea(async (created) => {
+      // Two cases run; afterwards one of them becomes unreadable. The readable one is
+      // unchanged, so a comparison that only looked at what it could read would report a
+      // clean result and silently drop the other.
+      await created.write(
+        'dataset/manifest.json',
+        JSON.parse(
+          await readFile(
+            join(REPOSITORY_ROOT, 'evals/datasets/core-v1/manifest.json'),
+            'utf8',
+          ),
+        ) as unknown,
+      );
+      // Both cards are read through the case checker, so what gets copied into the test
+      // dataset is a document the real loader accepts; a case it rejected would drop out
+      // of the comparison instead of being reported.
+      const first = await readDocument(
+        join(REPOSITORY_ROOT, `evals/datasets/core-v1/cases/${CASE}.json`),
+        schemas.case,
+      );
+      const secondCase = 'read-repo-index-with-cache';
+      const second = await readDocument(
+        join(
+          REPOSITORY_ROOT,
+          `evals/datasets/core-v1/cases/${secondCase}.json`,
+        ),
+        schemas.case,
+      );
+      await created.write(`dataset/cases/${CASE}.json`, first);
+      await created.write(`dataset/cases/${secondCase}.json`, second);
+      const dataset = join(created.path, 'dataset');
+      const directory = join(created.path, 'run');
+      const firstCell = decisionCellOf(CASE);
+      const secondCell = decisionCellOf(secondCase);
+      await runPlan({
+        directory,
+        plan: planOf({
+          caseIds: [CASE, secondCase],
+          datasetPath: dataset,
+          protocols: ['decision'],
+          targets: [decisionTarget()],
+        }),
+        fixture: fixtureOf({
+          [firstCell]: fixtureCell({
+            decision: [decisionForCase({ '4': 0.9 }, { '8': 0.9 })],
+          }),
+          [secondCell]: fixtureCell({
+            decision: [decisionForCase({ '4': 0.9 }, { '8': 0.9 })],
+          }),
+        }),
+      });
+      // Corrupt one case on disk, leaving the other valid and unchanged.
+      await created.write(`dataset/cases/${secondCase}.json`, {
+        caseId: secondCase,
+        familyId: 'not-a-declared-family',
+      });
+
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(err.join('\n')).toContain('could not be verified');
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      // The readable case was compared and did not drift; the unreadable one is listed as
+      // unverified rather than dropped or counted as clean.
+      expect(at(lineage, 'inputs.drifted')).toEqual([]);
+      const unverified = objectsAt(lineage, 'inputs.unverified');
+      expect(unverified).toHaveLength(1);
+      expect(textAt(unverified[0] ?? {}, 'caseId')).toBe(secondCase);
+      expect(at(lineage, 'inputs.reRequestRequired')).toBe(true);
+    });
+  });
+
+  it('says nothing about inputs when they are unchanged', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // Silence has to mean "compared and unchanged", so the negative case is asserted:
+      // a warning that fired unconditionally would be noise nobody reads.
+      expect(err.join('\n')).not.toContain('case input(s) changed');
+      expect(err.join('\n')).not.toContain('could not be determined');
+    });
+  });
+
+  it('reports an unreadable dataset as undetermined rather than as unchanged', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      // Point the plan's dataset at a directory that holds nothing, so the comparison
+      // cannot run. Silence here would be read as "unchanged".
+      const plan = await readJson(join(directory, 'plan.json'));
+      await created.write('run/plan.json', {
+        ...plan,
+        datasetPath: 'evals/datasets/does-not-exist',
+      });
+      const err: string[] = [];
+      const code = await replayRun(
+        {
+          root: REPOSITORY_ROOT,
+          out: () => undefined,
+          err: (line) => err.push(line),
+        },
+        {
+          directory,
+          output: join(created.path, 'derived'),
+          variants: null,
+          force: false,
+          flags: {
+            answer: null,
+            thresholdRisk: null,
+            thresholdAuthorization: null,
+            mode: null,
+            channel: null,
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(err.join('\n')).toContain('could not be determined');
+    });
+  });
+
+  it('records the contract it re-derived under, and flags a source from another era', async () => {
+    await withArea(async (created) => {
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [CELL]: decisionForCase({ '4': 0.9, '5': 0.1 }, { '8': 0.9, '9': 0.1 }),
+      });
+      // A source written under another contract is a legitimate input — the answers are
+      // still there — but the derived numbers describe today's reading of them, which is
+      // a different claim from reproducing the original.
+      const index = await readJson(join(directory, 'index.json'));
+      const before = await inventory(directory);
+      // Written through the same round trip the tool writes with, so the edit changes
+      // the contract and nothing else.
+      await created.write('run/index.json', {
+        ...index,
+        versions: {
+          ...objectAt(index, 'versions'),
+          contract: 'review-contract-v0',
+        },
+      });
+      expect(await inventory(directory)).not.toEqual(before);
+      await replay({ directory, output: join(created.path, 'derived') });
+      const lineage = await readJson(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(textAt(lineage, 'source.versions.contract')).toBe(
+        'review-contract-v0',
+      );
+      expect(textAt(lineage, 'replay.contract')).toBe('review-contract-v1');
+      expect(listTextAt(lineage, 'notes').join('\n')).toContain(
+        'review-contract-v0',
+      );
+    });
+  });
+});
