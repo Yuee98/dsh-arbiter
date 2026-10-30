@@ -404,7 +404,15 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
           io.err(`problem ${resolved.message}`);
           return 1;
         }
-        if (resolved.ref.length === 0) continue;
+        if (resolved.ref.length === 0) {
+          // Said explicitly rather than skipped: a target with no credential is a decision
+          // about the endpoint, and a reader comparing it to the ones below must see that
+          // the difference is intended.
+          io.out(
+            `live target ${target.targetId} sends no credential; its endpoint authenticates nobody`,
+          );
+          continue;
+        }
         io.out(
           `live target ${target.targetId} resolves decision credential ${resolved.ref} from the environment at dispatch`,
         );
@@ -675,6 +683,11 @@ export function liveProblems(
         problems.push(resolved.message);
         continue;
       }
+      // An empty reference is a statement about the endpoint: it authenticates nobody, so
+      // there is nothing to check and nothing to send. Refusing it here made every local
+      // no-key service unreachable, while inventing a placeholder name would have put a
+      // credential in the plan that no request ever used.
+      if (resolved.ref.length === 0) continue;
       // The preflight and the dispatch resolve the same value, so passing here means the
       // transport will find the same variable rather than a sibling that was never set.
       if ((env(resolved.ref) ?? '').length === 0) {
