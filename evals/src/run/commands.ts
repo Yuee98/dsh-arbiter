@@ -35,6 +35,7 @@ import {
   RUN_FILES,
   writeJson,
 } from './artifact.js';
+import { chatRouteProblems } from './chat-service.js';
 import { createRun, readExisting, resumeRun } from './lifecycle.js';
 import {
   cellGrid,
@@ -641,11 +642,15 @@ async function occupiedRun(directory: string): Promise<string | null> {
 /**
  * Why a live plan cannot dispatch, before anything is written.
  *
- * A chat cell needs an LLM service to stream through; this command has none, so a live
- * chat target is refused here with the reason rather than at the transport, where it
- * would surface as one failed cell per scripted call. A decision cell needs its
- * credential. `provider: "session"` is refused for the same reason production refuses it:
+ * A chat cell needs an LLM service to stream through and a decision cell needs its
+ * credential, so both are checked here rather than at the transport, where a
+ * misconfigured plan would surface as one failed cell per case and read like a provider
+ * outage. `provider: "session"` is refused for the same reason production refuses it:
  * there is no host session in a headless run.
+ *
+ * A chat provider is unroutable when the service the caller supplied has no route for it.
+ * Which providers a service serves is the service's own answer, not a table repeated here:
+ * a preflight with its own copy would pass a plan the transport then refuses.
  */
 export function liveProblems(
   plan: RunPlan,
@@ -664,10 +669,26 @@ export function liveProblems(
   const decisionTargets = decisions
     ? plan.targets.filter((target) => target.decision !== null)
     : [];
-  if (chatTargets.length > 0 && llm === null) {
-    problems.push(
-      'a live chat cell needs the host LLM service, which this command does not have; run a chat plan offline, or reach a chat model through a decision endpoint',
-    );
+  if (chatTargets.length > 0) {
+    if (llm === null) {
+      problems.push(
+        'a live chat cell needs an LLM service and this command has none; run a chat plan offline, or reach a chat model through a decision endpoint',
+      );
+    } else {
+      // A service that publishes its routes is checked against them. One that does not is a
+      // composition this module cannot audit — an in-process caller's own service — and
+      // refusing its plan would reject wiring that works. The headless service the CLI
+      // builds always publishes them, so the command path is always checked.
+      problems.push(
+        ...chatRouteProblems(
+          llm,
+          chatTargets.flatMap((target) =>
+            target.chat === null ? [] : [target.chat.provider],
+          ),
+          env,
+        ),
+      );
+    }
   }
   for (const target of chatTargets) {
     if (target.chat?.provider === 'session') {

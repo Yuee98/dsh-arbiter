@@ -918,9 +918,11 @@ describe('corrections from review', () => {
     });
   });
 
-  it('says why a live chat plan cannot run and writes nothing', async () => {
-    // RQ10-B05: the CLI holds no LLM service, so a live chat cell would fail every attempt
-    // at the transport instead of failing once, before the directory exists.
+  it('refuses a live chat plan whose provider has no headless route, and writes nothing', async () => {
+    // The CLI now holds a headless chat service, so "there is no LLM service" is no longer
+    // why a plan is refused. What still has to be refused is a provider the service cannot
+    // route: an unlisted id would fail every cell at the transport instead of failing once,
+    // before the directory exists.
     await withArea(async (area) => {
       const plan = planOf({
         transport: 'live',
@@ -951,7 +953,49 @@ describe('corrections from review', () => {
         io,
       );
       expect(code).toBe(1);
-      expect(err.join('\n')).toContain('needs the host LLM service');
+      // The refusal names the routes that do exist, so an operator can fix the plan from
+      // the message alone.
+      const message = err.join('\n');
+      expect(message).toContain('has no headless route');
+      expect(message).toContain('deepseek-account');
+      await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
+    });
+  });
+
+  it('refuses a live chat plan whose route exists but whose key is unset', async () => {
+    // A routable provider with no key would otherwise write a directory of identical
+    // provider refusals that read like an outage.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'live',
+        fixture: null,
+        targets: [
+          {
+            targetId: 'chat-deepseek',
+            provider: 'deepseek-account',
+            model: 'deepseek-flash',
+            modelVersion: null,
+            chat: {
+              provider: 'deepseek-account',
+              model: 'deepseek-flash',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 1,
+            },
+            decision: null,
+            credentialRef: null,
+          },
+        ],
+      });
+      await area.write('plan.json', plan);
+      const { io, err } = recorder(area.path);
+      const code = await runCli(
+        ['run', at(area, 'plan.json'), '--dir', at(area, 'run')],
+        io,
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('needs DEEPSEEK_API_KEY');
       await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
     });
   });
@@ -990,7 +1034,7 @@ describe('corrections from review', () => {
       );
       expect(code).toBe(1);
       // Refused before anything is written, and the reason is the route, not the directory.
-      expect(err.join('\n')).toContain('live chat cell needs');
+      expect(err.join('\n')).toContain('no headless run has');
       await expect(readdir(join(area.path, 'run'))).rejects.toThrow();
     });
   });

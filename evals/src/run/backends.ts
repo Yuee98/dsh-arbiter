@@ -223,6 +223,11 @@ function boundedStream(parts: {
 /**
  * The live chat backend for one cell.
  *
+ * The service is whatever the caller supplied — the host's when one is in process, the
+ * headless HTTP adapter otherwise — so this function is about routing and bounds, not
+ * about which service exists. A cell with no service at all is refused by name, because
+ * it would otherwise fail at the transport once per case.
+ *
  * `provider: "session"` is refused rather than resolved: there is no host session in
  * a headless run, and the production route resolver would fail on it after the plan
  * was already accepted. Refusing here names the plan's mistake at the place it can
@@ -244,7 +249,7 @@ function liveChat(
   if (llm === null) {
     return {
       ok: false,
-      message: 'a live chat cell needs the host LLM service',
+      message: 'a live chat cell needs an LLM service',
     };
   }
   if (config.provider === 'session') {

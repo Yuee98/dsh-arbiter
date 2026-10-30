@@ -1,12 +1,16 @@
 /**
- * The first wiring gap RQ-15 had to close before a real pilot could run.
+ * The wiring gaps RQ-15 had to close before a real pilot could run.
  *
- * §4.1: an endpoint that authenticates nobody is expressible, and no fabricated bearer is
- * ever sent on its behalf. RQ-H1B's resource decision recorded this as a blocker: the
- * runner refused an empty credential reference, so a local service that authenticates
- * nobody could not be named at all.
+ * Each section states the *capability* rather than the implementation, because that is
+ * what the resource decision recorded as missing:
  *
- * Nothing here reaches a network: every cell is answered by a scripted socket.
+ *   §4.1  an endpoint that authenticates nobody is expressible, and no fabricated bearer
+ *         is ever sent on its behalf.
+ *   §4.2  a headless run reaches a chat model through its own HTTP service, with the
+ *         provider's real usage recorded and the credential never leaving the adapter.
+ *
+ * Nothing here reaches a network or a provider: the chat service takes its fetch, and the
+ * decision cells are answered by a scripted socket.
  */
 
 import { join } from 'node:path';
@@ -22,9 +26,14 @@ import {
 } from '../../evals/src/run/lifecycle.js';
 import { readRun } from '../../evals/src/run/artifact.js';
 import { planProblems } from '../../evals/src/run/plan.js';
+import {
+  chatRouteProblems,
+  headlessChatService,
+} from '../../evals/src/run/chat-service.js';
 import { coreCases, VERSIONS } from './helpers/report-run.js';
 import {
   cellIdOf,
+  chatTarget,
   decisionAnswer,
   decisionTarget,
   fixtureCell,
@@ -32,6 +41,90 @@ import {
   planOf,
   withArea,
 } from './helpers/run.js';
+
+/** One SSE body from a list of payloads, in the provider's own framing. */
+function sseBody(payloads: readonly unknown[]): ReadableStream<Uint8Array> {
+  const text = [
+    ...payloads.map((payload) => `data: ${JSON.stringify(payload)}\n\n`),
+    'data: [DONE]\n\n',
+  ].join('');
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+/** A fetch that answers with one scripted SSE body and records what it was sent. */
+function recordingFetch(payloads: readonly unknown[]): {
+  readonly fetch: typeof fetch;
+  readonly calls: {
+    readonly url: string;
+    readonly authorization: string | undefined;
+    readonly body: unknown;
+  }[];
+} {
+  const calls: {
+    readonly url: string;
+    readonly authorization: string | undefined;
+    readonly body: unknown;
+  }[] = [];
+  const impl: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    calls.push({
+      url:
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      authorization: headers.get('authorization') ?? undefined,
+      body:
+        typeof init?.body === 'string'
+          ? (JSON.parse(init.body) as unknown)
+          : null,
+    });
+    return Promise.resolve(
+      new Response(sseBody(payloads), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+  };
+  return { fetch: impl, calls };
+}
+
+/** The chunk sequence an OpenAI-compatible streamed call produces. */
+function chatStream(text: string): readonly unknown[] {
+  return [
+    {
+      id: 'gen-1',
+      object: 'chat.completion.chunk',
+      model: 'deepseek-flash',
+      choices: [{ index: 0, delta: { role: 'assistant', content: '' } }],
+    },
+    {
+      id: 'gen-1',
+      object: 'chat.completion.chunk',
+      model: 'deepseek-flash',
+      choices: [{ index: 0, delta: { content: text } }],
+    },
+    {
+      id: 'gen-1',
+      object: 'chat.completion.chunk',
+      model: 'deepseek-flash',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 1234,
+        completion_tokens: 56,
+        total_tokens: 1290,
+        prompt_cache_hit_tokens: 1024,
+      },
+    },
+  ];
+}
 
 /** Run one plan to completion in a directory and read its records back. */
 async function dispatchPlan(parts: {
@@ -175,5 +268,226 @@ describe('§4.1 an endpoint that authenticates nobody is expressible', () => {
       expect(records[0]?.attempts).toEqual([]);
       expect(records[0]?.stopReason).toContain('PROBE_KEY');
     });
+  });
+});
+
+describe('§4.2 a headless run reaches a chat model through its own service', () => {
+  it('streams text and reports the provider usage, without leaking the credential', async () => {
+    const recorded = recordingFetch(chatStream('{"risk":2,"authorization":9}'));
+    const chat = headlessChatService({
+      read: (name) =>
+        name === 'DEEPSEEK_API_KEY' ? 'sk-test-value' : undefined,
+      fetch: recorded.fetch,
+    });
+    const chunks: Record<string, unknown>[] = [];
+    for await (const chunk of chat.stream({
+      provider: 'deepseek-account',
+      model: 'deepseek-flash',
+      system: 'system text',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'user text' }] },
+      ],
+      temperature: 0,
+      maxTokens: 400,
+    })) {
+      chunks.push(chunk);
+    }
+    // The vocabulary production's collector reads: one text delta, one usage, one finish.
+    expect(
+      chunks.filter((chunk) => chunk['type'] === 'text-delta'),
+    ).toHaveLength(1);
+    expect(
+      chunks.find((chunk) => chunk['type'] === 'usage')?.['usage'],
+    ).toEqual({
+      prompt_tokens: 1234,
+      completion_tokens: 56,
+      total_tokens: 1290,
+      prompt_cache_hit_tokens: 1024,
+    });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    const call = recorded.calls[0];
+    expect(call?.url).toBe('https://api.deepseek.com/chat/completions');
+    expect(call?.authorization).toBe('Bearer sk-test-value');
+    // The wire body carries the system prompt as its first message and asks for usage,
+    // which is what makes a streamed call recordable at all.
+    expect(call?.body).toMatchObject({
+      model: 'deepseek-flash',
+      stream: true,
+      stream_options: { include_usage: true },
+      messages: [
+        { role: 'system', content: 'system text' },
+        { role: 'user', content: 'user text' },
+      ],
+    });
+  });
+
+  it('drives a real chat cell end to end and records the provider usage', async () => {
+    // The whole path: plan → material → production renderer → this service → production
+    // parser → N0 → record. The record's usage must be the provider's own numbers, mapped
+    // by the shared mapping, and the response must not carry the key.
+    await withArea(async (area) => {
+      const recorded = recordingFetch(
+        chatStream('{"risk":2,"authorization":9}'),
+      );
+      const chat = headlessChatService({
+        read: (name) =>
+          name === 'DEEPSEEK_API_KEY' ? 'sk-test-value' : undefined,
+        fetch: recorded.fetch,
+      });
+      // A live plan, so the headless service is what sends: an offline plan would replay
+      // the fixture instead and this would measure the scripted socket.
+      const plan = planOf({
+        transport: 'live',
+        protocols: ['chat'],
+        fixture: null,
+        targets: [
+          {
+            ...chatTarget('chat-deepseek'),
+            provider: 'deepseek-account',
+            model: 'deepseek-flash',
+            chat: {
+              provider: 'deepseek-account',
+              model: 'deepseek-flash',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 0,
+            },
+          },
+        ],
+      });
+      const records = await dispatchPlan({
+        directory: join(area.path, 'run'),
+        plan,
+        fixture: fixtureOf({}),
+        llm: chat,
+        readCredential: () => undefined,
+      });
+      const record = records[0];
+      expect(record?.status).toBe('reviewed');
+      expect(record?.outcome?.status).toBe('scored');
+      // Narrowed rather than asserted: the other two outcomes carry no verdict, and
+      // reading one off them would be the conflation this contract forbids.
+      expect(
+        record?.outcome?.status === 'scored' ? record.outcome.verdict : null,
+      ).toBe('review-allow');
+      // The provider reported its own counts, and the mapping read them.
+      expect(record?.usage?.totals.inputTokens.total).toBe(1234);
+      expect(record?.usage?.totals.outputTokens.total).toBe(56);
+      expect(record?.usage?.totals.totalTokens.total).toBe(1290);
+      // DeepSeek reports cache hits under `prompt_cache_hit_tokens`, which the shared
+      // `review-usage-v1` mapping does not cover. It therefore stays null (unknown, not
+      // zero) while the raw payload is preserved on the attempt, so a later mapping can
+      // re-normalize it. Asserting the gap keeps it visible instead of rounding it to 0.
+      expect(record?.usage?.totals.cacheReadTokens.total).toBeNull();
+      expect(record?.attempts[0]?.rawUsage).toMatchObject({
+        prompt_cache_hit_tokens: 1024,
+      });
+      // The credential never appears in a stored response.
+      expect(JSON.stringify(record)).not.toContain('sk-test-value');
+      expect(recorded.calls).toHaveLength(1);
+    });
+  });
+
+  it('reports a provider refusal as a refusal, with no text read as an answer', async () => {
+    const chat = headlessChatService({
+      read: () => 'sk-test-value',
+      fetch: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'bad key' } }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+    });
+    const chunks: Record<string, unknown>[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of chat.stream({
+          provider: 'deepseek-account',
+          model: 'deepseek-flash',
+          system: 's',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+        })) {
+          chunks.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/refused the call with HTTP 401/u);
+    // Nothing was yielded: a refusal is not an answer with empty text.
+    expect(chunks).toEqual([]);
+  });
+
+  it('names a provider it cannot route instead of guessing an endpoint', () => {
+    const chat = headlessChatService({ read: () => 'sk-test-value' });
+    expect(() =>
+      chat.stream({
+        provider: 'workbuddy',
+        model: 'glm-5.3-flash',
+        system: 's',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+      }),
+    ).toThrow(/no headless route/u);
+  });
+
+  it('reports an unset key rather than sending an empty bearer', () => {
+    const chat = headlessChatService({ read: () => undefined });
+    expect(() =>
+      chat.stream({
+        provider: 'deepseek-account',
+        model: 'deepseek-flash',
+        system: 's',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+      }),
+    ).toThrow(/DEEPSEEK_API_KEY is not set/u);
+  });
+
+  it('refuses a plan whose chat provider it cannot route, and says what it can', () => {
+    const chat = headlessChatService({ read: () => 'sk-test-value' });
+    const problems = chatRouteProblems(chat, ['workbuddy'], () => 'x');
+    expect(problems.join('\n')).toContain('has no headless route');
+    expect(problems.join('\n')).toContain('deepseek-account');
+  });
+
+  it('refuses a plan whose route exists but whose key is unset', () => {
+    const chat = headlessChatService({ read: () => undefined });
+    expect(
+      chatRouteProblems(chat, ['deepseek-account'], () => undefined),
+    ).toEqual([expect.stringContaining('needs DEEPSEEK_API_KEY')]);
+  });
+
+  it('reports a stream that ended with no finish as a transport fault', async () => {
+    // A provider that closes the connection mid-answer must not be read as an empty
+    // review: the collector would otherwise call it a parser failure.
+    const bytes = new TextEncoder().encode(
+      'data: {"choices":[{"delta":{"content":"partial answer"}}]}\n\n',
+    );
+    const chat = headlessChatService({
+      read: () => 'sk-test-value',
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(bytes);
+                controller.close();
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+    await expect(
+      (async () => {
+        for await (const _chunk of chat.stream({
+          provider: 'deepseek-account',
+          model: 'deepseek-flash',
+          system: 's',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+        })) {
+          // The delta is yielded before the error; the error is the point.
+          expect(_chunk).toBeDefined();
+        }
+      })(),
+    ).rejects.toThrow(/without a finish reason/u);
   });
 });
