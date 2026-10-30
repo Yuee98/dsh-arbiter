@@ -247,7 +247,14 @@ describe('the lineage digest certifies the bytes the derivation used', () => {
           await new Promise((resolve) => setImmediate(resolve));
         }
       })();
-      const outcomes: { readonly code: number; readonly err: string }[] = [];
+      // The attempt index is kept on each outcome, because the derived directory is
+      // named after it: counting into a filtered list instead would assert about one
+      // directory while meaning another.
+      const outcomes: {
+        readonly attempt: number;
+        readonly code: number;
+        readonly err: string;
+      }[] = [];
       try {
         for (let attempt = 0; attempt < 40; attempt += 1) {
           try {
@@ -255,13 +262,18 @@ describe('the lineage digest certifies the bytes the derivation used', () => {
               directory,
               output: join(created.path, `derived-${String(attempt)}`),
             });
-            outcomes.push({ code: result.code, err: result.err.join('\n') });
+            outcomes.push({
+              attempt,
+              code: result.code,
+              err: result.err.join('\n'),
+            });
           } catch (error) {
             // A writer caught mid-file yields a torn document, and the shared reader
             // throws on unparsable JSON rather than classifying it. That is a refusal
             // too — nothing was derived — so it is counted as one instead of failing the
             // test for a race it did not choose.
             outcomes.push({
+              attempt,
               code: 1,
               err: error instanceof Error ? error.message : String(error),
             });
