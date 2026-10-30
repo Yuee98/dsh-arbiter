@@ -1,0 +1,152 @@
+{
+  "planVersion": "eval-run-plan-v1",
+  "datasetId": "core-v1",
+  "datasetPath": "evals/datasets/core-v1",
+  "transport": "live",
+  "protocols": ["chat", "decision"],
+  "targets": [
+    {
+      "targetId": "clef-local",
+      "provider": "clef-local",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef",
+        "apiKeyRef": "",
+        "timeoutMs": 30000,
+        "costTier": "free"
+      },
+      "credentialRef": null
+    },
+    {
+      "targetId": "clef-flash-local",
+      "provider": "clef-local",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef-flash",
+        "apiKeyRef": "",
+        "timeoutMs": 30000,
+        "costTier": "free"
+      },
+      "credentialRef": null
+    },
+    {
+      "targetId": "clef-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef",
+        "model": "clef",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "clef-flash-cloudflare",
+      "provider": "cloudflare",
+      "model": "clef-flash",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef-flash",
+        "model": "clef-flash",
+        "apiKeyRef": "CLOUDFLARE_API_TOKEN",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "targetId": "jev-1-13-0",
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-1.13.0",
+        "apiKeyRef": "TYPESAFE_API_KEY",
+        "timeoutMs": 30000,
+        "costTier": "paid"
+      },
+      "credentialRef": "TYPESAFE_API_KEY"
+    },
+    {
+      "targetId": "deepseek-v4-1-flash",
+      "provider": "deepseek-account",
+      "model": "deepseek-flash",
+      "modelVersion": null,
+      "chat": {
+        "provider": "deepseek-account",
+        "model": "deepseek-flash",
+        "temperature": 0,
+        "maxTokens": 10000,
+        "timeoutMs": 30000,
+        "maxRepairRetries": 1
+      },
+      "decision": null,
+      "credentialRef": null
+    },
+    {
+      "targetId": "workbuddy-glm-5-3-flash",
+      "provider": "workbuddy",
+      "model": "glm-5.3-flash",
+      "modelVersion": null,
+      "chat": {
+        "provider": "workbuddy",
+        "model": "glm-5.3-flash",
+        "temperature": 0,
+        "maxTokens": 10000,
+        "timeoutMs": 30000,
+        "maxRepairRetries": 1
+      },
+      "decision": null,
+      "credentialRef": null
+    }
+  ],
+  "context": {
+    "maxInputTokens": 10000
+  },
+  "fixture": null,
+  "split": "dev",
+  "caseIds": [
+    "read-named-source-file",
+    "read-repo-index-with-cache",
+    "cleanup-stale-cache-dir",
+    "cleanup-rebuildable-cache",
+    "delete-generated-output-no-permission",
+    "delete-generated-output-authorized",
+    "private-key-upload",
+    "sample-log-upload-authorized",
+    "prohibited-config-reformat",
+    "unrequested-config-reformat"
+  ],
+  "repeats": 1,
+  "bounds": {
+    "concurrency": 4,
+    "timeoutMs": 30000,
+    "maxAttempts": 90,
+    "maxInputTokens": 20000
+  },
+  "notes": [
+    "Stage S1 (pilot) of the RQ-H1B resource decision; the record is validation/review-quality/resource-decision.md.",
+    "Measured with the production renderer at context 10000: 10 cases render to 28,514 chat input tokens and 29,424 decision input tokens; the largest single request is 3,059.",
+    "Total planned input is 2 x 28,514 + 5 x 29,424 = 204,148 estimated input tokens over the 70 sendable cells.",
+    "The grid is 10 cases x 7 targets x 2 protocols x 1 repeat = 140 cells. Each target offers exactly one protocol, so 70 are supported and 70 are recorded unsupported without a request.",
+    "bounds.maxAttempts 90 is this run's exact worst case: 50 decision cells x 1 attempt + 20 chat cells x 2 (one attempt plus the transport's one repair). It is the ceiling, not a reserve.",
+    "A second pilot pass needs its own run directory and is separately bounded, because --resume only dispatches cells with no record at all and a failed cell keeps its record. A single run therefore cannot spend a retry allowance, and claiming one here would be false.",
+    "Two of the ten cases declare their own material incomplete. That is an input fact to measure, not a run failure; no case is truncated at this budget, which is why context.maxInputTokens stays at the production default.",
+    "This plan is not dispatchable today: the runner refuses a live chat cell without the host LLM service, and it rejects an empty credential reference. Both are recorded as blockers in the resource decision; neither is worked around by inventing a credential.",
+    "Targets 3-5 name credential references only. No credential value appears in this document; a live run resolves CLOUDFLARE_API_TOKEN and TYPESAFE_API_KEY from the environment.",
+    "Targets 6-7 are the host's chat routes. provider and model are the host-observed route ids, which differ from the display labels; they must be re-confirmed with listProviders/listModels before dispatch."
+  ]
+}
