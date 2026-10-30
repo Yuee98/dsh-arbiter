@@ -133,7 +133,9 @@ S2 每候选 234 **无重跑额度**：全量阶段已经由试点确认流程�
 
 S2 的六个候选各是一份同形 run（各 182 格／234 attempts／535,220 tokens），因为 run plan 没有候选轴（§4.3）。**候选 B、C1–C4 与本窗口的授权范围在同一批内**，不再逐次询问。
 
-**S2 的 3,211,320 是规划投影，不是六个候选的实测渲染值。** 它按候选 A 的逐案例估算 × 6 得出；RQ-14 的 `record.json` 明确记录六个候选的实际估算不同（A 151,906、B 160,876、C1 145,038、C2 135,706、C3 137,526、C4 102,062，各为 52 格 2 repeats 的量级）。B 比 A 大约 5.9%，所以六候选的真实合计会高于此表。用它做授权量级判断是可以的，用它做精确账单预测不可以。
+**S2 的 3,211,320 是规划投影，不是六个候选的实测渲染值。** 它按候选 A 的逐案例估算 × 6 得出。RQ-14 冻结的六个候选实测各不相同（`record.json` 的 52 格口径：A 151,906、B 160,876、C1 145,038、C2 135,706、C3 137,526、C4 102,062，合计 833,114）。**这个合计比 6 × A 的 911,436 低 78,322**，因为 C4 的量表压缩（102,062）把 B 的增幅抵消掉了。
+
+所以方向不能靠「B 比 A 大」推断：单个候选的大小不决定合计的方向。本表保留 3,211,320 作为**授权量级**的投影，并明确它不是账单预测；精确的六候选合计只能在 RQ-14 的候选 × target 渲染完成后测量（那是 #82 的产物）。
 
 最终验证用 holdout、且只跑**一个**候选 —— 按设计文档 3.3，保留集不得用于调参，也只在候选冻结后跑一次。
 
@@ -157,7 +159,11 @@ estimatedInputTokens += record.material?.estimatedInputTokens ?? 0;
 
 因此：**5,200,000 是「初次请求输入」的估算基线，不是「全部已发送输入」的上限。** 表里的 4,303,557 与它同口径，比较是自洽的，但它们都不覆盖 repair 重复发送的部分。本文件不再把 5,200,000 说成硬性停止条件。
 
-要精确核对实际发送量，`evals/src/metrics/usage.ts` 的按 attempt 汇总（`estimated` 段与 `attempts` 计数）能给出逐 attempt 的估算，且已排除 `sent === false` 的拒绝请求。**这是 #82 执行后核算的路径，不是本窗口的派发前检查。**
+要精确核对实际发送量，用 `evals/src/metrics/usage.ts` 里**逐 attempt** 的字段：`attempts[].estimatedInputTokens` 对每个 attempt 各记一次（`kind` 区分 `initial` 与 `repair`），并排除 `sent === false` 的拒绝请求。
+
+**注意不要用该模块的 `estimated.inputTokens` 做这件事** —— 它和 `spendOf` 同口径，按 cell 只加一次 `record.material.estimatedInputTokens`（见 `metrics/usage.ts` 的 `estimated: { inputTokens: estimatedInput, ... }`）。两个字段名字相近、覆盖范围不同，混用会重现本节刚修正的那个低估。
+
+**这是 #82 执行后核算的路径，不是本窗口的派发前检查。**
 
 #### 3.3.3 停止条件
 
@@ -385,7 +391,7 @@ export TYPESAFE_API_KEY="$(cat ~/.keys/.jev.local.key)"
 4. **chat 的 provider／model id 待复核** —— §2.2 的表来自本机 session 记录推断，不是 `listProviders()`／`listModels()` 的返回值。派发前必须复核。
 5. **凭据有效性未验证** —— 只确认文件存在，未读内容、未验证是否仍有效。
 6. **货币上限未验证** —— 运行器不代币定价，且配额失败不会停止派发（`scheduler.ts` 无 quota 停止原因）。§3.3.4 要求派出付费请求前先确认 provider 侧硬上限；未确认前付费 target 为 blocked。`maxCurrency` 保持 `unknown`，精确花费由 #82 事后从账单回填。
-7. **累计 token 估算少计 repair** —— `spendOf` 按 cell 只计一次初次渲染估算，repair 重复发送不计入。因此 5,200,000 是估算基线而非硬上限；精确核算须用 `evals/src/metrics/usage.ts` 的按 attempt 汇总（#82 执行后）。
+7. **累计 token 估算少计 repair** —— `spendOf` 按 cell 只计一次初次渲染估算，repair 重复发送不计入。因此 5,200,000 是估算基线而非硬上限。精确核算须用 `evals/src/metrics/usage.ts` 的 `attempts[].estimatedInputTokens`（逐 attempt，含 `kind: 'repair'`）；**不要用同模块的 `estimated.inputTokens`**，它按 cell 计，与 `spendOf` 同口径（#82 执行后）。
 8. **§2.3 无同模型双协议 target** —— 设计文档 3.2 的该项对比在本候选集上不可执行，只能记录系统组合差异。
 9. **累计 attempts 靠操作者核对，运行器不强制** —— §3.3 的 2,300 不是 `bounds` 字段，运行器不认识它。每次起跑前必须手工汇总各 run 的 `index.json` 的 `spent.attempts`。要让它自动生效需要一个跨 run 的账本（工程任务，不在本窗口）。
 10. **`concurrency: 4` 未经限流实测** —— 没有四路并发下 provider 限流行为的证据。它是运营初值，不是已验证吞吐；若试点出现 429，应降到 1–2 重跑，属 §3.3 重跑额度内。
