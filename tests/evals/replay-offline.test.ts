@@ -39,6 +39,7 @@ import {
   objectsAt,
   readJson,
   replay,
+  replayBetween,
 } from './helpers/replay.js';
 import type { InventoryEntry } from './helpers/replay.js';
 import { CORE_DATASET } from './helpers/report-run.js';
@@ -219,99 +220,58 @@ describe('the lineage digest certifies the bytes the derivation used', () => {
     });
   });
 
-  it('refuses a run that changes while it is being read', async () => {
-    // The temporal form of the same defect, and the one a run still being written
-    // produces. A background writer alternates two valid plans while the replay reads;
-    // every accepted read must be internally consistent, and any read that saw the two
-    // disagree must be refused rather than published.
+  it('refuses a run whose plan changes between the reader and the hasher', async () => {
+    // The temporal form of the same defect. Racing a real writer cannot test this
+    // reliably: `writeFile` is not atomic, so most reads land mid-file and are refused
+    // as unparsable before the consistency check is ever reached — and a test whose
+    // accepted arm never executes proves nothing about the accepted arm.
+    //
+    // So the two reads are separated deterministically instead. The artifact reader
+    // parses the original plan; the swap happens in the window after it, and the module
+    // then hashes the replacement while still holding the original document. That is
+    // exactly the state a run being written hands a replay, produced on demand.
     await withArea(async (created) => {
       const directory = await twoCaseRun(join(created.path, 'run'));
       const planPath = join(directory, RUN_FILES.plan);
       const original = await readFile(planPath, 'utf8');
-      // Read through the plan checker, so the two versions this writer alternates are
-      // both schema-valid: a plan the reader would reject tests the schema, not the
-      // consistency check this case is about.
       const plan = await readJson(planPath);
-      const variants = ['a', 'b'].map(
-        (mark) =>
-          `${JSON.stringify({ ...plan, notes: [`variant-${mark}`] })}\n`,
+      const replacement = `${JSON.stringify({ ...plan, notes: ['variant-b'] })}\n`;
+
+      // One write, in the middle of the read: the reader has already parsed plan.json
+      // by the time this lands, so the document and the bytes disagree.
+      // Only the replacement is written here. Restoring inside the hook would put the
+      // original bytes back before the module hashes them, and the read would then look
+      // consistent — the swap has to remain in place across the hashing read.
+      let swapped = false;
+      const swap = async (): Promise<void> => {
+        swapped = true;
+        await writeFile(planPath, replacement);
+      };
+      const outcome = await replayBetween({
+        directory,
+        output: join(created.path, 'derived-first'),
+        during: swap,
+      });
+      // The swap must have happened, or this run tested nothing.
+      expect(swapped).toBe(true);
+      expect(outcome.code).toBe(1);
+      expect(outcome.err.join('\n')).toMatch(
+        /changed while it was being read|does not match the plan digest/,
       );
-      let writing = true;
-      let round = 0;
-      const writer = (async (): Promise<void> => {
-        // The flag is read from a closure the test flips, so the compiler cannot know
-        // it is true on the first pass; eslint cannot either, hence the read below.
-        while (writing as boolean) {
-          await writeFile(planPath, variants[round % 2] ?? '');
-          round += 1;
-          await new Promise((resolve) => setImmediate(resolve));
-        }
-      })();
-      // The attempt index is kept on each outcome, because the derived directory is
-      // named after it: counting into a filtered list instead would assert about one
-      // directory while meaning another.
-      const outcomes: {
-        readonly attempt: number;
-        readonly code: number;
-        readonly err: string;
-      }[] = [];
-      try {
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          try {
-            const result = await replay({
-              directory,
-              output: join(created.path, `derived-${String(attempt)}`),
-            });
-            outcomes.push({
-              attempt,
-              code: result.code,
-              err: result.err.join('\n'),
-            });
-          } catch (error) {
-            // A writer caught mid-file yields a torn document, and the shared reader
-            // throws on unparsable JSON rather than classifying it. That is a refusal
-            // too — nothing was derived — so it is counted as one instead of failing the
-            // test for a race it did not choose.
-            outcomes.push({
-              attempt,
-              code: 1,
-              err: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      } finally {
-        writing = false;
-        await writer;
-        await writeFile(planPath, original);
-      }
-      // At least one read must have caught the disagreement; otherwise the sample never
-      // exercised the window and the test would pass for the wrong reason.
-      const refused = outcomes.filter((outcome) => outcome.code === 1);
-      expect(refused.length).toBeGreaterThan(0);
-      // Every refusal has to be one of the inconsistency reasons, never an unrelated
-      // failure that happens to exit 1. A writer caught mid-write yields a torn file
-      // rather than two whole versions, and that is reported as unreadable — the point
-      // is that neither shape is published as a derivation.
-      const reasons = [
-        'changed while it was being read',
-        'is not valid JSON',
-        'does not match the plan digest',
-        'JSON',
-      ];
-      for (const outcome of refused) {
-        expect(reasons.some((reason) => outcome.err.includes(reason))).toBe(
-          true,
-        );
-      }
-      // And every accepted read produced a lineage whose digest matches its own bytes:
-      // consistency, not luck, is what an exit code of 0 now claims.
-      const accepted = outcomes.filter((outcome) => outcome.code === 0);
-      for (const [index] of accepted.entries()) {
-        const paths = await inventory(
-          join(created.path, `derived-${String(index)}`),
-        );
-        expect(paths.length).toBeGreaterThan(0);
-      }
+      // Nothing was published, so the mismatch cannot be mistaken for a completed run.
+      expect(
+        await inventory(join(created.path, 'derived-first')).catch(() => []),
+      ).toEqual([]);
+
+      // And with the directory whole again, the same replay succeeds: the refusal is a
+      // property of the inconsistent state, not of the directory or the command.
+      await writeFile(planPath, original);
+      const clean = await replay({
+        directory,
+        output: join(created.path, 'derived-clean'),
+      });
+      expect(clean.code).toBe(0);
+      expect(clean.err).toEqual([]);
     });
   });
 

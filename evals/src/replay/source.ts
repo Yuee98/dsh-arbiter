@@ -145,6 +145,15 @@ function versionsOf(index: RunIndex): ReplaySource['versions'] {
 export async function readSource(parts: {
   readonly directory: string;
   readonly root: string;
+  /**
+   * A seam called once after the plan has been parsed, before its bytes are hashed.
+   *
+   * This is the window the snapshot check exists for. A test can only produce it on
+   * demand: racing a real writer lands mid-file nearly every time, and a torn document
+   * is refused by the JSON parser before this comparison is reached, so the race would
+   * test the parser rather than the invariant. Production callers pass nothing.
+   */
+  readonly duringRead?: () => Promise<void>;
 }): Promise<SourceRead> {
   const checkers = await compileRunCheckers();
   const read = await readRun(parts.directory, checkers);
@@ -166,6 +175,7 @@ export async function readSource(parts: {
   // The reader parsed these files itself, so the snapshot check is what makes the
   // artifact and the lineage describe one state of the directory. A run that is still
   // being written, or one being continued, is the case this exists for.
+  if (parts.duringRead !== undefined) await parts.duringRead();
   const planBytes = await record(RUN_FILES.plan);
   const indexBytes = await record(RUN_FILES.index);
   const ties: readonly {

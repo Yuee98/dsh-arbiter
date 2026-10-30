@@ -323,6 +323,15 @@ function driftOf(
 export async function replayRun(
   io: ReplayIo,
   command: ReplayCommand,
+  /**
+   * A seam the source reader calls once after parsing the plan.
+   *
+   * Present so a test can produce the state a half-written run hands a replay without
+   * racing a real writer, which lands mid-file almost every time and is refused by the
+   * JSON parser before the invariant under test is reached. Production callers pass
+   * nothing.
+   */
+  hooks?: { readonly duringFirstRead?: () => Promise<void> },
 ): Promise<number> {
   const variants = await variantsOf(io, command);
   if (!variants.ok) {
@@ -330,7 +339,13 @@ export async function replayRun(
     return 2;
   }
   const directory = resolve(io.root, command.directory);
-  const read: SourceRead = await readSource({ directory, root: io.root });
+  const read: SourceRead = await readSource({
+    directory,
+    root: io.root,
+    ...(hooks?.duringFirstRead === undefined
+      ? {}
+      : { duringRead: hooks.duringFirstRead }),
+  });
   if (!read.ok) {
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
