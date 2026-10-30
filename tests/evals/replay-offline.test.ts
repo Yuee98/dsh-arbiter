@@ -19,7 +19,7 @@
  *      read from.
  */
 
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,6 +39,7 @@ import {
   objectsAt,
   readJson,
   replay,
+  replayBetween,
 } from './helpers/replay.js';
 import type { InventoryEntry } from './helpers/replay.js';
 import { CORE_DATASET } from './helpers/report-run.js';
@@ -180,6 +181,109 @@ describe('the source is never written', () => {
       // not proximity.
       expect(result.code).toBe(0);
       expect(sourceDocuments(await inventory(directory))).toEqual(before);
+    });
+  });
+});
+
+describe('the lineage digest certifies the bytes the derivation used', () => {
+  /**
+   * These are the two ways a digest can stop meaning anything.
+   *
+   * The reader parses each document itself and this module hashes the bytes, so a
+   * directory that changes between the two reads hands the derivation one version and
+   * the lineage another. A reader who later re-hashes the source would see the recorded
+   * digest match its own file and conclude the derivation was reproducible, which is the
+   * one inference a lineage exists to support.
+   */
+
+  it('refuses a run whose plan does not match the digest the index records', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      // A plan edited in place: schema-valid, so only the index's own digest can catch
+      // it. This is the static form of the inconsistency — a hand edit, or a run whose
+      // plan was rewritten after the fact.
+      const plan = await readJson(join(directory, RUN_FILES.plan));
+      await writeFile(
+        join(directory, RUN_FILES.plan),
+        `${JSON.stringify({ ...plan, notes: ['edited after the run'] }, null, 2)}\n`,
+      );
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+      });
+      expect(result.code).toBe(1);
+      expect(result.err.join('\n')).toContain('does not match the plan digest');
+      // Nothing was derived, so the mismatch cannot be mistaken for a completed replay.
+      expect(
+        await inventory(join(created.path, 'derived')).catch(() => []),
+      ).toEqual([]);
+    });
+  });
+
+  it('refuses a run whose plan changes between the reader and the hasher', async () => {
+    // The temporal form of the same defect. Racing a real writer cannot test this
+    // reliably: `writeFile` is not atomic, so most reads land mid-file and are refused
+    // as unparsable before the consistency check is ever reached — and a test whose
+    // accepted arm never executes proves nothing about the accepted arm.
+    //
+    // So the two reads are separated deterministically instead. The artifact reader
+    // parses the original plan; the swap happens in the window after it, and the module
+    // then hashes the replacement while still holding the original document. That is
+    // exactly the state a run being written hands a replay, produced on demand.
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      const planPath = join(directory, RUN_FILES.plan);
+      const original = await readFile(planPath, 'utf8');
+      const plan = await readJson(planPath);
+      const replacement = `${JSON.stringify({ ...plan, notes: ['variant-b'] })}\n`;
+
+      // One write, in the middle of the read: the reader has already parsed plan.json
+      // by the time this lands, so the document and the bytes disagree.
+      // Only the replacement is written here. Restoring inside the hook would put the
+      // original bytes back before the module hashes them, and the read would then look
+      // consistent — the swap has to remain in place across the hashing read.
+      let swapped = false;
+      const swap = async (): Promise<void> => {
+        swapped = true;
+        await writeFile(planPath, replacement);
+      };
+      const outcome = await replayBetween({
+        directory,
+        output: join(created.path, 'derived-first'),
+        during: swap,
+      });
+      // The swap must have happened, or this run tested nothing.
+      expect(swapped).toBe(true);
+      expect(outcome.code).toBe(1);
+      expect(outcome.err.join('\n')).toMatch(
+        /changed while it was being read|does not match the plan digest/,
+      );
+      // Nothing was published, so the mismatch cannot be mistaken for a completed run.
+      expect(
+        await inventory(join(created.path, 'derived-first')).catch(() => []),
+      ).toEqual([]);
+
+      // And with the directory whole again, the same replay succeeds: the refusal is a
+      // property of the inconsistent state, not of the directory or the command.
+      await writeFile(planPath, original);
+      const clean = await replay({
+        directory,
+        output: join(created.path, 'derived-clean'),
+      });
+      expect(clean.code).toBe(0);
+      expect(clean.err).toEqual([]);
+    });
+  });
+
+  it('accepts a directory that holds still, so the check is not merely strict', async () => {
+    await withArea(async (created) => {
+      const directory = await twoCaseRun(join(created.path, 'run'));
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+      });
+      expect(result.code).toBe(0);
+      expect(result.err).toEqual([]);
     });
   });
 });

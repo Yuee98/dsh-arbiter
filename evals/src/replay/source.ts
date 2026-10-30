@@ -23,6 +23,8 @@ import { join } from 'node:path';
 
 import type { ReviewOutcome } from '../../../src/review-contract/index.js';
 
+import { digestOf } from '../data/hash.js';
+
 import { RUN_FILES, readRun, recordPathOf } from '../run/artifact.js';
 import { compileRunCheckers } from '../run/schemas.js';
 import type { CellRecord, CellState, RunIndex, RunPlan } from '../run/types.js';
@@ -32,6 +34,49 @@ import type { ReplaySource, SourceFile } from './types.js';
 /** The `sha256:<hex>` digest of a document's bytes exactly as they stand. */
 function digestOfBytes(bytes: Buffer): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+/**
+ * The canonical digest of a document as it stands in the bytes that were read.
+ *
+ * The artifact reader parses the files itself, so its documents and this module's
+ * digests are two reads of one directory. Comparing canonical digests is what ties
+ * them together: `digestOf` normalises formatting, so this is "the document parsed
+ * from these bytes" rather than "these bytes happened to be formatted this way".
+ */
+function digestOfSnapshot(bytes: Buffer): string | null {
+  try {
+    const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+    return digestOf(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why a document the reader produced is not the document these bytes hold.
+ *
+ * This is the check that makes a lineage's digest mean something. Without it, the
+ * digest and the derivation are two independent reads: a run still being written, or
+ * one being continued, can hand the reader an index from before a write and this
+ * module the plan from after it, and the derived numbers would then describe bytes
+ * that the lineage does not name. A reader who re-hashes the source would see the
+ * recorded digest match its own file and conclude the derivation was reproducible.
+ */
+function snapshotProblem(parts: {
+  readonly path: string;
+  readonly bytes: Buffer;
+  readonly document: unknown;
+}): string | null {
+  const snapshot = digestOfSnapshot(parts.bytes);
+  if (snapshot === null) {
+    return `${parts.path} is not valid JSON, so the document the replay read cannot be tied to the bytes it hashed`;
+  }
+  const parsed = digestOf(parts.document);
+  if (snapshot !== parsed) {
+    return `${parts.path} changed while it was being read: the digest the lineage would record is of different bytes than the document the derivation uses`;
+  }
+  return null;
 }
 
 /** One record file, with the bytes it was read at. */
@@ -100,6 +145,15 @@ function versionsOf(index: RunIndex): ReplaySource['versions'] {
 export async function readSource(parts: {
   readonly directory: string;
   readonly root: string;
+  /**
+   * A seam called once after the plan has been parsed, before its bytes are hashed.
+   *
+   * This is the window the snapshot check exists for. A test can only produce it on
+   * demand: racing a real writer lands mid-file nearly every time, and a torn document
+   * is refused by the JSON parser before this comparison is reached, so the race would
+   * test the parser rather than the invariant. Production callers pass nothing.
+   */
+  readonly duringRead?: () => Promise<void>;
 }): Promise<SourceRead> {
   const checkers = await compileRunCheckers();
   const read = await readRun(parts.directory, checkers);
@@ -118,8 +172,49 @@ export async function readSource(parts: {
     if (bytes !== null) files.push({ path, digest: digestOfBytes(bytes) });
     return bytes;
   };
-  await record(RUN_FILES.plan);
-  await record(RUN_FILES.index);
+  // The reader parsed these files itself, so the snapshot check is what makes the
+  // artifact and the lineage describe one state of the directory. A run that is still
+  // being written, or one being continued, is the case this exists for.
+  if (parts.duringRead !== undefined) await parts.duringRead();
+  const planBytes = await record(RUN_FILES.plan);
+  const indexBytes = await record(RUN_FILES.index);
+  const ties: readonly {
+    readonly path: string;
+    readonly bytes: Buffer | null;
+    readonly document: unknown;
+  }[] = [
+    { path: RUN_FILES.plan, bytes: planBytes, document: artifact.plan },
+    { path: RUN_FILES.index, bytes: indexBytes, document: artifact.index },
+  ];
+  const mismatched: string[] = [];
+  for (const tie of ties) {
+    if (tie.bytes === null) {
+      mismatched.push(`${tie.path} disappeared while the run was being read`);
+      continue;
+    }
+    const problem = snapshotProblem({
+      path: tie.path,
+      bytes: tie.bytes,
+      document: tie.document,
+    });
+    if (problem !== null) mismatched.push(problem);
+  }
+  // The index certifies the plan by digest, so a directory whose two documents disagree
+  // is not a run a replay can describe: the derivation would use one plan while the
+  // lineage reported the index that names the other. That is a different failure from a
+  // concurrent write — it can also be a hand-edited plan — and both make the same claim
+  // false, so both are refused.
+  if (
+    planBytes !== null &&
+    digestOf(artifact.plan) !== artifact.index.planHash
+  ) {
+    mismatched.push(
+      `${RUN_FILES.plan} does not match the plan digest ${RUN_FILES.index} records (${artifact.index.planHash}); the run's documents disagree about which plan produced it`,
+    );
+  }
+  if (mismatched.length > 0) {
+    return { ok: false, problems: mismatched };
+  }
   const records = new Map<string, SourcedRecord>();
   for (const entry of artifact.records) {
     const path = recordPathOf(entry.cellId);
@@ -135,6 +230,10 @@ export async function readSource(parts: {
           `${path} disappeared while the run was being read; a replay needs a directory that holds still`,
         ],
       };
+    }
+    const recordProblem = snapshotProblem({ path, bytes, document: entry });
+    if (recordProblem !== null) {
+      return { ok: false, problems: [recordProblem] };
     }
     records.set(entry.cellId, {
       record: entry,

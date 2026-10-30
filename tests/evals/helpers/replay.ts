@@ -167,6 +167,8 @@ export async function replay(parts: {
   readonly mode?: string | null;
   readonly channel?: string | null;
   readonly force?: boolean;
+  /** A test seam: runs once after the source plan has been parsed. */
+  readonly duringFirstRead?: () => Promise<void>;
 }): Promise<ReplayOutcome> {
   const out: string[] = [];
   const err: string[] = [];
@@ -188,8 +190,51 @@ export async function replay(parts: {
       channel: parts.channel ?? null,
     },
   };
-  const code = await replayRun(io, command);
+  const code = await replayRun(io, command, {
+    ...(parts.duringFirstRead === undefined
+      ? {}
+      : { duringFirstRead: parts.duringFirstRead }),
+  });
   return { code, out, err };
+}
+
+/**
+ * Run a replay, doing one thing in the middle of its source read.
+ *
+ * The two reads a lineage ties together — the artifact reader parsing a document, and
+ * this module hashing its bytes — happen close enough that a real concurrent writer
+ * almost always lands mid-file. That state is refused as unparsable before the
+ * consistency check is ever reached, so a race-based test ends up exercising the JSON
+ * parser instead of the invariant and its accepted arm never runs.
+ *
+ * Interleaving one action between the two reads produces the state a half-written run
+ * hands a replay, deterministically and exactly once. The hook is a test seam on
+ * purpose: making it a production option would let a caller request the behaviour this
+ * feature exists to refuse.
+ */
+export async function replayBetween(parts: {
+  readonly directory: string;
+  readonly output: string;
+  readonly during: () => Promise<void>;
+}): Promise<ReplayOutcome> {
+  let arrive: () => void = () => undefined;
+  const reachedRead = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  const outcome = await replay({
+    directory: parts.directory,
+    output: parts.output,
+    // The seam is the middle of the source read: signal the injected action, run it to
+    // completion, and only then let the read continue. Awaiting it here rather than
+    // racing it is what makes the two document versions ordered instead of concurrent.
+    duringFirstRead: async () => {
+      arrive();
+      await parts.during();
+    },
+  });
+  // If the read never reached the seam, the test would silently assert nothing.
+  await reachedRead;
+  return outcome;
 }
 
 /** A parsed JSON object, as a test may walk it. */
