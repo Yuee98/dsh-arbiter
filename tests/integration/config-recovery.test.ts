@@ -189,6 +189,48 @@ describe('a saved document survives the round trip', () => {
       { target: 'command', kind: 'regex', pattern: '^gh pr view(?: .*)?$' },
     ]);
   });
+
+  /**
+   * The bound of the recovery promise, pinned so it is not claimed away.
+   *
+   * The recovery copy is re-parsed by the build that reads it, so a value this
+   * build now refuses is refused in the copy too. When the profile document and
+   * the copy both carry it, neither can be read and the host falls back to the
+   * built-in defaults — taking custom rules with it. This is why an upgrade that
+   * refuses a value must be a manual edit *before* restarting, and why the docs
+   * say so instead of promising an unconditional "previous configuration is kept".
+   */
+  test('a copy holding a value this build refuses loses the rules on a cold start', async () => {
+    const harness = await createHarness({ rules: [RULE] });
+    const directory = join(harness.home, 'arbiter', 'last-good');
+    const [entry] = await readdir(directory);
+    if (entry === undefined) throw new Error('no recovery copy was written');
+    const path = join(directory, entry);
+    const record: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (record === null || typeof record !== 'object')
+      throw new TypeError('the copy must be an object');
+    // The copy exactly as an earlier build left it: `ask` for subagents, and the
+    // rule that build was enforcing. Only the stored payload is replaced, so the
+    // wrapper's own fields stay as that build wrote them.
+    const stored: unknown = Reflect.get(record, 'config');
+    if (stored === null || typeof stored !== 'object')
+      throw new TypeError('the copy must carry a config object');
+    Reflect.set(record, 'config', {
+      ...stored,
+      modes: { main: 'ask', subagent: 'ask' },
+    });
+    await writeFile(path, JSON.stringify(record), 'utf8');
+
+    const host = await coldStart(harness.home, {
+      modes: { main: 'ask', subagent: 'ask' },
+      rules: [RULE],
+    });
+    expect(host.runtime.invalidConfigError).toContain('modes.subagent');
+    // Neither source can be read, so the built-in defaults decide — and the rule
+    // that earlier build was enforcing is gone with them.
+    expect(host.runtime.config.rules).toEqual([]);
+    expect(host.runtime.config.modes.subagent).toBe('no-ask');
+  });
 });
 
 /**

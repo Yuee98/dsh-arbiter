@@ -44,6 +44,7 @@
     "typeAgentScope": "Must be a nonempty array of strings.",
     "rangeNumber": "Must be between {min} and {max}.",
     "enumValue": "Must be one of: {values}.",
+    "modesSubagentFixed": "A subagent has no approval channel, so ask never asked anyone; subagents are fixed to no-ask and this setting accepts nothing else.",
     "lengthCustomRules": "Must not exceed {max} characters.",
     "relationWindowDenials": "Must not exceed breaker.windowSize.",
     "relationParentEvidenceFloor": "Must not exceed context.parentHumanItems.",

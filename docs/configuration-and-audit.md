@@ -135,7 +135,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | 判定策略 | `policy.version` 只有 `arbiter-policy-v3`；档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名 | **没有可调阈值**；旧 `tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress` 及 `normal`／`progress` 策略块一律报 `policy.retired`，不迁移 |
 | chat 后端 | temperature（0）/ maxTokens（10000）/ maxRepairRetries（1）/ timeoutMs（20000） | 范围；`maxTokens` 默认值从 400 提高，因为 400 时模型把预算耗在思考上、返回不了 JSON |
 | 执行边界 | `boundary`：trusted / guarded；首次默认 guarded | 用户在本配置页选择并保存应用；决定已启用会话放行后的沙箱，不启用未接管会话。保存后对当前已启用会话立即生效（先写记录再改旋钮），未启用会话不被改写 |
-| 审批模式 | 主会话 `ask`（默认）或 `no-ask`；所有子任务独立取 `ask`／`no-ask`，默认 `no-ask` | 用户在本设置页选择；不提供单个子任务覆盖。两者共用同一份判定矩阵 |
+| 审批模式 | 主会话 `ask`（默认）或 `no-ask`，用户可选；子任务固定 `no-ask`，不接受 `ask` | 主会话由用户在本设置页选择，不提供单个子任务覆盖。两者共用同一份判定矩阵；子任务无审批通道，`modes.subagent: ask` 报 `modes.subagent-fixed` |
 | 凭据 | 显示"已设置/未设置/来源"，可写入 | 见 [机密](configuration-and-audit.md#design-8-2) |
 
 **配置生效约定**：以校验并成功应用为生效点。已有结果继续推进，不因后端或输入协议变更丢弃、重审；旧响应按原请求协议解释。已弹出的人工审批保持等待，尚未作出的后续判定使用新配置；已经结算或开始执行的调用不追溯。保存失败或应用失败时不能显示“已生效”。不额外增加每次执行前检查模式的产品步骤，具体在途边界见[配置生效与在途请求](approval-modes.md#configuration-activation)。
@@ -165,7 +165,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | Reviewer | `chat`，跟随发起调用的会话模型（`provider: session`） |
 | 执行边界 | guarded，保留工作区文件沙箱 |
 | 主会话审批模式 | `ask`，自动审查后需要人工时可发起审批 |
-| 子任务审批模式 | `no-ask`，所有子任务统一采用，不提供单子任务覆盖 |
+| 子任务审批模式 | 固定 `no-ask`，所有子任务统一采用；子会话无审批通道，`ask` 不被接受 |
 | 初始命令规则 | 空规则表；需要 Arbiter 处理的调用从 `review(default)` 起步 |
 
 首版不附带预设命令规则。先实际使用并积累日志，再评估是否需要增加预设及其内容；本文与规则章节中的示例不自动加入配置。空规则表不表示关闭审查或取消其他宿主 guard，也不影响用户自行创建规则。预设规则的后续评估与[离线规则建议延期](#offline-rule-review)分别跟踪，均不扩充首版范围。

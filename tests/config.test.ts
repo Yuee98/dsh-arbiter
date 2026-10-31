@@ -94,6 +94,12 @@ describe('configuration', () => {
     ]);
     // Nothing is converted: the fallback defaults apply, not a mapped value.
     expect(parsed.config.modes).toEqual({ main: 'ask', subagent: 'no-ask' });
+    // The replacement each path names must itself be acceptable there: offering
+    // `ask` to a subagent would point at a value this same build refuses.
+    const [main, subagent] = retired;
+    expect(main?.message).toContain('"ask" or "no-ask"');
+    expect(subagent?.message).toContain('"no-ask"');
+    expect(subagent?.message).not.toContain('"ask" or "no-ask"');
   });
 
   test('refuses the retired threshold and probe sections', () => {
@@ -329,7 +335,8 @@ describe('first install defaults', () => {
   test('an existing document keeps its values instead of being overwritten by defaults', () => {
     const parsed = parseConfig({
       enabled: false,
-      modes: { main: 'no-ask', subagent: 'ask' },
+      boundary: 'trusted',
+      modes: { main: 'no-ask' },
       audit: { retentionDays: 7, retentionBytes: 1024 * 1024 },
       reviewer: {
         type: 'decision',
@@ -338,15 +345,43 @@ describe('first install defaults', () => {
     });
     expect(parsed.errors).toEqual([]);
     expect(parsed.config.enabled).toBe(false);
+    expect(parsed.config.boundary).toBe('trusted');
     expect(parsed.config.modes).toEqual({
       main: 'no-ask',
-      subagent: 'ask',
+      subagent: 'no-ask',
     });
     expect(parsed.config.audit).toMatchObject({
       retentionDays: 7,
       retentionBytes: 1024 * 1024,
     });
     expect(parsed.config.reviewer.type).toBe('decision');
+  });
+
+  test('refuses a subagent mode of ask instead of converting it', () => {
+    // A subagent has no approval channel, so `ask` never opened a question; the
+    // setting stopped being a choice. It is reported by its own code rather than
+    // silently rewritten, so an operator learns why instead of finding a value
+    // changed on the next save.
+    const parsed = parseConfig({ modes: { subagent: 'ask' } });
+    expect(parsed.errors).toEqual([
+      {
+        path: 'modes.subagent',
+        message:
+          'a subagent has no approval channel, so "ask" never opened a question; subagents are fixed to "no-ask" and the setting accepts nothing else',
+        code: 'modes.subagent-fixed',
+        params: { value: 'ask' },
+      },
+    ]);
+    // The fallback keeps the only accepted value; nothing is mapped onto `ask`.
+    expect(parsed.config.modes.subagent).toBe('no-ask');
+  });
+
+  test('accepts the only subagent mode and omitting the field', () => {
+    for (const modes of [{}, { subagent: 'no-ask' }]) {
+      const parsed = parseConfig({ modes });
+      expect(parsed.errors).toEqual([]);
+      expect(parsed.config.modes.subagent).toBe('no-ask');
+    }
   });
 
   test('a save or malformed body without an object config is an error', () => {

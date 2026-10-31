@@ -80,10 +80,10 @@ function humanText(
  * Whether a real person can be reached for this call.
  *
  * This is a fact about the host, not a policy, and it is decided once per call by
- * the gate and then carried here. Three conditions make a question impossible and
- * they are distinct reasons: a subagent has no channel of its own, a host may
- * expose no approval service, and a session's own approval policy may already
- * refuse prompts. None of them is a human answer.
+ * the gate and then carried here. Four conditions make a question impossible and
+ * they are distinct reasons: a subagent has no channel of its own, a subagent's
+ * mode never asks, a host may expose no approval service, and a session's own
+ * approval policy may already refuse prompts. None of them is a human answer.
  */
 export interface AskChannel {
   readonly available: boolean;
@@ -134,9 +134,13 @@ function channelOf(
     unavailableCode: code,
     unavailableText: UNAVAILABLE_TEXT[code],
   });
-  if (call.mode !== 'ask') return unavailable('automatic_mode_no_human');
+  // A subagent is checked first: its mode is fixed to `no-ask`, so testing the
+  // mode first would report "this mode does not ask" for every child call and hide
+  // the fact that no channel exists there at all — the reason that outlives any
+  // configuration.
   if (call.sessionKind !== 'main')
     return unavailable('subagent_no_human_channel');
+  if (call.mode !== 'ask') return unavailable('automatic_mode_no_human');
   const approval = host.services.approval;
   if (approval === undefined)
     return unavailable('approval_channel_unavailable');

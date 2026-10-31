@@ -806,14 +806,17 @@ describe('missing approval channel', () => {
       },
     });
     try {
-      // The subagent mode is `strict`, so the mode check answers first: either
-      // way it is a fallback, and neither opens a question. The text also
-      // carries the review rule, its reason and the missing context, so the
-      // agent is not left with a bare channel error.
+      // A child session has no channel of its own, and that is reported as the
+      // cause even though its mode is also `no-ask`: the missing channel outlives
+      // any configuration, so it is the fact the record names. Either way it is a
+      // fallback, and neither path opens a question. The text also carries the
+      // review rule, its reason and the missing context, so the agent is not left
+      // with a bare channel error.
       const childDecision = await harness.gate(call(child, 'c1'), allowNext);
       expect(childDecision.kind).toBe('deny');
       expect(childDecision.reason).toContain('fallback-deny');
-      expect(childDecision.reason).toContain('automatic_mode_no_human');
+      expect(childDecision.reason).toContain('subagent_no_human_channel');
+      expect(childDecision.reason).not.toContain('automatic_mode_no_human');
       // The escalation names the matrix decision, not a retired rule number:
       // risk 7 requires A10 and the review found A2.
       expect(childDecision.reason).toContain('requires authorization 10');

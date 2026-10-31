@@ -5,11 +5,23 @@ import type {
   BreakerConfig,
   BreakerPreset,
   ConfigError,
+  SubagentMode,
 } from '../types.js';
 import { asObject, asEnum, asBoolean, asInteger } from './values.js';
 
 /** The only two modes. Both apply the same matrix. */
 const MODES: readonly ApprovalMode[] = ['ask', 'no-ask'];
+
+/**
+ * The one mode a subagent can have.
+ *
+ * A delegated child has no approval channel: the host pins its approval policy to
+ * `never`, and this plugin refuses to ask for a person on a subagent's behalf even
+ * when it could. `ask` therefore never opened a question there — it settled as the
+ * same fallback denial, under a different recorded reason — so the value is not
+ * accepted rather than offered and discarded.
+ */
+const SUBAGENT_MODES: readonly SubagentMode[] = ['no-ask'];
 
 /**
  * The retired mode names.
@@ -24,7 +36,7 @@ const RETIRED_MODES: ReadonlySet<unknown> = new Set([
 ]);
 
 /**
- * The two modes, parsed strictly.
+ * The main session's mode, parsed strictly.
  *
  * The retired values are named in the refusal rather than left to a generic
  * "must be one of": an operator upgrading from `normal`/`strict`/`progress` should
@@ -37,6 +49,34 @@ const RETIRED_MODES: ReadonlySet<unknown> = new Set([
 function retiredValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
+
+/**
+ * The refusal for a retired mode name.
+ *
+ * The replacement named depends on the path: `ask` is a real choice for a main
+ * session but a refused one for a subagent, so offering `ask` to a subagent
+ * operator would send them to a value this same build rejects.
+ */
+function retiredModeError(
+  value: unknown,
+  path: string,
+  replacement: string,
+): ConfigError {
+  return {
+    path,
+    message: `normal, strict and progress were retired; use ${replacement}`,
+    code: 'modes.retired',
+    params: { value: retiredValue(value) },
+  };
+}
+
+/** The replacement a main session offers for a retired mode name. */
+const MAIN_MODE_REPLACEMENT =
+  '"ask" or "no-ask" (the shared matrix applies to both, and no-ask only removes the human question)';
+
+/** The replacement a subagent offers: the only value it accepts. */
+const SUBAGENT_MODE_REPLACEMENT =
+  '"no-ask" (a subagent has no approval channel, so it does not accept "ask" either)';
 
 function parseMode(
   value: unknown,
@@ -51,12 +91,45 @@ function parseMode(
   // message would send an upgrading operator looking for a typo.
   const index = errors.findIndex((error) => error.path === path);
   if (index >= 0 && RETIRED_MODES.has(value)) {
+    errors[index] = retiredModeError(value, path, MAIN_MODE_REPLACEMENT);
+  }
+  return parsed;
+}
+
+/**
+ * A subagent's mode, which has exactly one accepted value.
+ *
+ * `ask` is refused with its own code rather than the generic enum message: it is a
+ * value this build once accepted, so the operator needs to learn that it stopped
+ * being a choice and why, not that they mistyped a mode. The value is not silently
+ * rewritten either — the document is reported, the same as every other refusal
+ * here, and the recovery path then decides what runs (see `docs/approval-modes.md`
+ * for what that means on a cold start).
+ */
+function parseSubagentMode(
+  value: unknown,
+  path: string,
+  errors: ConfigError[],
+): SubagentMode {
+  const parsed = asEnum<SubagentMode>(
+    value,
+    SUBAGENT_MODES,
+    'no-ask',
+    path,
+    errors,
+  );
+  if (value === undefined || parsed === value) return parsed;
+  const index = errors.findIndex((error) => error.path === path);
+  if (index < 0) return parsed;
+  if (RETIRED_MODES.has(value)) {
+    errors[index] = retiredModeError(value, path, SUBAGENT_MODE_REPLACEMENT);
+  } else if (value === 'ask') {
     errors[index] = {
       path,
       message:
-        'normal, strict and progress were retired; use "ask" or "no-ask" (the shared matrix applies to both, and no-ask only removes the human question)',
-      code: 'modes.retired',
-      params: { value: retiredValue(value) },
+        'a subagent has no approval channel, so "ask" never opened a question; subagents are fixed to "no-ask" and the setting accepts nothing else',
+      code: 'modes.subagent-fixed',
+      params: { value: 'ask' },
     };
   }
   return parsed;
@@ -69,9 +142,8 @@ export function parseModes(
   const modesValue = asObject(raw['modes'], 'modes', errors);
   return {
     main: parseMode(modesValue['main'], 'ask', 'modes.main', errors),
-    subagent: parseMode(
+    subagent: parseSubagentMode(
       modesValue['subagent'],
-      'no-ask',
       'modes.subagent',
       errors,
     ),

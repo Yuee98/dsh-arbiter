@@ -14,6 +14,7 @@
   "ask": "Interactive approval (ask)",
   "noAsk": "Auto approval (no-ask)",
   "subagentMode": "Subtask approval mode",
+  "subagentFixedHelp": "Fixed to auto approval (no-ask) and not selectable: the host pins a delegated child session's approval policy to never, and the plugin does not open a human approval on a subtask's behalf.",
   "subagentNote": "Every subtask uses the subtask approval mode; there is no per-subtask mode switch.",
   "sessionNote": "Approval modes and the execution boundary describe plugin configuration only; whether to take over a session is always decided by that session's permission menu, and changing configuration does not enable any session.",
   "invalidConfig": "The configuration file is invalid; the last valid configuration is still in use: {error}",
