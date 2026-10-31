@@ -45,6 +45,9 @@
 | `caseMaterial(case,'chat').request` 等于 `renderChatRequest(snapshot)` | evals 绕过生产渲染器 |
 | `caseMaterial(case,'decision').request` 等于 `PRODUCTION_PACKAGE.renderDecision(snapshot)` | 同上，decision 侧 |
 | 同一答案经 `review()` 与 `reviewWith(candidateOf(plan).pkg)` 得到相同 outcome | 两条入口在下游分叉 |
+| **decision 侧**：同一 10 档分布经两条入口得到相同的 `risk`/`authorization`/`requiredAuthorization`/`verdict`，且两侧 `audit` 相同 | 只比了 chat，而 N0 修复主要作用于 decision |
+| **decision 侧**：恰好落在容差的分布两侧都判 `scored`；`1.0002` 两侧都判 `review-failure` 且 reason 相同 | 修好一处却放宽了另一处，或两侧失败分类不同 |
+| 两条入口发出的 decision 请求体 `toEqual` | 两侧各自渲染，字节其实不同 |
 | 该 outcome 的 `requiredAuthorization` / `verdict` 也相同 | 只比了两档分、没比矩阵 |
 | 不可读答案在两条入口同样失败 | 候选把失败归因成质量差 |
 | `REVIEW_PROMPT_VERSION = 'review-prompt-v1'`、`REVIEW_CONTRACT_VERSION = 'review-contract-v1'` | 版本无法追溯 |
@@ -61,6 +64,7 @@
 | --- | --- | --- | --- |
 | `REVIEW_CONTRACT_VERSION` | `review-contract-v1` | `ReviewScores.contractVersion`（`src/host/gate.ts:99`） | `RunVersions.contract`（`evals/src/run/commands.ts:83`） |
 | `REVIEW_PROMPT_VERSION` | `review-prompt-v1` | **未写入记录**（生产只把 `CHAT_PROTOCOL` / `DECISION_PROTOCOL` 写进 attempt 的 `protocol`） | `RunVersions.prompt` |
+| 请求指纹（可复现） | `digestOf({protocol, request})` | **可从 `snapshots.content` 重算**（见 §5.1） | `CellMaterial.promptFingerprint` |
 | `POLICY_VERSION` | `arbiter-policy-v3` | `DEFAULT_CONFIG.policy.version` | 计划与运行目录的 config revision |
 | 线协议 | `arbiter-chat-json-v2` / `arbiter-decision-v2` | `ReviewAttempt.protocol` | `CellTargetRecord.protocolName` |
 | 请求指纹 | `digestOf({protocol, request})` | —（生产按 callId 记录 attempt） | `CellMaterial.promptFingerprint` |
@@ -92,6 +96,35 @@ attempt.request.system：{"risk":<integer 1-10>,"authorization":[redacted]}
 所以这不是本分支引入的缺陷，也不影响分数、判定或 provider 侧行为；它是既有设计对「记录字节」
 与「提交字节」的区分，且已被文档化。**本任务不改它**：修正的话要放宽遮蔽规则或改写 chat
 提示的占位符，两者都会动到本任务范围之外的安全边界或 prompt 语义。记录在此，供后续任务决定。
+
+### 5.1 请求指纹可以在两侧相关（RQ16-B01 的收口）
+
+前置事实：生产**不**持久化 `promptFingerprint`，但**持久化了完整 `ReviewSnapshot`**
+（`src/audit/writer.ts:89` 把 `record.snapshot` 写进 `snapshots.content`，`hash(content)` 存在
+`content_hash`）。渲染器是纯函数，所以同一 build 上可以由该快照重算出同一个规范摘要：
+
+```
+evals 记录：   CellMaterial.promptFingerprint = digestOf({ protocol, request })
+生产重算：     digestOf({ protocol, PRODUCTION_PACKAGE.render<Protocol>(snapshots.content) })
+               → 与上面相等
+```
+
+这条已由 `tests/evals/production-evals-parity.test.ts` 的 *the production request fingerprint is
+reproducible from the stored snapshot* 断言，chat 与 decision 各一次；**用的是记录里真实的
+`material.material.promptFingerprint`，不是测试自己重算的值**（自己重算会让断言变成恒真）。
+
+因此「候选参数与生产请求指纹可关联」的成立方式是：
+
+| 环节 | 是否有同一摘要 | 依据 |
+| --- | --- | --- |
+| evals 记录 | 有 | `CellMaterial.promptFingerprint` |
+| 生产审计快照 | 可重算得到 | `snapshots.content` + 生产渲染器（同一 build） |
+| 生产 attempt 的 `request` | **不能**（设计如此） | 已过 `maskAttempt`；实测重算值不同，见下 |
+
+**代价与边界**：这不是新增列或迁移，也不改 schema；它依赖「同一 build 重放」。跨 build 重放需要
+渲染语义变了就换 `REVIEW_PROMPT_VERSION` —— 该约定已在 `src/reviewer/contract.ts:34` 写明。生产侧
+若要直接读出摘要，需要新增一个持久化字段；本任务**不**做（issue 不要求新增开关／字段，且快照路径
+已足够证明可关联）。
 
 **边界（必须如实说明）**：
 
