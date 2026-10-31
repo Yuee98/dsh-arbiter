@@ -409,6 +409,10 @@ issue #87 的第一条验收条件是「`pnpm verify` 与适用完整隔离 DSH 
 
 **这些记录的价值在于它解释了「为什么同一命令在两处结果不同」**，而不是用来主张验收未满足。根因定位（§2.2）在本 PR 中仍然成立且有用：它说明该步骤对 store 可写性的依赖，而不是说明构建有问题。
 
+**最终 head 的复核（证据适用性）**：coordinator 的 59/1 与通过的 `check:build` 取得时，head 为 `3f5cb4b`。此后本 PR 只追加了**文档改动**——`git diff --stat 3f5cb4b..HEAD -- src/ tests/ evals/` 为**空**，实际变更只有 `README.md`、`docs/reviewer.md` 与 `delivery/` 三份报告。因此在最终 head `e2b75fe` 上，被测代码与测试套件与 59/1 时**逐字节相同**，该结果适用于最终 head。
+
+本 worker 会话在最终 head 上又跑了一次完整 E2E（`.local/logs/e2e-final.log`，`.local/e2e/results-final.json`）：**60 用例 55 passed / 5 failed**，与之前一致——因为会话权限未变（`sandbox-exec` 仍不可用、store 仍不可写，见本轮复测）。两份记录并存，结论以 coordinator 的 59/1 为准，理由是代码与测试相同、且其环境能满足验收条件。
+
 ---
 
 ## 4. 未执行项
