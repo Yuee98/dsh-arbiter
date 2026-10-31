@@ -28,16 +28,16 @@
 
 名称描述插件的权限审批，不承诺所有操作自动完成、不被问题阻塞或全程无人值守。
 
-插件设置页提供两项独立选择：
+插件设置页提供两项设置，其中只有一项是真正的选择：
 
 | 设置 | 可选值 | 作用范围 |
 |---|---|---|
 | 主会话审批模式 | `ask` / `no-ask` | 当前插件配置作用域内的主会话 |
-| 子任务审批模式 | `ask` / `no-ask` | 当前插件配置作用域内的所有 subagent |
+| 子任务审批模式 | 固定 `no-ask`（不可选） | 当前插件配置作用域内的所有 subagent |
 
-由用户控制选择，不提供单个 subagent 的覆盖开关。**子任务不继承父会话的审批模式**，统一读取子任务设置；“继承授权证据”是另一件事。默认值为主会话 `ask`、子任务 `no-ask`（`src/config/defaults.ts:32`），完整默认配置见[首版初始默认值](configuration-and-audit.md#initial-defaults)。
+由用户控制主会话的选择，不提供单个 subagent 的覆盖开关。**子任务不继承父会话的审批模式**，统一读取子任务设置；“继承授权证据”是另一件事。默认值为主会话 `ask`、子任务 `no-ask`（`src/config/defaults.ts:32`），完整默认配置见[首版初始默认值](configuration-and-audit.md#initial-defaults)。
 
-**子任务默认 `no-ask` 的理由**：子会话没有自己的审批通道，请求人工只会结算成 `fallback-deny`；提前写明使记录说明原因，而不是暗示一个没人能回答的问题。
+**子任务固定 `no-ask` 的理由。** 子会话没有自己的审批通道：宿主在委派时把子会话的审批策略固定为 `never`，插件也不代子任务发起人工审批（`src/host/settlement.ts` 的 `channelOf` 先按会话类型判定，再按模式判定）。因此 `ask` 从未真正打开过一个提问——它只是把同一个 `fallback-deny` 记成另一种原因。既然两个值对结果没有任何差别，该设置不再接受 `ask`：设置页保留同一控件但禁用（灰色、不可聚焦），tooltip 说明原因；文档里存着 `modes.subagent: ask` 会报 `modes.subagent-fixed` 配置错误并使用上一份有效配置，**不做静默改写**。子任务的兜底原因码因此是 `subagent_no_human_channel`，而不是 `automatic_mode_no_human`——前者是比任何配置都更长久的事实。
 
 **旧值不转换。** `normal`／`strict`／`progress` 与 `probeMode` 一律作为配置错误报出（`src/config/policy.ts:43-57` 的 `policy.retired`），并提示替代：`normal` 与 `strict` 原本就是同一引擎加一个通道开关（即此处的 `ask`／`no-ask`），而 `progress` 会放宽矩阵本身——设计已明确禁止。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）同样报错并提示「共用矩阵取代了概率阈值」。**不提供迁移、转换或兼容读取。**
 

@@ -216,7 +216,7 @@ Auto 槽只允许单一注册，所以在 arbiter 运行后启用官方可能只
 
 实测还暴露一处文案偏差：子任务中交给原生 ask 的调用被 `never` 直接判为 `rejected`，模型看到的是 “the user rejected tool …”，但其实没有人类参与（`g5-d`）。插件应自己记录拒绝来源，不能直接沿用原生结果文案。
 
-**当前设置约定**：在插件设置页单独选择所有子任务共用的 strict 或 progress，不提供 normal，也不提供每个 subagent 独立开关。子任务不再继承父会话的审批模式；旧 O6 结论已由本轮决定取代。完整设置范围见[审批模式](approval-modes.md#mode-selection)。
+**当前设置约定**：子任务审批模式固定为 `no-ask`——子会话没有审批通道，`ask` 从不真正提问——设置页保留该控件但禁用，不提供每个 subagent 的独立开关。子任务不继承父会话的审批模式；`modes.subagent: ask` 作为配置错误（`modes.subagent-fixed`）报出，不做静默改写。旧 O6 结论已由本轮决定取代。完整设置范围见[审批模式](approval-modes.md#mode-selection)。
 
 | 路径 | 处理 |
 |---|---|
@@ -296,7 +296,7 @@ subagent 的简短说明草案：
 | strict：自动审批 | 与 normal 相同 | fallback-deny |
 | progress：自动审批 · 推进 | 有条件扩大代批范围 | fallback-deny |
 
-主会话可选三档，子任务只可选 strict / progress；都由用户在插件设置页统一配置。规则入口、审查、故障、人工和兜底阶段分别记录，例如 force-review → review-escalate → fallback-deny。故障可经 error-escalate 进入同一人工处理流程。
+主会话可选 `ask` / `no-ask`；子任务固定 `no-ask`（设置项禁用），因为子会话没有审批通道。规则入口、审查、故障、人工和兜底阶段分别记录，例如 force-review → review-escalate → fallback-deny。故障可经 error-escalate 进入同一人工处理流程。
 
 表中的“人工请求”仅指插件人工审批。三档都不限制 agent 使用 ask 或聊天补充授权、澄清问题；force-ask 与宿主 ask 工具是不同概念。名称与 tooltip 草案统一见[模式设置](approval-modes.md#mode-selection)。
 

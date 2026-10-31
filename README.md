@@ -101,16 +101,16 @@
 
 ## 已实现的功能
 
-| 模块                 | 当前状态                                                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| DSH 插件接入         | `tools/pre-execute` 门禁、`/arbiter` 命令、auto 预设注册、配置页与只读状态；普通工具、MCP、`run_code` 外层与 PTC 内层在入口处进入同一判定  |
-| 命令规则             | 自带的保守 shell 读取器、exact／RE2 regex／glob、四值裁决、作用范围、优先级、复合命令覆盖、规则测试                                        |
-| 自动审查             | 不可变 ReviewSnapshot、来源标记的授权证据、历史与先前裁决、token 预算、chat 与 decision 两种适配器、版本化判定策略                         |
-| 审批与生命周期       | 主会话 `ask`／`no-ask`、子任务独立设置（默认 `no-ask`）；人工审批、human-abort、fallback-deny、review-cancelled 与 error-escalate 分开记录 |
-| 配置                 | 配置页“保存并应用”，文件为唯一可编辑来源，并发冲突拒绝，内容快照与生效记录，无效配置回退到上一份有效配置                                   |
-| 审计与恢复           | 内存裁决、DSH 会话 `plugin:arbiter/decision` 最小记录、SQLite 完整审计、异步有界队列、恢复、默认 30 天／1 GiB 清理                         |
-| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情（首版不提供离线建议页签与操作）                           |
-| 离线建议原型（延期） | 仅有原型参考代码与历史候选数据；首版不暴露页签、生成入口、审核／接纳操作及其公开路由，重新设计前不可从产品界面或 API 触发                  |
+| 模块                 | 当前状态                                                                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| DSH 插件接入         | `tools/pre-execute` 门禁、`/arbiter` 命令、auto 预设注册、配置页与只读状态；普通工具、MCP、`run_code` 外层与 PTC 内层在入口处进入同一判定    |
+| 命令规则             | 自带的保守 shell 读取器、exact／RE2 regex／glob、四值裁决、作用范围、优先级、复合命令覆盖、规则测试                                          |
+| 自动审查             | 不可变 ReviewSnapshot、来源标记的授权证据、历史与先前裁决、token 预算、chat 与 decision 两种适配器、版本化判定策略                           |
+| 审批与生命周期       | 主会话 `ask`／`no-ask`、子任务固定 `no-ask`（设置项禁用）；人工审批、human-abort、fallback-deny、review-cancelled 与 error-escalate 分开记录 |
+| 配置                 | 配置页“保存并应用”，文件为唯一可编辑来源，并发冲突拒绝，内容快照与生效记录，无效配置回退到上一份有效配置                                     |
+| 审计与恢复           | 内存裁决、DSH 会话 `plugin:arbiter/decision` 最小记录、SQLite 完整审计、异步有界队列、恢复、默认 30 天／1 GiB 清理                           |
+| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情（首版不提供离线建议页签与操作）                             |
+| 离线建议原型（延期） | 仅有原型参考代码与历史候选数据；首版不暴露页签、生成入口、审核／接纳操作及其公开路由，重新设计前不可从产品界面或 API 触发                    |
 
 ## 本地安装与试用
 
@@ -121,7 +121,7 @@
 - 安装前确认宿主版本与 `tests/e2e/runtime/package.json` 一致；需要新版本时先走独立的 DSH 升级 PR（三平台 smoke + 人工审核），不要在安装或发布时临时换版本。
 - 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。以下三类内容都会被**拒绝加载**，不提供转换或兼容读取（宿主保留上一份生效配置，原文件不被改写）：
   - **规则格式**：只保留 `arbiter-config-v3`；声明 `arbiter-config-v1`／`arbiter-config-v2`，或仍用单条件 `match` 写法，都以 `config.format-retired`／`rule.format-retired` 拒绝，并提示“该写法已退役、请改用 `conditions`”。改写**不是机械换字段**：每条旧 `match` 都要人工重新核对匹配范围与语义后写成一条 `conditions`（旧 `regex` 按前缀搜索、旧 `glob` 保留取反与 extglob、旧选择器会字符串化数字与布尔，这些在当前整值匹配与类型化 JSONPath 下不能直接照搬表达式）；多条件规则必须显式写出 `combine`（`all` 或 `any`），本版不再按条件数推断。
-  - **审批模式**：`normal`／`strict`／`progress` 不再接受，只接受 `ask`／`no-ask`。前两者原本是同一引擎加一个通道开关（即现在的 `ask`／`no-ask`），`progress` 会放宽矩阵本身，设计已明确禁止。按 `modes.main`／`modes.subagent` 手工改写。
+  - **审批模式**：`normal`／`strict`／`progress` 不再接受，主会话只接受 `ask`／`no-ask`。前两者原本是同一引擎加一个通道开关（即现在的 `ask`／`no-ask`），`progress` 会放宽矩阵本身，设计已明确禁止。按 `modes.main` 手工改写；`modes.subagent` 只接受 `no-ask`，写 `ask` 报 `modes.subagent-fixed`。
   - **判定策略**：`policy` 段只保留 `version`（`arbiter-policy-v3`）。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）与 `normal`／`progress`／`probeMode` 策略块全部报 `policy.retired`，并提示「共用矩阵取代了概率阈值」或「审批模式由 `modes` 决定」。
 - **会话记录与审计库的结构未变**：`plugin:arbiter/admission`／`plugin:arbiter/decision` 与 `$DSH_HOME/arbiter/arbiter.db` 无需迁移或重建。审计库仍只支持自己写入的那一套结构，旧结构库被拒绝打开而不是迁移（`tests/integration/audit-isolation.test.ts` 固定该行为）；日志修复工具已随 RQ-06 删除，旧日志不提供运行时改写路径。
 - 唯一可见变化：宿主语言为英文时，界面由「中文回退」变为**英文**（本轮补齐了 `locale/en/` 全部 705 个 key）。这是预期变化，不是回归。
