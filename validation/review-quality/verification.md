@@ -55,7 +55,7 @@ $ diff <(main 的失败用例列表) <(本分支的失败用例列表)
 | --- | --- | --- |
 | `tests/review-contract/normalize.test.ts` | 新增 18 个边界用例（*the sum tolerance boundary is decimal, not float*） | passed |
 | `tests/review-contract/saved-response-boundary.test.ts` | 5 个用例，用保存的 Clef 响应重放边界 | passed |
-| `tests/evals/production-evals-parity.test.ts` | 8 个用例，生产与 evals 同包同逻辑 | passed |
+| `tests/evals/production-evals-parity.test.ts` | 13 个用例：同包、同渲染、同判定，另加 fingerprint 可复算（chat/decision）与 decision 端到端对等 | passed |
 | `tests/config.test.ts` | 新增 1 个默认值回归 | passed |
 | `tests/client/reviewer-model-picker.test.tsx`、`tests/e2e/plugin-smoke.spec.ts` | 跟随 locale 文案更新 | picker 24 passed；plugin-smoke 属上表环境失败集 |
 
@@ -63,9 +63,15 @@ $ diff <(main 的失败用例列表) <(本分支的失败用例列表)
 
 | 撤销的改动 | 结果 |
 | --- | --- |
-| 用 `git show 501d00b~1:src/review-contract/normalize.ts` 换回旧实现 | `normalize.test.ts` **17 个用例失败**；`saved-response-boundary.test.ts` **3 个失败** |
+| **只回退比较实现**（保留 `withinSumTolerance` 导出，把 `checkProbabilities` 改回「先浮点累加再 `Math.abs`」） | `normalize.test.ts` + `saved-response-boundary.test.ts` 共 **5 个行为用例失败**，模块加载正常 —— 是行为检出，不是缺导出 |
 | 把 `candidateOf` 的默认包改成 `variantPackage(PRODUCTION_VARIANT)` | parity 的 "same object" 断言失败 |
 | 给 `caseMaterial` 的渲染结果加一个空格 | parity 的两条渲染断言失败 |
+| 改 `caseMaterial` 里被哈希的成员（`digestOf({protocol, request, extra:1})`） | parity 的两条 fingerprint 断言失败 |
+| **只回退比较实现**，跑 parity 的 decision 用例 | 「恰好落在容差」用例失败（12 passed / 1 failed）—— 证明 decision 端到端对等确实覆盖了 N0 修复 |
+
+> 修订记录：早期版本的证伪用「整份换回旧 `normalize.ts`」完成，Relay 指出那样会因缺少
+> `withinSumTolerance` 导出而在**模块加载阶段**失败，无法区分「检出原缺陷」与「导入失败」。已改为
+> 上述的定向回退，并在相同改动下重跑确认 5 个用例是行为失败。
 
 ## 4. 未执行项
 
