@@ -50,16 +50,33 @@ function retiredValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-/** The refusal for a retired mode name, at whichever path stored it. */
-function retiredModeError(value: unknown, path: string): ConfigError {
+/**
+ * The refusal for a retired mode name.
+ *
+ * The replacement named depends on the path: `ask` is a real choice for a main
+ * session but a refused one for a subagent, so offering `ask` to a subagent
+ * operator would send them to a value this same build rejects.
+ */
+function retiredModeError(
+  value: unknown,
+  path: string,
+  replacement: string,
+): ConfigError {
   return {
     path,
-    message:
-      'normal, strict and progress were retired; use "ask" or "no-ask" (the shared matrix applies to both, and no-ask only removes the human question)',
+    message: `normal, strict and progress were retired; use ${replacement}`,
     code: 'modes.retired',
     params: { value: retiredValue(value) },
   };
 }
+
+/** The replacement a main session offers for a retired mode name. */
+const MAIN_MODE_REPLACEMENT =
+  '"ask" or "no-ask" (the shared matrix applies to both, and no-ask only removes the human question)';
+
+/** The replacement a subagent offers: the only value it accepts. */
+const SUBAGENT_MODE_REPLACEMENT =
+  '"no-ask" (a subagent has no approval channel, so it does not accept "ask" either)';
 
 function parseMode(
   value: unknown,
@@ -74,7 +91,7 @@ function parseMode(
   // message would send an upgrading operator looking for a typo.
   const index = errors.findIndex((error) => error.path === path);
   if (index >= 0 && RETIRED_MODES.has(value)) {
-    errors[index] = retiredModeError(value, path);
+    errors[index] = retiredModeError(value, path, MAIN_MODE_REPLACEMENT);
   }
   return parsed;
 }
@@ -85,8 +102,9 @@ function parseMode(
  * `ask` is refused with its own code rather than the generic enum message: it is a
  * value this build once accepted, so the operator needs to learn that it stopped
  * being a choice and why, not that they mistyped a mode. The value is not silently
- * rewritten either — the document is reported and the last effective configuration
- * stays in force, the same as every other refusal here.
+ * rewritten either — the document is reported, the same as every other refusal
+ * here, and the recovery path then decides what runs (see `docs/approval-modes.md`
+ * for what that means on a cold start).
  */
 function parseSubagentMode(
   value: unknown,
@@ -104,7 +122,7 @@ function parseSubagentMode(
   const index = errors.findIndex((error) => error.path === path);
   if (index < 0) return parsed;
   if (RETIRED_MODES.has(value)) {
-    errors[index] = retiredModeError(value, path);
+    errors[index] = retiredModeError(value, path, SUBAGENT_MODE_REPLACEMENT);
   } else if (value === 'ask') {
     errors[index] = {
       path,

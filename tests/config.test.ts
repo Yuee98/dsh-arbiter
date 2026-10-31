@@ -94,6 +94,12 @@ describe('configuration', () => {
     ]);
     // Nothing is converted: the fallback defaults apply, not a mapped value.
     expect(parsed.config.modes).toEqual({ main: 'ask', subagent: 'no-ask' });
+    // The replacement each path names must itself be acceptable there: offering
+    // `ask` to a subagent would point at a value this same build refuses.
+    const [main, subagent] = retired;
+    expect(main?.message).toContain('"ask" or "no-ask"');
+    expect(subagent?.message).toContain('"no-ask"');
+    expect(subagent?.message).not.toContain('"ask" or "no-ask"');
   });
 
   test('refuses the retired threshold and probe sections', () => {
