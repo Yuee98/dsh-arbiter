@@ -142,7 +142,9 @@ export DEEPSEEK_API_KEY=$(cat ~/.keys/.deepseek.local.key)
 
 按 target：`deepseek-v4-1-flash` 10/0，其余五个 target **各 10 次全部 422**。逐 target 的端点原文见 §3.2 的汇总表。
 
-**B 臂 50 次 422 没有产生任何用量**（`rawUsage: null`），因为请求在校验阶段被拒。它们的 attempt 计数在 `spent.attempts` 里，货币与 token 消耗为零 —— 这不是"成本优势"，是"请求没通过"。
+**B 臂 50 次 422 没有产生任何已报告的用量**（`rawUsage: null`），因为请求在校验阶段被拒。它们的 attempt 计数在 `spent.attempts` 里，**token 用量未报告、货币金额仍 `unknown`** —— 这不是"成本优势"，是"请求没通过"。
+
+**勘误：此处早期版本写「货币与 token 消耗为零」，把「provider 没有报告」读成了「确认没有消耗」。** 本轮未取 provider 账单（§4），因此这 50 次尝试的**货币金额是未知，不是 0**；能确定的只有「记录里没有可计入的 token」这件事。§4.1 已按同一口径写明「`rawUsage: null` 不等同于账单核验过的零费用」，本句与之一致。
 
 ### 3.3 B 臂探针读数（仅 chat 可用）
 
