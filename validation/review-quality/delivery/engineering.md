@@ -133,7 +133,7 @@
 | 验证点 | 结论 | 真实执行证据 |
 | --- | --- | --- |
 | `insufficient-material` 与 `review-failure` 是两个状态 | **passed** | `tests/review-contract/evaluate.test.ts:83` *escalates without inventing a verdict*（在 `describe('insufficient material')` @ `:82` 内，断言结果**没有** `verdict` 与 `requiredAuthorization` 属性）、`:140` *reports every rejected field with its reason class*（在 `describe('review failure')` @ `:139` 内）；`src/review-contract/evaluate.ts` 三种 `status` |
-| 材料缺失不伪造 R10/A1/A2 | **passed** | 同上：材料缺失时保留 `diagnostic: { risk, authorization }` 供诊断，但**不产生判定**；`tests/review-contract/evaluate.test.ts:96-97` 显式断言无 `verdict` |
+| 材料缺失不伪造 R10/A1/A2 | **passed** | 同上：材料缺失时保留 `diagnostic: { risk, authorization }` 供诊断，但**不产生判定**；`tests/review-contract/evaluate.test.ts:99-100` 显式断言 `not.toHaveProperty('verdict')` 与 `not.toHaveProperty('requiredAuthorization')` |
 | 评审前的四条早退路径各有独立 stage code | **passed** | `src/host/gate-review.ts` 的 `preRequestExit`（`circuit_open`、`snapshot_error:*`、超出输入预算、材料不足），`src/host/gate.ts:580` 的 `noteStage` |
 | 记录写契约版本 | **passed** | `src/host/gate.ts:99`（`contractVersion: REVIEW_CONTRACT_VERSION`） |
 | 真实宿主中的缺失材料可读 | **passed** | `tests/e2e/call-detail.spec.ts:85` *opens the shared detail from the log entry and reports missing material* —— 真实 SQLite 里 seed 一条「无 review 快照、无 model attempt」的记录，详情必须点名缺口而非渲染空层；**本机通过** |

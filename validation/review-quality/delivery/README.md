@@ -78,7 +78,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 | 检查 | 结果 | 证据 |
 | --- | --- | --- |
 | 新日志正常保留 | **passed** | `tests/e2e/history-recovery.spec.ts:928`／`:1064`／`:1115`（补齐固定运行时后三条全过）；`tests/audit.test.ts` 111 tests |
-| 无旧配置迁移入口 | **passed** | `src/config/format.ts:22`（`CONFIG_FORMAT_V3`）／`:31-34`（`RETIRED_CONFIG_FORMATS`）只接受 `arbiter-config-v3`；`src/config/policy.ts:14-23` 的 `RETIRED_THRESHOLDS` 把旧阈值字段报为 `policy.retired`；`tests/config-format.test.ts`（14 tests）、`tests/config.test.ts`（39 tests）全过 |
+| 无旧配置迁移入口 | **passed** | `src/config/format.ts:21`（`CONFIG_FORMAT_V3`）／`:31-34`（`RETIRED_CONFIG_FORMATS`）只接受 `arbiter-config-v3`；`src/config/policy.ts:14-23` 的 `RETIRED_THRESHOLDS` 把旧阈值字段报为 `policy.retired`；`tests/config-format.test.ts`（14 tests）、`tests/config.test.ts`（39 tests）全过 |
 | 无旧审计迁移／修复工具 | **passed** | RQ-06（PR [#104](https://github.com/Yuee98/dsh-arbiter/pull/104)）删除 `scripts/repair-session.ts`；`tests/integration/audit-isolation.test.ts:191` 的 `describe('an unmigratable audit database')` 断言旧结构库被拒绝打开而不是迁移 |
 | evals 未入发布包 | **passed** | `check:build` 在失败前已打印 `Published package: no evals source, schema, data or import.`（`.local/logs/verify.log:664`）；实际判定在 `scripts/build/package-boundary.ts`，由 `scripts/check-build.ts` 的 tarball 清单与导入扫描执行。**注意**：整步仍为 `blocked（环境）`，这一句是包体边界先于消费者安装打印的结论 |
 

@@ -57,10 +57,12 @@ reviewer:
 
 | 类型 | 接口 | 输出 | 何时使用 |
 |---|---|---|---|
-| **`decision`** | 专用 REST：`state` + `questions` → typed 答案 + **概率分布** | 分布 + 类别 + 探针 | 有 Cloudflare / Jev / 本地部署；信息最完整 |
-| **`chat`** | `ctx.llm.stream()` → 文本，自行解析 JSON | 1–10 点值 + 探针布尔 | 想复用已有 provider，或临时用对话模型 |
+| **`decision`** | 专用 REST：`state` + `questions` → typed 答案 + **概率分布** | 两个 `score` 分布（risk／authorization） | 有 Cloudflare / Jev / 本地部署；信息最完整 |
+| **`chat`** | `ctx.llm.stream()` → 文本，自行解析 JSON | risk／authorization 两个 1–10 点值 | 想复用已有 provider，或临时用对话模型 |
 
-**`chat.provider = "session"`**：使用发起调用的会话所用模型，采用 chat 的点值与探针输出契约。这是一个显式选项，不是故障兜底；授权标准与其他后端统一。此选项下不提供连接测试，用户可先在草稿中选择具体模型测试，再切回跟随会话。
+（上表的「输出」列在 #65 之前还包含四个探针布尔；**现行请求不含探针**，见[探针与组合判定](#design-5-6-2)。）
+
+**`chat.provider = "session"`**：使用发起调用的会话所用模型，采用 chat 的两项点值输出契约。这是一个显式选项，不是故障兜底；授权标准与其他后端统一。此选项下不提供连接测试，用户可先在草稿中选择具体模型测试，再切回跟随会话。
 
 **一次性测试**：使用点击时的草稿和固定合成样例，直接请求 Reviewer 并解析／校验输出，复用正式格式修复重试机制；不经过命令规则、人工／兜底或工具执行。结果仅在本次弹窗展示，关闭即结束，不保留测试状态、历史或正式审批记录。测试与保存独立，见[测试契约](configuration-and-audit.md#reviewer-test-ui)。
 
@@ -97,8 +99,8 @@ reviewer:
 **后端定位**（首次默认值以 2026-10-24 的确认替代旧稿主次）：
 
 1. **`chat.provider: "session"` 为首次默认**——复用发起调用的会话模型，不需要先配置另一套审查服务；采用 chat 输出契约。
-2. **固定 chat 模型为可选配置**——用户从 DSH 模型列表选择独立的 reviewer，输出点值与探针。
-3. **decision 为可选专用后端**——配置兼容接口、模型及凭据后使用概率分布与探针；不因选择其他类型而自动启用，也不作为故障回退。
+2. **固定 chat 模型为可选配置**——用户从 DSH 模型列表选择独立的 reviewer，输出两个 1–10 点值。
+3. **decision 为可选专用后端**——配置兼容接口、模型及凭据后使用两个概率分布；不因选择其他类型而自动启用，也不作为故障回退。
 
 **不做形态判断**：`useFacts = factsComplete(parse)`（见 [事实完整性闸门](review-context.md#design-5-2-2)），与后端无关。
 
@@ -210,7 +212,7 @@ questions.risk.score.criteria: List should have at most 10 items after validatio
 
 **为什么 `authorized` 也用 `score` 而不是多个 `noul`**：单调性。多个 noul 可能自相矛盾（`P(explicit) > P(any)`），需要额外一致性规则；单个 score 的 `P(≥x)` 天然单调递减。
 
-**三个探针保留 `noul`**：它们是二元事实，`criteria.true/false` 正好用来写清两端含义。
+**（历史设计）三个探针曾用 `noul`**：它们是二元事实，`criteria.true/false` 正好写清两端含义。**现行请求不含探针**，见[探针与组合判定](#design-5-6-2)。
 
 **限制**：Clef **没有自由文本输出**（只有 noul/choice/score 三种类型），因此 `reason` 由代码合成，见 [拒绝理由（reason）](reviewer.md#design-5-7)。
 
@@ -266,14 +268,7 @@ P_* = null   // 概率门不适用，改用级别阈值（§5.6 第 ⑤ 层）
 
 **矛盾检测**（写进 prompt，也写进校验代码）：
 
-| 矛盾 | 处理 |
-|---|---|
-| `risk ≤ 3` ∧ (`destructive` ∨ `secrets`) | 修复重试 → 仍矛盾则 fail-closed |
-| `risk ≥ 9` ∧ ¬`destructive` ∧ ¬`secrets` | 修复重试 → 仍矛盾则 fail-closed |
-| `authorized ≥ 8` ∧ `risk ≥ 9` 且未触发不变式 | 合法（高授权 + 高风险仍按不变式走，不算矛盾） |
-| `risk ≤ 4` ∧ `bulk` | 可疑但**不算矛盾**——批量操作可以低风险（批量格式化）；仅降低置信 |
-
-矛盾 → 视为审查失败或修复重试，不进入映射。这比只校验标签/点数一致性更强，且**专治锚定**——模型把 critical 压成 medium 时，`destructive=true` 往往还会漏出来。
+**跨信号矛盾检测已退出。** 上表在 #65 之后只剩「两个分数是否各自合法」这一层校验：`risk`／`authorization` 必须落在 1–10，decision 的分布必须通过 N0 的档位与总和校验。**不再有** `risk ≤ 3` 与 `destructive`／`secrets` 的互推，也不再有 `bulk` 相关的可疑判定——那些探针根本不在现行请求里（见[探针与组合判定](#design-5-6-2)）。#65 删除这两条互推的理由是它们会拒绝合法分类；`tests/reviewer.test.ts` 保留了两条原本失败的组合作为新的通过用例。
 
 **为什么不用自报 `confidence`**：
 
@@ -282,7 +277,7 @@ P_* = null   // 概率门不适用，改用级别阈值（§5.6 第 ⑤ 层）
 | `confidence` | "你对自己判断有多确信" | 元认知 | 差，且在**模型误解动作时最自信** |
 | `risk` 点值 | "这个动作的后果有多严重" | 对世界的判断 | 序数一致性好，阈值可离线验证 |
 
-自报 confidence 一律不采信（IR 中不保留该字段）；判定只用 `risk` 点值与三个探针。
+自报 confidence 一律不采信（记录中不保留该字段）；判定只用 `risk` 与 `authorization` 两项分数。
 
 <a id="design-5-4-2"></a>
 
@@ -419,6 +414,12 @@ higher. For authorization, report only coverage you can point to; uncertainty is
 not coverage.
 ```
 
+> **上面这段是 #65 之后、探针仍在时的旧 prompt 文本，保留作历史对照。** 现行契约为**无探针候选 A**：`PRODUCTION_PACKAGE.asksProbe === false`，请求里不出现
+> `secrets`／`destructive`／`egress`／`bulk`，`## Probes` 一节也不存在。现行文本的唯一来源是
+> `src/reviewer/contract.ts` 的 `REVIEW_CONTRACT`（末句为 *Report only coverage you can point to:
+> uncertainty is not coverage. When two bands are defensible, report the higher one for risk and the
+> lower one for authorization.*）。**不要据本节旧文本推断当前请求要求四个布尔。**
+
 > 上面这段是 #65 之后的现行文本。原文在这两行是 `If risk <= 3 then destructive and
 > secrets must be false.` 与 `If risk >= 9 then destructive or secrets must be true.`；
 > 新 rubric 按后果分级，这两条互推会拒绝合法分类，已随 #65 删除（`tests/reviewer.test.ts`
@@ -434,7 +435,7 @@ not coverage.
 2. 矛盾检测：`risk ≤ 3` 与 `destructive`/`secrets` 互斥，锚定会影响可塑的数字，较难同时影响四个布尔；
 3. 上线后监控：`risk` 直方图若异常堆积在某阈值，就是锚定的直接证据（[日志与离线调优](configuration-and-audit.md#design-5-8) 指标）。
 
-**规则与阈值单一事实源**：prompt 里的映射（`≤2` / `3-7` / `≥8`）和代码里的 τ 必须来自同一份配置，从配置对象插值生成 prompt，**不要手写两遍**——否则调阈值时改了代码忘了 prompt，模型会按旧边界产信号，这种漂移极难发现。
+**阈值不进 prompt。** 现行契约**刻意不把矩阵与阈值写进 prompt**（`src/reviewer/contract.ts` 的注释记录了这条理由）：模型若收到答案键就会去算分，而模型的算术不是本次审查的权威。档位**文本**仍只有一份来源（`rubric-text.ts` 从 `review-contract/rubrics.ts` 派生），两个协议序列化同一份——漂移风险由「只有一份 band 文本」消除，不再靠「配置与 prompt 同步」。
 
 <a id="design-5-4-3"></a>
 
@@ -443,8 +444,8 @@ not coverage.
 | 失败类型 | 处理 |
 |---|---|
 | JSON 解析失败（含代码块包裹、前后有废话） | 先容错提取（剥离 fence、截取首个 `{...}`），成功则继续校验 |
-| schema 校验失败（缺字段、越界、`risk`/`authorized` 不在 1–10、探针非布尔） | **修复式重试**：把原输出 + 具体校验错误 + 要求发回，只修正格式 |
-| 语义矛盾（`risk ≤ 3` 却 `destructive`/`secrets` 为真；`risk ≥ 9` 却两者皆假） | 修复式重试，理由写明矛盾点 |
+| schema 校验失败（缺字段、越界、`risk`/`authorization` 不在 1–10） | **修复式重试**：把原输出 + 具体校验错误 + 要求发回，只修正格式 |
+| 语义矛盾 | **不再有这一类**：两项分数之间没有互推关系（#65 已删除），校验只判各自是否合法 |
 | provider 错误（`NO_ADAPTER`/`AUTH`/`RATE_LIMIT`/`QUOTA`/`MISSING_CREDENTIAL`） | **不重试**，该次审查失败（[Reviewer 类型选择](reviewer.md#design-5-2) 不做自动回退） |
 | 全部后端与重试均失败 | fail-closed：工具调用失败（不执行），错误写明"审查不可用" |
 
@@ -461,7 +462,7 @@ not coverage.
 
 1. 容错提取只负责"找到 JSON"，找到后按**完全严格**的 schema 校验——多余字段、越界值一律判失败；
 2. **信号生成失败不产生自动 allow**——有限修复失败后 error-escalate，人工能否接管取决于审批模式；
-3. `risk` 与 `authorized` 必须是 1–10 的整数（不接受小数、字符串、越界；`0` 不再合法，因为 1 表示有效禁止）；四个探针必须是布尔（不接受 `0/1`、`"yes"` 等变体）。
+3. `risk` 与 `authorization` 必须是 1–10 的整数（不接受小数、字符串、越界；`0` 不再合法，因为 1 表示有效禁止）。**没有探针字段可校验**：现行请求不包含它们，答非所问的多余成员按严格 schema 判失败。
 
 <a id="design-5-5"></a>
 
@@ -487,30 +488,26 @@ not coverage.
 
 ## 统一中间表示
 
-所有后端产出同一个结构，判定引擎只认它：
+两个后端产出同一个**两项分数**结构，判定引擎只认它。**没有探针成员**——`src/reviewer/contract.ts` 的模块注释明确记录了这一点：探针存在是为了让固定拒绝引擎能读到分数旁的布尔，而共用矩阵不再需要它们（有后果就抬高 risk 档，许可不覆盖动作就降低 authorization 档）。
 
 ```js
 {
-  // —— 风险信号：Clef 给分布，chat 给点值 ——
-  riskDist: {"1": n, …, "10": n} | null,   // Clef 分布，已按公共 1–10 编号；chat 为 null
-  riskPoint: number | null,                // chat 的 1–10 点值；Clef 为 null
-  riskScore: number | null,                // 公共尺度的概率加权档（仅审计/展示）
-  riskClass: "low" | "medium" | "high",    // 两者都可由上面的信号导出
+  // —— 两个协议的唯一差异：分布 vs 点值 ——
+  riskDist:  {"0": n, …, "9": n} | null,   // decision 原生 0–9 分布；chat 为 null
+  authDist:  {"0": n, …, "9": n} | null,   // 同上
+  riskPoint: number | null,                // chat 的 1–10 点值；decision 为 null
+  authPoint: number | null,
 
-  // —— 授权信号（同形）——
-  authDist: {"1": n, …, "10": n} | null,   // Clef，公共编号
-  authPoint: number | null,                // chat，1–10
-  authClass: "none" | "implied" | "explicit",
-
-  // —— 四个确定性探针 ——
-  secrets: boolean,                        // Clef: noul ≥ 0.5
-  destructive: boolean,
-  egress: boolean,
-  bulk: boolean,                           // 作用于大量对象/范围不确定（§5.6.2）
+  // —— 归一到公共尺度后的结果（矩阵的实际输入）——
+  risk: 1–10,                              // decision 走 N0，chat 恒等
+  authorization: 1–10,
+  requiredAuthorization: 1–10,             // requiredAuthorizationFor(risk)
+  verdict: "review-allow" | "review-deny" | "review-escalate",
 
   // —— 溯源与质量 ——
   source: "decision" | "chat",
-  repairs: number
+  repairs: number,
+  contractVersion: "review-contract-v1"
 }
 ```
 
@@ -518,22 +515,14 @@ not coverage.
 
 | 字段 | `decision` | `chat` |
 |---|---|---|
-| `riskDist` / `authDist` | 真实分布，编号为公共 1–10 | `null` |
+| `riskDist` / `authDist` | 原生 0–9 分布 | `null` |
 | `riskPoint` / `authPoint` | `null` | 1–10 |
-| `riskClass` | 从分布导出 | 从点值导出 |
-| `authClass` | 从分布导出 | 从点值导出 |
-| `secrets` / `destructive` / `egress` / `bulk` | `noul ≥ 0.5` | 模型直接给 |
+| `risk` / `authorization` | N0 归一（最小 `F(k) > 0.5`／`>= 0.5`） | 恒等 |
+| 探针 | **无** | **无** |
 
-**两种类型都产出完整 IR**，差异只在有无分布。`chat.provider: "session"` 同样要求四探针 + 点值输出，因此只缺 `riskDist`/`authDist`，**不丢探针或授权维度**。
+**两种类型都产出完整结构**，差异只在有无分布。`chat.provider: "session"` 同样只产两项分数。
 
-**类别导出（两后端共用同一套边界）**：
-
-```js
-riskClass = point <= 3 ? "low" : point <= 8 ? "medium" : "high"
-          // Clef: 用 P(≤3) / P(4..8) / P(≥9) 得到三桶概率
-authClass = point >= 8 ? "explicit" : point >= 5 ? "implied" : "none"
-          // Clef: P(≥8) ≥ τ_auth → explicit；P(≥5) ≥ τ_auth → implied；否则 none
-```
+**中间分类已退出**：`riskClass`（`low`／`medium`／`high`）与 `authClass`（`none`／`implied`／`explicit`）在 #65 之后不再是判定输入，也不再是契约常量。矩阵直接消费公共 1–10 档位，因此「可配置的类别边界会改变授权要求」这个风险面也随之消失。
 
 **不采信自报置信度**：chat 后端**不要求**模型给 `confidence`；给了也不采信。`Clef` 的 `confidence` 只用于审计展示，不参与判定（判定用的是分布本身）。
 
