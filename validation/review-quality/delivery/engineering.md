@@ -55,7 +55,7 @@
 | `session-denial` | a rule denial shows the Arbiter marker, its reason, and opens the shared detail | **passed** | §1.3 |
 | `history-recovery` | a verdict the plugin settles is persisted and cold-read by another runtime | **passed** | §1.6 冷恢复 |
 | `history-recovery` | the built plugin recovers a real host session log after a cold start | **passed** | §1.6 |
-| `history-recovery` | real plugin records cold-read after a restart, with and without the audit store | **passed** | §1.6 |
+| `history-recovery` | real plugin records cold-read after a restart, with and without the audit store | **passed**（含本轮补强：真实重启前后读出同一具体裁决） | §1.6 |
 
 **未通过且与上述流程相关的用例**（5 条，全部 `blocked（环境）`，见 §3.3）：
 
@@ -146,7 +146,8 @@
 
 | 验证点 | 结论 | 真实执行证据 |
 | --- | --- | --- |
-| 冷恢复后裁决可读 | **passed** | `tests/e2e/history-recovery.spec.ts:928` *a verdict the plugin settles is persisted and cold-read by another runtime*（两个 plugin 实例用**不同 scope**，排除内存缓存命中）；`:1064` *the built plugin recovers a real host session log after a cold start*；`:1115` *real plugin records cold-read after a restart, with and without the audit store* —— 三条**补齐固定运行时后全部通过**（§3.2 第 20–22 号用例） |
+| 冷恢复后裁决可读 | **passed** | `tests/e2e/history-recovery.spec.ts` 三条，**补齐固定运行时后全部通过**：`:1009` *a verdict the plugin settles is persisted and cold-read by another runtime*（两个 plugin 实例用**不同 scope**，排除内存缓存命中）；`:1145` *the built plugin recovers a real host session log after a cold start*；`:1196` *real plugin records cold-read after a restart, with and without the audit store* |
+| **真实进程重启后仍能读出具体裁决**（本轮补强） | **passed** | 同上 `:1196`。重启前向**该 profile 自己的审计库**写入一条已知裁决（`callId = restart-seeded-verdict`、`result = review-deny`），经产品**自己的** `/api/arbiter/logs` 路由断言可读；真实启动→停止→在同一 `DSH_HOME` 上重启后，**由重启后的进程**再次读取，断言同一 `callId` 与 `result` 仍可读、且整份可读集合与重启前**逐条相同**。**证伪已验证**：在首次读取后删除该行，只有这条新断言失败（`Received array: []`），其余两条仍通过 |
 | 恢复的覆盖度如实报告 | **passed** | `:1064` 断言 `status = { coverage: 'partial', reset: false }`（audit store 关闭，一个来源确实不可用，读出「部分」而不是「未知」或「已知为空」） |
 | 显式重置生效且不可复活 | **passed** | `:1064` 中 `applied.host.reset?.(sessionId)` 之后 `window.items` 为空且 `status.reset === true` |
 | `review-cancelled` 记录保留 | **passed（集成层）／not-run（真实宿主）** | `tests/integration/decision-chain.test.ts:831` *attempts and usage survive a cancellation that arrives after the request*：取消的调用**经 durable readers 往返后仍可读**（`readableCancellation('cancel-1', stored) === true`，`:884`），`stored.result === 'review-cancelled'`（`:885`），attempt 保留 `usage.inputTokens === 900`，且 trace 含 `review-cancelled`（`:892`）而非审查失败；`tests/audit.test.ts:968-980` 把 `review-cancelled` 行写进 store 并断言它不进入 prior-verdict 窗口。**本机没有在真实宿主里触发一次「审查在途被取消」的 E2E** |
