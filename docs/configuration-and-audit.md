@@ -120,7 +120,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | decision 配置 | 用户填写 `url` / `model` / `apiKeyRef`；超时等放高级设置 | 必填项、URL 与字段格式；连接测试独立于保存，见[Reviewer 配置](#reviewer-configuration) |
 | chat 配置 | 一个 select 选择 DSH 已配置的具体模型或“跟随会话模型”，映射到 `provider` / `model`；采样、输出及超时等放高级设置 | UI 不要求手填 provider／模型名；字段与数值校验见[Reviewer 配置](#reviewer-configuration) |
 | Reviewer 超时 | `reviewerTimeoutMs`（旧稿初值 8000ms，发布值待评测） | 正整数 |
-| 熔断 | `breaker.mode`（preset/custom/off）、`preset`（strict/balanced/lenient）、自动审批下提前熔断选项（字段名待定） | 枚举、预设阈值约束；与审批模式的 strict 含义分开 |
+| 熔断 | `breaker.mode`（preset/custom/off）、`preset`（strict/balanced/lenient）、`consecutiveDenials`／`windowDenials`／`windowSize` | 枚举、预设阈值约束；与审批模式的 `ask`／`no-ask` 无关，两者正交 |
 | 审查预算 | `reviewBudget`（默认 null = 不限，仅提示不阻断） | 正整数或 null |
 | 后端成本标记 | `costTier`（free/paid，用于成本估算显示） | 枚举 |
 | 授权证据流 | `evidence.maxItems`（20）/ `evidence.parentHumanItems`（5）/ `evidence.parentEvidenceFloor`（1） | 正整数、floor ≤ parentHumanItems |
@@ -131,13 +131,11 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | 项目审查指引 | `projectRules.enabled`（已确认默认 true）/ `projectRules.files`（`.dsh/arbiter.md`, `.arbiter.md`） | 布尔、相对路径；用户负责内容，每次新快照取得当前文本，已发出的快照不变，不逐次认可 |
 | checkpoint 上限 | `context.checkpointMaxItems`（3） | 正整数 |
 | tool call 参数上限 | `context.toolCallArgumentMaxChars`（200） | 正整数 |
-| 探针预置 | `probeMode`：`assist`（默认）\| `override`（[判定引擎](reviewer.md#design-5-6) ① 层） | 枚举 |
-| 判定阈值（decision） | 风险／授权概率门槛、风险上限、critical 门槛，按所选审查策略应用 | normal / strict 共用；与 chat 授权标准一致，数值待评测；高级编辑范围见下文建议 |
-| 判定阈值（chat） | 风险点值上限、授权点值下限，按所选审查策略应用 | normal / strict 共用；数值待评测，不因后端不同改变所需授权类别 |
-| 判定策略调整 | progress 对部分常规 review-escalate 条件的调整 | 具体条件留待评测；不在普通设置页逐条暴露 |
-| chat 后端 | temperature（0）/ maxTokens（300）/ output（json\|tool） | 范围 |
+| 探针 | **无探针**：生产包 `asksProbe: false`，请求里没有 `recoverability` 一问 | 不可配置；旧 `probeMode`（`assist`／`override`）报 `policy.retired` |
+| 判定策略 | `policy.version` 只有 `arbiter-policy-v3`；档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名 | **没有可调阈值**；旧 `tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress` 及 `normal`／`progress` 策略块一律报 `policy.retired`，不迁移 |
+| chat 后端 | temperature（0）/ maxTokens（10000）/ maxRepairRetries（1）/ timeoutMs（20000） | 范围；`maxTokens` 默认值从 400 提高，因为 400 时模型把预算耗在思考上、返回不了 JSON |
 | 执行边界 | `boundary`：trusted / guarded；首次默认 guarded | 用户在本配置页选择并保存应用；决定已启用会话放行后的沙箱，不启用未接管会话。保存后对当前已启用会话立即生效（先写记录再改旋钮），未启用会话不被改写 |
-| 审批模式 | 主会话 normal / strict / progress，默认 normal；所有子任务统一 strict / progress，默认 strict | 用户在本设置页选择；不提供单个子任务覆盖 |
+| 审批模式 | 主会话 `ask`（默认）或 `no-ask`；所有子任务独立取 `ask`／`no-ask`，默认 `no-ask` | 用户在本设置页选择；不提供单个子任务覆盖。两者共用同一份判定矩阵 |
 | 凭据 | 显示"已设置/未设置/来源"，可写入 | 见 [机密](configuration-and-audit.md#design-8-2) |
 
 **配置生效约定**：以校验并成功应用为生效点。已有结果继续推进，不因后端或输入协议变更丢弃、重审；旧响应按原请求协议解释。已弹出的人工审批保持等待，尚未作出的后续判定使用新配置；已经结算或开始执行的调用不追溯。保存失败或应用失败时不能显示“已生效”。不额外增加每次执行前检查模式的产品步骤，具体在途边界见[配置生效与在途请求](approval-modes.md#configuration-activation)。
@@ -166,11 +164,11 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 |---|---|
 | Reviewer | `chat`，跟随发起调用的会话模型（`provider: session`） |
 | 执行边界 | guarded，保留工作区文件沙箱 |
-| 主会话审批模式 | normal，自动审查后需要人工时可发起审批 |
-| 子任务审批模式 | strict，所有子任务统一采用，不提供单子任务覆盖 |
+| 主会话审批模式 | `ask`，自动审查后需要人工时可发起审批 |
+| 子任务审批模式 | `no-ask`，所有子任务统一采用，不提供单子任务覆盖 |
 | 初始命令规则 | 空规则表；需要 Arbiter 处理的调用从 `review(default)` 起步 |
 
-首版不附带预设命令规则。先实际使用并积累日志，再评估是否需要增加预设及其内容；本文与规则章节中的示例不自动加入配置。空规则表不表示关闭审查策略或取消其他宿主 guard，也不影响用户自行创建规则。预设规则的后续评估与[离线规则建议延期](#offline-rule-review)分别跟踪，均不扩充首版范围。
+首版不附带预设命令规则。先实际使用并积累日志，再评估是否需要增加预设及其内容；本文与规则章节中的示例不自动加入配置。空规则表不表示关闭审查或取消其他宿主 guard，也不影响用户自行创建规则。预设规则的后续评估与[离线规则建议延期](#offline-rule-review)分别跟踪，均不扩充首版范围。
 
 <a id="reviewer-configuration"></a>
 
@@ -178,7 +176,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 
 Reviewer 使用设置页中的常规配置区，选择 `decision / chat` 后展开对应字段。decision 的接口地址、模型及凭据引用由用户填写；chat 使用同一个 select 列出“跟随会话模型”和 DSH 中已配置的具体模型，不要求用户手填 provider 或模型名。具体模型按 provider 分组并显示 `provider / model`，列表较长时支持搜索；底层配置仍保留 provider／model 或 session 变体的含义。
 
-chat 复用宿主已有 provider 的凭据；decision 配置仅保存凭据引用，显示凭据是否已配置，新增或更新凭据沿用[独立凭据存储](#design-8-2)，不回显密钥。超时、输出长度、采样与格式修复重试等放在折叠的高级设置中；审批策略与判定阈值使用它们自己的配置区。
+chat 复用宿主已有 provider 的凭据；decision 配置仅保存凭据引用，显示凭据是否已配置，新增或更新凭据沿用[独立凭据存储](#design-8-2)，不回显密钥。超时、输出长度、采样与格式修复重试等放在折叠的高级设置中。**判定策略没有独立配置区**：档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名，`policy` 段只有 `version`；审批模式（`ask`／`no-ask`）在模式设置里选，见[模式选择](approval-modes.md#mode-selection)。
 
 修改进入当前草稿，统一通过页面“保存并应用”生效。[测试 Reviewer](#reviewer-test-ui)读取点击时的草稿，成功不会自动保存或应用；保存也不要求先测试，且不自动发起模型请求。必填项、字段格式等配置错误阻止保存；网络、认证、配额等连接测试失败可提示，但不额外阻止保存。运行中若所选后端不可用，沿用 `error-escalate` 及既定人工／兜底流程，不自动切换其他后端。
 
@@ -296,9 +294,9 @@ UI 保存和外部替换配置文件走同一条校验、规范化和应用路�
 
 已定的日常入口是**三档审批模式 + 命令规则**。用户希望特定命令放行、禁止或每次审查时，优先编辑命令规则；无需先理解模型点值与概率。模式选择旁始终提供[tooltip](approval-modes.md#mode-selection)，说明插件人工审批与 agent 提问的区别。
 
-建议另设折叠的“高级设置”入口，不用“开发者设置”暗示只有插件开发者才能调整。可按实现成熟度开放判定阈值、内置判定规则的有限参数或开关、超时和重试参数；具体字段与可调范围仍需评测，不承诺一开始支持任意代码或完整自定义策略语言。上方配置表是字段清单，不表示所有项目都进入普通设置页。
+建议另设折叠的“高级设置”入口，不用“开发者设置”暗示只有插件开发者才能调整。可开放的是**运行参数**：超时、重试、输入预算、审计保留、熔断预设。**判定阈值不在此列**——它由共用契约命名，没有字段可放，也不承诺任意脚本或完整自定义策略语言。上方配置表是字段清单，不表示所有项目都进入普通设置页。
 
-建议保持三档选择，调整策略后附“已自定义”标记，展示相对预设的变化并提供恢复默认、导出及已有案例回放入口。normal / strict 的常规策略共用一份配置，避免高级设置使两者重新分叉；progress 调整作为额外部分表达。自定义不改变命令规则优先级、force-ask 需要实际人工审批、故障不自动放行等产品契约。
+**当前没有可调的判定策略**：`policy` 段只有 `version`，档位／N0／矩阵由 `REVIEW_CONTRACT_VERSION` 命名，因此「调整阈值」这一层高级设置没有字段可放。可调的是熔断预设、超时与重试、输入预算、审计保留这类**运行参数**，它们不改变判定语义。任何改变矩阵或档位含义的改动都是契约升版，不走进配置项。自定义运行参数不改变命令规则优先级、`force-ask` 需要实际人工审批、故障不自动放行等产品契约。
 
 上述分层是当前建议，需在界面设计时确定具体可编辑字段；不为本轮讨论新增复杂的策略编辑器实现要求。宿主 ask 的 legacy / timed 设置归宿主管理，不随插件审批模式自动切换。
 
@@ -597,7 +595,7 @@ appendPluginRecord(session, "plugin:arbiter/decision", {...});
 {
   "ts": "...", "sessionId": "...", "callId": "...", "configRevision": "cfg-12",
   "tool": "bash", "command": "deploy --target prod",
-  "sessionKind": "subagent", "approvalMode": "progress", "executionMode": "guarded",
+  "sessionKind": "subagent", "approvalMode": "no-ask", "executionMode": "guarded",
   "trace": [
     { "stage": "rule", "result": "force-review", "ruleId": "deploy-review" },
     { "stage": "review", "result": "review-escalate", "decisionRules": ["R5"],
@@ -763,7 +761,7 @@ Reviewer 连接使用的凭据值、认证头不写入审计记录，配置快�
 | 层次 | 展示内容 |
 |---|---|
 | 概览 | 当次调用、最终裁决、简短原因与当次审批模式 |
-| 判定依据 | 实际判定链、命中的命令规则或审查策略，以及当时提供的授权证据与来源 |
+| 判定依据 | 实际判定链、命中的命令规则或共用矩阵条目，以及当时提供的授权证据与来源 |
 | 原始材料 | 已保存的完整工具输入、结构化审查输入、模型响应及配置／模板版本，供需要时展开排查 |
 
 详情按实际发生的阶段展示：规则短路没有模型审查时，不补造模型结果；历史模式、配置与输入以当次记录为准，不用当前设置重新解释旧裁决。权限裁决的展示不接管宿主工具执行结果及失败提示，职责边界见[审批拒绝的展示与会话继续](architecture.md#approval-rejection-feedback)。
@@ -792,7 +790,7 @@ Reviewer 连接使用的凭据值、认证头不写入审计记录，配置快�
 
 | 内容 | 回答的问题 | 建议记录与展示 |
 |---|---|---|
-| 判定依据 | 这次为什么放行、拒绝或转人工？ | 命令规则 id／版本、审查策略与命中的判定规则、相关信号与阈值、完整阶段链、人工结果或兜底原因；区分权限决定和宿主执行结果 |
+| 判定依据 | 这次为什么放行、拒绝或转人工？ | 命令规则 id／版本、两项公共分数与矩阵要求的授权、`contractVersion`、完整阶段链、人工结果或兜底原因；区分权限决定和宿主执行结果 |
 | 授权证据 | 当时有哪些人类指令或审批记录支持这项操作？ | 实际提供给 reviewer 的输入片段及来源、session／message 标识、ask 的问题与答案、父会话原始人类消息与 agent 转述的区分，以及摘要／截断情况 |
 
 授权证据首先是判定前的审查输入，记录保留的是当时输入的可追溯来源；后续新请求也可以读取仍适用的原始授权和先前裁决。因此它不只是事后日志，但历史记录本身不会自动创造或延续授权。没有进入审查的规则短路调用，也不能展示成“模型已检查授权”。
