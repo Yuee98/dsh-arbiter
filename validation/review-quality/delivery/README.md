@@ -40,8 +40,61 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 | # | 发现 | 影响 |
 | --- | --- | --- |
 | F1 | **E2E 的 12 个失败里有 7 个不是「本机环境不可修」，而是没按 `docs/development-baseline.md` 跑固定 DSH 运行时** | 按基线执行 `npm ci --prefix tests/e2e/runtime` 后，`gate-real`、`history-recovery`、`context-sources`、`agent-guidance` 的 7 个用例立即转为通过。**这意味着此前「失败集与 main 逐条相同」的结论虽然成立，但把可修的配置缺失算进了「环境阻塞」**。详见 [engineering.md §3.2](engineering.md) |
-| F2 | `check:build` 的 `ERR_SQLITE_ERROR` 已定位到具体条件：**`CI=true` 时 pnpm 需要写共享 store 的 SQLite 索引，而 store 位于 checkout 之外、本 checkout 不可写** | 不是随机故障，也不是本次改动引起。设 `CI=false` 时同一命令成功。CI 上通过是因为 runner 的 store 可写。详见 [engineering.md §2.2](engineering.md) |
+| F2 | `check:build` 的 `ERR_SQLITE_ERROR` 已定位到具体条件：**`CI=true` 时 pnpm 需要写共享 store 的 SQLite 索引，而 store 位于 checkout 之外、本 checkout 不可写** | 不是随机故障，也不是本次改动引起。在空目录里只切换 `CI` 即可复现与不复现（`scripts/check-build.ts:34`／`:50` 硬编码 `CI: 'true'`，因此该脚本本机必然触发）。CI 上通过是因为 runner 的 store 可写。详见 [engineering.md §2.2](engineering.md) |
 | F3 | 剩余 5 个 E2E 失败中，**`locale-surfaces` 的 `reviewedCallId` 类型断言**与 `main` 上同样失败，且与本次改动无关；其余 4 个由 `sandbox-exec` 不可用或由此派生的写入缺失引起 | 记录为 `blocked（环境）`，不写成 passed，也不引用 CI 通过代替本机记录。详见 [engineering.md §3.3](engineering.md) |
+
+---
+
+## Issue 附加验收条件的逐条对照
+
+| 条件（issue #87 原文要点） | 状态 | 证据 |
+| --- | --- | --- |
+| `pnpm verify` 与适用完整隔离 DSH E2E 通过 | **`pnpm verify` 12/14 步 passed、`check:build` blocked（环境）**；**E2E blocked（环境）** | [engineering.md §2](engineering.md)、[§3](engineering.md)。未写成通过 |
+| 每项范围可链接到实现和证据；**工程条件**满足才建议整体完成 | **是** | [engineering.md](engineering.md) 六项逐项给实现文件与用例；[pilot.md](pilot.md)／[limitations.md](limitations.md)／[handover.md](handover.md) 各自给引用 |
+| 新日志正常保留、无旧迁移入口、evals 未入发布包 | **passed** | 见下方 §「日志、迁移与发布包」 |
+| 沿用 #88 的 `startNewSession` 或等价宿主可观察同步 | **passed** | 见下方 §「会话切换同步」 |
+| 报告链接新版 decision 的完整十档真实验证（RQ-15 S1），**并明确声明工程通过不代替质量证据** | **是** | [pilot.md §2.2](pilot.md) 指向 [decision-record.md](../decision-record.md)；[pilot.md §4](pilot.md) 与本节末的声明 |
+| 链接 #91 的故障／usage／凭据回显回归 | **passed** | 见下方 §「#91 回归」 |
+| 四类分列不混写 | **是** | 本文件是索引，四类各自独立文件 |
+
+### 日志、迁移与发布包
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| 新日志正常保留 | **passed** | `tests/e2e/history-recovery.spec.ts:928`／`:1064`／`:1115`（补齐固定运行时后三条全过）；`tests/audit.test.ts` 111 tests |
+| 无旧配置迁移入口 | **passed** | `src/config/format.ts:22`（`CONFIG_FORMAT_V3`）／`:31-34`（`RETIRED_CONFIG_FORMATS`）只接受 `arbiter-config-v3`；`src/config/policy.ts:14-23` 的 `RETIRED_THRESHOLDS` 把旧阈值字段报为 `policy.retired`；`tests/config-format.test.ts`（14 tests）、`tests/config.test.ts`（39 tests）全过 |
+| 无旧审计迁移／修复工具 | **passed** | RQ-06（PR [#104](https://github.com/Yuee98/dsh-arbiter/pull/104)）删除 `scripts/repair-session.ts`；`tests/integration/audit-isolation.test.ts:191` 的 `describe('an unmigratable audit database')` 断言旧结构库被拒绝打开而不是迁移 |
+| evals 未入发布包 | **passed** | `check:build` 在失败前已打印 `Published package: no evals source, schema, data or import.`（`.local/logs/verify.log:664`）；实际判定在 `scripts/build/package-boundary.ts`，由 `scripts/check-build.ts` 的 tarball 清单与导入扫描执行。**注意**：整步仍为 `blocked（环境）`，这一句是包体边界先于消费者安装打印的结论 |
+
+> 最后一行需要准确读：**「evals 未入发布包」这一断言本身在本机执行过并通过**（它在消费者安装之前完成），但 `check:build` **作为一整步**因后续消费者安装失败而 `blocked（环境）`。两者不互相替代。
+
+### 会话切换同步
+
+issue 要求「发送前确认会话创建响应对应的 conversation 已显示，并断言最终日志／turn 的 sessionId 与之相同；编辑器可见、固定等待或标记文本本身不能证明切换完成」。
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| 共享 helper 存在且等两个宿主信号 | **passed** | `tests/e2e/dsh/ui.ts:60` 的 `startNewSession`：先等 `POST /api/session/create` 的 `result.value.sessionId`，再等 `[data-conversation-session="<id>"]` 可见（宿主自己用该属性定位会话归属），无固定 `waitForTimeout` |
+| 用例断言 turn 落在该 id 上 | **passed** | `tests/e2e/agent-guidance.spec.ts:635-636`（`other.sessionId === otherSessionId` 且 `!== plainSession.sessionId`）；`tests/e2e/session-admission.spec.ts:745-746`（`expect(plain.sessionId).toBe(plainSessionId)`）；`tests/e2e/session-denial.spec.ts:327`／`:438`／`:580`（`toBe(createdId)`） |
+| 这三处用例在本次执行中通过 | **passed** | `agent-guidance`（§3.2 转为通过的 7 条之一）、`session-admission`（本机直接通过）、`session-denial` 的前两条本机通过；**`session-denial` 的第 3 条 `the refusal reason reaches the agent, and parallel calls keep running` 本机 timedOut**，但它的断言对象是并行调用，不是会话切换 |
+
+### #91 回归（故障／usage／凭据回显）
+
+[#91](https://github.com/Yuee98/dsh-arbiter/pull/91)（`fd96646`）修复 decision 传输层，作为本任务的回归基线。三项：
+
+| 项 | 结果 | 证据 |
+| --- | --- | --- |
+| **故障**（`success:false` 优先于结构完整的答案） | **passed** | `tests/reviewer-protocol.test.ts:1021` *HTTP 200 with success:false classifies as a provider failure*、`:1174` *a provider failure with no code is not reported as a network fault* |
+| **usage**（从响应读取并写入 attempt） | **passed** | `tests/reviewer-usage.test.ts`（全文件，含 `:442` *a stream that fails after reporting usage keeps it*）；`tests/reviewer-protocol.test.ts:815` *both attempts contribute their own reported usage* |
+| **凭据回显**（三条路径都遮蔽） | **passed** | `tests/reviewer-protocol.test.ts:851` *a credential echoed in a successful answer never leaves review()*、`:894` *a credential resolved by the transport itself is masked too*、`:516` *the credential never reaches a stored field* |
+
+以上用例均在本机 `test:unit`（71 files / 1739 tests）中实际执行并通过（`.local/logs/verify.log:195-196`）。
+
+> **一个诚实的限定**：#91 的真实端点验证（Cloudflare／TypeSafe 三个入口的真实响应）是 **PR #91 当时的记录**，本阶段**没有重跑真实端点**。本报告引用的是**回归测试**层面，不是新的真实端点证据。
+
+### 声明
+
+**工程通过不代替真实模型质量证据。** 本报告的 A 类（工程结果）与上述附加条件全部是工程层面的判据；模型准确率、矩阵阈值合理性、保留集表现属于 [B 类](pilot.md) 的限定结论与 [D 类](handover.md) 的移交项，本阶段**没有**、也**不声称**已达标。
 
 ---
 
