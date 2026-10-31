@@ -16,7 +16,7 @@
 | 支持平台 | **基准系统 macOS 27.0.1 / arm64**：本轮在该平台完成产品级验收（含跨进程冷恢复与**真实卸载**）。Ubuntu 24.04 与 Windows 2025 有历史三平台 `@smoke` 兼容证据（同 head 各 3 passed），但 smoke 不证明文件边界／沙箱、冷恢复、停用／卸载，**这两者的产品级验收本轮 not-run**。首版只把 macOS 记为完成产品级验收的系统，其余仅声明通过基础兼容 smoke |
 | 界面语言 | **中文与英文均为完整资源**：`locale/zh/` 与 `locale/en/` 各 14 模块、705 key，`pnpm check:i18n:release` 退出 0。中英切换与布局在真实宿主逐面验收（含真实冲突告警卡与真实 Reviewer 弹窗）                                                                                                                                                        |
 | 发布入口 | `pnpm check:release` 通过（i18n 发布门禁 + `pnpm verify` + 完整真实 DSH 套件，57/57 真实 DSH 用例通过）                                                                                                                                                                                                                                         |
-| 默认行为 | 空命令规则表、chat + 跟随会话模型、guarded、主会话 normal／子任务 strict；**安装不接管任何会话**                                                                                                                                                                                                                                                |
+| 默认行为 | 空命令规则表、chat + 跟随会话模型、guarded、主会话 `ask`／子任务 `no-ask`；**安装不接管任何会话**                                                                                                                                                                                                                                               |
 
 完整逐项结论、环境、命令与未运行项见[首版验收报告](docs/implementation-report.md#首版验收报告2026-10-26issue-23)。**已知限制（不得记为通过）**：decision 后端的真实网络行为（自定义 JSON 协议，官方 Anthropic endpoint 不兼容，需要 serving 层，用户明确延后）、`#14` 真实 provider 成功路径、`#19` 更广义的并发隔离、`#12` 本轮真人点击与 PTC 取消、`#51` 两条边界探针挂起项、self-hosted DSH runner 未部署。
 
@@ -24,11 +24,27 @@
 
 **首版入口收敛（2026-10-25 已实现）**：配置页不再注册“离线建议”页签，也不提供生成候选、批量审核或确认接纳的按钮；对应的公开路由 `/api/arbiter/suggestions`、`/api/arbiter/analyze`、`/api/arbiter/replay` 与 `/api/arbiter/suggestions/act` 均已移除，宿主不再返回处理结果，因此没有任何入口能启动分析或让候选改动生效配置。`src/suggestions.ts` 及候选存储表保留为原型参考与历史数据，不构成首版产品承诺；已有调用日志、规则、候选行与 `validation/` 原始验证证据都不因本次收敛被删除。首版内仍完整提供规则管理、规则测试、Reviewer 配置、日志与完整数据采集。
 
-**首版默认值（2026-10-24 已确认）**：chat + 跟随会话模型、guarded、主会话 normal／子任务 strict、空命令规则表；安装不自动接管会话。预设规则留待实际使用后评估，正文与实施验收见[初始默认值](docs/configuration-and-audit.md#initial-defaults)。
+**当前默认值**：chat + 跟随会话模型、guarded、主会话 `ask`／子任务 `no-ask`、空命令规则表；安装不自动接管会话。审批模式只有 `ask`／`no-ask` 两档，两者共用同一份判定矩阵——档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名，**没有可调阈值**。预设规则留待实际使用后评估，正文与实施验收见[初始默认值](docs/configuration-and-audit.md#initial-defaults)与[审批模式](docs/approval-modes.md#mode-selection)。
 
-状态（2026-10-21，返修后的历史记录；当前状态见上方「首版交付状态」）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、三档审批模式、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，历史 R1–R9 脚本与结果保持不变，R8 所覆盖的接纳流程不再属于首版，改由独立的 `validation/first-release-scope/` 回归验证当前契约）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
+状态（2026-10-21，返修后的历史记录；当前状态见上方「首版交付状态」）：**首轮完整功能版本已实现并可在隔离的 DSH 0.2.1-rc.2 profile 中试用**。已接入真实 `tools/pre-execute` 门禁、chat 审查后端、审批模式（当时为三档，现为 `ask`／`no-ask`）、人工与兜底结算、配置页、SQLite 审计、会话裁决记录和离线规则建议。评审提出的 R1–R9 已修复并纳入 `pnpm verify` 回归（R3 仍是生命周期夹具，真实 DSH 在途热更新未跑；R8 另经真实 Web 候选确认；#20 收敛首版范围后，历史 R1–R9 脚本与结果保持不变，R8 所覆盖的接纳流程不再属于首版，改由独立的 `validation/first-release-scope/` 回归验证当前契约）；真实模型质量、真实人工审批、decision 后端网络与 Web 点击操作仍未验证，详见[首轮实施报告](docs/implementation-report.md)和[返修记录](docs/implementation-review-remediation-2026-10-21.md)。
 
 后续已确认采用[同位置 arbiter 权限选择器](docs/architecture.md#permission-selector-contract)：菜单控制会话启停，trusted / guarded 在插件配置页选择。U1–U4 已验证基础接入与探针收尾。
+
+## 审查质量与评测（Milestone #2，2026-10-31）
+
+本轮把审查判定收敛到**单一共用契约**，并在隔离 DSH 中完成宿主集成验收。**工程基线完成，复杂场景质量与最终模型／阈值选择待后续验证。**
+
+| 项         | 现状                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| 判定契约   | 两项 1–10（risk／authorization）+ N0 归一 + 100 格共同矩阵；`REVIEW_CONTRACT_VERSION` 命名，`policy` 段只有 `version` |
+| 审批模式   | `ask`／`no-ask` 两档，共用同一矩阵；`no-ask` 把升级结算为 `fallback-deny`                                             |
+| 生产与评测 | 同一条 `reviewWith(pkg)` 管线、同一个 `PRODUCTION_PACKAGE` 对象；候选只在实验侧                                       |
+| 旧数据     | `arbiter-config-v1`／`v2`、旧审计迁移、日志修复工具、三档模式与阈值字段**全部退出**，不迁移                           |
+| 工程验收   | 六项宿主流程（主子会话、ask／no-ask、规则优先级、授权、缺失／故障、冷恢复）逐项有真实执行证据                         |
+| 质量现状   | **未达标也未冻结**：authorization 系统性低估、risk 边界高估、样本量不足；保留集验证未执行                             |
+
+完整四类分列报告（工程结果／核心试点结果／已知限制／后续移交项）：[交付报告](validation/review-quality/delivery/README.md)。
+**工程通过不代替真实模型质量证据**——本 milestone 的完成说明是「工程基线及核心试点完成」，不是「质量达标」。
 
 ## 2026-10-22 修复与补测
 
@@ -55,34 +71,34 @@
 
 ## 从这里开始
 
-| 阅读目的                               | 文档                                                    |
-| -------------------------------------- | ------------------------------------------------------- |
-| 首轮实现了什么、如何试用、证据与缺口   | [首轮实施报告](docs/implementation-report.md)           |
-| 统一术语、规则分类与判定阶段           | [产品术语](docs/terminology.md)                         |
-| 比较三档策略、主／子任务设置与配置生效 | [审批模式与审查策略](docs/approval-modes.md)            |
-| 了解产品目标、现有范围与边界           | [产品需求](docs/requirements.md)                        |
-| 了解执行链、审批模式与子 agent         | [总体架构](docs/architecture.md)                        |
-| 理解命令规则、优先级和规则沉淀         | [规则引擎](docs/rules.md)                               |
-| 理解授权证据、历史与输入预算           | [审查上下文](docs/review-context.md)                    |
-| 理解模型接口与最终判定                 | [审查后端与判定引擎](docs/reviewer.md)                  |
-| 了解配置体验、规则测试和记录           | [配置、规则测试与审计](docs/configuration-and-audit.md) |
-| 首轮实现交接与状态回填                 | [实现交接](docs/initial-implementation-handoff.md)      |
-| 查看计划和需要实测的假设               | [实施与验证](docs/implementation.md)                    |
-| 继续产品讨论或追溯方案变化             | [决策与待讨论问题](docs/decisions-and-questions.md)     |
-| 核对宿主约束、技术来源和生态背景       | [调研证据](evidence.md)                                 |
+| 阅读目的                             | 文档                                                    |
+| ------------------------------------ | ------------------------------------------------------- |
+| 首轮实现了什么、如何试用、证据与缺口 | [首轮实施报告](docs/implementation-report.md)           |
+| 统一术语、规则分类与判定阶段         | [产品术语](docs/terminology.md)                         |
+| 比较两档模式、共用矩阵与配置生效     | [审批模式与审查策略](docs/approval-modes.md)            |
+| 了解产品目标、现有范围与边界         | [产品需求](docs/requirements.md)                        |
+| 了解执行链、审批模式与子 agent       | [总体架构](docs/architecture.md)                        |
+| 理解命令规则、优先级和规则沉淀       | [规则引擎](docs/rules.md)                               |
+| 理解授权证据、历史与输入预算         | [审查上下文](docs/review-context.md)                    |
+| 理解模型接口与最终判定               | [审查后端与判定引擎](docs/reviewer.md)                  |
+| 了解配置体验、规则测试和记录         | [配置、规则测试与审计](docs/configuration-and-audit.md) |
+| 首轮实现交接与状态回填               | [实现交接](docs/initial-implementation-handoff.md)      |
+| 查看计划和需要实测的假设             | [实施与验证](docs/implementation.md)                    |
+| 继续产品讨论或追溯方案变化           | [决策与待讨论问题](docs/decisions-and-questions.md)     |
+| 核对宿主约束、技术来源和生态背景     | [调研证据](evidence.md)                                 |
 
 ## 已实现的功能
 
-| 模块                 | 当前状态                                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| DSH 插件接入         | `tools/pre-execute` 门禁、`/arbiter` 命令、auto 预设注册、配置页与只读状态；普通工具、MCP、`run_code` 外层与 PTC 内层在入口处进入同一判定 |
-| 命令规则             | 自带的保守 shell 读取器、exact／RE2 regex／glob、四值裁决、作用范围、优先级、复合命令覆盖、规则测试                                       |
-| 自动审查             | 不可变 ReviewSnapshot、来源标记的授权证据、历史与先前裁决、token 预算、chat 与 decision 两种适配器、版本化判定策略                        |
-| 审批与生命周期       | 主会话 normal／strict／progress、子任务 strict／progress；人工审批、human-abort、fallback-deny 与 error-escalate 分开记录                 |
-| 配置                 | 配置页“保存并应用”，文件为唯一可编辑来源，并发冲突拒绝，内容快照与生效记录，无效配置回退到上一份有效配置                                  |
-| 审计与恢复           | 内存裁决、DSH 会话 `plugin:arbiter/decision` 最小记录、SQLite 完整审计、异步有界队列、恢复、默认 30 天／1 GiB 清理                        |
-| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情（首版不提供离线建议页签与操作）                          |
-| 离线建议原型（延期） | 仅有原型参考代码与历史候选数据；首版不暴露页签、生成入口、审核／接纳操作及其公开路由，重新设计前不可从产品界面或 API 触发                 |
+| 模块                 | 当前状态                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| DSH 插件接入         | `tools/pre-execute` 门禁、`/arbiter` 命令、auto 预设注册、配置页与只读状态；普通工具、MCP、`run_code` 外层与 PTC 内层在入口处进入同一判定  |
+| 命令规则             | 自带的保守 shell 读取器、exact／RE2 regex／glob、四值裁决、作用范围、优先级、复合命令覆盖、规则测试                                        |
+| 自动审查             | 不可变 ReviewSnapshot、来源标记的授权证据、历史与先前裁决、token 预算、chat 与 decision 两种适配器、版本化判定策略                         |
+| 审批与生命周期       | 主会话 `ask`／`no-ask`、子任务独立设置（默认 `no-ask`）；人工审批、human-abort、fallback-deny、review-cancelled 与 error-escalate 分开记录 |
+| 配置                 | 配置页“保存并应用”，文件为唯一可编辑来源，并发冲突拒绝，内容快照与生效记录，无效配置回退到上一份有效配置                                   |
+| 审计与恢复           | 内存裁决、DSH 会话 `plugin:arbiter/decision` 最小记录、SQLite 完整审计、异步有界队列、恢复、默认 30 天／1 GiB 清理                         |
+| 界面                 | 状态与覆盖、模式 tooltip、规则表与测试、reviewer、策略与高级设置、日志筛选／详情（首版不提供离线建议页签与操作）                           |
+| 离线建议原型（延期） | 仅有原型参考代码与历史候选数据；首版不暴露页签、生成入口、审核／接纳操作及其公开路由，重新设计前不可从产品界面或 API 触发                  |
 
 ## 本地安装与试用
 
@@ -91,7 +107,11 @@
 **版本与迁移说明**
 
 - 安装前确认宿主版本与 `tests/e2e/runtime/package.json` 一致；需要新版本时先走独立的 DSH 升级 PR（三平台 smoke + 人工审核），不要在安装或发布时临时换版本。
-- 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。规则格式只保留 `arbiter-config-v3`；仍声明 `arbiter-config-v1`／`arbiter-config-v2`，或仍在使用单条件 `match` 写法的规则，都会被拒绝加载（宿主保留上一份生效配置，原文件不被改写），并在配置页给出“该写法已退役、请改用 `conditions`”的中文提示。改写**不是机械换字段**：每条旧 `match` 都要人工重新核对匹配范围与语义后写成一条 `conditions`（旧 `regex` 按前缀搜索、旧 `glob` 保留取反与 extglob、旧选择器会字符串化数字与布尔，这些在当前整值匹配与类型化 JSONPath 下不能直接照搬表达式）；多条件规则必须显式写出 `combine`（`all` 或 `any`），本版不再按条件数推断。会话记录 `plugin:arbiter/admission`／`plugin:arbiter/decision` 与审计库 `$DSH_HOME/arbiter/arbiter.db` 的结构均未变，无需迁移或重建。
+- 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。以下三类内容都会被**拒绝加载**，不提供转换或兼容读取（宿主保留上一份生效配置，原文件不被改写）：
+  - **规则格式**：只保留 `arbiter-config-v3`；声明 `arbiter-config-v1`／`arbiter-config-v2`，或仍用单条件 `match` 写法，都以 `config.format-retired`／`rule.format-retired` 拒绝，并提示“该写法已退役、请改用 `conditions`”。改写**不是机械换字段**：每条旧 `match` 都要人工重新核对匹配范围与语义后写成一条 `conditions`（旧 `regex` 按前缀搜索、旧 `glob` 保留取反与 extglob、旧选择器会字符串化数字与布尔，这些在当前整值匹配与类型化 JSONPath 下不能直接照搬表达式）；多条件规则必须显式写出 `combine`（`all` 或 `any`），本版不再按条件数推断。
+  - **审批模式**：`normal`／`strict`／`progress` 不再接受，只接受 `ask`／`no-ask`。前两者原本是同一引擎加一个通道开关（即现在的 `ask`／`no-ask`），`progress` 会放宽矩阵本身，设计已明确禁止。按 `modes.main`／`modes.subagent` 手工改写。
+  - **判定策略**：`policy` 段只保留 `version`（`arbiter-policy-v3`）。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）与 `normal`／`progress`／`probeMode` 策略块全部报 `policy.retired`，并提示「共用矩阵取代了概率阈值」或「审批模式由 `modes` 决定」。
+- **会话记录与审计库的结构未变**：`plugin:arbiter/admission`／`plugin:arbiter/decision` 与 `$DSH_HOME/arbiter/arbiter.db` 无需迁移或重建。审计库仍只支持自己写入的那一套结构，旧结构库被拒绝打开而不是迁移（`tests/integration/audit-isolation.test.ts` 固定该行为）；日志修复工具已随 RQ-06 删除，旧日志不提供运行时改写路径。
 - 唯一可见变化：宿主语言为英文时，界面由「中文回退」变为**英文**（本轮补齐了 `locale/en/` 全部 705 个 key）。这是预期变化，不是回归。
 
 1. 从 shipped Web 模板创建隔离 profile（本机 CLI 入口见下方说明）：
