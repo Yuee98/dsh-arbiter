@@ -37,7 +37,9 @@
 
 由用户控制主会话的选择，不提供单个 subagent 的覆盖开关。**子任务不继承父会话的审批模式**，统一读取子任务设置；“继承授权证据”是另一件事。默认值为主会话 `ask`、子任务 `no-ask`（`src/config/defaults.ts:32`），完整默认配置见[首版初始默认值](configuration-and-audit.md#initial-defaults)。
 
-**子任务固定 `no-ask` 的理由。** 子会话没有自己的审批通道：宿主在委派时把子会话的审批策略固定为 `never`，插件也不代子任务发起人工审批（`src/host/settlement.ts` 的 `channelOf` 先按会话类型判定，再按模式判定）。因此 `ask` 从未真正打开过一个提问——它只是把同一个 `fallback-deny` 记成另一种原因。既然两个值对结果没有任何差别，该设置不再接受 `ask`：设置页保留同一控件但禁用（灰色、不可聚焦），tooltip 说明原因；文档里存着 `modes.subagent: ask` 会报 `modes.subagent-fixed` 配置错误并使用上一份有效配置，**不做静默改写**。子任务的兜底原因码因此是 `subagent_no_human_channel`，而不是 `automatic_mode_no_human`——前者是比任何配置都更长久的事实。
+**子任务固定 `no-ask` 的理由。** 子会话没有自己的审批通道：宿主在委派时把子会话的审批策略固定为 `never`，插件也不代子任务发起人工审批（`src/host/settlement.ts` 的 `channelOf` 先按会话类型判定，再按模式判定）。因此 `ask` 从未真正打开过一个提问——它只是把同一个 `fallback-deny` 记成另一种原因。既然两个值对结果没有任何差别，该设置不再接受 `ask`：设置页保留同一控件但禁用（灰色、不可聚焦），tooltip 说明原因；文档里存着 `modes.subagent: ask` 会报 `modes.subagent-fixed` 配置错误，**不做静默改写**。子任务的兜底原因码因此是 `subagent_no_human_channel`，而不是 `automatic_mode_no_human`——前者是比任何配置都更长久的事实。
+
+**升级到本版前请先手工改掉 `modes.subagent: ask`。** 无效文档的回退顺序是「内存中已生效的配置 → 本 profile 的 `last-good` 副本 → 内置默认值」（`src/host/runtime.ts` 的 `selectConfig`），其中 `last-good` 副本同样要过当前解析器。热重载时内存里还有上一份有效配置，自定义规则不受影响；但**冷启动**时若文档和 `last-good` 副本都还含 `ask`，两者都无法通过新解析器，最终落到内置默认值——此时自定义规则不生效，原先配置的确定性 deny 也会一并消失。改写这一个字段即可，不需要迁移工具。该行为是既有恢复路径的属性，由 `tests/integration/config-recovery.test.ts` 固定。
 
 **旧值不转换。** `normal`／`strict`／`progress` 与 `probeMode` 一律作为配置错误报出（`src/config/policy.ts:43-57` 的 `policy.retired`），并提示替代：`normal` 与 `strict` 原本就是同一引擎加一个通道开关（即此处的 `ask`／`no-ask`），而 `progress` 会放宽矩阵本身——设计已明确禁止。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）同样报错并提示「共用矩阵取代了概率阈值」。**不提供迁移、转换或兼容读取。**
 

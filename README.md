@@ -119,7 +119,7 @@
 **版本与迁移说明**
 
 - 安装前确认宿主版本与 `tests/e2e/runtime/package.json` 一致；需要新版本时先走独立的 DSH 升级 PR（三平台 smoke + 人工审核），不要在安装或发布时临时换版本。
-- 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。以下三类内容都会被**拒绝加载**，不提供转换或兼容读取（宿主保留上一份生效配置，原文件不被改写）：
+- 从早期开发版升级到本版：**配置文件需要一次手工重写，本版不做自动迁移**。以下三类内容都会被**拒绝加载**，不提供转换或兼容读取（原文件不被改写；热重载时内存中的上一份生效配置继续运行，但**冷启动时 `last-good` 副本同样要过新解析器**，若文档与副本都无效则回退内置默认值，自定义规则随之不生效——所以请在重启前完成改写）：
   - **规则格式**：只保留 `arbiter-config-v3`；声明 `arbiter-config-v1`／`arbiter-config-v2`，或仍用单条件 `match` 写法，都以 `config.format-retired`／`rule.format-retired` 拒绝，并提示“该写法已退役、请改用 `conditions`”。改写**不是机械换字段**：每条旧 `match` 都要人工重新核对匹配范围与语义后写成一条 `conditions`（旧 `regex` 按前缀搜索、旧 `glob` 保留取反与 extglob、旧选择器会字符串化数字与布尔，这些在当前整值匹配与类型化 JSONPath 下不能直接照搬表达式）；多条件规则必须显式写出 `combine`（`all` 或 `any`），本版不再按条件数推断。
   - **审批模式**：`normal`／`strict`／`progress` 不再接受，主会话只接受 `ask`／`no-ask`。前两者原本是同一引擎加一个通道开关（即现在的 `ask`／`no-ask`），`progress` 会放宽矩阵本身，设计已明确禁止。按 `modes.main` 手工改写；`modes.subagent` 只接受 `no-ask`，写 `ask` 报 `modes.subagent-fixed`。
   - **判定策略**：`policy` 段只保留 `version`（`arbiter-policy-v3`）。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）与 `normal`／`progress`／`probeMode` 策略块全部报 `policy.retired`，并提示「共用矩阵取代了概率阈值」或「审批模式由 `modes` 决定」。
