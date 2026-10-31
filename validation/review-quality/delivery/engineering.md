@@ -96,7 +96,7 @@
 | 无 ask 时 `error-escalate` → `fallback-deny` | **passed** | 同上（`error-escalate` × `no-ask` → `fallback-deny`）；`tests/review-contract/matrix.test.ts:283` *a fallback keeps the stage and the reason too* |
 | 无 ask 时 `force-ask` 走 fallback-deny | **passed** | `tests/integration/decision-chain.test.ts:457` *a fallback denial is not written when the call was cancelled* —— 该用例把 `force-ask` 规则 + `no-ask` 作为「最短的兜底拒绝路径」，断言 `storedTrace('m-force-control')` 恰为 `['force-ask', 'fallback-deny']`（`:505`） |
 | 真实宿主中的模式切换 | **passed** | `tests/e2e/config-lifecycle.spec.ts:283` *an external patch replacement applies through the same validation path*（`main: 'no-ask'` 经外部 patch 生效并被读回）、`:319`，两项在 §3.2 的运行中通过 |
-| 三档模式下 agent 仍可 ask，且答复不记成 human-allow | **passed** | `tests/e2e/agent-guidance.spec.ts:769` —— 在 `ask` 与 `no-ask` 各跑一次真实 ask 卡片交互，断言 `decision['result'] !== 'human-allow'`（在 §3.2 的运行中通过） |
+| 两种模式下 agent 仍可 ask，且答复不记成 human-allow | **passed** | `tests/e2e/agent-guidance.spec.ts:769`（用例标题仍写作 *all three approval modes…*，但 `:787` 的循环只遍历 `ask` 与 `no-ask` 两档）—— 各跑一次真实 ask 卡片交互，断言 `decision['result'] !== 'human-allow'`（在 §3.2 的运行中通过） |
 
 **实现链接**：`src/review-contract/matrix.ts:60`（`AskPolicy`）、`:91`（`settle`）、`src/config.ts:121`（`askPolicyForSession`）、`src/config/defaults.ts:32`（`{ main: 'ask', subagent: 'no-ask' }`）、`src/host/gate.ts:319`。
 
@@ -346,6 +346,24 @@ sandbox-exec: sandbox_apply: Operation not permitted
 `guarded` 边界下宿主请求 `workspace-write`，宿主自己拒绝启动沙箱（错误原文见 #1 的 `Received string`），因此任何「allow 之后真正写文件」的用例都无法完成。**这是执行环境限制，不是插件行为。**
 
 **这 5 个记为 `blocked（环境）`，不写成 passed，也不以 CI 通过代替本机记录。**
+
+---
+
+## 3.4 结论的准确边界
+
+**本文件不宣称 issue #87 的第一条验收条件（`pnpm verify` 与适用完整隔离 DSH E2E 通过）已满足。**
+
+| 条件 | 本机结论 |
+| --- | --- |
+| `pnpm verify` 通过 | **未满足** —— `check:build` `blocked（环境）`；其余 12 步 passed，`check:regressions` 单独重跑 passed |
+| 适用完整隔离 DSH E2E 通过 | **未满足** —— 59 用例中 54 passed / 5 failed，5 个失败 `blocked（环境）` |
+| 六项宿主流程有真实执行证据 | **满足**（§1 逐项；可按 §0.1 的用例状态复核） |
+| 本 PR 未引入 E2E 回归 | **满足** —— 失败集与未修改的 `main` 一致或为其子集，双向无差异 |
+
+**可以成立的结论**：工程实现及本机可执行的部分已验证，未发现本 PR 引入的回归。
+**不能成立的结论**：工程条件全部满足、可无条件收口。
+
+要补足前两项，必须在具备可用 `sandbox-exec` 与可写 pnpm store 的环境中执行；本 checkout 无法自行解决（§2.2、§3.3）。
 
 ---
 
