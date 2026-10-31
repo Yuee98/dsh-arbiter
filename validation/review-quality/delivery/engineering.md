@@ -26,6 +26,49 @@
 
 ---
 
+## 0.1 本次实际执行到的关键用例（逐条状态）
+
+下表是 §1 各流程所引用用例在 §3.2 运行中的真实状态（`.local/e2e/results-cli.json`）：
+
+| spec | 用例 | 状态 | 服务于 |
+| --- | --- | --- | --- |
+| `session-admission` | a subagent inherits an enabled parent and an unmanaged session stays ungated | **passed** | §1.1 主子会话 |
+| `session-admission` | a cold restart with the audit database removed restores admission | **passed** | §1.6 恢复 |
+| `session-admission` | an unenabled session takes zero gate; enabling gates it; the same-value native command exits | **passed** | §1.1／§1.3 |
+| `session-admission` | the native auto entry is rejected before any permission write | **passed** | §1.3 |
+| `session-admission` | a trusted session writes outside the workspace and unload narrows it | **passed** | §1.3 |
+| `session-admission` | a call that arrives in the drain window is confined by the rolled-back sandbox | **passed** | §1.3 |
+| `agent-guidance` | all three approval modes still let the agent ask and never record the answer as human-allow | **passed** | §1.2 ask／no-ask |
+| `agent-guidance` | the guidance survives a complete persona and context suppression | **passed** | §3.2（补齐运行时后转通过） |
+| `config-lifecycle` | a fresh profile applies the first-release defaults without taking over a session | **passed** | §1.2 |
+| `config-lifecycle` | saves a UI draft and shows saved plus effective identities | **passed** | §1.2 |
+| `config-lifecycle` | an external patch replacement applies through the same validation path | **passed** | §1.2 模式切换 |
+| `config-lifecycle` | an invalid external file keeps the effective configuration and reports the load error | **passed** | §1.2 |
+| `rules-format` | a declared tool-argument rule loads and the tester agrees on both values | **passed** | §1.3 规则命中 |
+| `gate-real` | the plugin gate and the tester agree on a tool-argument rule | **passed** | §1.3 |
+| `gate-real` | the real gate allows a quoted shell argument but not two arguments | **passed** | §1.3 |
+| `rule-test-panel` | the editor entry focuses the tester and both conclusions are shown | **passed** | §1.3 优先级 |
+| `rule-test-panel` | a rejected selector locates the condition that owns it | **passed** | §1.3 |
+| `context-sources` | real DSH sessions expose human originals, ask answers and compaction | **passed** | §1.4 授权 |
+| `call-detail` | opens the shared detail from the log entry and reports missing material | **passed** | §1.5 缺失 |
+| `session-denial` | an allowed call that the host sandbox refused is not shown as an Arbiter denial | **passed** | §1.5 故障不混淆 |
+| `session-denial` | a rule denial shows the Arbiter marker, its reason, and opens the shared detail | **passed** | §1.3 |
+| `history-recovery` | a verdict the plugin settles is persisted and cold-read by another runtime | **passed** | §1.6 冷恢复 |
+| `history-recovery` | the built plugin recovers a real host session log after a cold start | **passed** | §1.6 |
+| `history-recovery` | real plugin records cold-read after a restart, with and without the audit store | **passed** | §1.6 |
+
+**未通过且与上述流程相关的用例**（5 条，全部 `blocked（环境）`，见 §3.3）：
+
+| spec | 用例 | 状态 | 服务的流程 |
+| --- | --- | --- | --- |
+| `first-release-acceptance` | one session is configured, enabled, denied, reviewed and recovered | failed（sandbox 派生） | 端到端 journey |
+| `first-release-acceptance` | a bare install leaves the rule table empty and starts no gate | failed（`sandbox-exec`） | 裸安装 |
+| `first-release-uninstall` | uninstalling through the plugin manager stops the gate and survives a restart | failed（sandbox 派生） | 卸载 |
+| `locale-surfaces` | every plugin surface switches between the released Chinese and English copy | failed（`reviewedCallId` 类型，与 `main` 同） | 语言面 |
+| `session-denial` | the refusal reason reaches the agent, and parallel calls keep running | timedOut | 并行调用 |
+
+---
+
 ## 1. 六项宿主流程验收
 
 六项对应 issue #87「范围」第一条。每项给出验证点、真实执行的用例、以及可复核的证据位置。
