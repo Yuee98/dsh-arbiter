@@ -116,6 +116,40 @@
 
 ---
 
+## 2.1 记录口径纠正：把「配置缺失」误归入「环境阻塞」
+
+**这一条是对历史记录口径的纠正，不是对历史证据的改写。**
+
+此前若干任务（如 [RQ-16 验证记录](../verification.md) §2）把 `pnpm test:e2e:dsh` 的失败整体归入「环境阻塞」，理由是「失败集与未修改的 `main` 逐条相同」。**该理由成立**——本报告 §A 也复核了同样的事实（12 vs 12，双向无差异）。
+
+但收口过程中发现：那 12 个失败里**有 7 个不是本机环境不可修**，而是 **checkout 没有按 `docs/development-baseline.md:106` 安装固定 DSH 运行时**。这些用例在**解析宿主入口时**就抛出 `DSH_E2E_CLI must point at the host entry for this test.`，根本没有进入断言。
+
+按基线执行后（同一命令、同一 checkout）：
+
+```sh
+npm ci --prefix tests/e2e/runtime --strict-allow-scripts --no-audit --no-fund
+DSH_E2E_CLI="$PWD/tests/e2e/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" \
+DSH_E2E_VERSION="$(node -p 'require("./tests/e2e/runtime/package.json").dependencies["@deepseek-ai/dsh"]')" \
+pnpm exec playwright test
+```
+
+**7 个此类失败转为通过，真实环境阻塞为 5 个**（54 passed / 5 failed）。
+
+| 口径 | 失败数 | 构成 |
+| --- | --- | --- |
+| 按 issue 原样执行（未装固定运行时） | 12 | 7 个宿主入口解析失败 + 5 个真实环境阻塞 |
+| 按 `development-baseline` 前置条件执行 | 5 | 全部由 `sandbox-exec` 不可用或其派生写入缺失引起，另有 1 条与 `main` 同因失败、1 条与 `main` 同因超时 |
+
+**处理方式**：
+
+- **历史记录保持原样，未改写。** `verification.md` 是 #84 当时的执行记录，改写它等于篡改历史证据。
+- 该纠正记录于本文件与 [engineering.md §3.2](engineering.md)，并在 [README](README.md) 的 F1 中单列。
+- 后续任务引用「E2E 环境阻塞」时应使用本节的 12／5 拆分，而不是笼统的「12 个环境阻塞」。
+
+**为什么这不改变本报告的结论**：本报告的 A 类**两个数字都记录**，且 5 个残余失败仍记为 `blocked（环境）`、不写成 passed。纠正的是**归因**，不是**状态**。
+
+---
+
 ## 3. 本阶段新增的已知限制（工程侧，不属 B 类质量问题）
 
 这三条来自本报告的 [A 类](engineering.md) 执行过程，是**记录方式的限制**，不是产品缺陷：
