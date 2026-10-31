@@ -106,20 +106,16 @@ export function StatusPanel(props: {
           </Field>
           <Field
             label={t('status.subagentMode')}
-            hint={modeHelp(t)[draft.modes.subagent] ?? '—'}
+            hint={t('status.subagentFixedHelp')}
           >
             <div className="arb:w-full">
               <Select
                 value={draft.modes.subagent}
-                options={['ask', 'no-ask'] as const}
-                labels={{
-                  ask: t('status.ask'),
-                  'no-ask': t('status.noAsk'),
-                }}
-                onChange={(value) => {
-                  onDraft((next) => {
-                    next.modes.subagent = value;
-                  });
+                options={['no-ask'] as const}
+                labels={{ 'no-ask': t('status.noAsk') }}
+                disabled
+                onChange={() => {
+                  // Disabled: the single accepted value is already selected.
                 }}
               />
             </div>

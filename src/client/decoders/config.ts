@@ -159,7 +159,9 @@ export function configuration(value: unknown): ArbiterConfig {
       'guarded',
     modes: {
       main: field(modes, 'main', choice('ask', 'no-ask')),
-      subagent: field(modes, 'subagent', choice('ask', 'no-ask')),
+      // A subagent's mode is fixed, so a host answering with `ask` is not a
+      // configuration this page may present as an editable choice.
+      subagent: field(modes, 'subagent', choice('no-ask')),
     },
     rules: field(source, 'rules', array(commandRule)),
     reviewer: field(source, 'reviewer', reviewer),

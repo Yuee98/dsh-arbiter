@@ -119,6 +119,34 @@ describe('approval-mode settings', () => {
     expect(screen.queryByLabelText(/子任务覆盖/u)).toBeNull();
   });
 
+  test('pins the subtask select to no-ask and disables it', async () => {
+    usePageHandlers({ writes: [] });
+    const { user } = renderClient(<ArbiterPage />);
+    const subtask = await screen.findByRole('combobox', {
+      name: /子任务审批模式/u,
+    });
+    // The control keeps its shape; only the choice is gone.
+    expect(subtask).toBeDisabled();
+    expect(subtask).toHaveValue('no-ask');
+    expect(
+      within(subtask).getByRole('option', { name: '自动审批（no-ask）' }),
+    ).toBeInTheDocument();
+    expect(
+      within(subtask).queryByRole('option', { name: '交互审批（ask）' }),
+    ).toBeNull();
+    // The hint says why it is not a choice, rather than leaving a greyed box.
+    expect(
+      screen.getByText(/宿主把委派子会话的审批策略固定为 never/u),
+    ).toBeInTheDocument();
+    // A disabled select cannot be changed, so the draft stays as it loaded.
+    await user.selectOptions(subtask, 'no-ask');
+    expect(subtask).toHaveValue('no-ask');
+    // The main session's mode remains a real choice.
+    expect(
+      screen.getByRole('combobox', { name: /主会话审批模式/u }),
+    ).toBeEnabled();
+  });
+
   test('shows both execution boundaries with their real sandbox consequence', async () => {
     usePageHandlers({ writes: [] });
     const { user } = renderClient(<ArbiterPage />);

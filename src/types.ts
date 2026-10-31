@@ -25,13 +25,18 @@ import type { NormalizationDetail } from './shell/types.js';
  */
 export type ApprovalMode = 'ask' | 'no-ask';
 /**
- * A subagent's mode. It names the same policy as {@link ApprovalMode}.
+ * A subagent's mode: exactly one value.
  *
- * Kept as its own alias because a subagent's answer is not a user preference in
- * the same sense: a child session has no approval channel of its own, so `ask`
- * still settles as `fallback-deny` unless the host reaches a real person.
+ * A child session has no approval channel of its own — the host pins a delegated
+ * session's approval policy to `never`, and this plugin refuses to ask on a
+ * subagent's behalf anyway. `ask` therefore never opened a question here; it only
+ * relabelled the same fallback denial, so the setting is not offered at all.
+ *
+ * The single member is a type rather than a constant so the invariant is checked
+ * where the configuration is read and where a session's mode is looked up, not
+ * only where a form is drawn.
  */
-export type SubagentMode = ApprovalMode;
+export type SubagentMode = 'no-ask';
 export type SessionKind = 'main' | 'subagent';
 /**
  * The plugin's execution boundary, chosen on the configuration page.

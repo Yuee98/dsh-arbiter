@@ -44,6 +44,7 @@
     "typeAgentScope": "必须是非空的字符串数组。",
     "rangeNumber": "必须在 {min} 与 {max} 之间。",
     "enumValue": "必须是以下之一：{values}。",
+    "modesSubagentFixed": "子任务没有审批通道，ask 也不会真正提问；子任务固定为 no-ask，该项不接受其他值。",
     "lengthCustomRules": "不得超过 {max} 个字符。",
     "relationWindowDenials": "不得超过 breaker.windowSize。",
     "relationParentEvidenceFloor": "不得超过 context.parentHumanItems。",

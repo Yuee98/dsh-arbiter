@@ -224,6 +224,11 @@ test.describe('configuration lifecycle', () => {
       const plugin = page.locator('[data-arbiter-root]');
       const mode = plugin.getByLabel('主会话审批模式', { exact: false });
       await expect(mode).toHaveValue('ask');
+      // The subtask setting keeps its control but offers no choice: a child
+      // session has no approval channel, so the value is fixed.
+      const subtask = plugin.getByLabel('子任务审批模式', { exact: false });
+      await expect(subtask).toHaveValue('no-ask');
+      await expect(subtask).toBeDisabled();
       await mode.selectOption('no-ask');
       await expect(plugin.locator('[data-arbiter-save-status]')).toHaveText(
         '草稿未保存；当前生效配置未改变。',
