@@ -312,7 +312,7 @@ EXIT=1
 ```
 
 日志：`.local/logs/e2e-cli.log`、`.local/logs/e2e-cli-json.log`；机器可读结果：`.local/e2e/results-cli.json`；逐条摘要：`.local/logs/e2e-summary.json`。
-**评审修复后按 `pnpm build` → E2E 顺序重跑**（`.local/logs/e2e-r2.log`、`.local/e2e/results-r2.json`）：**54 passed / 5 failed，失败集与首次运行完全相同**，即 B03 的补强断言没有引入回归。
+**评审修复后按 `pnpm build` → E2E 顺序两次重跑**：`.local/logs/e2e-r2.log`（54 passed / 5 failed，59 项）与 `.local/logs/e2e-r3.log`（**55 passed / 5 failed，60 项** —— 新增了 `a verdict the real host settled survives a real restart`）。两次的失败集与首次运行**完全相同**，即 B03 的补强断言没有引入回归。
 
 **转为通过的 7 个用例**（全部是此前在解析宿主入口时失败的）：
 
@@ -360,7 +360,7 @@ sandbox-exec: sandbox_apply: Operation not permitted
 | 条件 | 本机结论 |
 | --- | --- |
 | `pnpm verify` 通过 | **未满足** —— `check:build` `blocked（环境）`；其余 12 步 passed，`check:regressions` 单独重跑 passed |
-| 适用完整隔离 DSH E2E 通过 | **未满足** —— 59 用例中 54 passed / 5 failed，5 个失败 `blocked（环境）` |
+| 适用完整隔离 DSH E2E 通过 | **未满足** —— 60 用例中 55 passed / 5 failed，5 个失败 `blocked（环境）` |
 | 六项宿主流程有真实执行证据 | **满足**（§1 逐项；可按 §0.1 的用例状态复核） |
 | 本 PR 未引入 E2E 回归 | **满足** —— 失败集与未修改的 `main` 一致或为其子集，双向无差异 |
 
