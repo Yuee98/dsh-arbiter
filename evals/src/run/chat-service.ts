@@ -135,7 +135,7 @@ function deltaText(delta: unknown): string | null {
  * a person is looking at a broken reviewer or a truncated one.
  */
 function finishOf(reason: string): Record<string, unknown> {
-  if (reason === 'stop' || reason === 'end_turn') {
+  if (isNormalFinish(reason)) {
     return { type: 'finish', reason: { kind: 'stop' } };
   }
   return {
@@ -151,6 +151,16 @@ function finishOf(reason: string): Record<string, unknown> {
       },
     },
   };
+}
+
+/**
+ * Whether a finish reason ends the answer normally.
+ *
+ * Named once so "which reason may be deferred" and "which reason renders a stop" cannot
+ * drift apart: a reason that counts as normal is emitted immediately and never held.
+ */
+function isNormalFinish(reason: string): boolean {
+  return reason === 'stop' || reason === 'end_turn';
 }
 
 /**
@@ -212,14 +222,26 @@ async function* events(
   // unprovable to the type checker, and the one thing this variable must guarantee is that
   // "no finish was emitted" cannot be read as a normal end.
   let finished = false;
+  // The failure finish held back until the usage that prices it has been read.
+  //
+  // An OpenAI-compatible provider may send `finish_reason: "length"` and then report the
+  // usage in a following usage-only chunk. Emitting the failure immediately makes
+  // `collectChatText` throw, which ends this generator before that chunk is read — so the
+  // provider's own token counts, the only record of what a truncated call cost, would be
+  // lost. A failure finish is therefore held until either the usage arrives or the stream
+  // ends, and only a *failure* finish is held: `stop` carries nothing a later chunk can
+  // improve on.
+  let heldFinish: string | null = null;
   /** The events one payload produces, and whether it ended the answer. */
   const handle = (
     payload: string,
   ): {
     readonly events: Record<string, unknown>[];
     readonly ended: boolean;
+    /** A failure finish this payload wants reported after its usage is read. */
+    readonly hold: string | null;
   } => {
-    if (payload.length === 0) return { events: [], ended: false };
+    if (payload.length === 0) return { events: [], ended: false, hold: null };
     let parsed: unknown;
     try {
       parsed = JSON.parse(payload) as unknown;
@@ -247,21 +269,27 @@ async function* events(
         'provider-refusal',
       );
     }
-    if (isRecord(parsed['usage'])) {
+    const carriedUsage = isRecord(parsed['usage']);
+    if (carriedUsage) {
       out.push({ type: 'usage', usage: parsed['usage'] });
     }
     const choices = parsed['choices'];
     const choice =
       Array.isArray(choices) && isRecord(choices[0]) ? choices[0] : null;
-    if (choice === null) return { events: out, ended: false };
+    if (choice === null) return { events: out, ended: false, hold: null };
     const text = deltaText(choice['delta']);
     if (text !== null) out.push({ type: 'text-delta', text });
     const reason = choice['finish_reason'];
     if (typeof reason === 'string' && reason.length > 0) {
-      out.push(finishOf(reason));
-      return { events: out, ended: true };
+      // A normal stop is emitted here; a failure is deferred only when its own chunk
+      // carried no usage, because then the numbers can still arrive in a later one.
+      if (isNormalFinish(reason) || carriedUsage) {
+        out.push(finishOf(reason));
+        return { events: out, ended: true, hold: null };
+      }
+      return { events: out, ended: true, hold: reason };
     }
-    return { events: out, ended: false };
+    return { events: out, ended: false, hold: null };
   };
   try {
     for (;;) {
@@ -279,12 +307,29 @@ async function* events(
         if (payload === '[DONE]') {
           // The stream's own terminator. A provider that already sent a finish reason has
           // said why it ended; one that did not ended normally by this marker alone.
+          if (heldFinish !== null) {
+            yield finishOf(heldFinish);
+            heldFinish = null;
+            finished = true;
+          }
           if (!finished) yield { type: 'finish', reason: { kind: 'stop' } };
           return;
         }
         const handled = handle(payload);
-        if (handled.ended) finished = true;
+        // The pending finish was chosen by an *earlier* payload; this one is what prices
+        // it, so it is reported before moving on. A payload that only creates the pending
+        // finish must not release it: its usage can still be on the wire.
+        const priced = handled.events.some(
+          (event) => event['type'] === 'usage',
+        );
         yield* handled.events;
+        if (priced && heldFinish !== null) {
+          yield finishOf(heldFinish);
+          heldFinish = null;
+          finished = true;
+        }
+        if (handled.hold !== null) heldFinish = handled.hold;
+        if (handled.ended && heldFinish === null) finished = true;
       }
     }
     // A body that ended without `[DONE]` still produced whatever it produced; the last
@@ -294,9 +339,25 @@ async function* events(
       const payload = tail.slice('data:'.length).trim();
       if (payload !== '[DONE]') {
         const handled = handle(payload);
-        if (handled.ended) finished = true;
+        const priced = handled.events.some(
+          (event) => event['type'] === 'usage',
+        );
         yield* handled.events;
+        if (priced && heldFinish !== null) {
+          yield finishOf(heldFinish);
+          heldFinish = null;
+          finished = true;
+        }
+        if (handled.hold !== null) heldFinish = handled.hold;
+        if (handled.ended && heldFinish === null) finished = true;
       }
+    }
+    if (heldFinish !== null) {
+      // A failure finish whose usage never arrived is still the provider's own reason for
+      // ending the answer, so it is reported rather than downgraded to "no finish".
+      yield finishOf(heldFinish);
+      heldFinish = null;
+      finished = true;
     }
     if (!finished) {
       // No terminator and no finish reason: the stream simply stopped. Leaving it to the

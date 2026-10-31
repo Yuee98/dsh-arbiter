@@ -33,6 +33,7 @@ import {
   headlessChatService,
 } from '../../evals/src/run/chat-service.js';
 import { candidateOf } from '../../evals/src/run/candidate.js';
+import { collectChatText } from '../../src/reviewer/llm.js';
 import { PRODUCTION_VARIANT } from '../../src/reviewer/variant.js';
 import { coreCases, VERSIONS } from './helpers/report-run.js';
 import {
@@ -494,6 +495,126 @@ describe('§4.2 a headless run reaches a chat model through its own service', ()
         }
       })(),
     ).rejects.toThrow(/without a finish reason/u);
+  });
+
+  it('keeps the usage a truncated stream reports after its failure finish', async () => {
+    // A provider may say `finish_reason: "length"` and only then report the usage. The
+    // failure finish must not be emitted before that chunk is read: the collector throws
+    // on it, the generator is closed, and the provider's own token counts — the only
+    // record of what a truncated, billed call cost — would be lost.
+    const chat = headlessChatService({
+      read: () => 'sk-test-value',
+      fetch: recordingFetch([
+        { choices: [{ index: 0, delta: { content: '{"risk":2' } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+          },
+        },
+      ]).fetch,
+    });
+    await expect(
+      collectChatText(
+        chat.stream({
+          provider: 'deepseek-account',
+          model: 'deepseek-flash',
+          system: 's',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      kind: 'provider-refusal',
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    });
+  });
+
+  it('keeps the usage a truncated stream carries inline', async () => {
+    // The other provider shape: one chunk names the finish and the counts together.
+    // Nothing is deferred here, and the usage must survive just the same.
+    const chat = headlessChatService({
+      read: () => 'sk-test-value',
+      fetch: recordingFetch([
+        { choices: [{ index: 0, delta: { content: '{"risk":2' } }] },
+        {
+          choices: [{ index: 0, delta: {}, finish_reason: 'length' }],
+          usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+        },
+      ]).fetch,
+    });
+    await expect(
+      collectChatText(
+        chat.stream({
+          provider: 'deepseek-account',
+          model: 'deepseek-flash',
+          system: 's',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'u' }] }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      kind: 'provider-refusal',
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+    });
+  });
+
+  it('records a truncated cell’s usage instead of dropping it', async () => {
+    // The end of the path: a `length` finish followed by a usage-only chunk must reach
+    // the record, or a run reports a billed failure as if it had spent nothing.
+    await withArea(async (area) => {
+      const chat = headlessChatService({
+        read: (name) =>
+          name === 'DEEPSEEK_API_KEY' ? 'sk-test-value' : undefined,
+        fetch: recordingFetch([
+          { choices: [{ index: 0, delta: { content: '{"risk":2' } }] },
+          { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
+          {
+            choices: [],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+            },
+          },
+        ]).fetch,
+      });
+      const plan = planOf({
+        transport: 'live',
+        protocols: ['chat'],
+        fixture: null,
+        targets: [
+          {
+            ...chatTarget('chat-deepseek'),
+            provider: 'deepseek-account',
+            model: 'deepseek-flash',
+            chat: {
+              provider: 'deepseek-account',
+              model: 'deepseek-flash',
+              temperature: 0,
+              maxTokens: 400,
+              timeoutMs: 5_000,
+              maxRepairRetries: 0,
+            },
+          },
+        ],
+      });
+      const records = await dispatchPlan({
+        directory: join(area.path, 'run-truncated'),
+        plan,
+        fixture: fixtureOf({}),
+        llm: chat,
+        readCredential: () => undefined,
+      });
+      const attempt = records[0]?.attempts[0];
+      expect(attempt?.failureKind).toBe('provider-refusal');
+      expect(attempt?.rawUsage).toEqual({
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+      });
+    });
   });
 });
 
