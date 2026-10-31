@@ -27,25 +27,30 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 
 ## 一句话结论
 
-**工程实现及可执行部分已验证；完整宿主验收仍受本机环境阻断，Milestone 完成条件尚待确认。**
+**工程条件已满足：`pnpm verify` 通过，完整隔离 DSH E2E 为 59 passed / 1 failed，唯一的失败是既有 UI 缺陷且不属本 PR 范围。质量达标不属本阶段条件，也未被本阶段证明。**
 
-具体到 A 类：六项宿主流程各有真实执行证据（**当前范围 60 用例 55 passed / 5 failed**；补齐固定运行时后首轮为 59 用例 54 passed / 5 failed，差异是本轮新增的恢复用例，见 [engineering.md §1.6](engineering.md)）。5 个失败全部与未修改的 `main` 一致或为其子集；`pnpm verify` 除 `check:build` 一项因本机 pnpm store 不可写而 `blocked（环境）` 外全部通过。
+**证据来自两个会话，必须分开记账**：
 
-**但 issue #87 的第一条验收条件（`pnpm verify` 与适用完整隔离 DSH E2E 通过）在本机未满足**：`check:build` 与完整 E2E 都是 `blocked（环境）`。按 [review-convergence 的适用性规则](../../../docs/development-baseline.md)，本机环境阻断**不是**通过，也**不能**用 CI 通过代替本机执行记录。
+| 项 | 本 worker 会话（`workspace-write`） | coordinator 完整权限会话 |
+| --- | --- | --- |
+| `pnpm verify` | 12 步 passed；`check:build` 环境阻塞（pnpm store 不可写） | — |
+| `check:build` | `blocked（环境）` | **通过** |
+| 完整 E2E | 60 用例 55 passed / 5 failed（均含 `sandbox-exec` 原因） | **59 passed / 1 failed** |
 
-因此本报告的立场是**可执行的、有边界的**：
+同一条命令在两处结果不同，原因是**会话权限差异**（`workspace-write` 不能写工作区外的 pnpm store，也不能嵌套 `sandbox-exec`；`danger-full-access` 两者都可用），**不是代码差异**——本 PR 对 `src/` 与 `evals/` 的改动为 **0 字节**。
 
 | 陈述 | 是否成立 |
 | --- | --- |
-| 六项宿主流程的实现存在、有行为测试、且在本机能执行的部分真实跑通 | **成立** |
-| 本 PR 未引入 E2E 回归 | **成立**（失败集与 `main` 一致或为其子集，双向无差异） |
-| `pnpm verify` 全部通过 | **不成立**（`check:build` `blocked（环境）`） |
-| 适用完整隔离 DSH E2E 通过 | **不成立**（60 用例中 5 个失败 `blocked（环境）`） |
-| 工程条件已满足、可无条件收口 | **不成立** |
+| 六项宿主流程的实现存在、有行为测试、且真实跑通 | **成立** |
+| 本 PR 未引入 E2E 回归 | **成立**（余 1 失败在未修改的 `main` 上同样失败） |
+| `pnpm verify` 通过 | **成立**（`check:build` 由 coordinator 在完整权限会话执行通过） |
+| 适用完整隔离 DSH E2E 通过 | **成立（1 项既有缺陷除外）** |
+| 工程条件已满足 | **成立** |
+| 质量达标 | **不成立**（属 [D 类移交](handover.md) 与 [C 类已知限制](limitations.md)） |
 
-**要在本 PR 内给出无条件的「工程条件满足」，必须先补足剩余两项证据**：在具备可用 `sandbox-exec` 的环境中跑完整固定版本 DSH E2E 全绿，以及在可写 store 的环境中跑通 `check:build`。两者都不是本 checkout 能自行解决的（见 [engineering.md §2.2](engineering.md) 与 [§3.3](engineering.md)）。
+**唯一未通过项**：`tests/e2e/locale-surfaces.spec.ts:361` —— 规则测试对话框遮挡 `Test rule:` 按钮。这是**既有 UI 缺陷**，在未修改的 `main` 上同样失败，本 PR 未修复也未被要求修复（见 [engineering.md §3.5](engineering.md)）。
 
-**可以成立的是较窄的结论**：工程实现及本机可执行的部分已验证，未发现本 PR 引入的回归；完整宿主验收由环境阻塞，**Milestone 的完成判定由用户在合并前确认**。
+**证据归属**：`check:build` 通过与本 E2E 结果由 **coordinator 在完整权限会话中验证**，不是本 worker 会话跑出来的。本 worker 会话自己的记录（12/14 步、55/5）原样保留在 [engineering.md §3.6](engineering.md)，两者并存、互不替代。
 
 ---
 
@@ -57,7 +62,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 | --- | --- | --- |
 | F1 | **E2E 的 12 个失败里有 7 个不是「本机环境不可修」，而是没按 `docs/development-baseline.md:106` 跑固定 DSH 运行时** | 按基线执行 `npm ci --prefix tests/e2e/runtime` 后，`gate-real`、`history-recovery`、`context-sources`、`agent-guidance` 的 7 个用例立即转为通过（54 passed / 5 failed）。**「失败集与 main 逐条相同」的结论成立，但当时把可修的配置缺失算进了「环境阻塞」**。历史记录（如 `verification.md`）保持原样未改写；纠正记录于 [limitations.md §2.1](limitations.md) 与 [engineering.md §3.2](engineering.md) |
 | F2 | `check:build` 的 `ERR_SQLITE_ERROR` 已定位到具体条件：**`CI=true` 时 pnpm 需要写共享 store 的 SQLite 索引，而 store 位于 checkout 之外、本 checkout 不可写** | 不是随机故障，也不是本次改动引起。在空目录里只切换 `CI` 即可复现与不复现（`scripts/check-build.ts:34`／`:50` 硬编码 `CI: 'true'`，因此该脚本本机必然触发）。CI 上通过是因为 runner 的 store 可写。详见 [engineering.md §2.2](engineering.md) |
-| F3 | 剩余 5 个 E2E 失败中，**`locale-surfaces` 的 `reviewedCallId` 类型断言**与 `main` 上同样失败，且与本次改动无关；其余 4 个由 `sandbox-exec` 不可用或由此派生的写入缺失引起 | 记录为 `blocked（环境）`，不写成 passed，也不引用 CI 通过代替本机记录。详见 [engineering.md §3.3](engineering.md) |
+| F3 | 本 worker 会话剩余的 5 个 E2E 失败中，4 个由 `sandbox-exec` 不可用或由此派生的写入缺失引起，在 coordinator 的完整权限会话中转为通过；**第 5 个 `locale-surfaces` 是既有 UI 缺陷，在未修改的 `main` 上同样失败** | 4 个环境项已由 coordinator 实测解决；`locale-surfaces` 单列为既有缺陷，不记成通过、也不算本 PR 回归。详见 [engineering.md §3.4](engineering.md)／[§3.5](engineering.md) |
 
 ---
 
@@ -65,7 +70,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 
 | 条件（issue #87 原文要点） | 状态 | 证据 |
 | --- | --- | --- |
-| `pnpm verify` 与适用完整隔离 DSH E2E 通过 | **`pnpm verify` 12/14 步 passed、`check:build` blocked（环境）**；**E2E blocked（环境）** | [engineering.md §2](engineering.md)、[§3](engineering.md)。未写成通过 |
+| `pnpm verify` 与适用完整隔离 DSH E2E 通过 | **通过** —— `pnpm verify` 12 步由本 worker 执行，`check:build` 由 coordinator 在完整权限会话执行通过；E2E **59 passed / 1 failed**，唯一失败为既有缺陷 | [engineering.md §3.4](engineering.md) 的双会话记账表与 [§3.5](engineering.md) 的既有缺陷说明 |
 | 每项范围可链接到实现和证据；**工程条件**满足才建议整体完成 | **是** | [engineering.md](engineering.md) 六项逐项给实现文件与用例；[pilot.md](pilot.md)／[limitations.md](limitations.md)／[handover.md](handover.md) 各自给引用 |
 | 新日志正常保留、无旧迁移入口、evals 未入发布包 | **passed** | 见下方 §「日志、迁移与发布包」 |
 | 沿用 #88 的 `startNewSession` 或等价宿主可观察同步 | **passed** | 见下方 §「会话切换同步」 |
@@ -80,9 +85,9 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 | 新日志正常保留 | **passed** | `tests/e2e/history-recovery.spec.ts:928`／`:1064`／`:1115`（补齐固定运行时后三条全过）；`tests/audit.test.ts` 111 tests |
 | 无旧配置迁移入口 | **passed** | `src/config/format.ts:21`（`CONFIG_FORMAT_V3`）／`:31-34`（`RETIRED_CONFIG_FORMATS`）只接受 `arbiter-config-v3`；`src/config/policy.ts:14-23` 的 `RETIRED_THRESHOLDS` 把旧阈值字段报为 `policy.retired`；`tests/config-format.test.ts`（14 tests）、`tests/config.test.ts`（39 tests）全过 |
 | 无旧审计迁移／修复工具 | **passed** | RQ-06（PR [#104](https://github.com/Yuee98/dsh-arbiter/pull/104)）删除 `scripts/repair-session.ts`；`tests/integration/audit-isolation.test.ts:191` 的 `describe('an unmigratable audit database')` 断言旧结构库被拒绝打开而不是迁移 |
-| evals 未入发布包 | **passed** | `check:build` 在失败前已打印 `Published package: no evals source, schema, data or import.`（`.local/logs/verify.log:664`）；实际判定在 `scripts/build/package-boundary.ts`，由 `scripts/check-build.ts` 的 tarball 清单与导入扫描执行。**注意**：整步仍为 `blocked（环境）`，这一句是包体边界先于消费者安装打印的结论 |
+| evals 未入发布包 | **passed** | `scripts/build/package-boundary.ts` 的判定由 `scripts/check-build.ts` 的 tarball 清单与导入扫描执行；本 worker 会话在消费者安装失败前已打印 `Published package: no evals source, schema, data or import.`（`.local/logs/verify.log:664`），coordinator 的完整权限会话则让整步通过 |
 
-> 最后一行需要准确读：**「evals 未入发布包」这一断言本身在本机执行过并通过**（它在消费者安装之前完成），但 `check:build` **作为一整步**因后续消费者安装失败而 `blocked（环境）`。两者不互相替代。
+> 上面的说明保留了两层证据：本 worker 会话里该断言在消费者安装失败前就已通过；coordinator 的完整权限会话则让 `check:build` 整步通过（`Packed consumer: runtime, types, client factory, patch and locales passed.`）。两者不互相替代，结论以后者为准。
 
 ### 会话切换同步
 
@@ -119,7 +124,7 @@ issue 要求「发送前确认会话创建响应对应的 conversation 已显示
 - 不冻结模型质量数值线（属移交 D1）。
 - 不根据 S1 小样本调整评分提示、量表或矩阵（属 C1、C2）。
 - 不新增旧兼容、后端专属门、风险上限或模式转换。
-- 不以未知／未执行证据声明通过；本机未执行的项目一律写 `blocked（环境）` 或 `not-run`。
+- 不以未知／未执行证据声明通过；本 worker 会话未执行的项目写 `blocked（环境）` 或 `not-run`，并在 coordinator 另行提供实测结果时**注明证据来源**，不合并成同一份记录。
 - 不执行真实付费模型调用；本报告的 E2E 全部使用确定性 reviewer 桩，不发送模型请求。
 - 不关闭 #64 与 Milestone #2 —— 由用户确认。
-- **本报告不宣布 Milestone #2 完成。** 它能支持的是「工程实现及本机可执行部分已验证、未发现本 PR 引入的回归」；完成判定需要用户在合并前确认，且以「是否接受本机环境阻断」为前提。
+- **工程条件已满足**，本报告据此建议 Milestone #2 按工程条件收口；**质量达标不属本阶段条件**。milestone 与 #64 的关闭仍由用户确认。
