@@ -217,7 +217,7 @@ questions.risk.score.criteria: List should have at most 10 items after validatio
 | 概率门 | `probabilities` 完整可见 |
 | 与 chat 后端统一 | 两边都归一到公共 1–10 序数（decision 原生 0–9，见[共用评分契约](#design-5-5)），IR 可合并 |
 
-**为什么 `authorized` 也用 `score` 而不是多个 `noul`**：单调性。多个 noul 可能自相矛盾（`P(explicit) > P(any)`），需要额外一致性规则；单个 score 的 `P(≥x)` 天然单调递减。
+**为什么授权也用 `score` 而不是多个 `noul`**：单调性。多个 noul 可能自相矛盾（`P(explicit) > P(any)`），需要额外一致性规则；单个 score 的 `P(≥x)` 天然单调递减。（本节讨论的是 decision 侧两个分数问题之所以都用 `score` 类型的**理由**；问题键名现在是 `authorization`，不是早先的 `authorized`。）
 
 **（历史设计）三个探针曾用 `noul`**：它们是二元事实，`criteria.true/false` 正好写清两端含义。**现行请求不含探针**，见[探针与组合判定](#design-5-6-2)。
 
