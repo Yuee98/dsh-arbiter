@@ -310,6 +310,7 @@ EXIT=1
 ```
 
 日志：`.local/logs/e2e-cli.log`、`.local/logs/e2e-cli-json.log`；机器可读结果：`.local/e2e/results-cli.json`；逐条摘要：`.local/logs/e2e-summary.json`。
+**评审修复后按 `pnpm build` → E2E 顺序重跑**（`.local/logs/e2e-r2.log`、`.local/e2e/results-r2.json`）：**54 passed / 5 failed，失败集与首次运行完全相同**，即 B03 的补强断言没有引入回归。
 
 **转为通过的 7 个用例**（全部是此前在解析宿主入口时失败的）：
 
