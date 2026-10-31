@@ -6,6 +6,8 @@ import { DEFAULT_CONFIG, parseConfig, parseDocument } from '../src/config.js';
 import type { LocaleTree } from '../src/client/i18n/catalog.js';
 import { flattenCatalog } from '../src/client/i18n/catalog.js';
 import { issueKey } from '../src/client/view-issues.js';
+import { PRODUCTION_PACKAGE } from '../src/reviewer/package.js';
+import { PRODUCTION_VARIANT } from '../src/reviewer/variant.js';
 
 describe('configuration', () => {
   test('defaults are complete and valid', () => {
@@ -283,6 +285,23 @@ describe('configuration', () => {
   test('default configuration remains the fallback shape', () => {
     expect(DEFAULT_CONFIG.policy.version).toBe('arbiter-policy-v3');
     expect(DEFAULT_CONFIG.rules).toEqual([]);
+  });
+
+  test('the confirmed defaults are the frozen candidate, not a reading of them', () => {
+    // RQ-16 applies the decided candidate by *not* adding a knob: the prompt axis has no
+    // configuration member at all, so there is nothing a user could set to a variant and
+    // nothing for a default to drift to. These assertions pin that the default is the
+    // decided package rather than a look-alike.
+    expect(DEFAULT_CONFIG.modes).toEqual({ main: 'ask', subagent: 'no-ask' });
+    expect(DEFAULT_CONFIG.reviewer.type).toBe('chat');
+    expect(DEFAULT_CONFIG.reviewer.chat.model).toBe('');
+    expect(DEFAULT_CONFIG.reviewer.chat.temperature).toBe(0);
+    // The matrix is not a configuration value: both modes apply the shared one, so no
+    // default threshold exists to regress and no user-tunable quantile was added.
+    expect(DEFAULT_CONFIG).not.toHaveProperty('thresholds');
+    expect(DEFAULT_CONFIG).not.toHaveProperty('quantiles');
+    expect(PRODUCTION_VARIANT.prompt).toBe('no-probe');
+    expect(PRODUCTION_PACKAGE.asksProbe).toBe(false);
   });
 });
 

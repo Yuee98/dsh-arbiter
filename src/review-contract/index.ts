@@ -64,6 +64,7 @@ export {
   validateNativeDistribution,
   validatePublicDistribution,
   weightedBand,
+  withinSumTolerance,
 } from './normalize.js';
 
 export type { RubricBand } from './rubrics.js';

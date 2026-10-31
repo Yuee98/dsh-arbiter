@@ -132,7 +132,7 @@ test(
           new URL(response.url()).pathname === '/api/arbiter/credentials',
       ),
       plugin
-        .getByRole('radio', { name: 'decision（分布 + 四探针）', exact: true })
+        .getByRole('radio', { name: 'decision（分布）', exact: true })
         .check(),
     ]);
     expect(credentials.status()).toBe(200);

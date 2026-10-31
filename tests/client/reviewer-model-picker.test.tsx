@@ -725,9 +725,7 @@ describe('reviewer decision fields', () => {
       }),
     );
     const user = await openReviewer();
-    await user.click(
-      screen.getByRole('radio', { name: 'decision（分布 + 四探针）' }),
-    );
+    await user.click(screen.getByRole('radio', { name: 'decision（分布）' }));
     const url = screen.getByLabelText('URL');
     await user.clear(url);
     await user.type(url, 'https://review.example.test/v1');
@@ -787,9 +785,7 @@ describe('reviewer decision fields', () => {
 describe('reviewer credential status outcomes', () => {
   async function openDecision() {
     const user = await openReviewer();
-    await user.click(
-      screen.getByRole('radio', { name: 'decision（分布 + 四探针）' }),
-    );
+    await user.click(screen.getByRole('radio', { name: 'decision（分布）' }));
     return user;
   }
 

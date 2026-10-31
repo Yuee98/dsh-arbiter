@@ -33,6 +33,7 @@ import {
   validateNativeDistribution,
   verdictFor,
   weightedBand,
+  withinSumTolerance,
 } from '../../src/review-contract/index.js';
 import { score } from '../helpers/score.js';
 
@@ -412,6 +413,122 @@ describe('distribution validation', () => {
     if (!result.ok) throw new Error('expected acceptance');
     expect(result.value).toEqual(input);
     expect(result.value).not.toBe(input);
+  });
+});
+
+describe('the sum tolerance boundary is decimal, not float', () => {
+  // A real answer from the S1 pilot: ten four-decimal probabilities whose exact
+  // decimal total is 0.9999, i.e. |Σ−1| is *exactly* SUM_TOLERANCE. The old rule
+  // accumulated the doubles and compared `Math.abs(total - 1)`; that float total
+  // lands one ulp past the bound and the answer was refused. The three cases below
+  // pin all three sides of the boundary, because fixing the false rejection must
+  // not soften the real one.
+  const PILOT_INSIDE = dist({
+    '0': 0.0276,
+    '1': 0.07,
+    '2': 0.1349,
+    '3': 0.2086,
+    '4': 0.1692,
+    '5': 0.1261,
+    '6': 0.083,
+    '7': 0.0638,
+    '8': 0.055,
+    '9': 0.0617,
+  });
+
+  test('the tolerance constant is the decimal 1e-4, compared as one', () => {
+    // One source of truth: the comparison's decimal form is derived from the
+    // constant, so changing one without the other is a test failure rather than a
+    // silent semantic drift.
+    expect(exactDecimal(SUM_TOLERANCE)).toBe('0.0001');
+  });
+
+  test('an answer exactly on the tolerance is accepted (inside)', () => {
+    // Float accumulation really does overshoot the bound, which is why the
+    // comparison cannot be a float one.
+    expect(
+      Math.abs(Object.values(PILOT_INSIDE).reduce((a, b) => a + b, 0) - 1),
+    ).toBeGreaterThan(SUM_TOLERANCE);
+    const result = validateNativeDistribution(PILOT_INSIDE);
+    expect(result.ok).toBe(true);
+  });
+
+  test('both sides of the exactly-on-the-tolerance case are accepted', () => {
+    // 0.9999 and 1.0001 are the same distance from one, so a magnitude comparison
+    // must treat them alike. The pilot observed both spellings.
+    const below = validateNativeDistribution(PILOT_INSIDE);
+    expect(below.ok).toBe(true);
+    // 1.0001 built from the same digits shifted onto the other side.
+    const above = dist({
+      '0': 0.0276,
+      '1': 0.07,
+      '2': 0.1349,
+      '3': 0.2086,
+      '4': 0.1692,
+      '5': 0.1261,
+      '6': 0.083,
+      '7': 0.0638,
+      '8': 0.055,
+      '9': 0.0619,
+    });
+    expect(withinSumTolerance('1.0001')).toBe(true);
+    expect(validateNativeDistribution(above).ok).toBe(true);
+  });
+
+  test('a total outside the tolerance is still rejected', () => {
+    // The pilot's sixth failure: 1.0002 is outside by the decimal reading too, so
+    // it must keep failing. This is the counterexample that stops the fix from
+    // widening the product's tolerance.
+    const outside = dist({
+      '0': 0.0276,
+      '1': 0.07,
+      '2': 0.1349,
+      '3': 0.2086,
+      '4': 0.1692,
+      '5': 0.1261,
+      '6': 0.083,
+      '7': 0.0638,
+      '8': 0.055,
+      '9': 0.062,
+    });
+    expect(withinSumTolerance('1.0002')).toBe(false);
+    const result = validateNativeDistribution(outside);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toBe('probability-sum-not-one');
+  });
+
+  test.each([
+    // Inside, on and outside, stated as exact decimals rather than as floats.
+    ['0.9999', true],
+    ['1.0001', true],
+    ['1', true],
+    ['0.99999', true],
+    ['1.00001', true],
+    ['0.99989', false],
+    ['1.00011', false],
+    ['0.99', false],
+    ['1.01', false],
+    // The magnitude is what is bounded, so a zero-ish total cannot slip through a
+    // sign check either.
+    ['0.9998', false],
+    ['1.0002', false],
+    // Longer decimals are compared exactly rather than truncated to the tolerance's
+    // own precision: 1.0000999999 is inside, 1.0001000001 is not.
+    ['1.0000999999', true],
+    ['1.0001000001', false],
+  ])('withinSumTolerance(%s) is %s', (sum, expected) => {
+    expect(withinSumTolerance(sum)).toBe(expected);
+  });
+
+  test('the failure detail states the exact total, not a rounded float', () => {
+    // The detail is shown to a person and may reach an audit record. Printing the
+    // exact decimal is what lets them re-check the boundary themselves; the old
+    // `toFixed(6)` form named a float artefact.
+    const result = validateNativeDistribution(dist({ '0': 1.0002, '1': 0 }));
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.detail).toBe('total is 1.0002, which is not 1 within 0.0001');
   });
 });
 

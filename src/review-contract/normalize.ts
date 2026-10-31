@@ -46,8 +46,66 @@ const NATIVE_MAX = 9;
  * kept at 1e-4: wide enough for ordinary rounding, far too narrow to admit a
  * 0.95 or 1.05 total that would change the score. A wider bound would be a
  * semantic decision that needs its own evidence, so it is not taken here.
+ *
+ * The value is a *decimal* 10^-4 and it is compared as one: see
+ * {@link withinSumTolerance}. Reading it as a double would move the boundary by one
+ * binary ulp, which is exactly the mistake that made a total of 0.9999 fail.
  */
 export const SUM_TOLERANCE = 1e-4;
+
+/**
+ * The tolerance as a decimal literal, in the same vocabulary the sum uses.
+ *
+ * Deriving it from {@link SUM_TOLERANCE} rather than writing `'0.0001'` keeps one
+ * source of truth: changing the constant changes the comparison, and the test that
+ * pins both to each other fails if they ever drift apart.
+ */
+function toleranceDecimal(): string {
+  const exact = exactDecimal(SUM_TOLERANCE);
+  // `SUM_TOLERANCE` is a compile-time literal, so this is unreachable; returning the
+  // plain literal would hide a future non-finite value behind a silent default.
+  if (exact === null) {
+    throw new RangeError('SUM_TOLERANCE has no exact decimal form');
+  }
+  return exact;
+}
+
+/**
+ * Whether an exact decimal total is within {@link SUM_TOLERANCE} of one.
+ *
+ * The comparison is integer arithmetic on the submitted digits, not
+ * `Math.abs(total - 1)`. The float form is wrong in both directions at the
+ * boundary and it was observed failing outward on real answers: ten four-decimal
+ * probabilities summing to a decimal 0.9999 accumulate to 0.9998999999999999, whose
+ * float distance from one is 0.00010000000000010001 — one ulp past 1e-4, so a
+ * total that is *exactly* at the tolerance was rejected. "Exactly at the bound" is
+ * inside it here, which is the same inclusive reading N0's authorization rule uses.
+ *
+ * The magnitude is compared, so an over-total is held to the same bound: 1.0001 is
+ * inside and 1.0002 is not.
+ */
+export function withinSumTolerance(sum: string): boolean {
+  const scale = Math.max(decimalPlaces(sum), decimalPlaces(toleranceDecimal()));
+  const scaledSum = scaleDecimal(sum, scale);
+  const one = 10n ** BigInt(scale);
+  const difference = scaledSum >= one ? scaledSum - one : one - scaledSum;
+  return difference <= scaleDecimal(toleranceDecimal(), scale);
+}
+
+/** The digits after the point in an exact decimal string. */
+function decimalPlaces(text: string): number {
+  const point = text.indexOf('.');
+  return point === -1 ? 0 : text.length - point - 1;
+}
+
+/** One exact decimal scaled by `10^scale` as an integer. */
+function scaleDecimal(text: string, scale: number): bigint {
+  const negative = text.startsWith('-');
+  const digits = negative ? text.slice(1) : text;
+  const [whole = '0', fraction = ''] = digits.split('.');
+  const scaled = BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
+  return negative ? -scaled : scaled;
+}
 
 /** The public score a chat integer names, or why it names none. */
 export function chatScore(value: unknown):
@@ -250,23 +308,36 @@ function checkProbabilities(
   entries: readonly (readonly [string, unknown])[],
 ): Either<ScoreDistribution> {
   const record: Record<string, number> = {};
-  let total = 0;
+  const exact: string[] = [];
   let nonZero = 0;
   for (const [key, raw] of entries) {
     const checked = readProbability(raw);
     if (typeof checked === 'string') return failProbability(checked, key);
     record[key] = checked;
     if (checked === 0) continue;
-    total += checked;
+    const decimal = exactDecimal(checked);
+    // Validation already refused non-finite values, so this is unreachable; refusing
+    // loudly beats dropping a level's mass from the sum, which could move the total
+    // into tolerance and accept a distribution nobody submitted.
+    if (decimal === null) {
+      return fail('probability-not-finite', `level ${key} has no exact form`);
+    }
+    exact.push(decimal);
     nonZero += 1;
   }
   if (nonZero === 0) {
     return fail('probability-sum-not-one', 'every level holds zero mass');
   }
-  if (Math.abs(total - 1) > SUM_TOLERANCE) {
+  // The total is compared as the exact decimal the answer carries, in integer
+  // arithmetic. Accumulating the doubles first and then taking `Math.abs(total - 1)`
+  // is what rejected a total that sat exactly on the tolerance: 0.9999 accumulates to
+  // 0.9998999999999999 and one ulp of float error decides a boundary the protocol
+  // means in decimal.
+  const total = addDecimals(exact);
+  if (!withinSumTolerance(total)) {
     return fail(
       'probability-sum-not-one',
-      `total is ${total.toFixed(6)}, which is not 1 within ${String(SUM_TOLERANCE)}`,
+      `total is ${total}, which is not 1 within ${toleranceDecimal()}`,
     );
   }
   return { ok: true, value: record };

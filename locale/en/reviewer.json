@@ -1,9 +1,9 @@
 {
   "title": "Reviewer type",
   "description": "Pick exactly one; there is no automatic fallback. chat uses the DSH LLM service; decision calls a Clef / Jev compatible REST backend directly.",
-  "chat": "chat (point value + four probes)",
-  "decision": "decision (distribution + four probes)",
-  "failureDescription": "When the backend is unavailable, times out or returns invalid output the call enters error-escalate: it is not auto-approved and the backend is not switched. The decision 11-level criteria are built into the plugin.",
+  "chat": "chat (point value)",
+  "decision": "decision (distribution)",
+  "failureDescription": "When the backend is unavailable, times out or returns invalid output the call enters error-escalate: it is not auto-approved and the backend is not switched. The decision 10-level criteria are built into the plugin.",
   "url": "URL",
   "apiKeyRef": "Credential reference (apiKeyRef)",
   "apiKeyHint": "Only the reference name is stored here, never the secret value.",
