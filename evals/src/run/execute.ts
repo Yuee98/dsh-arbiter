@@ -24,8 +24,9 @@
  * card, and writing `0` would read as a free call.
  */
 
-import { review } from '../../../src/reviewer/service.js';
+import { reviewWith } from '../../../src/reviewer/service.js';
 import type { ReviewAttempt } from '../../../src/reviewer/attempt.js';
+import type { ReviewPackage } from '../../../src/reviewer/package.js';
 import { aggregateUsage } from '../../../src/reviewer/usage.js';
 
 import { inputHashOf } from '../data/eligibility.js';
@@ -84,6 +85,15 @@ export interface CellDeps {
   readonly now: () => number;
   /** The run's input bound, enforced on every attempt rather than only at admission. */
   readonly maxInputTokens: number;
+  /**
+   * The package this cell renders and reads with.
+   *
+   * Required rather than optional: a cell that fell back to production's package would
+   * measure the wrong candidate while its record still named the right one, which is the
+   * one failure an A/B comparison cannot detect afterwards. The scheduler resolves it once
+   * from the plan, so every cell of one run uses one package.
+   */
+  readonly pkg: ReviewPackage;
 }
 
 /**
@@ -126,6 +136,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The model name one parsed body carries, wherever that protocol puts it.
+ *
+ * Two wire shapes name it and they nest it differently: a flat body (TypeSafe) puts
+ * `model` at the root, and a wrapped Cloudflare body puts it inside `result`. Reading
+ * only the root made every Cloudflare cell report `null` while the body it had just
+ * saved named the model, which is a record contradicting its own evidence. A chat body
+ * names no model at all, so it stays null — the answer there is only the two bands.
+ */
+function modelOf(body: Record<string, unknown>): string | null {
+  const named = body['model'];
+  if (typeof named === 'string' && named.length > 0) return named;
+  const wrapped = body['result'];
+  if (!isRecord(wrapped)) return null;
+  const nested = wrapped['model'];
+  return typeof nested === 'string' && nested.length > 0 ? nested : null;
+}
+
+/**
  * The model a response body named, when it named one.
  *
  * Read from the last attempt that carried a body, because that is the answer the
@@ -144,8 +172,8 @@ function responseModelOf(attempts: readonly ReviewAttempt[]): string | null {
       continue;
     }
     if (!isRecord(parsed)) continue;
-    const named = parsed['model'];
-    if (typeof named === 'string' && named.length > 0) return named;
+    const named = modelOf(parsed);
+    if (named !== null) return named;
   }
   return null;
 }
@@ -313,9 +341,12 @@ export async function runCell(parts: {
       }),
     };
   }
-  let result: Awaited<ReturnType<typeof review>>;
+  let result: Awaited<ReturnType<ReturnType<typeof reviewWith>>>;
   try {
-    result = await review({
+    // The plan's package, not production's. `review()` hard-codes the production package,
+    // which is why a candidate could not be measured before: the only way to name one is
+    // to build the service for it here.
+    result = await reviewWith(deps.pkg)({
       snapshot: parts.material.snapshot,
       callId: parts.cellId,
       signal: deps.signal,

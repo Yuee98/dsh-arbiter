@@ -35,6 +35,8 @@ import {
   RUN_FILES,
   writeJson,
 } from './artifact.js';
+import { chatRouteProblems } from './chat-service.js';
+import { candidateOf, candidateSummary } from './candidate.js';
 import { createRun, readExisting, resumeRun } from './lifecycle.js';
 import {
   cellGrid,
@@ -364,6 +366,9 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
     `bounds concurrency ${String(plan.bounds.concurrency)}, timeoutMs ${String(plan.bounds.timeoutMs)}, maxAttempts ${String(plan.bounds.maxAttempts)}, maxInputTokens ${String(plan.bounds.maxInputTokens)}`,
   );
   io.out(`transport ${plan.transport}`);
+  // Which package the cells render and read with, before anything is sent. A comparison
+  // whose plan does not say this cannot be told apart from a baseline run afterwards.
+  io.out(`package ${candidateSummary(candidateOf(resolvedPlan))}`);
   if (plan.fixture !== null) {
     const fixture = await readFixture(
       fixturePathOf(resolve(io.root, command.planPath), plan.fixture),
@@ -404,7 +409,15 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
           io.err(`problem ${resolved.message}`);
           return 1;
         }
-        if (resolved.ref.length === 0) continue;
+        if (resolved.ref.length === 0) {
+          // Said explicitly rather than skipped: a target with no credential is a decision
+          // about the endpoint, and a reader comparing it to the ones below must see that
+          // the difference is intended.
+          io.out(
+            `live target ${target.targetId} sends no credential; its endpoint authenticates nobody`,
+          );
+          continue;
+        }
         io.out(
           `live target ${target.targetId} resolves decision credential ${resolved.ref} from the environment at dispatch`,
         );
@@ -633,11 +646,15 @@ async function occupiedRun(directory: string): Promise<string | null> {
 /**
  * Why a live plan cannot dispatch, before anything is written.
  *
- * A chat cell needs an LLM service to stream through; this command has none, so a live
- * chat target is refused here with the reason rather than at the transport, where it
- * would surface as one failed cell per scripted call. A decision cell needs its
- * credential. `provider: "session"` is refused for the same reason production refuses it:
+ * A chat cell needs an LLM service to stream through and a decision cell needs its
+ * credential, so both are checked here rather than at the transport, where a
+ * misconfigured plan would surface as one failed cell per case and read like a provider
+ * outage. `provider: "session"` is refused for the same reason production refuses it:
  * there is no host session in a headless run.
+ *
+ * A chat provider is unroutable when the service the caller supplied has no route for it.
+ * Which providers a service serves is the service's own answer, not a table repeated here:
+ * a preflight with its own copy would pass a plan the transport then refuses.
  */
 export function liveProblems(
   plan: RunPlan,
@@ -656,10 +673,26 @@ export function liveProblems(
   const decisionTargets = decisions
     ? plan.targets.filter((target) => target.decision !== null)
     : [];
-  if (chatTargets.length > 0 && llm === null) {
-    problems.push(
-      'a live chat cell needs the host LLM service, which this command does not have; run a chat plan offline, or reach a chat model through a decision endpoint',
-    );
+  if (chatTargets.length > 0) {
+    if (llm === null) {
+      problems.push(
+        'a live chat cell needs an LLM service and this command has none; run a chat plan offline, or reach a chat model through a decision endpoint',
+      );
+    } else {
+      // A service that publishes its routes is checked against them. One that does not is a
+      // composition this module cannot audit — an in-process caller's own service — and
+      // refusing its plan would reject wiring that works. The headless service the CLI
+      // builds always publishes them, so the command path is always checked.
+      problems.push(
+        ...chatRouteProblems(
+          llm,
+          chatTargets.flatMap((target) =>
+            target.chat === null ? [] : [target.chat.provider],
+          ),
+          env,
+        ),
+      );
+    }
   }
   for (const target of chatTargets) {
     if (target.chat?.provider === 'session') {
@@ -675,6 +708,11 @@ export function liveProblems(
         problems.push(resolved.message);
         continue;
       }
+      // An empty reference is a statement about the endpoint: it authenticates nobody, so
+      // there is nothing to check and nothing to send. Refusing it here made every local
+      // no-key service unreachable, while inventing a placeholder name would have put a
+      // credential in the plan that no request ever used.
+      if (resolved.ref.length === 0) continue;
       // The preflight and the dispatch resolve the same value, so passing here means the
       // transport will find the same variable rather than a sibling that was never set.
       if ((env(resolved.ref) ?? '').length === 0) {

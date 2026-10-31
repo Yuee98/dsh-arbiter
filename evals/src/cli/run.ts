@@ -60,6 +60,7 @@ import {
   showRun,
 } from '../run/commands.js';
 import type { RunIo } from '../run/commands.js';
+import { headlessChatService } from '../run/chat-service.js';
 import {
   isReplayCommand,
   parseReplayCommand,
@@ -624,11 +625,22 @@ async function runExperimentCommand(
 
 /** Dispatch one run command with the caller's streams, environment and lifetime. */
 async function runCommand(io: CliIo, command: RunCommandLine): Promise<number> {
+  const env = io.env ?? ((name: string) => process.env[name]);
   const runIo: RunIo = {
     root: io.root,
     out: io.out,
     err: io.err,
     ...(io.env === undefined ? {} : { env: io.env }),
+    // A headless CLI has no host LLM service, so a live chat cell streams through the HTTP
+    // one. It is constructed here because this layer owns the process environment: the
+    // runner resolves a credential through `readCredential` and never reads the environment
+    // itself, so a service built anywhere else would have no way to find its key.
+    //
+    // Only `run` carries it. `plan`, `resume` and `show` never send a request, and handing
+    // them a service would make an offline command look able to dispatch.
+    ...(command.name === 'run'
+      ? { llm: headlessChatService({ read: env }) }
+      : {}),
   };
   switch (command.name) {
     case 'plan':

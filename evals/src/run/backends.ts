@@ -223,6 +223,11 @@ function boundedStream(parts: {
 /**
  * The live chat backend for one cell.
  *
+ * The service is whatever the caller supplied — the host's when one is in process, the
+ * headless HTTP adapter otherwise — so this function is about routing and bounds, not
+ * about which service exists. A cell with no service at all is refused by name, because
+ * it would otherwise fail at the transport once per case.
+ *
  * `provider: "session"` is refused rather than resolved: there is no host session in
  * a headless run, and the production route resolver would fail on it after the plan
  * was already accepted. Refusing here names the plan's mistake at the place it can
@@ -244,7 +249,7 @@ function liveChat(
   if (llm === null) {
     return {
       ok: false,
-      message: 'a live chat cell needs the host LLM service',
+      message: 'a live chat cell needs an LLM service',
     };
   }
   if (config.provider === 'session') {
@@ -289,6 +294,14 @@ function liveChat(
  * already holds, so the value that authenticates the request is the same one the
  * transport masks. Resolving it here keeps the environment out of the transport,
  * which production deliberately does not read.
+ *
+ * An empty reference means "this endpoint needs no credential" — a local service that
+ * authenticates nobody. The production transport already treats that as its own case:
+ * `decisionCredential` returns undefined for an empty `apiKeyRef` and the request is
+ * sent without an Authorization header. Refusing it here, as this runner used to,
+ * made a whole class of legitimate endpoints unreachable. The alternative — accepting a
+ * placeholder name and sending a fabricated bearer — is worse, because the record would
+ * then name a credential that never existed.
  */
 function liveDecision(
   target: RunTarget,
@@ -310,14 +323,10 @@ function liveDecision(
     return { ok: false, message: consistency.message };
   }
   const ref = consistency.ref;
-  if (ref.length === 0) {
-    return {
-      ok: false,
-      message: `target ${target.targetId} names no credential reference`,
-    };
-  }
-  const value = read(ref);
-  if (value === undefined || value.length === 0) {
+  // No reference is a statement about the endpoint, not a missing value. The transport's
+  // own rule decides what to send, so this branch only skips the environment read.
+  const value = ref.length === 0 ? undefined : read(ref);
+  if (ref.length > 0 && (value === undefined || value.length === 0)) {
     return {
       ok: false,
       message: `credential "${ref}" is not set`,
@@ -330,7 +339,10 @@ function liveDecision(
       transport: {
         fetch: (input, init) => fetch(input, init),
         credentials: undefined,
-        preResolvedCredential: { value },
+        // Omitted entirely for a no-credential endpoint. Passing an empty value would make
+        // the transport believe a credential was resolved and sent, and its masking list
+        // would then carry an empty string it never put on the wire.
+        ...(value === undefined ? {} : { preResolvedCredential: { value } }),
         decision: {
           url: config.url,
           model: config.model,

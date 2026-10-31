@@ -22,6 +22,7 @@
 import type { ReviewCase } from '../data/types.js';
 
 import { cellIdOf } from './artifact.js';
+import { candidateProblems } from './candidate.js';
 import type { RunBounds, RunPlan, RunProtocol, RunTarget } from './types.js';
 
 /** One planned cell, before anything ran. */
@@ -125,6 +126,10 @@ export function planProblems(
   if (plan.transport === 'live' && plan.fixture !== null) {
     problems.push('a live plan must not carry a fixture');
   }
+  // A candidate whose axes are all at their baseline measures production's package while
+  // claiming to be a treatment. Reported here rather than at dispatch, because a run whose
+  // cells duplicate a baseline under another name is a comparison nobody can interpret.
+  problems.push(...candidateProblems(plan));
   return problems;
 }
 

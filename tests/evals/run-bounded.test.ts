@@ -39,7 +39,11 @@ import {
 } from '../../evals/src/run/lifecycle.js';
 import { cellGrid } from '../../evals/src/run/plan.js';
 import { compileRunCheckers } from '../../evals/src/run/schemas.js';
-import type { CellRecord, RunFixture } from '../../evals/src/run/types.js';
+import type {
+  CellRecord,
+  FixtureResponse,
+  RunFixture,
+} from '../../evals/src/run/types.js';
 import type { LlmLike } from '../../src/reviewer.js';
 import type { ReviewSnapshot } from '../../src/types.js';
 import type { ReviewCase } from '../../evals/src/data/types.js';
@@ -91,6 +95,11 @@ const datasetDigestOfCoreV1 = datasetDigest(inspection);
  * this test can honestly assert is that the two agree. Asserting a specific value would
  * freeze the current behaviour of the masking boundary, and a change to that boundary —
  * including a fix — would then look like a regression here.
+ *
+ * Both wire shapes are read, because they nest the name differently: a flat body puts
+ * `model` at the root and a wrapped Cloudflare body puts it inside `result`. A helper
+ * that only looked at the root would silently disagree with the record for every
+ * wrapped target.
  */
 function modelNamedByStored(record: CellRecord | undefined): string | null {
   const text = record?.attempts[0]?.responseText;
@@ -103,7 +112,11 @@ function modelNamedByStored(record: CellRecord | undefined): string | null {
   }
   if (!isRecord(parsed)) return null;
   const named = parsed['model'];
-  return typeof named === 'string' && named.length > 0 ? named : null;
+  if (typeof named === 'string' && named.length > 0) return named;
+  const wrapped = parsed['result'];
+  if (!isRecord(wrapped)) return null;
+  const nested = wrapped['model'];
+  return typeof nested === 'string' && nested.length > 0 ? nested : null;
 }
 
 /** Run one plan and read the directory back, without removing it first. */
@@ -1298,6 +1311,38 @@ describe('decision usage', () => {
       // true whether or not the adapter's mask leaves that text parseable.
       expect(record.target.responseModel).toBe(modelNamedByStored(record));
       expect(record.usage?.totals.outputTokens.total).toBe(40);
+    });
+  });
+
+  it('reads the response model out of a wrapped body, not only the root', async () => {
+    // The Cloudflare envelope is `{result: {model, answers, usage}, success}`. Reading only
+    // the root made every Cloudflare cell record `responseModel: null` while the body it
+    // had just saved named the model, so the record contradicted its own evidence.
+    await withArea(async (area) => {
+      const plan = planOf({
+        transport: 'offline',
+        protocols: ['decision'],
+        targets: [decisionTarget('decision-wrapped')],
+      });
+      const cellId = cellIdOf({
+        caseId: 'read-named-source-file',
+        targetId: 'decision-wrapped',
+        protocol: 'decision',
+      });
+      const answer = decisionAnswer({ '1': 1 }, { '9': 1 }, { model: 'clef' });
+      const wrapped: FixtureResponse = {
+        status: 200,
+        body: JSON.stringify({
+          result: JSON.parse(answer.body) as unknown,
+          success: true,
+        }),
+      };
+      const result = await runPlanIn({
+        directory: join(area.path, 'run'),
+        plan,
+        fixture: fixtureOf({ [cellId]: fixtureCell({ decision: [wrapped] }) }),
+      });
+      expect(result.records[0]?.target.responseModel).toBe('clef');
     });
   });
 

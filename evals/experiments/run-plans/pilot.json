@@ -15,10 +15,10 @@
         "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
         "model": "clef",
         "apiKeyRef": "",
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "costTier": "free"
       },
-      "credentialRef": null
+      "credentialRef": ""
     },
     {
       "targetId": "clef-flash-local",
@@ -30,10 +30,10 @@
         "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
         "model": "clef-flash",
         "apiKeyRef": "",
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "costTier": "free"
       },
-      "credentialRef": null
+      "credentialRef": ""
     },
     {
       "targetId": "clef-cloudflare",
@@ -45,7 +45,7 @@
         "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef",
         "model": "clef",
         "apiKeyRef": "CLOUDFLARE_API_TOKEN",
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "costTier": "paid"
       },
       "credentialRef": "CLOUDFLARE_API_TOKEN"
@@ -60,7 +60,7 @@
         "url": "https://api.cloudflare.com/client/v4/accounts/b3a7fb1e6d341247192c0fbcedb41cdd/ai/run/@cf/cloudflare/clef-flash",
         "model": "clef-flash",
         "apiKeyRef": "CLOUDFLARE_API_TOKEN",
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "costTier": "paid"
       },
       "credentialRef": "CLOUDFLARE_API_TOKEN"
@@ -75,7 +75,7 @@
         "url": "https://api.typesafe.ai/v1/systemone",
         "model": "jev-1.13.0",
         "apiKeyRef": "TYPESAFE_API_KEY",
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "costTier": "paid"
       },
       "credentialRef": "TYPESAFE_API_KEY"
@@ -90,23 +90,7 @@
         "model": "deepseek-flash",
         "temperature": 0,
         "maxTokens": 10000,
-        "timeoutMs": 30000,
-        "maxRepairRetries": 1
-      },
-      "decision": null,
-      "credentialRef": null
-    },
-    {
-      "targetId": "workbuddy-glm-5-3-flash",
-      "provider": "workbuddy",
-      "model": "glm-5.3-flash",
-      "modelVersion": null,
-      "chat": {
-        "provider": "workbuddy",
-        "model": "glm-5.3-flash",
-        "temperature": 0,
-        "maxTokens": 10000,
-        "timeoutMs": 30000,
+        "timeoutMs": 60000,
         "maxRepairRetries": 1
       },
       "decision": null,
@@ -132,21 +116,21 @@
   ],
   "repeats": 1,
   "bounds": {
-    "concurrency": 4,
-    "timeoutMs": 30000,
-    "maxAttempts": 90,
+    "concurrency": 2,
+    "timeoutMs": 60000,
+    "maxAttempts": 70,
     "maxInputTokens": 20000
   },
   "notes": [
     "Stage S1 (pilot) of the RQ-H1B resource decision; the record is validation/review-quality/resource-decision.md.",
-    "Measured with the production renderer at context 10000: 10 cases render to 28,514 chat input tokens and 29,424 decision input tokens; the largest single request is 3,059.",
-    "Total planned input is 2 x 28,514 + 5 x 29,424 = 204,148 estimated input tokens over the 70 sendable cells.",
-    "The grid is 10 cases x 7 targets x 2 protocols x 1 repeat = 140 cells. Each target offers exactly one protocol, so 70 are supported and 70 are recorded unsupported without a request.",
-    "bounds.maxAttempts 90 is this run's exact worst case: 50 decision cells x 1 attempt + 20 chat cells x 2 (one attempt plus the transport's one repair). It is the ceiling, not a reserve.",
-    "A second pilot pass needs its own run directory and is separately bounded, because --resume only dispatches cells with no record at all and a failed cell keeps its record. A single run therefore cannot spend a retry allowance, and claiming one here would be false.",
-    "Two of the ten cases declare their own material incomplete. That is an input fact to measure, not a run failure; no case is truncated at this budget, which is why context.maxInputTokens stays at the production default.",
-    "This plan is not dispatchable today: the runner refuses a live chat cell without the host LLM service, and it rejects an empty credential reference. Both are recorded as blockers in the resource decision; neither is worked around by inventing a credential.",
+    "This plan measures candidate A only: it carries no `candidate` member, so every cell renders and reads with production's own package, which is RQ-14's candidate A. Candidate B is the same grid in `pilot-b.json`; a plan freezes one candidate because two candidates are two experiments, and the run records which one it measured so a report cannot attribute a package difference to a target.",
+    "Ten cases x six targets x one repeat is 60 cells per candidate, 120 across the A/B pair. Each target offers exactly one protocol, so the grid of 120 cells per plan is 60 supported and 60 recorded unsupported without a request.",
+    "bounds.maxAttempts 70 is this run's exact worst case: 50 decision cells x 1 attempt + 10 chat cells x 2 (one attempt plus the transport's one repair). It is the ceiling, not a reserve. A second pilot pass needs its own run directory and is separately bounded, because --resume only dispatches cells with no record at all and a failed cell keeps its record.",
+    "Targets 1-2 are the local Clef service on 127.0.0.1:8000. Their credential references are empty strings on purpose: an endpoint that authenticates nobody is expressed by naming nothing, and the runner then sends no Authorization header at all. A placeholder name would have been sent as a fabricated bearer.",
     "Targets 3-5 name credential references only. No credential value appears in this document; a live run resolves CLOUDFLARE_API_TOKEN and TYPESAFE_API_KEY from the environment.",
-    "Targets 6-7 are the host's chat routes. provider and model are the host-observed route ids, which differ from the display labels; they must be re-confirmed with listProviders/listModels before dispatch."
+    "Target 6 is a chat route reached through the headless HTTP chat service added for this task (evals/src/run/chat-service.ts). `provider` and `model` are the host-observed route ids, not display labels; the service reads DEEPSEEK_API_KEY at call time.",
+    "The two workbuddy chat targets in the previous revision are gone: the user removed that route from the pilot, and a headless run has no route for it either.",
+    "Two of the ten cases declare their own material incomplete. That is an input fact to measure, not a run failure; no case is truncated at this budget, which is why context.maxInputTokens stays at the production default.",
+    "concurrency is 2 rather than 4: no evidence exists for four-way concurrency against these providers, and the pilot's purpose is to measure latency and failure modes, not throughput. Four-way is a later value once 429 behaviour is known."
   ]
 }
