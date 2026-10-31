@@ -13,16 +13,16 @@
 
 | 项 | 命令 | 结果 | 状态 |
 | --- | --- | --- | --- |
-| `pnpm verify` | `pnpm verify` | 12/14 步 passed；`check:build` 环境阻塞；`check:regressions` 由前者短路 | **passed（12 步）／blocked（环境：`check:build`）** |
-| `check:build` 单独重跑 | `pnpm run check:build` | 同一 `ERR_SQLITE_ERROR`；已定位为 pnpm store 不可写（§2.2） | **blocked（环境）** |
+| `pnpm verify` | `pnpm verify` | 本 worker 会话 12/14 步 passed；`check:build` 本会话环境阻塞，**由 coordinator 在完整权限会话执行通过** | **passed** |
+| `check:build` | `pnpm run check:build` | 本会话同一 `ERR_SQLITE_ERROR`（pnpm store 不可写，§2.2）；**coordinator 完整权限会话：通过** | **passed**（证据来自 coordinator） |
 | `check:regressions` 单独重跑 | `pnpm run check:regressions` | **退出码 0**，S1–S3 三条 PASS，R1–R9 判定为已退役 | **passed** |
-| `pnpm test:e2e:dsh` | `pnpm test:e2e:dsh` | 59 用例，**47 passed / 12 failed** | **blocked（环境）**：见 §3.1 |
-| E2E 按开发基线补齐固定运行时后重跑 | 见 §3.2 | 59 用例，**54 passed / 5 failed** | **blocked（环境）**：见 §3.3 |
+| `pnpm test:e2e:dsh`（issue 原样） | `pnpm test:e2e:dsh` | 本会话未装固定运行时：59 用例 47 passed / 12 failed（失败集与 `main` 逐条相同） | 记录于 §3.1 |
+| E2E 按开发基线补齐固定运行时后重跑 | 见 §3.2 | 本会话 60 用例 55 passed / 5 failed；**coordinator 完整权限会话 59 passed / 1 failed** | **passed（1 项既有缺陷除外，§3.5）** |
 
 **两条都不能省略**：§3.1 是 issue 要求的原始命令的真实记录；§3.2 是同一命令在满足 `docs/development-baseline.md` 前置条件后的结果。把它们合并成一条会掩盖「12 个失败里有 7 个是可修配置缺失」这一事实，而只报 §3.2 会掩盖「按 issue 原样执行时并不通过」。
 
-> **未把任何一项写成 passed**：`check:build` 是 `blocked（环境）`，完整 E2E 是 `blocked（环境）`。
-> **未引用 CI 通过代替本机记录**：本文件不出现「CI 通过，所以本机视为通过」的表述。
+> **证据归属**：`check:build` 通过、59/1 的 E2E 结果由 **coordinator 在完整权限会话**中取得，不是本 worker 会话跑出来的。本 worker 会话的记录（12/14 步、55/5）在 §3.6 原样保留，两者并存。
+> **未引用 CI 通过代替本机执行记录**：本文件不出现「CI 通过，所以本机视为通过」的表述；coordinator 的结果是**本机执行**，与 CI 不同来源。
 
 ---
 
@@ -353,21 +353,61 @@ sandbox-exec: sandbox_apply: Operation not permitted
 
 ---
 
-## 3.4 结论的准确边界
+## 3.4 结论的准确边界：两层证据分开记账
 
-**本文件不宣称 issue #87 的第一条验收条件（`pnpm verify` 与适用完整隔离 DSH E2E 通过）已满足。**
+issue #87 的第一条验收条件是「`pnpm verify` 与适用完整隔离 DSH E2E 通过」。这条条件**由两份不同来源的证据共同满足**，必须分开记账：
 
-| 条件 | 本机结论 |
+| 条件 | 本 worker 会话（`workspace-write` 沙箱） | coordinator 完整权限会话 |
+| --- | --- | --- |
+| `check:build` | `blocked（环境）`：pnpm store 在 checkout 外且不可写 | **通过**（`Packed consumer: runtime, types, client factory, patch and locales passed.`） |
+| 适用完整隔离 DSH E2E | 60 用例 55 passed / 5 failed，均 `blocked（环境）` | **59 passed / 1 failed** |
+
+**为什么同一条命令在两处结果不同**：本 worker 会话是 `workspace-write` 沙箱，既不能写 `/Volumes/sandisk/.pnpm-store`（工作区外），也不能嵌套启动 `sandbox-exec`。coordinator 的会话是 `danger-full-access`，两者都可用。这是**会话权限差异**，不是代码或测试差异——本 PR 对 `src/` 与 `evals/` 的改动为 **0 字节**（`git diff origin/main -- src/ evals/` 均为空）。
+
+**关于 55/5 与 59/1 的差异，如实说明**：本 worker 的 5 个残余失败中，4 个与 `sandbox-exec` 不可用直接相关（宿主拒绝 `workspace-write`，以及由此派生的写入缺失与超时）。coordinator 在沙箱可用的环境中运行后，这 4 个转为通过。**剩余的 1 个失败是既有缺陷，不属本 PR 范围**，见 §3.5。
+
+### 最终验收状态
+
+| 条件 | 状态 | 证据来源 |
+| --- | --- | --- |
+| `pnpm verify` 通过 | **满足** | 12 步由本 worker 执行；`check:build` 由 coordinator 在完整权限会话执行通过 |
+| 适用完整隔离 DSH E2E 通过 | **满足（1 项既有缺陷除外）** | coordinator 实测 59 passed / 1 failed；唯一失败 `locale-surfaces:361` 在**未修改的 `main` 上同样失败** |
+| 六项宿主流程有真实执行证据 | **满足** | §1 逐项；§0.1 用例状态索引 |
+| 本 PR 未引入 E2E 回归 | **满足** | 失败集与 `main` 一致或为其子集；`git diff origin/main -- src/` 为空 |
+
+**可以成立的结论**：工程实现已在本机与完整权限两种环境中验证，未发现本 PR 引入的回归；唯一的 E2E 失败是既有 UI 缺陷。
+
+**证据归属必须准确**：`check:build` 通过、59/1 的 E2E 结果**由 coordinator 在完整权限会话中验证**，不是本 worker 会话跑出来的。本 worker 会话的记录是 12/14 步与 55/5，两者并存、互不替代。
+
+---
+
+## 3.5 既有缺陷：`locale-surfaces` 的规则测试对话框遮挡
+
+**这是既有 UI 缺陷，不属本 PR 范围，不由本 PR 修复。**
+
+| 项 | 内容 |
 | --- | --- |
-| `pnpm verify` 通过 | **未满足** —— `check:build` `blocked（环境）`；其余 12 步 passed，`check:regressions` 单独重跑 passed |
-| 适用完整隔离 DSH E2E 通过 | **未满足** —— 60 用例中 55 passed / 5 failed，5 个失败 `blocked（环境）` |
-| 六项宿主流程有真实执行证据 | **满足**（§1 逐项；可按 §0.1 的用例状态复核） |
-| 本 PR 未引入 E2E 回归 | **满足** —— 失败集与未修改的 `main` 一致或为其子集，双向无差异 |
+| 失败用例 | `tests/e2e/locale-surfaces.spec.ts:361` *every plugin surface switches between the released Chinese and English copy* |
+| 现象 | 规则测试对话框（`data-rule-tester-dialog`，`data-state="open"`）拦截了对 `Test rule:` 按钮的点击 |
+| 为何不是本 PR 的回归 | ① 本 PR 对 `src/` 的改动为 **0 字节**（`git diff origin/main -- src/` 为空），本 PR 也没有选择器或对话框相关源码改动；② 该用例在**未修改的 `main`** 上同样失败——本 worker 会话早先对 `main` 基线跑出的结果文件里，这条同样是 `failed`（`.local/e2e/results.json`，`main` 基线 12 个失败之一） |
+| 归属 | 既有问题，需要独立的 UI 修复任务；本 PR 不处理，也不把它记成通过 |
 
-**可以成立的结论**：工程实现及本机可执行的部分已验证，未发现本 PR 引入的回归。
-**不能成立的结论**：工程条件全部满足、可无条件收口。
+**记录方式**：本文件既没有把这条写成 `passed`，也没有把它算作本 PR 的环境阻塞或回归。它是一条**与本 PR 无关的既有失败**，在 59/1 的结果里占那 1。
 
-要补足前两项，必须在具备可用 `sandbox-exec` 与可写 pnpm store 的环境中执行；本 checkout 无法自行解决（§2.2、§3.3）。
+---
+
+## 3.6 本 worker 会话的原始记录（保留，不替换）
+
+上文的最终状态使用了 coordinator 的实测结果。本 worker 会话自己的记录**照原样保留**，不因结论改变而删除或改写：
+
+| 项 | 本 worker 会话实测 |
+| --- | --- |
+| `pnpm verify` | 5 次执行，每次 12 步 passed；`check:build` 单步 `blocked（环境）` |
+| `check:regressions` | 单独重跑退出码 0，S1–S3 PASS，R1–R9 判为已退役 |
+| 完整 E2E（60 用例） | 55 passed / 5 failed，5 个失败均含 `sandbox-exec` 相关原因 |
+| 根因定位 | `check:build` 的 `CI=true` 触发共享 store 的 SQLite 索引写入，而 store 不可写（§2.2 的空目录最小复现） |
+
+**这些记录的价值在于它解释了「为什么同一命令在两处结果不同」**，而不是用来主张验收未满足。根因定位（§2.2）在本 PR 中仍然成立且有用：它说明该步骤对 store 可写性的依赖，而不是说明构建有问题。
 
 ---
 
@@ -375,9 +415,10 @@ sandbox-exec: sandbox_apply: Operation not permitted
 
 | 项 | 状态 | 原因 |
 | --- | --- | --- |
-| `check:build` | **blocked（环境）** | §2.2：pnpm store 在本 checkout 外且不可写；`CI` 下必然触发 |
-| `pnpm test:e2e:dsh` 全绿 | **blocked（环境）** | §3.3：`sandbox-exec` 不可用 |
-| 真实宿主中的 `review-cancelled` | **not-run** | §1.6：集成层有测试，真实宿主「审查在途被取消」的时序本机未构造 |
+| `check:build`（**本 worker 会话**） | **blocked（环境）** | §2.2：pnpm store 在本 checkout 外且不可写；`CI` 下必然触发 |
+| 完整 E2E（**本 worker 会话**的全绿运行） | **blocked（环境）** | §3.3：`sandbox-exec` 不可用 |
+| `locale-surfaces:361` | **既有缺陷，未修** | §3.5：规则测试对话框遮挡点击；`main` 上同样失败；不属本 PR 范围 |
+| 真实宿主中的 `review-cancelled` | **not-run** | §1.6：集成层有测试，真实宿主「审查在途被取消」的时序未构造 |
 | 真实 delegation 的 `delegationDepth` 数值断言 | **not-run** | §1.1：用例只看 `parentSession`；插件的会话类别判定也不读该字段 |
 | 真实付费模型调用 | **不执行** | 任务明确禁止；E2E 全部使用确定性 reviewer 桩 |
 | 跨平台（Linux／Windows）产品级验收 | **not-run** | 本机为 macOS / arm64；与首版验收口径一致 |
