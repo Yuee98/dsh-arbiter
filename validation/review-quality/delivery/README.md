@@ -39,7 +39,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 
 | # | 发现 | 影响 |
 | --- | --- | --- |
-| F1 | **E2E 的 12 个失败里有 7 个不是「本机环境不可修」，而是没按 `docs/development-baseline.md` 跑固定 DSH 运行时** | 按基线执行 `npm ci --prefix tests/e2e/runtime` 后，`gate-real`、`history-recovery`、`context-sources`、`agent-guidance` 的 7 个用例立即转为通过。**这意味着此前「失败集与 main 逐条相同」的结论虽然成立，但把可修的配置缺失算进了「环境阻塞」**。详见 [engineering.md §3.2](engineering.md) |
+| F1 | **E2E 的 12 个失败里有 7 个不是「本机环境不可修」，而是没按 `docs/development-baseline.md:106` 跑固定 DSH 运行时** | 按基线执行 `npm ci --prefix tests/e2e/runtime` 后，`gate-real`、`history-recovery`、`context-sources`、`agent-guidance` 的 7 个用例立即转为通过（54 passed / 5 failed）。**「失败集与 main 逐条相同」的结论成立，但当时把可修的配置缺失算进了「环境阻塞」**。历史记录（如 `verification.md`）保持原样未改写；纠正记录于 [limitations.md §2.1](limitations.md) 与 [engineering.md §3.2](engineering.md) |
 | F2 | `check:build` 的 `ERR_SQLITE_ERROR` 已定位到具体条件：**`CI=true` 时 pnpm 需要写共享 store 的 SQLite 索引，而 store 位于 checkout 之外、本 checkout 不可写** | 不是随机故障，也不是本次改动引起。在空目录里只切换 `CI` 即可复现与不复现（`scripts/check-build.ts:34`／`:50` 硬编码 `CI: 'true'`，因此该脚本本机必然触发）。CI 上通过是因为 runner 的 store 可写。详见 [engineering.md §2.2](engineering.md) |
 | F3 | 剩余 5 个 E2E 失败中，**`locale-surfaces` 的 `reviewedCallId` 类型断言**与 `main` 上同样失败，且与本次改动无关；其余 4 个由 `sandbox-exec` 不可用或由此派生的写入缺失引起 | 记录为 `blocked（环境）`，不写成 passed，也不引用 CI 通过代替本机记录。详见 [engineering.md §3.3](engineering.md) |
 
