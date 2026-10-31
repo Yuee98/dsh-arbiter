@@ -1,56 +1,51 @@
 # 审批模式与审查策略
 
-本页集中维护审批模式、三档审查策略对照、配置生效与判定链。沿用当前讨论中的“审批模式”总称，替代 DND。后端统一授权标准、ask 独立性与请求生命周期已收敛；两模式取代原三档，阈值与 `progress` 扩展范围已删除。显示名称与高级设置方案为本轮建议。
+本页集中维护审批模式（`ask`／`no-ask`）、共用判定矩阵、配置生效与判定链。沿用“审批模式”总称，替代 DND。
 
-入口：[产品术语](terminology.md) · [总体架构](architecture.md) · [审查后端与引擎](reviewer.md) · [决策与待定项](decisions-and-questions.md#dnd-refinements)
+入口：[产品术语](terminology.md) · [总体架构](architecture.md) · [审查后端与引擎](reviewer.md) · [统一评分契约](reviewer.md#design-5-5) · [决策与待定项](decisions-and-questions.md#dnd-refinements)
 
-实现状态（2026-10-29，#68）：**三档模式已由两模式（ask／no-ask）取代**，两者共用同一份共用矩阵，模式只决定升级时能否开启真人审批。人工允许／拒绝／未决结束、fallback-deny 与 error-escalate 仍接入宿主审批 seam；插件直接调用 `approval.request` 以取得完整结果。下文的三档对照、阈值与 `progress` 扩展范围保留为历史设计与评测素材，不再是现行契约。
+实现状态（2026-10-29，#68；本页 2026-10-31 按新版契约修订，RQ-19）：**审批模式只有两档 `ask`／`no-ask`**，两者共用同一份 `review-contract` 矩阵，模式只决定升级时能否开启真人审批。人工允许／拒绝／未决结束、`fallback-deny` 与 `error-escalate` 接入宿主审批 seam；插件直接调用 `approval.request` 以取得完整结果。
 
 <a id="mode-selection"></a>
 
 ## 模式与设置入口
 
-**审批模式 = 插件人工审批方式。** #68 之后模式不再选择审查策略：审查判定规则与档位是共用的 `review-contract` 矩阵，两种模式逐字相同。这里的人工审批不包括 agent 自行调用 ask 工具或在聊天中提问。
+**审批模式 = 插件人工审批方式。** 模式不选择审查策略：判定规则与档位是共用的 `review-contract` 矩阵，两种模式逐字相同。这里的人工审批不包括 agent 自行调用 ask 工具或在聊天中提问。
 
 | 显示名称 | 标识 | 审查策略 | 需要人工时 |
 |---|---|---|---|
 | 交互审批 | `ask` | 共用矩阵 | 审批通道可用且为真实通道时发起人工审批 |
 | 自动审批 | `no-ask` | 同一份共用矩阵 | `fallback-deny`（不提问、不执行） |
 
-`no-ask` 不是更严格的策略，只是移除了问题：同一分数在两种模式下得到同一 `review-allow`／`review-deny`；只有「升级」的去向不同。旧值 `normal`／`strict`／`progress` 不转换，作为配置错误报出——`normal` 与 `strict` 原本就是同一引擎加一个通道开关（即此处的 ask／no-ask），而 `progress` 放宽矩阵本身，设计已明确禁止。
+`no-ask` 不是更严格的策略，只是移除了问题：同一分数在两种模式下得到同一 `review-allow`／`review-deny`；只有「升级」的去向不同。矩阵本身见[统一评分契约](reviewer.md#design-5-5)：A1 无条件拒绝，`risk ≤ 2 → A2`、`3–4 → A8`、`5–6 → A9`、`7–10 → A10`，没有第二个风险上限，也不按后端分叉。
 
-以下三档段落为历史设计（`normal`／`strict`／`progress`），保留以说明为何合并成两模式；现行实现见上文。
-
-**三档都启用自动审查（Auto Review），normal 也会自动批准或拒绝需要审查的调用。** 命令规则仍决定调用是否进入审查，不能理解为所有调用都调用 reviewer。normal 与 strict 共用常规审查策略，只在插件是否发起人工审批上不同；strict 不再额外收紧风险、授权或概率门。progress 调整部分判定规则和阈值，使一部分在常规策略下需要人工的操作成为 review-allow；具体范围由评测确定，不在本轮逐条锁定。
-
-在同一份信号、同一策略版本下，预设的审查自动批准范围为 `normal = strict ⊆ progress`。该关系不包含 normal 经人工批准后的执行量，也不承诺不同模型的实际输出完全相同。
-
-每档提供 tooltip，名称与文案草案如下：
+每档提供 tooltip：
 
 | 名称 | Tooltip |
 |---|---|
-| 交互审批 | 按命令规则处理，对需要审查的调用进行自动审查（Auto Review），并按策略自动批准或拒绝；需要人工决定时发起审批。 |
-| 自动审批 | 使用与交互审批相同的审查标准；需要人工审批的调用不执行，不新发起审批。Agent 仍可通过 ask 或聊天提问。 |
-| 自动审批 · 推进 | 在常规策略基础上调整部分规则和阈值，自动批准更多符合条件的操作；仍需人工审批的调用不执行。Agent 仍可提问。 |
+| 交互审批 | 按命令规则处理，对需要审查的调用进行自动审查（Auto Review），并按共用矩阵自动批准或拒绝；需要人工决定时发起审批。 |
+| 自动审批 | 使用与交互审批完全相同的审查标准；需要人工审批的调用不执行，不新发起审批。Agent 仍可通过 ask 或聊天提问。 |
 
-名称描述插件的权限审批，不承诺所有操作自动完成、不被问题阻塞或全程无人值守。宿主升权入口的覆盖仍需验证。
+名称描述插件的权限审批，不承诺所有操作自动完成、不被问题阻塞或全程无人值守。
 
 插件设置页提供两项独立选择：
 
 | 设置 | 可选值 | 作用范围 |
 |---|---|---|
-| 主会话审批模式 | `normal / strict / progress` | 当前插件配置作用域内的主会话 |
-| 子任务审批模式 | `strict / progress` | 当前插件配置作用域内的所有 subagent |
+| 主会话审批模式 | `ask` / `no-ask` | 当前插件配置作用域内的主会话 |
+| 子任务审批模式 | `ask` / `no-ask` | 当前插件配置作用域内的所有 subagent |
 
-由用户控制选择，暂不提供单个 subagent 的覆盖开关。**子任务不再继承父会话的审批模式**，统一读取子任务设置；“继承授权证据”是另一件事。主会话 normal、子任务 progress 是可表达的组合。
+由用户控制选择，不提供单个 subagent 的覆盖开关。**子任务不继承父会话的审批模式**，统一读取子任务设置；“继承授权证据”是另一件事。默认值为主会话 `ask`、子任务 `no-ask`（`src/config/defaults.ts:32`），完整默认配置见[首版初始默认值](configuration-and-audit.md#initial-defaults)。
 
-这里按“插件设置作用域内统一生效”理解用户意见；不额外引入每会话模式覆盖。**2026-10-24 已确认初始值为主会话 normal、子任务 strict**，完整默认配置见[首版初始默认值](configuration-and-audit.md#initial-defaults)。旧 `/arbiter dnd` 切换方案退出当前设计；`/arbiter status` 可只读展示设置与生效状态。
+**子任务默认 `no-ask` 的理由**：子会话没有自己的审批通道，请求人工只会结算成 `fallback-deny`；提前写明使记录说明原因，而不是暗示一个没人能回答的问题。
+
+**旧值不转换。** `normal`／`strict`／`progress` 与 `probeMode` 一律作为配置错误报出（`src/config/policy.ts:43-57` 的 `policy.retired`），并提示替代：`normal` 与 `strict` 原本就是同一引擎加一个通道开关（即此处的 `ask`／`no-ask`），而 `progress` 会放宽矩阵本身——设计已明确禁止。旧阈值字段（`tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress`）同样报错并提示「共用矩阵取代了概率阈值」。**不提供迁移、转换或兼容读取。**
 
 <a id="ask-independence"></a>
 
 ### ask 工具独立于审批模式
 
-按用户决定，**审批模式不限制 agent 使用 ask 工具或聊天补充授权、澄清需求**；撤回此前按提问目的限制自动档 ask 的建议。主会话为 strict / progress 时，也可根据受阻情况提问；不强制 agent 每次拒绝后都询问。
+按用户决定，**审批模式不限制 agent 使用 ask 工具或聊天补充授权、澄清需求**。两种模式下 agent 都可提问；不强制 agent 每次拒绝后都询问。
 
 提问及其答复不复活已结束的工具调用。取得补充授权后，由新请求重新审查；答复是授权证据，不自动记为 human-allow，也不替代 force-ask 要求的实际人工审批。用户没有答复不产生授权。
 
@@ -64,72 +59,53 @@
 
 `deny > force-ask > force-review > allow > review(default)` 保持不变。
 
-| 规则路径 | normal | strict / progress |
+| 规则路径 | `ask` | `no-ask` |
 |---|---|---|
 | `deny` | 规则拒绝，不进入审查 | 相同 |
 | `force-ask` | 进入人工处理 | `fallback-deny`，不交模型代批 |
 | `allow` 完整覆盖 | 免审放行，仍受执行环境约束 | 相同 |
-| `force-review / review(default)` | 应用常规审查策略 | strict 使用同一常规策略；progress 使用调整后的策略 |
+| `force-review / review(default)` | 应用共用矩阵 | 应用同一份共用矩阵 |
 
-**下面的审查规则矩阵只适用于已经进入审查的调用。** 不因矩阵中的限制对命令 allow 追加审查，也不把审批批准当成沙箱升权。命令规则与审查规则之间的全局硬边界仍在 C1、C3 中讨论。
+**规则裁决与审查裁决是两个阶段。** 前者由 `settleRule()` 按上述优先级映射（`src/policy.ts:120`），后者由 `settle()` 把审查阶段按模式与通道结算（`src/review-contract/matrix.ts:91`）。两者都不扩大对方：规则 `allow` 不因为「矩阵允许」而得到额外放行，审查 `review-allow` 也不能覆盖已命中的规则 `deny`。
+
+**下面的矩阵只适用于已经进入审查的调用。** 不因矩阵中的限制对命令 allow 追加审查，也不把审批批准当成沙箱升权。
 
 <a id="rule-matrix"></a>
 
-## 审查判定规则评测候选
+## 共用判定矩阵（现行契约）
 
-用户决定先固定三档关系，把具体条件留到评测阶段细化。下表保留此前 R1–R8 候选及编号，作为评测素材，**不是已经定稿的内置策略，也不要求现在逐条确认**。尤其 R1、R4、R5、R6 的效果仍需结合案例评估；旧稿的冲突不能在实现时同时生效。
+**这是唯一一份判定表，不由模式、后端或配置选择第二份。** 完整定义见[统一评分契约](reviewer.md#design-5-5)，实现为 `src/review-contract/matrix.ts:22`（`verdictFor`）与 `src/review-contract/rubrics.ts:74`（`requiredAuthorizationFor`）。
 
-“候选代批”表示还需通过全部相关判定规则和阈值，不能立即输出 allow。`authClass` 与信号来源沿用审查后端定义；“明确授权”不由选择 progress 本身产生。
+| 风险 | 最低授权 | 未达门槛时 |
+|---|---|---|
+| 任意风险 | **A1**（有效禁止／撤回） | **`review-deny`**，任何模式、任何风险都不例外 |
+| `risk ≤ 2` | A2 | `review-escalate` |
+| `risk 3–4` | A8 | `review-escalate` |
+| `risk 5–6` | A9 | `review-escalate` |
+| `risk 7–10` | A10 | `review-escalate` |
 
-| 编号 | 条件 | normal | strict | progress | 类别 |
-|---|---|---|---|---|---|
-| R1 | 凭证或敏感材料作为数据跨边界外发：`secrets ∧ egress`；正常认证不属于该条件 | `review-deny` | 同左 | 同左 | 建议跨档固定拒绝 |
-| R2 | 达到 critical 条件：chat 风险点值 ≥ 9，或 decision 的 critical 概率达到门槛 | `review-deny` | 同左 | 同左 | 固定拒绝条件，门槛见阈值表 |
-| R3 | 缺少可支持代批的授权证据 | `review-escalate` | 同左 | 同左 | 不通过模式选择补造授权 |
-| R4 | `destructive ∧ bulk` | `review-escalate` | 同左 | 同左 | 三档均要求人工的候选；是否允许推进扩展留待评测 |
-| R5 | 已识别的生产变更、安全控制变更、既有对象的不可逆删除 | `review-escalate` | 同左 | 同左 | 人工事项候选；具体范围留待评测 |
-| R6 | 普通批量外发：`bulk ∧ egress ∧ ¬secrets ∧ ¬destructive`，且不命中 R5 | `review-escalate` | 同左 | 明确授权且通过 progress 阈值时成为候选代批 | 可随档位变化的规则 |
-| R7 | 其余普通操作，包括无破坏、无敏感外发的批量本地工作 | 候选代批 | 与 normal 相同 | 常规范围内候选代批；扩展部分的条件待评测 | 常规策略与推进策略决定范围 |
-| R8 | 可用信号未通过所选档位阈值，或存在未解决的不确定性 | `review-escalate` | 同左 | 同左 | 不能因为无人可问而忽略门槛 |
+100 格逐格断言与计数（`[denies, escalates, allows] = [10, 58, 32]`，合计 100）见 `tests/review-contract/matrix.test.ts:51`。
 
-R5 的生产变更不包括所有生产只读查询；既有对象删除与本会话创建产物的精确清理要分开。条件需要可核对的操作范围和上下文，不能只按命令中是否出现一个关键词判断。
-
-**规则组合建议**：在同一份有效审查输入上，固定拒绝优先，其次是当前档位仍要求人工的规则，最后才考虑候选代批；候选还需通过所有相关阈值。具体顺序为：
-
-```text
-固定拒绝命中 → review-deny
-否则，当前档位要求人工的规则命中 → review-escalate
-否则，代批所需的规则条件与阈值全部满足 → review-allow
-否则 → review-escalate
-```
-
-“progress 使部分 review-escalate 变成 review-allow”描述同份信号在两套策略下的比较。实际调用直接应用 progress 策略并记录 review-allow，不先形成 review-escalate 再由兜底覆盖；force-ask、已形成的 review-deny 和 error-escalate 不因此获得代批。评测若决定放宽某个候选条件，应修改规则本身，不同时保留互相矛盾的“必须人工”和“可以代批”定义。
-
-执行边界另行判断：guarded 下确需人工升权的操作不能仅凭 review-allow 执行；trusted 下也不把“工作区外”自动等同于越过当前沙箱边界。升权受宿主约束，见[架构](architecture.md#design-6-4)。
+**已退出的历史设计**：本页此前保留的 R1–R8 评测候选表、`normal`／`strict`／`progress` 三档对照、`τ_auth`／`τ_risk`／`τ_critical`／`τ_low` 概率门、chat 点值上限 6／8，以及「规则组合建议」的四步顺序，都已由上式取代。它们不再作为可选策略、不再可配置、也不再是评测素材——**评测阈值与矩阵门槛属于后续窗口的独立任务**（见[交付报告](../validation/review-quality/delivery/handover.md)）。
 
 <a id="thresholds"></a>
 
-## 统一授权标准与阈值评测
+## 统一授权标准
 
-**chat 与 decision 采用统一的授权标准。** 对某类操作需要 implied 还是 explicit，由同一审查策略规定，不能仅因后端不同而改变。两类后端的信号形式仍不同：chat 给点值，decision 给分布；统一标准不等于数值或实际模型输出必定相同。
+**chat 与 decision 采用统一的授权标准。** 对某类操作需要多少授权，由同一份矩阵规定，不因后端不同而改变。两类后端的信号形式仍不同：chat 给点值，decision 给分布；统一标准不等于数值或实际模型输出必定相同。
 
-| 项目 | normal | strict | progress |
-|---|---|---|---|
-| 审查判定规则 | 常规规则 | 与 normal 相同 | 在常规规则基础上调整部分条件 |
-| 风险上限与最低授权要求 | 低带之外需明确授权；点值上限 6 | 与 normal 相同 | 低带之外需明确授权；点值上限 8 |
-| decision 的证据概率门 | `τ_auth` 0.80、`τ_risk` 0.75、`τ_critical` 0.25、`τ_low` 0.70 | 与 normal 相同 | 概率门相同；风险上限 6→8 |
-| chat 的点值门 | 低风险带 ≤3（契约常量）、代批上限 6 | 与 normal 相同 | 低风险带 ≤3（契约常量）、代批上限 8 |
-| 插件人工审批 | 通道可用时发起 | 不新发起 | 不新发起 |
+| 项目 | 现行契约 |
+|---|---|
+| 审查判定规则 | 共用矩阵，两个协议、两种模式逐字相同 |
+| 风险→最低授权 | `≤2 → A2`、`3–4 → A8`、`5–6 → A9`、`7–10 → A10` |
+| A1 | 无条件 `review-deny` |
+| decision 的分布处理 | N0：风险取最小 `F(k) > 0.5`、授权取最小 `F(k) >= 0.5`；总和与 1 的偏差 ≤ `1e-4`（精确十进制比较） |
+| chat 的点值处理 | 1–10 整数恒等映射 |
+| 可调阈值 | **无**。`policy` 配置段只保留 `version`（`arbiter-policy-v3`），档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名 |
 
-**首版初值（`arbiter-policy-v2`，2026-10-26）**：上表数值来自 [#22 的评测记录](../validation/arbiter-integration/2026-10-26-policy-calibration/REPORT.md)。每个字段在界面步长网格上被一对「必须放行／必须拦截」的合成标注样例夹住，按可行区间取初值（记录逐项写明是取中点还是保持发布值）；`tests/policy-calibration.test.ts` 在默认值离开该区间时失败。**这些数值与已确认规则矩阵一致，并被合成样例夹住；真实模型只提供了小样本佐证。** chat 侧 72 次真实请求（`deepseek-flash`）中 16 个正常样例有 13 个每次都得出一致结论、0 解析失败，说明模型能产出合规信号；但误放率、误拦率与 decision 侧行为均未测量，因此这些数值是可复核的初值，不是长期校准结果。
+**为什么没有可调阈值**：第二份数字就是第二个答案。档位含义、N0 规则或矩阵一旦可配置，同一分数在不同配置下含义不同，审计记录与离线回放也就无法复现判定。语义变更走 `REVIEW_CONTRACT_VERSION` 升版，不走进配置项。
 
-**已知限制**（同上记录）：R5 目前只表示「超过所选风险上限」，矩阵中的生产变更／安全控制变更／既有对象不可逆删除尚无可观测的操作类别信号；decision 协议因 `riskClass === 'high'` 已被 R2 固定拒绝而无法触发 R5；`implied` 授权等级在低带以上不参与判定；发布默认 `chat.maxTokens = 400` 对会 thinking 的模型会把预算耗在思考上并导致 review 失败（实测 15 例中 5 例），需另行收敛。**风险类别（`low` 0–3／`medium` 4–8／`high` 9–10）是两协议共用的契约常量，不是可调阈值**——可配置的类别边界会让高级设置在 decision 侧把中风险读成低风险并跳过授权要求，因此该字段不开放。
-
-例如某类操作的共同要求为授权等级至少 A、风险不高于 R：chat 使用相应点值条件，decision 检查 `P(auth ≥ A) ≥ τ_auth`、`P(risk ≤ R) ≥ τ_risk`。A、R 的语义和操作范围一致，概率门校准证据要求；不能用风险均值代替累计概率，也不把两个边际概率门当成联合概率保证。
-
-此前“strict 风险上限更低／概率门更高”和“decision 接受 implied、chat 一律要求 explicit”的表格退出当前契约。v1 的数值只作历史评测起点；发布默认值是 `arbiter-policy-v2` 中被样例区间夹住的初值，两者不混用。保留原始分布或点值、策略版本及判定原因，支持离线比较。
-
-默认三档配合命令规则完成日常配置；高级策略编辑的建议范围见[配置分层](configuration-and-audit.md#advanced-policy-settings)。调整策略不改变命令规则优先级或阶段含义。
+**质量现状（不是本页的契约，但必须一起读）**：共用矩阵的**工程条件**已满足（100 格逐格断言、单调性、无第二风险上限、无后端分支）。**模型判定质量未达标也未冻结**——S1 试点暴露的 authorization 系统性低估、risk 在 2→3 边界高估、样本量不足等问题仍未解决，且矩阵门槛实验属**工具刻意不支持**的轴。详见[交付报告的已知限制](../validation/review-quality/delivery/limitations.md)与[移交项](../validation/review-quality/delivery/handover.md)。**不要把「矩阵已固定」读成「矩阵已校准」。**
 
 <a id="configuration-activation"></a>
 
@@ -147,13 +123,13 @@ R5 的生产变更不包括所有生产只读查询；既有对象删除与本�
 | 模型请求仍在运行 | 不会仅因配置变化而取消或重复发起；按原请求的后端及协议接收、解释结果，再继续后续处理 |
 | 审查信号已取得、尚未形成结论 | 保留有效信号，不因切换后端重新调用模型；使用已生效策略中与该信号类型对应的判定规则和阈值 |
 | 已形成规则或审查阶段结果 | 保留 allow / deny / escalate 等已有结果，不重算；尚未进入的后续阶段按已生效配置处理 |
-| 已弹出并等待人工 | 保留原审批请求及其具体操作，等待 human-allow / human-deny / human-abort；切为 strict / progress 不撤销它，也不自动代批 |
+| 已弹出并等待人工 | 保留原审批请求及其具体操作，等待 human-allow / human-deny / human-abort；切为 `no-ask` 不撤销它，也不自动代批 |
 | 已经形成最终权限结论或已开始执行 | 不追溯、不撤回、不重新判定 |
-| 之前已 fallback-deny | 保持该次调用未执行；切回 normal 不自动补执行 |
+| 之前已 fallback-deny | 保持该次调用未执行；切回 `ask` 不自动补执行 |
 
 这里区分**结果的解释协议**与**后续阶段使用的策略**：旧响应按原请求的协议解析、校验，不拿新协议重新解释旧字段；后端和输入协议的新选择用于新发起的模型请求。审计保留信号产生时的配置／协议，以及后续判定实际使用的版本，不把整条链改写成一个新版本。正常超时、调用取消或输出非法仍按各自流程处理，配置变化本身不制造故障。
 
-例如，已有 review-escalate、尚未弹出审批时切为 strict，保留该审查结论，继续得到 fallback-deny；若审批已经弹出，则继续等待人工处理。已有 review-allow / review-deny 不因切换后端被撤回。保留同一请求的已有结果不等于允许新请求跨配置复用旧缓存，见[去重](reviewer.md#design-5-11)。
+例如，已有 review-escalate、尚未弹出审批时切为 `no-ask`，保留该审查结论，继续得到 fallback-deny；若审批已经弹出，则继续等待人工处理。已有 review-allow / review-deny 不因切换后端被撤回。保留同一请求的已有结果不等于允许新请求跨配置复用旧缓存，见[去重](reviewer.md#design-5-11)。
 
 “已保存”和“已生效”应在设置页有明确反馈；配置校验或应用失败不得显示为已生效。具体设置服务的应用方式需实现验证，当前不承诺已经具备热更新能力。
 
@@ -166,7 +142,7 @@ R5 的生产变更不包括所有生产只读查询；既有对象删除与本�
 - `review-escalate`：已经获得有效审查信号，当前策略要求人工决定。
 - `error-escalate`：审查未能正常完成，例如超时、后端不可用、有限修复后输出仍不合法。没有形成有效审查结论。
 
-| 阶段结果 | normal 且审批通道可用 | strict / progress，或审批通道不可用 |
+| 阶段结果 | `ask` 且审批通道可用 | `no-ask`，或审批通道不可用 |
 |---|---|---|
 | `review-escalate` | 人工审批 → human-allow / human-deny / human-abort | fallback-deny |
 | `error-escalate` | 提示审查故障及具体操作 → human-allow / human-deny / human-abort | fallback-deny |
@@ -219,20 +195,22 @@ fallback-deny 只结束当前 tool call，其他独立调用照常处理；依�
 
 上述任务继续原则也适用于其他由 Arbiter 产生的审批拒绝：Arbiter 返回具体结果与原因，不主动中断会话；agent 自行判断能否按允许的方案继续、是否需要补充信息或授权，无法推进时回复用户说明受阻。用户侧复用宿主工具调用界面，以橙色图标和 Arbiter 来源标记提示拒绝；执行失败及沙箱错误仍由宿主展示。完整展示契约见[审批拒绝的展示与会话继续](architecture.md#approval-rejection-feedback)。
 
-`promoted` 建议定义为：同一份有效信号在当前 progress 策略下为 review-allow，而在同版本 normal 基线下为 review-escalate。它是离线或代码回放比较，不需要再次调用模型。占比只是诊断信息，仍需人工复核才能判断误放。
+**关于「推进」指标**：本页此前定义了 `promoted`（同一信号在 progress 下为 review-allow、在同版本 normal 下为 review-escalate）。两模式取代三档后，这个比较不再有对象——两种模式的 `review-allow`／`review-deny` 完全相同。**该指标随 `progress` 一并退出。** 若后续窗口要比较不同的矩阵门槛，那属于新的契约版本与独立实验，不能借用本条定义。
 
 <a id="open-choices"></a>
 
 ## 当前收敛状态与后续工作
 
-**产品框架已收敛**：normal / strict 共用常规审查策略；strict 将需要插件人工审批的调用结算为 fallback-deny；progress 在审查阶段扩大部分代批范围；两类后端统一授权标准；ask 不受审批模式限制；默认三档，优先通过命令规则处理特定命令。设置范围、配置生效、各类终态和行为指引沿用已定契约。
+**产品框架已收敛**：`ask` / `no-ask` 共用同一份判定矩阵，`no-ask` 把需要人工的升级结算为 `fallback-deny`；两类后端统一授权标准；ask 不受审批模式限制；默认两档（主 `ask`、子 `no-ask`），优先通过命令规则处理特定命令。设置范围、配置生效、各类终态和行为指引沿用已定契约。
 
 | 后续工作 | 状态 |
 |---|---|
-| 具体审查规则与阈值、progress 扩展范围 | 首版初值已按 [#22 评测记录](../validation/arbiter-integration/2026-10-26-policy-calibration/REPORT.md) 选定为 `arbiter-policy-v2`；R5 操作类别、decision 侧 R5 与 implied 授权带仍待有真实样本后再评 |
-| 高级设置 | 支持单独入口的方向建议；开放字段、编辑形式、恢复默认与自定义标记待细化，不承诺任意脚本或完整规则语言 |
-| 显示名称与 tooltip、主／子初始值 | 上文已给出名称与 tooltip 草案；主 normal／子 strict 初始值已于 2026-10-24 确认 |
+| 矩阵门槛与阈值校准 | **不在本 milestone**。2026-10-31 范围调整把质量数值线的冻结移出；矩阵门槛实验属现有回放工具**刻意不支持**的轴。见[移交项](../validation/review-quality/delivery/handover.md) |
+| 高级设置 | 当前只保留 `policy.version`，没有可调阈值入口。开放字段与编辑形式属新窗口的产品裁决，不承诺任意脚本或完整规则语言 |
+| 显示名称与 tooltip、主／子初始值 | 上文已给出名称与 tooltip；主 `ask`／子 `no-ask` 已实现（`src/config/defaults.ts:32`） |
 | 等待、重试与恢复参数 | 超时长度、重试次数、熔断阈值、冷却与恢复方式留到运行评测；故障不自动放行、取消终止当前请求、完整记录阶段等既定语义保持不变 |
-| 宿主接入验证 | 升权入口、指引注入、父级原话与 ask 答复采集、设置应用、人工审批结束事件映射，见[实施清单](implementation.md#design-14) |
+| 宿主接入验证 | 升权入口、指引注入、父级原话与 ask 答复采集、设置应用、人工审批结束事件映射。**六项宿主流程已在隔离 profile 验收**，见[交付报告的工程结果](../validation/review-quality/delivery/engineering.md) |
 
 “后续精调”表示现在不锁死参数，不表示实现可以长期不定义行为。评测同时观察误放、误拦、受阻后恢复、等待时长与成本；不只优化自动批准比例。
+
+**本页与实现的一致性**：模式取值、共用矩阵、`fallback-deny` 结算、旧值拒绝分别由 `src/config/defaults.ts:32`、`src/review-contract/matrix.ts:22`／`:91`、`src/config/policy.ts:43`、`src/policy.ts:120` 实现；行为测试见 `tests/config.test.ts`、`tests/review-contract/matrix.test.ts`、`tests/integration/decision-chain.test.ts`。
