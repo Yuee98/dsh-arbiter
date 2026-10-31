@@ -17,16 +17,21 @@
  *
  * No model request is made and the daily DSH profile is never touched.
  */
+import { mkdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
+import { createCaseHost } from './dsh/case-host.js';
 import { startDshHost, type DshHost } from './dsh/host.js';
+import { waitForSession, type LoggedSession } from './dsh/session-log.js';
+import { startNewSession } from './dsh/ui.js';
 import { resolveDshCommand } from './dsh/profile.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -647,6 +652,85 @@ async function historyState(
 }
 
 /**
+ * Put one known verdict into the live profile's own audit store.
+ *
+ * The restart case needs a durable row whose identity it controls: the shipped
+ * writer is exercised by the other two tests in this file, and this one is about
+ * what a *restarted process* can still serve. The row is written with the current
+ * schema and the current record format so the restarted build accepts it; a row
+ * this build could not interpret would make the readback meaningless.
+ */
+function seedRestartVerdict(home: string, callId: string): void {
+  const path = join(home, 'arbiter', 'arbiter.db');
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  try {
+    db.prepare(
+      `INSERT OR REPLACE INTO calls(call_id, ts, session_id, session_kind, parent_session,
+          profile, workspace, tool, arguments, arguments_schema, cwd, fingerprint,
+          config_revision, config_snapshot_id, approval_mode, execution_mode, result,
+          reason, trace, effect, session_record_state, scores, review_stage, usage,
+          decision_rules, execution_status, record_format_version,
+          execution_started_at, execution_finished_at)
+       VALUES (?, ?, 'restart-session', 'main', NULL, 'arbiter-e2e', '/workspace/app',
+          'bash', ?, NULL, '/workspace/app', 'bash:restart-seeded', 'rev-restart',
+          'cfg-restart', 'ask', 'guarded', 'review-deny', 'Arbiter: seeded for the restart case.',
+          ?, 'null', 'written', NULL, 'review-deny', NULL, '[]', 'not-started', 2, NULL, NULL)`,
+    ).run(
+      callId,
+      Date.now() - 1_000,
+      JSON.stringify({ command: 'echo restart-seeded' }),
+      JSON.stringify([
+        {
+          stage: 'review',
+          result: 'review-deny',
+          decisionRules: [],
+          at: Date.now() - 1_000,
+        },
+      ]),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The stored verdicts a running host actually reports, by `callId`.
+ *
+ * The readiness probe above says only that the record service came up. A restart
+ * that lost every prior verdict but still initialised the reader would satisfy
+ * it, so a restart case needs a second, content-bearing observation: the plugin's
+ * own log route, read from the restarted process, naming the ids and results it
+ * can still serve.
+ */
+async function servedVerdicts(
+  host: DshHost,
+): Promise<readonly { readonly callId: string; readonly result: string }[]> {
+  const response = await fetch(`${host.origin}/api/arbiter/logs?limit=50`, {
+    headers: { cookie: `${host.cookie.name}=${host.cookie.value}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  expect(response.ok).toBe(true);
+  const body: unknown = await response.json();
+  if (body === null || typeof body !== 'object') {
+    throw new TypeError('the logs payload is not an object');
+  }
+  const rows = fieldOf(body, 'rows');
+  if (!Array.isArray(rows)) {
+    throw new TypeError('the logs payload has no rows array');
+  }
+  const verdicts: { callId: string; result: string }[] = [];
+  for (const entry of rows as readonly unknown[]) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const callId = fieldOf(entry, 'callId');
+    const result = fieldOf(entry, 'result');
+    if (typeof callId !== 'string' || typeof result !== 'string') continue;
+    verdicts.push({ callId, result });
+  }
+  return verdicts;
+}
+
+/**
  * Apply the built plugin to a minimal real context and return its host object.
  *
  * This drives the shipped `apply()` — the same entry the DSH loader calls — so
@@ -1112,6 +1196,179 @@ test('the built plugin recovers a real host session log after a cold start', asy
   }
 });
 
+/**
+ * A verdict the REAL host produces, read back after a REAL restart.
+ *
+ * The other restart case seeds SQLite directly, which proves the audit store
+ * survives a process restart but not that a verdict the product itself settled
+ * can be recovered into the next review. This case closes that gap with the
+ * product's own path end to end: a real DSH process runs a command the plugin's
+ * own rule denies, so the verdict is written through `CallSettlement` and the
+ * session log; the process is then stopped and restarted on the same
+ * `DSH_HOME`; and the restarted process must still report that exact `callId`
+ * with its denial outcome.
+ *
+ * No model is called: the rule short-circuits before the reviewer.
+ */
+test('a verdict the real host settled survives a real restart', async ({
+  page,
+}, testInfo) => {
+  const caseHost = await createCaseHost(
+    testInfo.outputPath('restart-verdict'),
+    {
+      arbiterRowConfig: {
+        format: 'arbiter-config-v3',
+        rules: [restartDenyRule()],
+      },
+    },
+  );
+  try {
+    const host = caseHost.current();
+    await openHost(page, host);
+    const sessionId = await sendPromptInNewSession(
+      page,
+      'RESTART-RULE RUN echo arbiter-restart-denied-one',
+    );
+    // The refused call must be issued by a session Arbiter already manages.
+    await enableRestartSession(host, sessionId);
+    const composer = page.locator('[contenteditable="true"]').first();
+    await composer.click();
+    await page.keyboard.insertText(
+      'RESTART-RULE-2 RUN echo arbiter-restart-denied-two',
+    );
+    await page.keyboard.press('Enter');
+
+    // Wait for the plugin's own durable decision record, not for a rendered
+    // marker: the record is what the restarted process must serve.
+    const recorded = await waitForSession(
+      host.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.events.some(
+          (event) =>
+            event.type === 'plugin:arbiter/decision' &&
+            JSON.stringify(event.data).includes('restart-deny'),
+        ),
+      120_000,
+    );
+    expect(recorded).not.toBeNull();
+    const settled = decisionCallId(recorded);
+    expect(typeof settled).toBe('string');
+    // The oracle exists before the restart, with the denial outcome.
+    const before = await servedVerdicts(host);
+    expect(before).toContainEqual({ callId: settled, result: 'deny' });
+
+    // --- a real process restart on the same DSH_HOME -----------------------
+    const restarted = await caseHost.restart();
+    const after = await servedVerdicts(restarted);
+    // The same verdict, by id and result, is served by the restarted process.
+    expect(after).toContainEqual({ callId: settled, result: 'deny' });
+    // And the plugin's own session-log record for that call is still readable,
+    // so recovery did not depend on the audit store alone.
+    const recovered = await waitForSession(
+      restarted.home,
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        candidate.events.some(
+          (event) =>
+            event.type === 'plugin:arbiter/decision' &&
+            JSON.stringify(event.data).includes('restart-deny'),
+        ),
+      60_000,
+    );
+    expect(recovered).not.toBeNull();
+    expect(decisionCallId(recovered)).toBe(settled);
+  } finally {
+    await caseHost.dispose();
+  }
+});
+
+/** Open the isolated host with its own bootstrap cookie. */
+async function openHost(page: Page, host: DshHost): Promise<void> {
+  await page
+    .context()
+    .addCookies([{ ...host.cookie, url: host.origin, httpOnly: true }]);
+  await page.goto(host.origin);
+  const preview = page.getByRole('dialog', { name: /预览版说明|Preview/i });
+  if (await preview.isVisible().catch(() => false)) {
+    await preview.getByRole('button', { name: /^(继续|Continue)$/ }).click();
+  }
+  const gettingStarted = page.getByRole('dialog', {
+    name: /开始使用|Get started/i,
+  });
+  if (await gettingStarted.isVisible().catch(() => false)) {
+    await gettingStarted
+      .getByRole('button', { name: /^(关闭|Close)$/ })
+      .click();
+  }
+}
+
+/**
+ * Start a new session and send one user turn through the host's own composer.
+ *
+ * The composer belongs to the previous session until the host finishes its
+ * create round trip, so the send waits for `startNewSession` to prove the
+ * switch happened; otherwise the turn lands in the session just left.
+ */
+async function sendPromptInNewSession(
+  page: Page,
+  text: string,
+): Promise<string> {
+  const sessionId = await startNewSession(page);
+  const composer = page.locator('[contenteditable="true"]').first();
+  await expect(composer).toBeVisible();
+  await composer.click();
+  await page.keyboard.insertText(text);
+  await page.keyboard.press('Enter');
+  return sessionId;
+}
+
+/** A deny rule for the fixture's marked `bash` command. */
+function restartDenyRule(): Record<string, unknown> {
+  return {
+    id: 'restart-deny',
+    scope: { tools: ['bash'] },
+    conditions: [
+      {
+        target: 'argument',
+        path: '$.command',
+        kind: 'regex',
+        pattern: 'echo arbiter-restart-denied.*',
+      },
+    ],
+    verdict: 'deny',
+  };
+}
+
+/** The `callId` of the plugin's own decision record in a logged session. */
+function decisionCallId(session: LoggedSession | null): string | null {
+  if (session === null) return null;
+  for (const event of session.events) {
+    if (event.type !== 'plugin:arbiter/decision') continue;
+    const data: unknown = event.data;
+    if (data === null || typeof data !== 'object') continue;
+    const callId: unknown = Reflect.get(data, 'callId');
+    if (typeof callId === 'string') return callId;
+  }
+  return null;
+}
+
+/** Enable a session through the plugin's own admission route. */
+async function enableRestartSession(
+  host: DshHost,
+  sessionId: string,
+): Promise<void> {
+  const response = await fetch(`${host.origin}/api/arbiter/sessions`, {
+    method: 'POST',
+    headers: {
+      cookie: `${host.cookie.name}=${host.cookie.value}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ sessionId, action: 'enable' }),
+  });
+  expect(response.status).toBe(200);
+}
+
 test('real plugin records cold-read after a restart, with and without the audit store', async () => {
   // --- 1. A real session is written and persisted by the shipped backend ------
   const log = await persistRealSession();
@@ -1124,12 +1381,27 @@ test('real plugin records cold-read after a restart, with and without the audit 
     expect(cold.headers.every((entry) => entry.endsWith(':true'))).toBe(true);
 
     // --- 2. A real host restarts on the same isolated profile ---------------
+    // The verdict seeded into the *live profile's* audit store is the oracle. It
+    // must be readable before the restart and again afterwards, by id and result,
+    // from the restarted process. A restart that reinitialised the reader but lost
+    // the rows would satisfy the readiness probe alone, which is why the concrete
+    // id and result are asserted on both sides.
+    const seededCallId = 'restart-seeded-verdict';
     const first = await startDshHost(repoRoot, join(artifacts, 'first'), {
       keepHome: true,
     });
     let firstState: Awaited<ReturnType<typeof historyState>>;
+    let firstVerdicts: Awaited<ReturnType<typeof servedVerdicts>>;
     try {
+      seedRestartVerdict(first.home, seededCallId);
       firstState = await historyState(first);
+      firstVerdicts = await servedVerdicts(first);
+      // The oracle exists before the restart, so the post-restart read cannot
+      // pass on an empty store.
+      expect(firstVerdicts).toContainEqual({
+        callId: seededCallId,
+        result: 'review-deny',
+      });
     } finally {
       await first.stop({ keepHome: true });
     }
@@ -1142,6 +1414,14 @@ test('real plugin records cold-read after a restart, with and without the audit 
       // A missing session-record API is reported, never silently assumed.
       expect(secondState.error === null || secondState.ready).toBe(true);
       expect({ ...secondState, ready: firstState.ready }).toEqual(secondState);
+      // The same verdict, by id and result, is served by the restarted process.
+      const secondVerdicts = await servedVerdicts(second);
+      expect(secondVerdicts).toContainEqual({
+        callId: seededCallId,
+        result: 'review-deny',
+      });
+      // Nothing was lost between the two processes.
+      expect(secondVerdicts).toEqual(firstVerdicts);
     } finally {
       await second.stop({ keepHome: true });
     }

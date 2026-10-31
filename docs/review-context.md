@@ -82,12 +82,14 @@ AST 解析产物可以作为审查输入，已可靠观察到的内容与分析�
 
 **正向用途（即使 partial 也有价值）**：
 
-- `observed.writes` 命中工作区外路径 → 可用于**提高 `risk`**、触发 `force-ask`；
-- `observed.network_commands` 非空 → 可确定性置 `egress = true`（用于不变式）；
-- `observed.credential_paths` 命中 → 可确定性置 `secrets = true`；
-- `pipeline_exec` 命中 `curl|sh` 之类 → 可确定性置 `destructive = true`。
+- `observed.writes` 命中工作区外路径 → 可作为**提高 `risk`** 的材料，也可支撑一条针对该命令的 `force-ask` 规则；
+- `observed.network_commands` 非空 → 表明存在外发，是模型判断 `risk` 的材料；
+- `observed.credential_paths` 命中 → 表明触碰到凭证路径，同上；
+- `pipeline_exec` 命中 `curl|sh` 之类 → 表明存在解释器执行，同上。
 
-可靠观察可用于提高严重度或说明不确定性；缺失观察不能当作减轻风险的依据。事实 partial 不构成 review-allow 或命令规则 allow 的全局否决开关。探针 override 是否及如何采用这些观察仍遵循[判定引擎](reviewer.md#design-5-6)及其评测约束，不由本节擅自改动阈值。
+可靠观察提供给模型作为判断材料；缺失观察不能当作减轻风险的依据。事实 partial 不构成 review-allow 或命令规则 allow 的全局否决开关。
+
+**这些观察不再改写探针布尔值。** 现行生产包是**无探针候选 A**：判定只用 risk／authorization 两项分数，`secrets`／`destructive`／`egress`／`bulk` 既不出现在请求里，也不参与判定。此前 `probeMode`（`assist`／`override`）的 override 分支已随 #68 删除，作为配置项报 `policy.retired`。事实的作用面因此收敛为「模型输入 + 审计 + 诊断」，不直接改判。见[判定引擎](reviewer.md#design-5-6)。
 
 **token 预算**：事实段约 100–250 tok/次。只输出与判定相关的类别，不 dump 完整 AST；条目超上限（如 30 条）截断并置 `truncated: true`，同时降级 `completeness`。各段总预算与相互约束见 [O10](decisions-and-questions.md#question-o10)。
 
