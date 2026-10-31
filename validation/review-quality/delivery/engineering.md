@@ -163,7 +163,7 @@
 
 ### 2.1 逐步结果
 
-日志：`.local/logs/verify.log`（699 行，ignored 目录）。
+日志：`.local/logs/verify.log`（699 行）与 `.local/logs/verify2.log`（文档改动后二次执行，699 行）。两份结果一致；ignored 目录，不入库。**两次执行都是完整 `pnpm verify`**，第二次在文档更新之后，因此下表同时验证「文档改动没有引入回归」。
 
 | 步 | 状态 | 证据 |
 | --- | --- | --- |
@@ -180,7 +180,7 @@
 | `test:integration` | **passed** — 25 files / **467** tests | `:272-273` |
 | `test:ui` | **passed** — 21 files / **353** tests | `:348-349` |
 | `build` | passed | 产物含 `lib/`、`locale/{en,zh}/*.json`、`cordis.patch.yml` |
-| `check:build` | **blocked（环境）** | `:664-698`；`Published package: no evals source, schema, data or import.` 已先打印，随后 `[ERR_SQLITE_ERROR]` |
+| `check:build` | **blocked（环境）** | `verify.log:664-698`／`verify2.log:680-698`；`Published package: no evals source, schema, data or import.` 已先打印，随后 `[ERR_SQLITE_ERROR]` |
 | `check:regressions` | 由前一步短路；**单独重跑 passed** | §2.3 |
 
 ### 2.2 `check:build` 的环境阻塞已定位
