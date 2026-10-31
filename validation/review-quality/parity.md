@@ -35,7 +35,7 @@
 
 ## 4. 可检验的证据（测试，不是声明）
 
-`tests/evals/production-evals-parity.test.ts`（8 个测试）：
+`tests/evals/production-evals-parity.test.ts`（13 个测试）：
 
 | 断言 | 防的是什么 |
 | --- | --- |

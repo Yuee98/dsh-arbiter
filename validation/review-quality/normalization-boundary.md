@@ -7,10 +7,11 @@ Runs: offline. **No model was called for this record.**
 ## 1. The defect
 
 `src/review-contract/normalize.ts` accumulated a decision answer's ten probabilities as
-doubles and compared `Math.abs(total - 1) > SUM_TOLERANCE`. The accumulation itself was
-already exact (`addDecimals`, BigInt), but the *tolerance test* was a float subtraction, so
-an answer whose decimal total sat exactly on `1e-4` from one was pushed outside by one
-binary ulp:
+doubles — `let total = 0; … total += checked` — and compared
+`Math.abs(total - 1) > SUM_TOLERANCE`. **Both halves were float operations.** The exact
+decimal helper `addDecimals` existed in the same file but was used only for the cumulative
+N0 median (`cumulativeDecimal`), not for the validation total. So an answer whose decimal
+total sat exactly on `1e-4` from one was pushed outside by one binary ulp:
 
 ```
 decimal total     0.9999
@@ -37,6 +38,10 @@ bound" is inside it, in both directions:
 The failure detail now prints the exact decimal total (`total is 1.0002, …`) instead of a
 `toFixed(6)` float rendering, so a person re-checking the boundary reads the number the
 answer carried.
+
+Concretely, `checkProbabilities` no longer keeps a running `total` double at all: it
+collects each non-zero level's exact decimal, sums them with `addDecimals`, and hands the
+resulting **string** to `withinSumTolerance`. No float step remains on that path.
 
 ## 3. Saved responses: original result vs repaired result
 
