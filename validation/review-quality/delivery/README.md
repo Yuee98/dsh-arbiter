@@ -29,7 +29,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 
 **工程实现及可执行部分已验证；完整宿主验收仍受本机环境阻断，Milestone 完成条件尚待确认。**
 
-具体到 A 类：六项宿主流程各有真实执行证据（`54 passed / 5 failed` 于 59 个真实 DSH 用例，5 个失败全部与未修改的 `main` 一致或为其子集）；`pnpm verify` 除 `check:build` 一项因本机 pnpm store 不可写而 `blocked（环境）` 外全部通过。
+具体到 A 类：六项宿主流程各有真实执行证据（**当前范围 60 用例 55 passed / 5 failed**；补齐固定运行时后首轮为 59 用例 54 passed / 5 failed，差异是本轮新增的恢复用例，见 [engineering.md §1.6](engineering.md)）。5 个失败全部与未修改的 `main` 一致或为其子集；`pnpm verify` 除 `check:build` 一项因本机 pnpm store 不可写而 `blocked（环境）` 外全部通过。
 
 **但 issue #87 的第一条验收条件（`pnpm verify` 与适用完整隔离 DSH E2E 通过）在本机未满足**：`check:build` 与完整 E2E 都是 `blocked（环境）`。按 [review-convergence 的适用性规则](../../../docs/development-baseline.md)，本机环境阻断**不是**通过，也**不能**用 CI 通过代替本机执行记录。
 
@@ -40,7 +40,7 @@ Issue #87 的验收条件是「四类不得混写」。本报告因此拆成四�
 | 六项宿主流程的实现存在、有行为测试、且在本机能执行的部分真实跑通 | **成立** |
 | 本 PR 未引入 E2E 回归 | **成立**（失败集与 `main` 一致或为其子集，双向无差异） |
 | `pnpm verify` 全部通过 | **不成立**（`check:build` `blocked（环境）`） |
-| 适用完整隔离 DSH E2E 通过 | **不成立**（5 个失败 `blocked（环境）`） |
+| 适用完整隔离 DSH E2E 通过 | **不成立**（60 用例中 5 个失败 `blocked（环境）`） |
 | 工程条件已满足、可无条件收口 | **不成立** |
 
 **要在本 PR 内给出无条件的「工程条件满足」，必须先补足剩余两项证据**：在具备可用 `sandbox-exec` 的环境中跑完整固定版本 DSH E2E 全绿，以及在可写 store 的环境中跑通 `check:build`。两者都不是本 checkout 能自行解决的（见 [engineering.md §2.2](engineering.md) 与 [§3.3](engineering.md)）。

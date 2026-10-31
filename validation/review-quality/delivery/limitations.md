@@ -133,7 +133,7 @@ DSH_E2E_VERSION="$(node -p 'require("./tests/e2e/runtime/package.json").dependen
 pnpm exec playwright test
 ```
 
-**7 个此类失败转为通过，真实环境阻塞为 5 个**（54 passed / 5 failed）。
+**7 个此类失败转为通过，真实环境阻塞为 5 个**（当时 59 用例 54 passed / 5 failed；本 PR 新增一条恢复用例后为 **60 用例 55 passed / 5 failed**，失败集不变）。
 
 | 口径 | 失败数 | 构成 |
 | --- | --- | --- |

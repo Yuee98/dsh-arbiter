@@ -242,7 +242,9 @@ questions.risk.score.criteria: List should have at most 10 items after validatio
 
 ### 输出契约：policy-aware 信号
 
-**决策权归代码，模型只产信号**。为了让模型的分级接近我们的语义，把审查判定规则一并写进 prompt 作为参考——这不是偏离官方（官方 `REVIEW_POLICY` 本来就把 medium/high 的规则写进 prompt），区别只在官方让模型**自己下结论**，本设计让模型**按同样规则产信号**，结论由判定引擎应用审查策略得出。
+**决策权归代码，模型只产信号。** 模型只收到**评分锚点**（十档定义，见 `rubric-text.ts` 从 `review-contract/rubrics.ts` 派生）与**回答格式**，不收到判定矩阵与阈值：`src/reviewer/contract.ts` 的模块注释把这一点列为**刻意缺席项**——"the decision matrix and its thresholds. The engine applies them; a model that received them would be asked to reason about the answer key, and a model's arithmetic is not the authority this review depends on."
+
+这与官方 `REVIEW_POLICY` 的差别正在这里：官方把 medium/high 的规则写进 prompt 并让模型**自己下结论**；本设计只给锚点，模型按锚点报两个档位，结论由代码用共用矩阵得出。**把判定规则写进 prompt 是已退出的做法**，不要据此认为模型知道阈值。
 
 **输出 schema（现行）**：**只有两个成员**，键名是 `risk` 与 `authorization`（不是 `authorized`），值都是 1–10 整数。`src/reviewer/contract.ts` 的 `CHAT_ANSWER_FORMAT` 与 `src/reviewer/signals.ts` 的 `CHAT_MEMBERS` 是这条契约的实现与唯一读取清单。
 
