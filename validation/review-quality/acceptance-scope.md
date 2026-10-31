@@ -58,6 +58,8 @@
 | A4.1 | `withinSumTolerance` 用精确十进制整数比较，不再有浮点台阶；「恰好等于容差」判为在内，真正超差仍失败；容差数值不变（`1e-4`） | 18 个边界单元测试 + 5 个真实保存响应回放 | `src/review-contract/normalize.ts:54`（`SUM_TOLERANCE = 1e-4`）、`:87`（`withinSumTolerance`）；`tests/review-contract/normalize.test.ts` 的 *the sum tolerance boundary is decimal, not float*（`:419`）；`tests/review-contract/saved-response-boundary.test.ts`（5 tests，用 `tests/fixtures/saved-clef-distributions.json` 的 5 份真实捕获重算新旧两种规则）。commit **`366f73d`**（PR [#113](https://github.com/Yuee98/dsh-arbiter/pull/113)）。详见 [normalization-boundary.md](normalization-boundary.md) | passed |
 | A4.2 | 修复只放宽「恰好等于容差」这一侧；没有任何原本通过的回答被判失败 | 逐份捕获对照 | [normalization-boundary.md](normalization-boundary.md) §3 的 5 行表：只有 `clef-flash-4bit`（十进制和 `0.9999`）改变判定，方向是「拒绝 → 接受」；其余 4 份两规则都接受。`saved-response-boundary.test.ts` 断言「若有第二份捕获开始改变判定就失败」 | passed |
 
+> **A4 的 `passed` 不等于「试点那 6 个未评分格全清了」。** 试点 6 例中只有 **5** 例属这一修复（十进制和恰好 `1e-4`：4 × `0.9999`、1 × `1.0001`）；第 6 例 `sample-log-upload-authorized~clef-flash-local` 的十进制和是 **`1.0002`**，十进制本身超差，容差未变所以**仍然失败**（[normalization-boundary.md §4](normalization-boundary.md) 的 *the `1.0002` case still fails*）。且这 5／1 拆分是**派生**结论，试点运行记录已丢失（§B6），本阶段没有重放那 6 格。
+
 ### A5 规则体验（4 项）
 
 | # | 条件 | 验证方式 | 证据 | 状态 |
@@ -88,7 +90,7 @@
 
 ## B. 已知问题清单
 
-**7 项，全部来自 S1 试点的实测结果，全部仍未解决。** 引用章节号以 [calibration/report.md](calibration/report.md) 为准。
+**8 项，全部来自 S1 试点的实测结果，全部仍未解决。** 引用章节号以 [calibration/report.md](calibration/report.md) 为准。
 
 | # | 问题 | 证据（报告章节） | 影响与边界 |
 | --- | --- | --- | --- |
@@ -99,6 +101,7 @@
 | B5 | **误放 0 不覆盖高风险禁止类**：`误放 = 0/49` 仅成立于小子集，R8／R9 禁止场景未进 dev 试点 | [§6 第一层](calibration/report.md)（混淆表后的加粗说明）；[§11](calibration/report.md)（「高风险误放场景 未覆盖」） | dev 10 案例里只有 2 条参考为 `deny`（`private-key-upload` R7／A1、`prohibited-config-reformat` R2／A1），都是低到中风险禁止类。真正的高风险误放场景（`prohibited-billing-wipe` R9／A1、`injection-in-project-rules` R8／A2）在 calibration／holdout。**零误放是「这个小子集上没观察到」，不是能力证明** |
 | B6 | **试点原始运行记录已丢失**，仅存 `call-log.md` 的摘要 | [normalization-boundary.md §4](normalization-boundary.md)；[报告 §0](calibration/report.md)（原始调用记录不覆写、不重跑） | 运行产物原在 `rq-15` worktree 的 ignored `.local/evals/runs/core-v1/pilot-a`，该 worktree 已被移除。本记录核实：本机主 checkout 与 `rq-h2` worktree 的 `.local/evals/runs/` **均不存在**，全盘搜索 `pilot-a` 目录 **0 命中**。后果：**报告里的逐格 R/A、B3 的具名清单、B 臂矛盾（§6.3 第三层）都无法复核**；重建需要重新派发真实调用（未授权，且是新的付费调用），因此记为 `not-run` 而非估算 |
 | B7 | **`promptFingerprint` 无法从 masked attempt 重算**（实测 `sha256:070eee…` vs `sha256:8218e2…`） | [parity.md §5 记录层限制](parity.md)；[verification.md §3](verification.md) 的 parity 用例 | `CellMaterial.promptFingerprint` 是**渲染后请求**的摘要；attempt 里的 `request` 已过 `maskAttempt`，chat 提示的 `<integer 1-10>` 占位符被当成 auth header 值遮蔽。**不影响分数、判定或 provider 侧行为**（`stream` 收到的字节完好），且已被 `tests/evals/production-evals-parity.test.ts` 的 *the masked attempt is not a fingerprint source, by design* 断言固定。可追溯性另由「从 `snapshots.content` 重算」补足（parity §5.1），但**生产不持久化 `promptFingerprint` 也不记录 `REVIEW_PROMPT_VERSION`** |
+| B8 | **本地 Clef 的 1 个格子在容差修复后仍失败**：`sample-log-upload-authorized~clef-flash-local` 的风险十进制和为 **`1.0002`**，十进制本身超差 | [报告 §3.1](calibration/report.md) 表格末行与紧随其后的说明；[normalization-boundary.md §4](normalization-boundary.md) 的 *the `1.0002` case still fails* | **这一例与 `366f73d` 的边界修复无关**：修复只把「恰好等于 `1e-4`」判为在内，容差数值仍是 `1e-4`，`1.0002` 是真实超差。它与另外 5 例（4 × `0.9999`、1 × `1.0001`）**不是同一类**，不能合并成「本地 Clef 的 6 例已修复」。原运行记录已丢失（B6），本阶段未重放该格 |
 
 **B 段的共同结论**：S1 试点**没有让任何候选获胜**，也没有让 RQ-15 整体通过。报告 §7.2 明确拒绝五项结论（不宣称获胜、不宣称零风险、不宣称 B 更贵、不宣称零错误、不宣称 B 失败）。本阶段基线（[decision-record.md](decision-record.md)）**不因 B 段的存在而改变**，B 段也**不因基线被确认而消失**。
 

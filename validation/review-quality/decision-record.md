@@ -174,8 +174,12 @@ B 臂 50 次 decision 请求 **100% 被拒**（[报告 §3.2](calibration/report
 | A 臂可发送格子 | 60（120 格中 60 supported／60 unsupported，后者是 target 不提供该协议） |
 | 拿到真实响应 | **120/120** `status: reviewed` |
 | 网络／超时／取消失败 | **0** |
-| 无探针臂 `outcome.status: scored` | **54/60**（其余 6 为本地 Clef 的容差边界失败，已在 `366f73d` 修复） |
+| 无探针臂 `outcome.status: scored` | **54/60** |
+| 其中 **5** 个未评分格 | 十进制和恰好落在 `1e-4`（4 × `0.9999`、1 × `1.0001`），被旧浮点比较误拒；`366f73d` 修好后判**在内**（[报告 §3.1](calibration/report.md)、[normalization-boundary.md §3–§4](normalization-boundary.md)） |
+| 其中 **1** 个未评分格 | `sample-log-upload-authorized~clef-flash-local`，十进制和 **`1.0002`**，**十进制本身超差**；容差数值未变，`366f73d` **不覆盖**该例，它仍然失败（[报告 §3.1](calibration/report.md) 表格末行；[normalization-boundary.md §4](normalization-boundary.md) 的 *the `1.0002` case still fails*） |
 | 两处传输修复 | 空 `credentialRef` 表达「端点不认证」；headless chat 服务（`evals/src/run/chat-service.ts`） |
+
+**这 5／1 的拆分是派生结论，不是实测。** 试点运行记录已丢失（[acceptance-scope.md](acceptance-scope.md) §B6），本阶段没有重放那 6 格，也没有重新派发真实调用。「5 例会通过」的依据是保存捕获响应的精确算术重算加边界测试固定（[normalization-boundary.md §4](normalization-boundary.md)），**不是**把这 6 格重跑一遍。所以上表**不能**读成「本地 Clef 的失败已全部解决」：1 例的失败是真实的超差，与边界修复无关。
 
 **这证明的是「基线跑得通、接线可用、判读一致」，不是「基线判得对」。** 后者属 [acceptance-scope.md](acceptance-scope.md) §B 的已知问题与 §C 的后续移交。
 
