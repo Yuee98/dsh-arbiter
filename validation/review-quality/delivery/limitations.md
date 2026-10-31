@@ -152,15 +152,18 @@ pnpm exec playwright test
 
 ## 3. 本阶段新增的已知限制（工程侧，不属 B 类质量问题）
 
-这三条来自本报告的 [A 类](engineering.md) 执行过程，是**记录方式的限制**，不是产品缺陷：
+这一节记录**验证环境与会话权限**带来的边界，不是产品缺陷。
 
-| # | 限制 | 影响 | 处理 |
+| # | 限制 | 现状 | 处理 |
 | --- | --- | --- | --- |
-| E1 | `check:build` 在本机 `blocked（环境）`：pnpm store 在 checkout 外且不可写 | 本机无法验证打包消费者的完整链路 | 记录为 `blocked（环境）`，不以 CI 通过代替；复现条件见 [engineering.md §2.2](engineering.md) |
-| E2 | 完整 E2E 在本机 `blocked（环境）`：`sandbox-exec` 不可用导致 5 个用例无法完成 | 「allow 之后真正写文件」这一路径本机不可验 | 记录为 `blocked（环境）`；根因与逐条原因见 [engineering.md §3.3](engineering.md) |
-| E3 | `review-cancelled` 只有集成层证据，**没有真实宿主 E2E** | 「审查在途被取消」的真实时序本机未构造 | 记为「集成层 passed、真实宿主 not-run」，见 [engineering.md §1.6](engineering.md) |
+| E1 | worker 会话（`workspace-write`）无法写工作区外的 pnpm store，`check:build` 因此 `blocked（环境）` | **已解决**：coordinator 在 `danger-full-access` 会话执行 `check:build` **通过**（`Packed consumer: runtime, types, client factory, patch and locales passed.`） | 记录双会话结果，见 [engineering.md §3.4](engineering.md)；根因（`CI=true` 触发共享 store 的 SQLite 索引写入）仍记录于 §2.2 |
+| E2 | worker 会话不能嵌套启动 `sandbox-exec`，导致 4 个 E2E 用例及其派生的写入缺失失败 | **已解决**：coordinator 在完整权限会话跑出 **59 passed / 1 failed**，这 4 个转为通过 | 双会话结果并列于 [engineering.md §3.4](engineering.md)／[§3.6](engineering.md) |
+| E3 | `locale-surfaces:361` 失败：规则测试对话框遮挡 `Test rule:` 按钮 | **既有 UI 缺陷，未修**；在未修改的 `main` 上同样失败；本 PR 对 `src/` 的改动为 0 字节 | 单列为既有问题，见 [engineering.md §3.5](engineering.md)；需独立的 UI 修复任务，不属本 PR |
+| E4 | `review-cancelled` 只有集成层证据，**没有真实宿主 E2E** | **仍未闭合** | 记为「集成层 passed、真实宿主 not-run」，见 [engineering.md §1.6](engineering.md) |
 
-**E1–E3 不改变 B 类的性质，也不被 B 类吸收。** 它们是「本机没能验证」的记录，不是「产品有问题」的记录；两者在本报告里始终分开。
+**E1–E2 是会话权限差异，已由 coordinator 的完整权限会话闭合，不再是验收缺口。E3 是与本 PR 无关的既有缺陷。E4 是仍未执行的验证项。**
+
+**这一节不改变 B 类的性质，也不被 B 类吸收。** B 类是未解决的质量问题，E1–E4 是验证范围与既有缺陷的记录；两者在本报告里始终分开。
 
 ---
 
