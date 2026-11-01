@@ -10,10 +10,15 @@ import { stageView, type StageView } from './stage.js';
 import { decisionFeedback } from './feedback.js';
 import { evaluateCall } from '../rules/match.js';
 import type { HistoryStatus, ReviewScores } from '../types.js';
-import { buildCallSnapshot } from './call-snapshot.js';
+import {
+  buildCallSnapshot,
+  callRedactor,
+  type SnapshotBundle,
+} from './call-snapshot.js';
 import {
   earlyReview,
   preRequestExit,
+  finalizeCallReview,
   reasonOf,
   reviewExtras,
   runReview,
@@ -341,6 +346,13 @@ export class CallGate {
     const { runtime } = this.host;
     const session = agent.session;
     const sessionKind = sessionKindOf(agent);
+    // Register ancestry for audit-only/rule calls as well. A redaction fault must
+    // degrade storage, never change deterministic rule evaluation/execution.
+    try {
+      callRedactor(this.host, session);
+    } catch {
+      /* The snapshot/writer reports its own safe failure. */
+    }
     let cwd = process.cwd();
     try {
       cwd = await this.ensureCwd(agent, exec.signal);
@@ -556,10 +568,12 @@ export class CallGate {
   private async review(call: PreparedCall): Promise<PreToolDecision> {
     const breakerOpen = this.history.breakerOpen(call.session.id ?? 'unknown');
     let bundle: BuiltSnapshot | null = null;
+    let preparation: SnapshotBundle | null = null;
     let prepareError: string | null = null;
     if (!breakerOpen) {
       try {
-        bundle = (await buildCallSnapshot(this.host, call)).bundle;
+        preparation = await buildCallSnapshot(this.host, call);
+        bundle = preparation.bundle;
       } catch (error) {
         prepareError = error instanceof Error ? error.message : String(error);
       }
@@ -586,12 +600,39 @@ export class CallGate {
     // `preRequestExit` proved both of these exist for a proceeding review.
     if (bundle === null || this.host.services.llm === undefined)
       throw new Error('a review that proceeds must have a bundle and an llm');
+    if (preparation === null)
+      throw new Error('a review must have captured material');
+    const finalized = await finalizeCallReview(
+      this.host,
+      call,
+      this.host.services.llm,
+      preparation,
+    );
+    if (isAborted(call.exec.signal)) return { kind: 'cancel' };
+    const { backend } = finalized;
+    bundle = finalized.bundle;
+    prepareError = finalized.prepareError;
+    const finalExit = preRequestExit(this.host, {
+      breakerOpen: false,
+      bundle,
+      prepareError,
+    });
+    if (finalExit !== null) {
+      this.noteStage(call, finalExit.stage, finalExit.code);
+      return await this.settleReviewed(
+        call,
+        earlyReview(finalExit.outcome, finalExit.snapshot),
+      );
+    }
+    if (bundle === null)
+      throw new Error('a finalized review must have a snapshot');
     this.noteReview(call.session.id ?? 'unknown');
     const result = await runReview(
       this.host,
       call,
       this.host.services.llm,
       bundle,
+      backend,
     );
     // A cancellation that arrives while the request is already out does not undo
     // the attempts that reached the provider: they were sent and may have been

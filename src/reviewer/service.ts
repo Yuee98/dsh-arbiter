@@ -36,8 +36,19 @@ import {
   type DecisionTransportContext,
 } from './decision.js';
 import { PRODUCTION_PACKAGE, type ReviewPackage } from './package.js';
-import { redact, redactAuthHeaders } from './redact.js';
+import { CredentialRegistry } from './credential-registry.js';
+import {
+  redactSnapshot,
+  snapshotRedactor,
+  bindSnapshotRedactor,
+} from '../snapshot/redaction.js';
+import { prepareDecisionCredential } from './decision.js';
+import { bindPreparedReviewRequest } from './prepared-request.js';
 import { aggregateUsage, type UsageAggregate } from './usage.js';
+
+// Direct service consumers (including evals) need the same cross-call knowledge
+// as host-prepared snapshots. Session IDs are the caller's workflow identity.
+const DIRECT_CONTEXTS = new CredentialRegistry();
 
 /** What a caller must supply to run one review. */
 export interface ReviewRequest {
@@ -135,7 +146,39 @@ export function reviewWith(
   pkg: ReviewPackage,
 ): (request: ReviewRequest) => Promise<ReviewResult> {
   return async (request) => {
-    const { snapshot, callId, signal } = request;
+    let redactor = snapshotRedactor(request.snapshot);
+    redactor ??= DIRECT_CONTEXTS.context(
+      request.snapshot.sessionId,
+      request.snapshot.parentSessionId,
+    ).fork();
+    if (request.backend.kind === 'decision') {
+      const credentialResolution = await prepareDecisionCredential(
+        request.backend.transport,
+      );
+      if (credentialResolution.ok && credentialResolution.value !== undefined)
+        redactor.addKnown([credentialResolution.value]);
+      request = {
+        ...request,
+        backend: {
+          ...request.backend,
+          transport: {
+            ...request.backend.transport,
+            credentialResolution,
+            redactor,
+          },
+        },
+      };
+    } else
+      request = {
+        ...request,
+        backend: {
+          ...request.backend,
+          transport: { ...request.backend.transport, redactor },
+        },
+      };
+    const snapshot = redactSnapshot(request.snapshot, redactor);
+    bindSnapshotRedactor(snapshot, redactor);
+    const { callId, signal } = request;
     const transport = await runTransport(
       pkg,
       request,
@@ -148,7 +191,7 @@ export function reviewWith(
     // can carry a credential, and two consumers implementing that rule separately is
     // how a boundary leaks.
     const attempts = transport.attempts.map((attempt) =>
-      maskAttempt(attempt, transport.secrets),
+      maskAttempt(attempt, transport.secrets, redactor),
     );
     return {
       protocol: transport.protocol,
@@ -160,11 +203,9 @@ export function reviewWith(
               // The reason quotes provider text, so it crosses the same boundary as
               // the attempt's own error. Masking it here means a caller never has to
               // remember that the two fields carry the same risk.
-              redact(
-                redactAuthHeaders(
-                  transport.error ?? 'the reviewer produced no answer',
-                ),
-                transport.secrets,
+              redactor.text(
+                transport.error ?? 'the reviewer produced no answer',
+                false,
               ),
               transport.rejection?.partial ?? NO_PARTIAL,
             )
@@ -216,8 +257,18 @@ async function runTransport(
   callId: string,
   signal: AbortSignal,
 ): Promise<TransportRun> {
+  const context = snapshotRedactor(snapshot);
+  if (context === undefined)
+    throw new Error('a rendered review requires its material context');
   if (request.backend.kind === 'chat') {
     const rendered = pkg.renderChat(snapshot);
+    bindPreparedReviewRequest(
+      rendered,
+      context,
+      () => pkg.renderChat(redactSnapshot(snapshot, context)),
+      rendered,
+      pkg.asksProbe ? 'chat-probe' : 'chat',
+    );
     const result = await runChatTransport(
       { ...request.backend.transport, signal, readAnswer: pkg.readChat },
       rendered,
@@ -234,9 +285,17 @@ async function runTransport(
       secrets: result.secrets,
     };
   }
+  const rendered = pkg.renderDecision(snapshot);
+  bindPreparedReviewRequest(
+    rendered,
+    context,
+    () => pkg.renderDecision(redactSnapshot(snapshot, context)),
+    rendered,
+    'decision',
+  );
   const result = await runDecisionTransport(
     { ...request.backend.transport, signal, readAnswer: pkg.readDecision },
-    pkg.renderDecision(snapshot),
+    rendered,
     callId,
   );
   return {

@@ -1,3 +1,16 @@
+import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { vi } from 'vitest';
+import * as snapshotModule from '../../src/snapshot.js';
+import { runDecisionTransport } from '../../src/reviewer/decision.js';
+import { CredentialRedactor } from '../../src/reviewer/credential-redactor.js';
+import { DEFAULT_CONFIG } from '../../src/config.js';
+import { readChatAnswer } from '../../src/reviewer/signals.js';
+import { NEW_SCALE_TYPESAFE } from '../helpers/decision-captures.js';
+import {
+  renderChatUser,
+  renderDecisionRequest,
+} from '../../src/reviewer/prompt.js';
 /**
  * Gate + reviewer integration for review input.
  *
@@ -736,7 +749,12 @@ describe('gate review input', () => {
     const broken = {
       ...parent,
       snapshotEvents: () => {
-        throw new Error('parent log unreadable');
+        throw new Error(
+          JSON.stringify({
+            password: { value: 'synthetic-parent-diagnostic' },
+            path: '/tmp/output',
+          }),
+        );
       },
     };
     const reviewer = reviewerLlm({ risk: 3, authorization: 8 });
@@ -776,7 +794,10 @@ describe('gate review input', () => {
       {
         callId: 'call-unreadable-parent',
         name: 'bash',
-        arguments: { command: 'rm -rf build' },
+        arguments: {
+          command: 'rm -rf build',
+          note: 'synthetic-parent-diagnostic',
+        },
         signal: new AbortController().signal,
         agent: { session: child },
       },
@@ -799,6 +820,21 @@ describe('gate review input', () => {
     // The persisted structure is what the detail view reads, so both the
     // escalation and the gap are explainable after the fact.
     expect(stored.snapshot.missing.join(' ')).toContain('parent session');
+    expect
+      .soft(JSON.stringify(stored))
+      .not.toContain('synthetic-parent-diagnostic');
+    const db = new DatabaseSync(
+      join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+    );
+    try {
+      const rows = db
+        .prepare('SELECT content FROM snapshots WHERE call_id = ?')
+        .all('call-unreadable-parent');
+      expect(rows).toHaveLength(1);
+      expect(JSON.stringify(rows)).not.toContain('synthetic-parent-diagnostic');
+    } finally {
+      db.close();
+    }
   });
 });
 
@@ -873,5 +909,926 @@ describe('the host turn clock', () => {
     // so rather than reusing the closed number.
     expect(after.snapshot.turn).toBeNull();
     expect(after.snapshot.context).toEqual([]);
+  });
+});
+
+/** Actual gate + local HTTP endpoint + production SQLite writer, with synthetic secrets. */
+async function credentialEndpoint(
+  reply: unknown = NEW_SCALE_TYPESAFE,
+  status = 200,
+) {
+  const received: { body: unknown; authorization: string | undefined }[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      received.push({ body, authorization: request.headers.authorization });
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(reply));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (address === null || typeof address === 'string')
+    throw new Error('no endpoint port');
+  return {
+    received,
+    url: `http://127.0.0.1:${String(address.port)}/decision`,
+    stop: () =>
+      new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      ),
+  };
+}
+function credentialGate(
+  session: StubSession,
+  url: string,
+  resolve: NonNullable<HostServices['credentials']>['resolve'],
+  maxInputTokens = 20_000,
+  type: 'chat' | 'decision' = 'decision',
+  onEnsure?: () => void,
+) {
+  const llm = reviewerLlm({ risk: 3, authorization: 8 });
+  const stub = stubContext({
+    profileContext: {
+      home: process.env['DSH_HOME'] ?? '',
+      dir: process.cwd(),
+      name: 'credential-profile',
+    },
+    sandboxPolicy: { defaultMode: 'workspace-write' },
+    sessions: {
+      get: (id: string) => (id === session.id ? session : undefined),
+    },
+    llm: llm.llm,
+    credentials: { resolve },
+    approval: {
+      config: { policy: 'ask' },
+      request: () => Promise.resolve('unavailable'),
+    },
+    permissionPresets: { registerAuto: () => () => undefined },
+    workingDirectory: {
+      ensure: () => {
+        onEnsure?.();
+        return Promise.resolve(process.cwd());
+      },
+    },
+  });
+  admitSession(session);
+  const host = apply(stub.ctx, {
+    modes: { main: 'no-ask', subagent: 'no-ask' },
+    reviewer: {
+      type,
+      chat: { provider: 'stub', model: 'stub', maxRepairRetries: 0 },
+      decision: {
+        url,
+        model: 'test-model',
+        apiKeyRef: 'synthetic-reference',
+        timeoutMs: 5_000,
+      },
+    },
+    context: { maxInputTokens },
+  });
+  const run = (
+    callId: string,
+    args: unknown,
+    signal = new AbortController().signal,
+  ) =>
+    stub.gate()(
+      { callId, name: 'bash', arguments: args, signal, agent: { session } },
+      allow,
+    );
+  return { host, run, captured: llm.captured, llm: llm.llm };
+}
+describe('credential preparation at actual production boundaries', () => {
+  test.each(['chat', 'decision'] as const)(
+    '%s diagnostic reconstruction is safe on the actual wire and in every retained SQL table',
+    async (backend) => {
+      const secret = `synthetic-${backend}-record-diagnostic`;
+      const diagnostic = `password=${secret}; inspect /tmp/output for ops@example.test, count 4`;
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`diagnostic-${backend}`, [
+        human(1, 1, 'Only inspect 4 files for ops@example.test'),
+      ]);
+      const resolve = vi.fn(() =>
+        Promise.resolve({ value: 'synthetic-selected-auth' }),
+      );
+      const harness = credentialGate(
+        session,
+        endpoint.url,
+        resolve,
+        20_000,
+        backend,
+      );
+      const callId = `diagnostic-${backend}-call`;
+      harness.host.runtime.sessionRecordErrors.set(callId, diagnostic);
+      const args = { command: 'echo local' };
+      try {
+        await harness.run(callId, args);
+        await harness.host.currentAudit()?.flush();
+        const stored = await persistedCall(callId);
+        const wire = backend === 'chat' ? harness.captured : endpoint.received;
+        expect(wire).toHaveLength(1);
+        expect.soft(JSON.stringify(wire)).not.toContain(secret);
+        expect.soft(JSON.stringify(stored.snapshot)).not.toContain(secret);
+        expect(stored.snapshot.completeness.gaps).toEqual([]);
+        expect(stored.snapshot.missing.join(' ')).toContain('/tmp/output');
+        expect(stored.snapshot.missing.join(' ')).toContain('count 4');
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        const expectedWire =
+          backend === 'chat'
+            ? { user: renderChatUser(stored.snapshot) }
+            : { state: expected.state, questions: expected.questions };
+        const actualWire =
+          backend === 'chat'
+            ? { user: harness.captured[0]?.user }
+            : endpoint.received[0]?.body;
+        expect.soft(actualWire).toMatchObject(expectedWire);
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          for (const table of ['calls', 'snapshots', 'model_calls']) {
+            const rows = db.prepare(`SELECT * FROM ${table}`).all();
+            expect(rows.length).toBeGreaterThan(0);
+            expect.soft(JSON.stringify(rows)).not.toContain(secret);
+          }
+        } finally {
+          db.close();
+        }
+        expect(resolve).toHaveBeenCalledTimes(backend === 'decision' ? 1 : 0);
+        expect(harness.host.runtime.sessionRecordErrors.get(callId)).toBe(
+          diagnostic,
+        );
+        expect(args).toEqual({ command: 'echo local' });
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test.each(['Cookie', 'Set-Cookie'])(
+    '%s first cookie named Path is masked before actual wire and SQLite',
+    async (header) => {
+      const secret = 'synthetic-cookie-role-wire-private';
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`cookie-role-${header}`, [
+        human(1, 1, 'Only inspect 4 local files'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-cookie-review-auth' }),
+      );
+      const args = {
+        command: 'echo local',
+        [header]: `Path=${secret}${header === 'Set-Cookie' ? '; Path=/tmp/output; Max-Age=4; Secure' : ''}`,
+      };
+      try {
+        await harness.run(`cookie-role-call-${header}`, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(
+          secret,
+        );
+        const stored = await persistedCall(`cookie-role-call-${header}`);
+        expect(JSON.stringify(stored)).not.toContain(secret);
+        const retained =
+          header === 'Set-Cookie'
+            ? '; Path=/tmp/output; Max-Age=4; Secure'
+            : 'Path=[redacted:v1:';
+        expect(JSON.stringify(stored.snapshot.action.arguments)).toContain(
+          retained,
+        );
+        expect(args[header]).toContain(secret);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('malformed root Chat scores are rejected and masked in the actual attempt and SQLite', async () => {
+    const answer = JSON.stringify({
+      risk: 3,
+      authorization: 8,
+      error: 'request refused',
+    });
+    expect(readChatAnswer(answer).ok).toBe(false);
+    const session = makeSession('strict-chat-root', [
+      human(1, 1, 'Only inspect 4 files'),
+    ]);
+    const resolve = vi.fn(() =>
+      Promise.resolve({ value: 'not-read-for-chat' }),
+    );
+    const harness = credentialGate(session, 'unused', resolve, 20_000, 'chat');
+    if (harness.llm === undefined) throw new Error('missing Chat fixture');
+    const stream = vi
+      .spyOn(harness.llm, 'stream')
+      .mockImplementation(async function* () {
+        await Promise.resolve();
+        yield { type: 'text-delta', text: answer };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+      });
+    try {
+      expect(
+        (
+          await harness.run('strict-chat-root-call', {
+            command: 'echo local',
+            password: '8',
+          })
+        ).kind,
+      ).toBe('deny');
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledTimes(1);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        const row = db
+          .prepare('SELECT response_text FROM model_calls WHERE call_id = ?')
+          .get('strict-chat-root-call');
+        const raw: unknown = row?.['response_text'];
+        if (typeof raw !== 'string') throw new Error('missing Chat attempt');
+        const hidden: unknown = expect.stringContaining('[redacted:v1:');
+        expect(JSON.parse(raw)).toMatchObject({
+          risk: 3,
+          authorization: hidden,
+          error: 'request refused',
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+    }
+  });
+  test.each(['１２３４', '١٢٣٤'])(
+    'Unicode decimal password %s preserves authorization quantities at actual boundaries',
+    async (value) => {
+      const endpoint = await credentialEndpoint();
+      const instruction = `Only send ${value} files to ops@example.test`;
+      const session = makeSession(`decimal-wire-${value}`, [
+        human(1, 1, instruction),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-ascii-wire-auth' }),
+      );
+      const args = {
+        command: 'echo local',
+        password: value,
+        path: `/tmp/q${value}`,
+        count: 4,
+      };
+      try {
+        await harness.run(`decimal-wire-call-${value}`, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        expect(JSON.stringify(endpoint.received[0]?.body)).toContain(
+          instruction,
+        );
+        const stored = await persistedCall(`decimal-wire-call-${value}`);
+        expect(stored.snapshot.evidence[0]?.text).toBe(instruction);
+        const hidden: unknown = expect.stringContaining('[redacted:v1:');
+        expect(stored.snapshot.action.arguments).toMatchObject({
+          password: hidden,
+          path: `/tmp/q${value}`,
+          count: 4,
+        });
+        expect(args.password).toBe(value);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('known echoes in ordinary authorization and Cookie metadata never reach wire or retained SQL', async () => {
+    const secret = 'synthetic-wire-semantic-echo';
+    const endpoint = await credentialEndpoint();
+    const session = makeSession('semantic-echo-wire', [
+      human(1, 1, 'Only inspect 4 files'),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: secret }),
+    );
+    const args = {
+      command: 'echo local',
+      Authorization: `approved for ${secret}`,
+      'Set-Cookie': `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
+    };
+    try {
+      await harness.run('semantic-echo-wire-call', args);
+      await harness.host.currentAudit()?.flush();
+      expect(endpoint.received).toHaveLength(1);
+      expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+      expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(secret);
+      const stored = await persistedCall('semantic-echo-wire-call');
+      expect(JSON.stringify(stored)).not.toContain(secret);
+      const authorization: unknown = expect.stringContaining(
+        'approved for [redacted:v1:',
+      );
+      const cookie: unknown = expect.stringContaining('; Max-Age=4');
+      expect(stored.snapshot.action.arguments).toMatchObject({
+        Authorization: authorization,
+        'Set-Cookie': cookie,
+      });
+      expect(args.Authorization).toBe(`approved for ${secret}`);
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test('credentials first labelled by the provider are removed from all retained call material', async () => {
+    const secret = 'synthetic-provider-first-discovery';
+    const endpoint = await credentialEndpoint(
+      { error: { password: secret } },
+      500,
+    );
+    const session = makeSession('provider-first-discovery', [
+      human(1, 1, `inspect ${secret}`),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: 'synthetic-prepared-auth' }),
+    );
+    try {
+      await harness.run('provider-first-discovery-call', {
+        command: 'echo local',
+      });
+      await harness.host.currentAudit()?.flush();
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        for (const table of ['calls', 'snapshots', 'model_calls']) {
+          const rows = db.prepare(`SELECT * FROM ${table}`).all();
+          expect(rows.length).toBeGreaterThan(0);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+        }
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test.each([
+    {
+      name: 'query',
+      command:
+        'curl https://example.test/?access_token=synthetic-query-secret&recipient=ops@example.test&count=4',
+      secret: 'synthetic-query-secret',
+      retained: '&recipient=ops@example.test&count=4',
+    },
+    {
+      name: 'unclosed',
+      command: 'echo password="synthetic-unclosed-secret',
+      secret: 'synthetic-unclosed-secret',
+      retained: 'echo password=',
+    },
+  ])(
+    '$name credentials are masked through the gate, rendered request and raw SQLite',
+    async ({ name, command, secret, retained }) => {
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`syntax-wire-${name}`, [
+        human(1, 1, 'Only inspect 4 files for ops@example.test'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-wire-auth' }),
+      );
+      const args = { command };
+      const callId = `syntax-wire-call-${name}`;
+      try {
+        await harness.run(callId, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        const stored = await persistedCall(callId);
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        expect(endpoint.received[0]?.body).toMatchObject({
+          state: expected.state,
+          questions: expected.questions,
+        });
+        expect(expected.state).not.toContain(secret);
+        expect(expected.state).toContain(retained);
+        expect(expected.state).toContain(
+          'Only inspect 4 files for ops@example.test',
+        );
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          const rows = db
+            .prepare('SELECT * FROM calls WHERE call_id = ?')
+            .all(callId);
+          expect(rows).toHaveLength(1);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+        } finally {
+          db.close();
+        }
+        expect(args.command).toBe(command);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('a JSON string provider failure masks an unclosed quoted credential before SQLite', async () => {
+    const secret = 'synthetic-provider-unclosed-secret';
+    const endpoint = await credentialEndpoint(`password="${secret}`, 500);
+    const session = makeSession('provider-string-error', [
+      human(1, 1, 'inspect local files'),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: 'synthetic-provider-auth' }),
+    );
+    try {
+      expect(
+        (
+          await harness.run('provider-string-error-call', {
+            command: 'echo local',
+          })
+        ).kind,
+      ).toBe('deny');
+      await harness.host.currentAudit()?.flush();
+      expect(endpoint.received).toHaveLength(1);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        const rows = db
+          .prepare('SELECT * FROM model_calls WHERE call_id = ?')
+          .all('provider-string-error-call');
+        expect(rows).toHaveLength(1);
+        expect(JSON.stringify(rows)).not.toContain(secret);
+        const raw: unknown = rows[0]?.['response_text'];
+        if (typeof raw !== 'string') throw new Error('missing response text');
+        expect(JSON.parse(raw)).toContain('[redacted:v1:');
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test('an unbound rendered lookalike still masks raw input even with a shared context', async () => {
+    const secret = 'synthetic-unbound-private-password';
+    const endpoint = await credentialEndpoint();
+    const redactor = new CredentialRedactor('unbound-real-transport');
+    const request = renderDecisionRequest(
+      `ordinary recipient=ops@example.test count=4; password="${secret}"`,
+    );
+    const serialized: unknown = JSON.parse(JSON.stringify(request));
+    if (serialized === null || typeof serialized !== 'object')
+      throw new Error('request clone missing');
+    const state: unknown = Reflect.get(serialized, 'state');
+    const questions: unknown = Reflect.get(serialized, 'questions');
+    if (typeof state !== 'string') throw new Error('request state missing');
+    try {
+      await runDecisionTransport(
+        {
+          redactor,
+          fetch: globalThis.fetch,
+          credentials: undefined,
+          decision: {
+            ...DEFAULT_CONFIG.reviewer.decision,
+            url: endpoint.url,
+            model: 'test-model',
+            apiKeyRef: '',
+            timeoutMs: 5000,
+          },
+          signal: new AbortController().signal,
+        },
+        {
+          state,
+          questions,
+          estimatedInputTokens: request.estimatedInputTokens,
+        },
+        'unbound-real-call',
+      );
+      expect(endpoint.received).toHaveLength(1);
+      expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(secret);
+      expect(JSON.stringify(endpoint.received[0]?.body)).toContain(
+        'ops@example.test',
+      );
+      expect(request.state).toContain(secret);
+    } finally {
+      await endpoint.stop();
+    }
+  });
+  test.each([987654321, 8])(
+    'nested provider authorization=%s is masked in the actual attempt and raw SQLite',
+    async (value) => {
+      const endpoint = await credentialEndpoint(
+        { error: { authorization: value } },
+        500,
+      );
+      const session = makeSession(`provider-error-${String(value)}`, [
+        human(1, 1, 'only inspect local files'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-error-auth' }),
+      );
+      try {
+        const result = await harness.run(
+          `provider-error-call-${String(value)}`,
+          { command: 'echo local' },
+        );
+        expect(result.kind).toBe('deny');
+        expect(endpoint.received).toHaveLength(1);
+        await harness.host.currentAudit()?.flush();
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          const rows = db
+            .prepare('SELECT response_text FROM model_calls WHERE call_id = ?')
+            .all(`provider-error-call-${String(value)}`);
+          expect(rows).toHaveLength(1);
+          const raw: unknown = rows[0]?.['response_text'];
+          if (typeof raw !== 'string')
+            throw new Error('provider response not stored');
+          const parsed: unknown = JSON.parse(raw);
+          const masked: unknown = expect.stringContaining('[redacted:v1:');
+          expect(parsed).toMatchObject({ error: { authorization: masked } });
+        } finally {
+          db.close();
+        }
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test.each(['text', 'score', '4', 'approved'])(
+    'a credential equal to %s keeps typed source and the exact final rendered wire view',
+    async (secret) => {
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`protocol-wire-${secret}`, [
+        human(1, 1, 'Only send 4 files to ops@example.test'),
+      ]);
+      const resolve = vi.fn(() => Promise.resolve({ value: secret }));
+      const harness = credentialGate(session, endpoint.url, resolve);
+      try {
+        const result = await harness.run(`protocol-wire-call-${secret}`, {
+          command: 'echo local',
+          password: secret,
+          Authorization: secret,
+          path: '/tmp/q4',
+          count: 4,
+        });
+        // This fixed R5/A6 response reaches the existing fallback denial; the
+        // boundary proof is that the real review happened with intact material.
+        expect(result.kind).toBe('deny');
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(endpoint.received).toHaveLength(1);
+        expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+        const stored = await persistedCall(`protocol-wire-call-${secret}`);
+        expect(stored.snapshot.evidence[0]?.text).toBe(
+          'Only send 4 files to ops@example.test',
+        );
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        expect(endpoint.received[0]?.body).toMatchObject({
+          state: expected.state,
+          questions: expected.questions,
+        });
+        const masked: unknown = expect.stringContaining('[redacted:v1:');
+        expect(stored.snapshot.action.arguments).toMatchObject({
+          password: masked,
+          Authorization: masked,
+          path: '/tmp/q4',
+          count: 4,
+        });
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('late-known credential is removed before every cap; exact wire snapshot and real auth survive rotation', async () => {
+    const secret = 'synthetic-known-boundary-original-credential';
+    const endpoint = await credentialEndpoint();
+    const events = [
+      human(
+        1,
+        1,
+        `${'x'.repeat(3990)}${secret}\nOnly send 4 files to support@example.test`,
+      ),
+      { type: 'turn/start', seq: 2, data: { turn: 1 } },
+    ];
+    const session = makeSession('credential-root', events);
+    const resolve = vi.fn(() =>
+      Promise.resolve({
+        value:
+          resolve.mock.calls.length === 1
+            ? secret
+            : 'rotated-should-never-be-resolved',
+      }),
+    );
+    const harness = credentialGate(session, endpoint.url, resolve);
+    const args = {
+      command: `printf '${secret}'`,
+      count: 4,
+      recipient: 'support@example.test',
+      path: '/tmp/key-document',
+    };
+    try {
+      await harness.run('credential-wire', args);
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(endpoint.received).toHaveLength(1);
+      expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+      const wire = endpoint.received[0]?.body;
+      expect(JSON.stringify(wire)).not.toContain(secret);
+      expect(JSON.stringify(wire)).not.toContain('synthetic-known-boundary');
+      expect(JSON.stringify(wire)).toContain('support@example.test');
+      expect(JSON.stringify(wire)).toContain('/tmp/key-document');
+      const stored = await persistedCall('credential-wire');
+      expect(wire).toMatchObject({
+        state: renderDecisionRequest(renderChatUser(stored.snapshot)).state,
+      });
+      expect(stored.snapshot.evidence[0]?.source).toEqual({
+        kind: 'session-human',
+        sessionId: session.id,
+      });
+      expect(stored.snapshot.action.arguments).toMatchObject({
+        count: 4,
+        recipient: 'support@example.test',
+        path: '/tmp/key-document',
+      });
+      expect(args.command).toContain(secret);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        for (const table of ['calls', 'stages', 'snapshots', 'model_calls']) {
+          const rows = db.prepare(`SELECT * FROM ${table}`).all();
+          expect(rows.length).toBeGreaterThan(0);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+          expect(JSON.stringify(rows)).not.toContain(
+            'synthetic-known-boundary',
+          );
+        }
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test('chat keeps its frozen request without repeating snapshot token estimation', async () => {
+    const session = makeSession('chat-single-snapshot', [
+      human(1, 1, 'inspect local files'),
+    ]);
+    const original = snapshotModule.prepareReviewSnapshot;
+    let preparations = 0;
+    let rebuilds = 0;
+    const prepare = vi
+      .spyOn(snapshotModule, 'prepareReviewSnapshot')
+      .mockImplementation(async (...args) => {
+        const result = await original(...args);
+        preparations += 1;
+        return {
+          ...result,
+          rebuild: (known) => {
+            rebuilds += 1;
+            return result.rebuild(known);
+          },
+        };
+      });
+    const resolve = vi.fn(() =>
+      Promise.resolve({ value: 'unused-chat-credential' }),
+    );
+    const harness = credentialGate(
+      session,
+      'http://127.0.0.1:1/unused',
+      resolve,
+      20_000,
+      'chat',
+    );
+    try {
+      const result = await harness.run(
+        'chat-single-snapshot-call',
+        { command: 'echo local' },
+        new AbortController().signal,
+      );
+      expect(result.kind).toBe('allow');
+      expect(preparations).toBe(1);
+      expect(rebuilds).toBe(0);
+      expect(resolve).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+      harness.host.currentAudit()?.close();
+    }
+  });
+  test.each([
+    ['M0', 'deny', 'insufficient'],
+    ['OVER_BUDGET', 'deny', 'input_budget_exceeded'],
+    ['breaker', 'deny', 'circuit_open'],
+    ['chat', 'allow', 'review-allow'],
+  ] as const)(
+    '%s does not resolve decision credentials',
+    async (path, expectedKind, expectedCode) => {
+      const session = makeSession(`early-${path}`, [
+        human(1, 1, 'only inspect local files'),
+      ]);
+      let unreadable = false;
+      const target =
+        path === 'M0'
+          ? {
+              ...session,
+              snapshotEvents: (): readonly SessionEventLike[] => {
+                if (unreadable) throw new Error('source unavailable');
+                return session.snapshotEvents();
+              },
+            }
+          : session;
+      const resolve = vi.fn(() =>
+        Promise.resolve({ value: 'unused-synthetic-credential' }),
+      );
+      const harness = credentialGate(
+        target,
+        'http://127.0.0.1:1/unused',
+        resolve,
+        path === 'OVER_BUDGET' ? 1000 : 20_000,
+        path === 'chat' ? 'chat' : 'decision',
+        () => {
+          unreadable = path === 'M0';
+        },
+      );
+      if (path === 'breaker')
+        harness.host.runtime.breakers.set(target.id, {
+          denials: Array.from({ length: 20 }, () => Date.now()),
+        });
+      const controller = new AbortController();
+      try {
+        const result = await harness.run(
+          `early-call-${path}`,
+          { command: 'echo local' },
+          controller.signal,
+        );
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).not.toHaveBeenCalled();
+        expect(result.kind).toBe(expectedKind);
+        const raw: unknown = harness.host
+          .currentAudit()
+          ?.getCall(`early-call-${path}`);
+        expect(JSON.stringify(raw)).not.toContain(
+          'credential could not be resolved',
+        );
+        expect(JSON.stringify(raw)).toContain(expectedCode);
+      } finally {
+        unreadable = false;
+        harness.host.currentAudit()?.close();
+      }
+    },
+  );
+  test.each(['missing', 'throw'] as const)(
+    '%s credential result is reused once and retains review-failure classification',
+    async (kind) => {
+      const resolve = vi.fn(async () => {
+        await Promise.resolve();
+        if (kind === 'throw')
+          throw new Error('never echo synthetic-secret-lookup-error');
+        return undefined;
+      });
+      const session = makeSession(`credential-${kind}`, [
+        human(1, 1, 'inspect files'),
+      ]);
+      const harness = credentialGate(
+        session,
+        'http://127.0.0.1:1/unused',
+        resolve,
+      );
+      try {
+        await harness.run(`credential-${kind}`, { command: 'echo inspect' });
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).toHaveBeenCalledTimes(1);
+        const row: unknown = harness.host
+          .currentAudit()
+          ?.getCall(`credential-${kind}`);
+        expect(JSON.stringify(row)).toContain('error-escalate');
+        expect(JSON.stringify(row)).not.toContain('snapshot_error');
+        expect(JSON.stringify(row)).not.toContain(
+          'synthetic-secret-lookup-error',
+        );
+      } finally {
+        harness.host.currentAudit()?.close();
+      }
+    },
+  );
+  test('cancellation during credential resolution sends and settles nothing', async () => {
+    let release: ((value: { value: string }) => void) | undefined;
+    let signalReady: () => void = () => {
+      throw new Error('resolver signal missing');
+    };
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const resolve = vi.fn(() => {
+      signalReady();
+      return new Promise<{ value: string }>((done) => {
+        release = done;
+      });
+    });
+    const session = makeSession('cancel-credential', [
+      human(1, 1, 'inspect files'),
+    ]);
+    const endpoint = await credentialEndpoint();
+    const harness = credentialGate(session, endpoint.url, resolve);
+    const controller = new AbortController();
+    try {
+      const pending = harness.run(
+        'cancel-in-resolver',
+        { command: 'echo inspect' },
+        controller.signal,
+      );
+      await ready;
+      controller.abort();
+      if (release === undefined) throw new Error('resolver not entered');
+      release({ value: 'cancelled-credential' });
+      expect((await pending).kind).toBe('cancel');
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(endpoint.received).toEqual([]);
+      expect(
+        harness.host.currentAudit()?.getCall('cancel-in-resolver'),
+      ).toBeNull();
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+});
+
+describe('concurrent credential review preparation', () => {
+  test('resolutions stay separate and final views use the captured source cutoff', async () => {
+    const first = 'synthetic-parallel-first';
+    const second = 'synthetic-parallel-second';
+    const releases: ((value: { value: string }) => void)[] = [];
+    let signalReady: () => void = () => {
+      throw new Error('missing signal');
+    };
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const resolve = vi.fn(
+      () =>
+        new Promise<{ value: string }>((done) => {
+          releases.push(done);
+          if (releases.length === 2) signalReady();
+        }),
+    );
+    const session = makeSession('parallel-credential-root', [
+      human(1, 1, 'inspect only 4 files'),
+      { type: 'turn/start', seq: 2, data: { turn: 1 } },
+    ]);
+    const endpoint = await credentialEndpoint();
+    const harness = credentialGate(session, endpoint.url, resolve);
+    try {
+      const a = harness.run('parallel-a', {
+        command: 'echo one',
+        token: first,
+      });
+      const b = harness.run('parallel-b', {
+        command: 'echo two',
+        token: second,
+      });
+      await ready;
+      session.events.push(
+        human(3, 3, 'future message after captured source cutoff'),
+      );
+      if (releases[0] === undefined || releases[1] === undefined)
+        throw new Error('missing concurrent resolutions');
+      releases[1]({ value: second });
+      releases[0]({ value: first });
+      await Promise.all([a, b]);
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(endpoint.received).toHaveLength(2);
+      expect(
+        new Set(endpoint.received.map((item) => item.authorization)),
+      ).toEqual(new Set([`Bearer ${first}`, `Bearer ${second}`]));
+      const bodies = JSON.stringify(endpoint.received.map((item) => item.body));
+      expect(bodies).not.toContain(first);
+      expect(bodies).not.toContain(second);
+      expect(bodies).not.toContain(
+        'future message after captured source cutoff',
+      );
+      const storedA = await persistedCall('parallel-a');
+      const storedB = await persistedCall('parallel-b');
+      const views = [storedA.snapshot, storedB.snapshot].map(
+        (view) => renderDecisionRequest(renderChatUser(view)).state,
+      );
+      const wireStates = endpoint.received.map((item) =>
+        isRecord(item.body) ? item.body['state'] : undefined,
+      );
+      expect(new Set(wireStates)).toEqual(new Set(views));
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
   });
 });

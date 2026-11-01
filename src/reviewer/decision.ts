@@ -26,7 +26,12 @@ import {
 } from './envelope.js';
 import { DECISION_PROTOCOL } from './contract.js';
 import type { DecisionRequest } from './prompt.js';
-import { redact } from './redact.js';
+import { CredentialRedactor } from './credential-redactor.js';
+import {
+  bindPreparedReviewRequest,
+  isPreparedReviewRequest,
+  reviewRequestCopy,
+} from './prepared-request.js';
 import { readDecisionAnswer, type ParsedAnswer } from './signals.js';
 import { normalizeUsage } from './usage.js';
 
@@ -34,7 +39,13 @@ interface CredentialsLike {
   resolve(ref: string): Promise<{ readonly value: string } | undefined>;
 }
 
+export type CredentialResolution =
+  | { readonly ok: true; readonly value: string | undefined }
+  | { readonly ok: false; readonly error: string };
+
 export interface DecisionTransportContext {
+  readonly credentialResolution?: CredentialResolution;
+  readonly redactor?: CredentialRedactor;
   readonly fetch: typeof fetch;
   readonly credentials: CredentialsLike | undefined;
   /**
@@ -99,6 +110,11 @@ export interface DecisionTransportResult {
 async function decisionCredential(
   ctx: DecisionTransportContext,
 ): Promise<string | undefined> {
+  if (ctx.credentialResolution !== undefined) {
+    if (!ctx.credentialResolution.ok)
+      throw new Error(ctx.credentialResolution.error);
+    return ctx.credentialResolution.value;
+  }
   if (ctx.decision.apiKeyRef.length === 0) return undefined;
   let credential: string | undefined;
   try {
@@ -119,6 +135,23 @@ async function decisionCredential(
   return credential;
 }
 
+/** Capture every outcome once, including missing/throwing lookups. Never serialize it. */
+export async function prepareDecisionCredential(
+  ctx: DecisionTransportContext,
+): Promise<CredentialResolution> {
+  try {
+    return { ok: true, value: await decisionCredential(ctx) };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'decision credential could not be resolved',
+    };
+  }
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -127,7 +160,7 @@ function record(value: unknown): value is Record<string, unknown> {
 function requestBody(
   decision: ArbiterConfig['reviewer']['decision'],
   request: DecisionRequest,
-): unknown {
+): Record<string, unknown> {
   // The flat body is the default because two of the three known entries take it;
   // only the generic Cloudflare entry wraps, and its pathname says so.
   return requestShapeOf(decision.url) === 'wrapped'
@@ -140,6 +173,20 @@ function requestBody(
         state: request.state,
         questions: request.questions,
       };
+}
+function retainedBody(
+  decision: ArbiterConfig['reviewer']['decision'],
+  request: DecisionRequest,
+  redactor: CredentialRedactor,
+): unknown {
+  const retained = reviewRequestCopy(request, redactor);
+  if (!record(retained) || typeof retained['state'] !== 'string')
+    throw new Error('prepared decision material could not be safely retained');
+  return requestBody(decision, {
+    ...request,
+    state: retained['state'],
+    questions: retained['questions'],
+  });
 }
 
 /** The record shared by every path that got as far as sending a request. */
@@ -205,9 +252,10 @@ function readResponse(options: {
   readonly base: ReturnType<typeof attemptBase>;
   readonly secrets: readonly string[];
   readonly readAnswer: (body: unknown) => ParsedAnswer;
+  readonly redactor: CredentialRedactor;
 }): DecisionTransportResult {
   const { response, base, secrets } = options;
-  const responseText = redact(options.text, secrets);
+  const responseText = options.redactor.text(options.text, 'decision');
   if (!response.ok) {
     let refusal: unknown;
     try {
@@ -219,12 +267,13 @@ function readResponse(options: {
       response.status,
       providerExplanation(refusal),
       secrets,
+      options.redactor,
     );
     return unreadableOutcome({
       base,
       responseText,
       error,
-      rawUsage: reportedUsage(refusal, secrets),
+      rawUsage: reportedUsage(refusal, secrets, options.redactor),
       failureKind: 'provider-refusal',
       secrets,
     });
@@ -244,7 +293,7 @@ function readResponse(options: {
       secrets,
     });
   }
-  const rawUsage = reportedUsage(parsedBody, secrets);
+  const rawUsage = reportedUsage(parsedBody, secrets, options.redactor);
   // A provider that answered with an error is not answering the question, even
   // when it also filled the answer fields.
   if (record(parsedBody) && parsedBody['success'] === false) {
@@ -255,6 +304,7 @@ function readResponse(options: {
         response.status,
         providerExplanation(parsedBody),
         secrets,
+        options.redactor,
       ),
       rawUsage,
       failureKind: 'provider-refusal',
@@ -318,7 +368,22 @@ export async function runDecisionTransport(
       secrets: credential === undefined ? [] : [credential],
     };
   }
+  const redactor = ctx.redactor ?? new CredentialRedactor(`decision:${callId}`);
+  redactor.addKnown(credential === undefined ? [] : [credential]);
+  if (!isPreparedReviewRequest(request, redactor))
+    request = {
+      ...request,
+      state: redactor.text(request.state),
+      questions: redactor.value(request.questions, true),
+    };
   const body = requestBody(ctx.decision, request);
+  bindPreparedReviewRequest(
+    body,
+    redactor,
+    () => retainedBody(ctx.decision, request, redactor),
+    request,
+    'decision',
+  );
   const timeout = AbortSignal.timeout(ctx.decision.timeoutMs);
   const signal = AbortSignal.any([ctx.signal, timeout]);
   const startedAt = Date.now();
@@ -342,6 +407,7 @@ export async function runDecisionTransport(
       base: { ...base, durationMs: Date.now() - startedAt },
       secrets: credential === undefined ? [] : [credential],
       readAnswer: ctx.readAnswer ?? readDecisionAnswer,
+      redactor,
     });
   } catch (caught) {
     const raw = caught instanceof Error ? caught.message : String(caught);
@@ -349,7 +415,7 @@ export async function runDecisionTransport(
     // the header the request used. This is the one place the credential is known,
     // so the known value is removed here rather than trusting the transport.
     const secrets = credential === undefined ? [] : [credential];
-    const message = redact(raw, secrets);
+    const message = redactor.text(raw);
     return {
       attempts: [
         {

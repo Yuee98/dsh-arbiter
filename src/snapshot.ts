@@ -37,10 +37,20 @@ import {
   missingLines,
   NO_TRIMS,
 } from './snapshot/completeness.js';
-import { guidanceMaterials, readProjectRules } from './snapshot/guidance.js';
+import { guidanceMaterials } from './snapshot/guidance.js';
+import type { readProjectRules } from './snapshot/guidance.js';
+import type { readSessionLog } from './snapshot/log.js';
 import { currentTurnOf, toolWindow } from './snapshot/window.js';
-import { readSessionLog } from './snapshot/log.js';
+import {
+  captureSnapshotSources,
+  redactSnapshotSources,
+  type SnapshotSources,
+} from './snapshot/sources.js';
+import { redactSnapshot, bindSnapshotRedactor } from './snapshot/redaction.js';
+import { workflowRedactor } from './snapshot/workflow.js';
+import type { CredentialRedactor } from './reviewer/credential-redactor.js';
 import { truncateSnapshot } from './snapshot/budget.js';
+import { redactCompletenessInput } from './snapshot/material-redaction.js';
 export type {
   SessionEventLike,
   SessionLike,
@@ -282,18 +292,23 @@ interface SnapshotParts {
  * Kept apart from `buildReviewSnapshot` so the budget step has one obvious input:
  * the assembled material and the description of what it could not include.
  */
-async function assembleSnapshot(
+function assembleSnapshot(
   options: SnapshotOptions,
-): Promise<SnapshotParts> {
+  sources: SnapshotSources,
+  redactor: CredentialRedactor,
+): SnapshotParts {
   const session = options.agent.session;
   const parentId = session.header?.parentSession;
   const contextConfig = options.config.context;
-  const log = readSessionLog(session);
+  const log = sources.log;
   const evidence = assembleEvidence(log, {
     session,
     parentId,
     sessions: options.sessions,
     contextConfig,
+    ...(sources.parentLog === undefined
+      ? {}
+      : { parentLog: sources.parentLog }),
   });
   const identity = currentTurnOf(log, options.callId, options.turn ?? null);
   const window = toolWindow(log, {
@@ -314,11 +329,12 @@ async function assembleSnapshot(
   // that can still report it.
   const truncated =
     historyWindowOf.truncated || history.windowTruncated || window.truncated;
-  const projectRules = await readProjectRules(
-    options.cwd,
-    contextConfig.projectRules,
+  const projectRules = sources.project;
+  const guidance = guidanceMaterials(
+    contextConfig.customRules,
+    projectRules,
+    redactor,
   );
-  const guidance = guidanceMaterials(contextConfig.customRules, projectRules);
   const material = describeMaterial({
     log,
     evidence,
@@ -343,7 +359,7 @@ async function assembleSnapshot(
   const completeness = buildCompleteness({ ...material, trimmed: NO_TRIMS });
   const base: Omit<ReviewSnapshot, 'budget'> = {
     version: 1,
-    createdAt: Date.now(),
+    createdAt: sources.createdAt,
     configRevision: options.configRevision,
     callId: options.callId,
     sessionId: session.id ?? 'unknown',
@@ -370,23 +386,49 @@ async function assembleSnapshot(
     completeness,
     missing: missingLines(completeness),
   };
-  return { base, material };
+  // Budget candidates rebuild diagnostics, so their inputs must share the same
+  // completed knowledge and safe text as the snapshot they will overwrite.
+  redactor.discover(material);
+  const safeBase = redactSnapshot(base, redactor);
+  return {
+    base: safeBase,
+    material: redactCompletenessInput(material, redactor),
+  };
+}
+
+/** Capture once; the caller may finalize after resolving its actual credential. */
+export async function prepareReviewSnapshot(
+  options: SnapshotOptions,
+  workflow?: CredentialRedactor,
+): Promise<{
+  readonly bundle: BuiltSnapshot;
+  readonly rebuild: (known?: readonly string[]) => BuiltSnapshot;
+}> {
+  const sources = await captureSnapshotSources(options);
+  const context =
+    workflow ?? workflowRedactor(options.agent.session, options.sessions);
+  const rebuild = (known: readonly string[] = []): BuiltSnapshot => {
+    context.addKnown(known);
+    const redactor = context.fork();
+    const cleaned = redactSnapshotSources(sources, options, redactor);
+    const { base, material } = assembleSnapshot(options, cleaned, redactor);
+    const requested = truncateSnapshot(
+      base,
+      options.config.context.maxInputTokens,
+      material,
+    );
+    bindSnapshotRedactor(requested.snapshot, redactor);
+    return {
+      ...requested,
+      estimatedInputTokens: requested.snapshot.budget.estimatedInputTokens,
+    };
+  };
+  return { bundle: rebuild(), rebuild };
 }
 
 /** Build the immutable snapshot, prompt text and token estimate for one review. */
 export async function buildReviewSnapshot(
   options: SnapshotOptions,
 ): Promise<BuiltSnapshot> {
-  const { base, material } = await assembleSnapshot(options);
-  const requested = truncateSnapshot(
-    base,
-    options.config.context.maxInputTokens,
-    material,
-  );
-  return {
-    snapshot: requested.snapshot,
-    system: requested.system,
-    user: requested.user,
-    estimatedInputTokens: requested.snapshot.budget.estimatedInputTokens,
-  };
+  return (await prepareReviewSnapshot(options)).bundle;
 }

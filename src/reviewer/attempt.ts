@@ -10,7 +10,12 @@
 
 import type { UsageNormalized } from './usage.js';
 import { normalizeUsage } from './usage.js';
-import { redact, redactAuthHeaders, redactValue } from './redact.js';
+import { CredentialRedactor } from './credential-redactor.js';
+import {
+  isPreparedReviewRequest,
+  reviewRequestCopy,
+  preparedScoreMode,
+} from './prepared-request.js';
 
 /** The two backends one review can run on. */
 export type ReviewerBackend = 'chat' | 'decision';
@@ -90,21 +95,29 @@ export function attemptIdOf(callId: string, attempt: number): string {
 export function maskAttempt(
   attempt: ReviewAttempt,
   secrets: readonly string[],
+  context?: CredentialRedactor,
 ): ReviewAttempt {
-  const maskedRaw = redactValue(attempt.rawUsage, secrets);
+  const redactor =
+    context ?? new CredentialRedactor(`review:${attempt.callId}`);
+  redactor.addKnown(secrets);
+  const scores = preparedScoreMode(attempt.request, redactor, attempt.backend);
+  if (!isPreparedReviewRequest(attempt.request, redactor))
+    redactor.discover(attempt.request, true);
+  for (const material of [attempt.parsed, attempt.responseText])
+    redactor.discover(material, scores);
+  redactor.discover(attempt.error);
+  redactor.discover(attempt.rawUsage);
+  const maskedRaw = redactor.value(attempt.rawUsage);
   return {
     ...attempt,
     failureKind: attempt.failureKind,
-    request: redactValue(attempt.request, secrets),
-    parsed: redactValue(attempt.parsed, secrets),
+    request: reviewRequestCopy(attempt.request, redactor),
+    parsed: redactor.value(attempt.parsed, scores),
     responseText:
       attempt.responseText === null
         ? null
-        : redact(redactAuthHeaders(attempt.responseText), secrets),
-    error:
-      attempt.error === null
-        ? null
-        : redact(redactAuthHeaders(attempt.error), secrets),
+        : redactor.text(attempt.responseText, scores),
+    error: attempt.error === null ? null : redactor.text(attempt.error),
     rawUsage: maskedRaw,
     // Re-normalized from the masked payload rather than masked field by field:
     // the mapping is the production one, so a masked record cannot disagree with

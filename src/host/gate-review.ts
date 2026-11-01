@@ -1,3 +1,6 @@
+import type { SnapshotBundle } from './call-snapshot.js';
+import { prepareDecisionCredential } from '../reviewer/decision.js';
+import type { ReviewRequest } from '../reviewer/service.js';
 /**
  * Running one review through the shared service.
  *
@@ -158,6 +161,78 @@ export function reviewedOf(
   };
 }
 
+/** Resolve the selected decision credential once, after normal pre-request exits. */
+export async function prepareCallReviewer(
+  host: HostEnvironment,
+  call: CallContext,
+  llm: LlmLike,
+): Promise<ReviewRequest['backend']> {
+  const reviewer = host.runtime.config.reviewer;
+  if (reviewer.type === 'chat')
+    return {
+      kind: 'chat',
+      transport: {
+        llm,
+        session: call.session,
+        chat: reviewer.chat,
+        signal: call.exec.signal,
+      },
+    };
+  const transport = {
+    fetch: globalThis.fetch,
+    credentials: host.services.credentials,
+    decision: reviewer.decision,
+    signal: call.exec.signal,
+  };
+  const credentialResolution = await prepareDecisionCredential(transport);
+  return {
+    kind: 'decision',
+    transport: { ...transport, credentialResolution },
+  };
+}
+
+/** Finalize from captured sources; a credential error stays a transport outcome. */
+export async function finalizeCallReview(
+  host: HostEnvironment,
+  call: CallContext,
+  llm: LlmLike,
+  preparation: SnapshotBundle,
+): Promise<{
+  readonly backend: ReviewRequest['backend'];
+  readonly bundle: BuiltSnapshot | null;
+  readonly prepareError: string | null;
+}> {
+  const backend = await prepareCallReviewer(host, call, llm);
+  if (call.exec.signal.aborted)
+    return { backend, bundle: preparation.bundle, prepareError: null };
+  const resolution =
+    backend.kind === 'decision'
+      ? backend.transport.credentialResolution
+      : undefined;
+  const known =
+    resolution?.ok === true &&
+    resolution.value !== undefined &&
+    resolution.value.length > 0
+      ? [resolution.value]
+      : [];
+  // Chat and failed/missing credential resolution add no material. Keep their
+  // frozen request instead of paying for a second full budget/token pass.
+  if (known.length === 0)
+    return { backend, bundle: preparation.bundle, prepareError: null };
+  try {
+    return { backend, bundle: preparation.rebuild(known), prepareError: null };
+  } catch (error) {
+    return {
+      backend,
+      bundle: null,
+      prepareError:
+        error instanceof Error
+          ? error.message
+          : 'credential material preparation failed',
+    };
+  }
+}
+
 /**
  * Run one review through the shared service.
  *
@@ -174,43 +249,18 @@ export async function runReview(
   call: CallContext,
   llm: LlmLike,
   bundle: BuiltSnapshot,
+  backend?: ReviewRequest['backend'],
 ): Promise<Reviewed> {
   const { lifecycle } = host;
-  const reviewer = host.runtime.config.reviewer;
   const sessionId = call.session.id ?? 'unknown';
   lifecycle('review/start', { callId: call.exec.callId, sessionId });
   try {
-    const result = await review(
-      reviewer.type === 'chat'
-        ? {
-            snapshot: bundle.snapshot,
-            callId: call.exec.callId,
-            signal: call.exec.signal,
-            backend: {
-              kind: 'chat',
-              transport: {
-                llm,
-                session: call.session,
-                chat: reviewer.chat,
-                signal: call.exec.signal,
-              },
-            },
-          }
-        : {
-            snapshot: bundle.snapshot,
-            callId: call.exec.callId,
-            signal: call.exec.signal,
-            backend: {
-              kind: 'decision',
-              transport: {
-                fetch: globalThis.fetch,
-                credentials: host.services.credentials,
-                decision: reviewer.decision,
-                signal: call.exec.signal,
-              },
-            },
-          },
-    );
+    const result = await review({
+      snapshot: bundle.snapshot,
+      callId: call.exec.callId,
+      signal: call.exec.signal,
+      backend: backend ?? (await prepareCallReviewer(host, call, llm)),
+    });
     lifecycle(
       result.outcome.status === 'review-failure'
         ? 'review/failed'

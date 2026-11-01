@@ -1,3 +1,4 @@
+import type { CredentialRedactor } from './credential-redactor.js';
 /**
  * The decision transport's mechanics, shared by both reviewer paths.
  *
@@ -91,13 +92,14 @@ export function failureText(
   status: number,
   explanation: string | null,
   secrets: readonly string[],
+  redactor?: CredentialRedactor,
 ): string {
   const base = `HTTP ${String(status)}`;
   if (explanation === null) return base;
   // Mask before bounding: truncating first can cut a credential in half, and a
   // half is no longer an exact-value match, so the visible prefix would survive
   // the mask that was supposed to remove it.
-  const masked = redact(explanation, secrets);
+  const masked = redactor?.text(explanation) ?? redact(explanation, secrets);
   const bounded =
     masked.length > MAX_EXPLANATION
       ? `${masked.slice(0, MAX_EXPLANATION)}…`
@@ -116,12 +118,13 @@ export function failureText(
 export function reportedUsage(
   parsed: unknown,
   secrets: readonly string[],
+  redactor?: CredentialRedactor,
 ): unknown {
   if (!record(parsed)) return null;
   const payload = record(parsed['result']) ? parsed['result'] : parsed;
   const usage = payload['usage'];
   if (usage === undefined) return null;
-  return redactValue(usage, secrets);
+  return redactor?.value(usage) ?? redactValue(usage, secrets);
 }
 
 /**

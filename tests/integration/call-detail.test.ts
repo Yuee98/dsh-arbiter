@@ -430,7 +430,7 @@ describe('full audit detail', () => {
     expect(missingOf(after)).not.toContain('execution-not-observed');
   });
 
-  test('shows every attempt and preserves original tool arguments', async () => {
+  test('shows redacted audit copies while preserving execution-owned arguments', async () => {
     const harness = startHarness();
     const audit = harness.host.currentAudit();
     if (audit === null) throw new Error('the audit store did not start');
@@ -495,19 +495,23 @@ describe('full audit detail', () => {
     await persisted(harness.host, 'with-attempt');
 
     const detail = await detailOf(harness.host, 'with-attempt');
-    // The user's own command is original evidence and is shown as stored: a
-    // value inside a tool argument is not a Reviewer transport credential.
+    // The audit copy follows the same credential policy as outgoing material.
+    // The caller-owned execution arguments are retained by their original owner.
     const argumentsValue = JSON.stringify(
       fieldOf(fieldOf(detail, 'raw'), 'arguments'),
     );
-    expect(argumentsValue).toContain('top-secret');
+    expect(argumentsValue).not.toContain('top-secret');
+    expect(argumentsValue).toContain('[redacted:v1:');
+    expect(JSON.stringify(record.arguments)).toContain('top-secret');
     const attempts = listField(fieldOf(detail, 'raw'), 'modelAttempts');
-    // The transport block is removed; the reviewed content is not rewritten.
+    // Both transport echoes and reviewed material are safe audit copies.
     const request = fieldOf(attempts[0], 'request');
     expect(JSON.stringify(fieldOf(request, 'headers'))).not.toContain(
       'top-secret',
     );
-    expect(JSON.stringify(fieldOf(request, 'state'))).toContain('top-secret');
+    expect(JSON.stringify(fieldOf(request, 'state'))).not.toContain(
+      'top-secret',
+    );
     expect(attempts).toHaveLength(1);
     // The model's own answer text is still shown, with only the credential masked.
     expect(stringField(attempts[0], 'responseText')).toContain('echoed');

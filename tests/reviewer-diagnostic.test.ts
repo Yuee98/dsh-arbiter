@@ -478,7 +478,7 @@ describe('diagnostic material boundary', () => {
     });
     const material = JSON.stringify(result);
     expect(material).not.toContain(secret);
-    expect(material).toContain('[redacted]');
+    expect(material).toContain('[redacted:v1:');
     expect(result.status).toBe('failed');
     if (result.status !== 'failed') throw new Error('expected a failure');
     expect(result.failure).toBe('unavailable');
@@ -531,7 +531,7 @@ describe('diagnostic material boundary', () => {
     // The echoed secret is masked; the never-sent rotation value is not a
     // credential this run handled.
     expect(material).not.toContain(first);
-    expect(material).toContain('[redacted]');
+    expect(material).toContain('[redacted:v1:');
   });
 
   test('a chat provider echoing an authorization header cannot publish it', async () => {
@@ -559,7 +559,7 @@ describe('diagnostic material boundary', () => {
     });
     const material = JSON.stringify(result);
     expect(material).not.toContain('sk-header-secret');
-    expect(material).toContain('[redacted]');
+    expect(material).toContain('[redacted:v1:');
   });
 
   test('a chat provider echoing a quoted JSON authorization field is masked', async () => {
@@ -589,7 +589,7 @@ describe('diagnostic material boundary', () => {
     expect(material).not.toContain('sk-json-secret');
     expect(material).not.toContain('sk-other');
     expect(material).not.toContain('c2stYmFzaWM=');
-    expect(material).toContain('[redacted]');
+    expect(material).toContain('[redacted:v1:');
   });
 
   test.each([
@@ -625,7 +625,7 @@ describe('diagnostic material boundary', () => {
     });
     const material = JSON.stringify(result);
     expect(material).not.toContain(secret);
-    expect(material).toContain('[redacted]');
+    expect(material).toContain('[redacted:v1:');
   });
 
   test('masking an auth header keeps the surrounding failure text readable', async () => {

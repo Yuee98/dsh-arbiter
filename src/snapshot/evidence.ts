@@ -18,6 +18,7 @@
 import type { ContextCheckpoint, EvidenceItem } from '../types.js';
 import type { SessionEventLike } from './types.js';
 import type { SessionLog } from './log.js';
+import { sourceContentText as messageText } from './source-redaction.js';
 
 const EVIDENCE_TEXT_LIMIT = 4_000;
 const CHECKPOINT_TEXT_LIMIT = 2_000;
@@ -31,19 +32,6 @@ const SOURCE_PRIORITY = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function messageText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .flatMap((block) => {
-      if (!isRecord(block)) return [];
-      return block['type'] === 'text' && typeof block['text'] === 'string'
-        ? [block['text']]
-        : [];
-    })
-    .join('\n');
 }
 
 function eventTs(event: SessionEventLike): number {

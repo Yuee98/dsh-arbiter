@@ -89,6 +89,8 @@ export interface CompletenessInput {
     readonly enabled: boolean;
     readonly present: boolean;
     readonly missing: string | null;
+    /** Source classification retained when diagnostic text is sanitized. */
+    readonly unreadable?: boolean;
   };
   readonly sessionRecordGap: string | null;
   readonly historyGap: readonly string[];
@@ -256,7 +258,9 @@ function guidanceItems(input: CompletenessInput): MaterialGapItem[] {
   if (input.projectRules.missing !== null) {
     // A file that exists but cannot be read is material that should have been
     // available; an enabled-but-absent file is a source the user never authored.
-    const unreadable = input.projectRules.missing.includes('could not be read');
+    const unreadable =
+      input.projectRules.unreadable ??
+      input.projectRules.missing.includes('could not be read');
     out.push(
       item(
         'project-rules',

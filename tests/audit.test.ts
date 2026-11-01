@@ -867,7 +867,7 @@ describe('credential boundary in stored material', () => {
     // Each column is stored independently, so the whole row is checked.
     const stored = JSON.stringify(rows);
     expect(stored).not.toContain(sentinel);
-    expect(stored).toContain('[redacted]');
+    expect(stored).toContain('[redacted:v1:');
     db.close();
 
     // A cold read is the same guarantee: the three columns are readable again
@@ -880,7 +880,7 @@ describe('credential boundary in stored material', () => {
     expect(recordField(attempt, 'usage')).not.toBeNull();
     const reread = JSON.stringify(detail);
     expect(reread).not.toContain(sentinel);
-    expect(reread).toContain('[redacted]');
+    expect(reread).toContain('[redacted:v1:');
     reopened.close();
   });
 
@@ -3718,5 +3718,223 @@ describe('backward reads against an insertion', () => {
     expect(reread.total).toBe(5);
     expect(reread.newer).toBe(0);
     store.close();
+  });
+});
+
+describe('shared credential material audit copies', () => {
+  test('schema literals, standalone calls, stages and later unlabelled echoes share identities without touching inputs', async () => {
+    const { store } = await makeStore();
+    const secret = 'synthetic-schema-password';
+    const different = 'synthetic-schema-token';
+    const schema = {
+      type: 'object',
+      properties: {
+        password: { type: 'string', default: secret },
+        token: { type: 'string', examples: [different], enum: [different] },
+        count: { type: 'integer', default: 4 },
+        path: { type: 'string', default: '/tmp/key-file' },
+      },
+    };
+    const first = record({
+      callId: 'credential-first',
+      result: 'review-allow',
+      argumentsSchema: schema,
+      arguments: {
+        password: secret,
+        token: different,
+        recipient: 'support@example.test',
+        count: 4,
+        path: '/tmp/key-file',
+      },
+      reason: `only send 4 files to support@example.test; ${secret}`,
+      trace: [
+        { stage: 'rule', result: 'allow', at: 1, reason: `echo ${different}` },
+      ],
+      effect: { writes: [`/tmp/key-file ${secret}`] },
+    });
+    store.enqueue(first);
+    await store.flush();
+    store.enqueue(
+      record({
+        callId: 'credential-later',
+        result: 'review-deny',
+        arguments: { command: 'echo no new credentials' },
+        reason: `request rejected: ${secret}; ${different}`,
+      }),
+    );
+    await store.flush();
+    const db = new DatabaseSync(store.databasePath);
+    try {
+      const columns = db
+        .prepare(
+          'SELECT arguments, arguments_schema, reason, trace, effect FROM calls WHERE call_id = ?',
+        )
+        .get('credential-first');
+      const later = db
+        .prepare('SELECT reason FROM calls WHERE call_id = ?')
+        .get('credential-later');
+      const serialized = JSON.stringify([
+        columns,
+        later,
+        db.prepare('SELECT reason FROM stages').all(),
+      ]);
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain(different);
+      expect(serialized).toContain('/tmp/key-file');
+      expect(serialized).toContain('support@example.test');
+      const markers =
+        serialized.match(/\[redacted:v1:(?:password|token):[a-f0-9]{64}\]/gu) ??
+        [];
+      expect(new Set(markers).size).toBe(2);
+      expect(JSON.stringify(later)).toContain(markers[0] ?? 'missing-marker');
+      const schemaRow = stringField(columns, 'arguments_schema');
+      const decoded: unknown = JSON.parse(schemaRow);
+      const passwordMarker: unknown = expect.stringContaining(
+        '[redacted:v1:password:',
+      );
+      const tokenMarker: unknown = expect.stringContaining(
+        '[redacted:v1:token:',
+      );
+      expect(decoded).toMatchObject({
+        type: 'object',
+        properties: {
+          password: {
+            type: 'string',
+            default: passwordMarker,
+          },
+          token: {
+            type: 'string',
+            examples: [tokenMarker],
+          },
+          count: { type: 'integer', default: 4 },
+        },
+      });
+      expect(schema.properties.password.default).toBe(secret);
+      expect(first.arguments).toMatchObject({ password: secret, count: 4 });
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
+});
+
+describe('schema discovery precedes every durable projection', () => {
+  test.each([
+    'description-first',
+    'description-last',
+    'sibling-first',
+    'arguments-first',
+  ] as const)(
+    '%s cannot leave an earlier credential echo in raw SQLite',
+    async (order) => {
+      const { store } = await makeStore();
+      const secret = 'synthetic-schema-order-regression';
+      const sensitive =
+        order === 'description-last'
+          ? {
+              default: secret,
+              description: `Previous value was ${secret}`,
+              type: 'string',
+            }
+          : {
+              type: 'string',
+              description: `Previous value was ${secret}`,
+              default: secret,
+            };
+      const schema = {
+        type: 'object',
+        properties: {
+          note: { type: 'string', default: secret },
+          ...(order === 'arguments-first' ? {} : { password: sensitive }),
+          count: { type: 'integer', default: 4 },
+        },
+      };
+      const source = record({
+        callId: `schema-order-${order}`,
+        result: 'review-allow',
+        argumentsSchema: schema,
+        arguments:
+          order === 'arguments-first'
+            ? { password: secret }
+            : { command: 'echo local' },
+      });
+      const original = JSON.stringify(source);
+      store.enqueue(source);
+      await store.flush();
+      const db = new DatabaseSync(store.databasePath);
+      try {
+        const row = db
+          .prepare(
+            'SELECT arguments_schema, arguments FROM calls WHERE call_id = ?',
+          )
+          .get(source.callId);
+        expect(row).toBeDefined();
+        expect(JSON.stringify(row)).not.toContain(secret);
+        const encoded = stringField(row, 'arguments_schema');
+        expect(encoded).toContain('[redacted:v1:');
+        expect(JSON.parse(encoded)).toMatchObject({
+          type: 'object',
+          properties: { count: { type: 'integer', default: 4 } },
+        });
+        expect(JSON.stringify(source)).toBe(original);
+      } finally {
+        db.close();
+        store.close();
+      }
+    },
+  );
+});
+
+describe('schema protocol vocabulary is separate from literal credential material', () => {
+  test('type and string remain schema grammar but matching default data is masked in raw SQLite', async () => {
+    const { store } = await makeStore();
+    const schema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string', default: 'string' },
+        metadata: { default: { type: 'string' } },
+        count: { type: 'integer', default: 4 },
+      },
+      required: ['path'],
+    };
+    const original = JSON.stringify(schema);
+    store.enqueue(
+      record({
+        callId: 'schema-vocabulary',
+        result: 'review-allow',
+        arguments: { password: 'string', token: 'type' },
+        argumentsSchema: schema,
+      }),
+    );
+    await store.flush();
+    const db = new DatabaseSync(store.databasePath);
+    try {
+      const row = db
+        .prepare('SELECT arguments_schema FROM calls WHERE call_id = ?')
+        .get('schema-vocabulary');
+      const encoded = stringField(row, 'arguments_schema');
+      const hidden: unknown = expect.stringContaining('[redacted:v1:');
+      const decoded: unknown = JSON.parse(encoded);
+      expect(decoded).toMatchObject({
+        type: 'object',
+        properties: {
+          path: { type: 'string', default: hidden },
+          count: { type: 'integer', default: 4 },
+        },
+        required: ['path'],
+      });
+      if (decoded === null || typeof decoded !== 'object')
+        throw new Error('schema object missing');
+      const properties: unknown = Reflect.get(decoded, 'properties');
+      if (properties === null || typeof properties !== 'object')
+        throw new Error('schema properties missing');
+      const metadata: unknown = Reflect.get(properties, 'metadata');
+      expect(JSON.stringify(metadata)).not.toContain('"string"');
+      expect(JSON.stringify(metadata)).not.toContain('"type"');
+      expect(JSON.stringify(schema)).toBe(original);
+    } finally {
+      db.close();
+      store.close();
+    }
   });
 });
