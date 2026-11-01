@@ -27,8 +27,17 @@ function textBlock(
 }
 
 function resultString(value: string, depth: number): unknown {
-  if (/^data:(?:image|audio|video)\//iu.test(value))
-    return { type: 'media-omitted', note: 'inline media body not provided' };
+  const inline = /^data:([^;,]*)([^,]*),/iu.exec(value);
+  if (
+    inline !== null &&
+    (/;base64(?:;|$)/iu.test(inline[2] ?? '') ||
+      (inline[1] !== '' && mediaType({ mimeType: inline[1] }) !== null))
+  )
+    return {
+      type: inline[1] || 'media-omitted',
+      state: 'omitted',
+      note: 'inline media body not provided',
+    };
   const parsed = eventJson(value);
   if (!eventRecord(parsed) && !Array.isArray(parsed)) return value;
   const projected = resultContent(parsed, depth + 1);
@@ -81,6 +90,14 @@ function resultArray(value: readonly unknown[], depth: number): unknown[] {
   return result;
 }
 
+function encodedBody(value: Record<string, unknown>): boolean {
+  return (
+    typeof value['encoding'] === 'string' &&
+    /^(?:base64|base64url|binary)$/iu.test(value['encoding']) &&
+    (typeof value['data'] === 'string' || Array.isArray(value['data']))
+  );
+}
+
 function mediaType(value: Record<string, unknown>): string | null {
   const type = value['type'];
   const mime =
@@ -95,6 +112,7 @@ function mediaType(value: Record<string, unknown>): string | null {
     !/^(?:text\/|application\/(?:[\w.+-]+\+)?(?:json|xml)(?:;|$))/iu.test(mime)
   )
     return mime;
+  if (encodedBody(value)) return 'binary';
   return typeof type === 'string' &&
     /^(?:image|image_url|input_image|audio|input_audio|video|file|attachment|resource|resource_link)$/u.test(
       type,

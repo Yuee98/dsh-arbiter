@@ -483,6 +483,41 @@ describe('source read protections and isolation', () => {
 
 describe('result facts and whole-prefix snapshot integration', () => {
   test.each(['image/png', 'audio/mpeg', 'application/octet-stream'])(
+    'CW123-PR-B02 explicit data URI %s never expands its encoded body',
+    (type) => {
+      const body = resultBody({
+        content: { media: `data:${type};base64,DATA_URI_BINARY_SENTINEL` },
+      });
+      expect(JSON.stringify(body)).not.toContain('DATA_URI_BINARY_SENTINEL');
+      expect(JSON.stringify(body)).toContain('not provided');
+      expect(resultBody({ content: 'data:text/plain,ordinary text' })).toEqual({
+        state: 'present',
+        content: 'data:text/plain,ordinary text',
+      });
+    },
+  );
+  test.each(['base64', 'base64url', 'binary'])(
+    'CW123-PR-B02 explicitly declared %s data remains opaque without a MIME tag',
+    (encoding) => {
+      const body = resultBody({
+        content: {
+          encoding,
+          data: 'ENCODED_BINARY_SENTINEL',
+          reference: 'encoded-ref',
+        },
+      });
+      expect(JSON.stringify(body)).not.toContain('ENCODED_BINARY_SENTINEL');
+      expect(JSON.stringify(body)).toContain('encoded-ref');
+      expect(JSON.stringify(body)).toContain('omitted');
+      expect(
+        resultBody({ content: { encoding: 'utf8', data: 'ordinary text' } }),
+      ).toMatchObject({
+        state: 'present',
+        content: { encoding: 'utf8', data: 'ordinary text' },
+      });
+    },
+  );
+  test.each(['image/png', 'audio/mpeg', 'application/octet-stream'])(
     'CW123-PR-B02 MIME type %s cannot expose encoded media through JSON or direct bodies',
     (type) => {
       const media = {

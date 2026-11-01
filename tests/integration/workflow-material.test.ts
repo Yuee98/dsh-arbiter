@@ -135,6 +135,13 @@ describe('real grouped workflow source -> production material', () => {
                       data: 'MIME_WIRE_BINARY_SENTINEL',
                       reference: 'audio-ref',
                     },
+                    {
+                      encoding: 'base64',
+                      password: 'base64',
+                      data: 'ENCODING_WIRE_BINARY_SENTINEL',
+                      reference: 'encoding-ref',
+                    },
+                    'data:application/octet-stream;base64,DATA_URI_WIRE_BINARY_SENTINEL',
                   ],
                 },
               }
@@ -152,7 +159,10 @@ describe('real grouped workflow source -> production material', () => {
       );
       const wire = JSON.stringify(material.request);
       expect(wire).not.toContain('MIME_WIRE_BINARY_SENTINEL');
+      expect(wire).not.toContain('ENCODING_WIRE_BINARY_SENTINEL');
+      expect(wire).not.toContain('DATA_URI_WIRE_BINARY_SENTINEL');
       expect(wire).toContain('audio-ref');
+      expect(wire).toContain('encoding-ref');
       expect(wire).toContain('omitted');
     },
   );

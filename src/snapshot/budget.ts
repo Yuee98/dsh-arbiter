@@ -412,11 +412,11 @@ interface RenderedRequest {
  * renderer changes.
  */
 function estimatePayloads(
-  chatSystem: string,
+  chatSystemTokens: number,
   chatUser: string,
 ): { readonly chat: number; readonly decision: number } {
   return {
-    chat: estimateTokenCount(chatSystem) + estimateTokenCount(chatUser),
+    chat: chatSystemTokens + estimateTokenCount(chatUser),
     decision: renderDecisionRequest(chatUser).estimatedInputTokens,
   };
 }
@@ -430,9 +430,11 @@ function estimatePayloads(
  */
 function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
   let snapshot = candidate;
-  let system = renderChatSystem();
+  const system = renderChatSystem();
+  // The system contract does not depend on budget writeback within this call.
+  const systemTokens = estimateTokenCount(system);
   let user = renderChatUser(snapshot);
-  let payloads = estimatePayloads(system, user);
+  let payloads = estimatePayloads(systemTokens, user);
   for (let round = 0; round < 5; round += 1) {
     const estimated = Math.max(payloads.chat, payloads.decision);
     const over = estimated > candidate.budget.maxInputTokens;
@@ -449,13 +451,11 @@ function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
         ],
       },
     };
-    const nextSystem = renderChatSystem();
     const nextUser = renderChatUser(withBudget);
-    const nextPayloads = estimatePayloads(nextSystem, nextUser);
+    const nextPayloads = estimatePayloads(systemTokens, nextUser);
     const stable =
       Math.max(nextPayloads.chat, nextPayloads.decision) === estimated;
     snapshot = withBudget;
-    system = nextSystem;
     user = nextUser;
     payloads = nextPayloads;
     if (stable) break;
@@ -464,8 +464,7 @@ function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
 }
 
 /**
- * Whether this state still exceeds the budget, judged on the **stabilized**
- * payload.
+ * Render the stabilized candidate used to decide whether this state fits.
  *
  * The budget block itself contains the estimate, so writing the number back
  * changes the rendered size. Comparing the provisional render (which carries
@@ -473,30 +472,29 @@ function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
  * that would turn a satisfiable request into a false preparation failure. This
  * measures exactly what `renderedSnapshot` would submit.
  */
-function overBudget(
-  base: Omit<ReviewSnapshot, 'budget'>,
-  state: BudgetState,
-  maxInputTokens: number,
-  material: Omit<CompletenessInput, 'trimmed'>,
-): boolean {
-  const rendered = renderedSnapshot(
-    candidateSnapshot(base, state, maxInputTokens, material),
-  );
-  return rendered.snapshot.budget.estimatedInputTokens > maxInputTokens;
-}
-
-function finishSnapshot(
+function renderCandidate(
   base: Omit<ReviewSnapshot, 'budget'>,
   state: BudgetState,
   maxInputTokens: number,
   material: Omit<CompletenessInput, 'trimmed'>,
 ): RenderedRequest {
-  const candidate = candidateSnapshot(base, state, maxInputTokens, material);
   return renderedSnapshot(
-    candidate.prefix === undefined
-      ? candidate
-      : { ...candidate, ...prefixCompatibility(candidate.prefix) },
+    candidateSnapshot(base, state, maxInputTokens, material),
   );
+}
+
+/** Preserve the measured final state; legacy projections usually change no wire text. */
+function finishSnapshot(rendered: RenderedRequest): RenderedRequest {
+  if (rendered.snapshot.prefix === undefined) return rendered;
+  const snapshot = {
+    ...rendered.snapshot,
+    ...prefixCompatibility(rendered.snapshot.prefix),
+  };
+  // Exact text equality, rather than an assumed renderer dependency, keeps the
+  // existing estimate valid. A future renderer using these fields is remeasured.
+  return renderChatUser(snapshot) === rendered.user
+    ? { ...rendered, snapshot }
+    : renderedSnapshot(snapshot);
 }
 
 /**
@@ -544,10 +542,10 @@ export function truncateSnapshot(
     // Enough halvings for the action to reach its minimum floor.
     64;
   for (let step = 0; step < maxSteps; step += 1) {
-    if (!overBudget(base, state, maxInputTokens, material)) {
-      return finishSnapshot(base, state, maxInputTokens, material);
-    }
-    if (!truncateNext(state)) break;
+    const rendered = renderCandidate(base, state, maxInputTokens, material);
+    if (rendered.snapshot.budget.estimatedInputTokens <= maxInputTokens)
+      return finishSnapshot(rendered);
+    if (!truncateNext(state)) return finishSnapshot(rendered);
   }
-  return finishSnapshot(base, state, maxInputTokens, material);
+  return finishSnapshot(renderCandidate(base, state, maxInputTokens, material));
 }
