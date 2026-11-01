@@ -58,7 +58,8 @@
           "kind": "message",
           "role": "user",
           "source": "parent-relay",
-          "content": "整理草稿。"
+          "content": "整理草稿。",
+          "senderSessionId": "parent"
         },
         {
           "eventId": "child-first",

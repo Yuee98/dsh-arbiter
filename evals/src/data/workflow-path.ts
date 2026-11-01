@@ -83,3 +83,21 @@ export function pendingOf(
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
 }
+
+/** A predecessor can continue along its own path or a reachable ancestor, never a sibling. */
+export function branchIsAncestor(
+  workflow: Workflow,
+  ancestor: string,
+  branchId: string,
+): boolean {
+  const seen = new Set<string>();
+  let current = branchId;
+  while (current !== ancestor && current !== 'main') {
+    if (seen.has(current)) throw new Error(`branch cycle at ${current}`);
+    seen.add(current);
+    const branch = workflow.branches?.find((item) => item.branchId === current);
+    if (branch === undefined) throw new Error(`unknown branch ${current}`);
+    current = branch.parentBranchId;
+  }
+  return current === ancestor;
+}

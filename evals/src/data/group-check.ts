@@ -1,4 +1,5 @@
 /** Checks spanning selected groups. No file outside that selection is opened here. */
+import { legalPairs, mixesProhibition, productSize } from './eligibility.js';
 import { inspectDataset } from './inspect.js';
 import type { CurrentVersions, Finding } from './inspect.js';
 import type { Checkers } from './schemas.js';
@@ -190,6 +191,28 @@ function labelProblems(
       message:
         'unresolved reference is neither scoring eligible nor human confirmed',
     });
+  if (mixesProhibition(value.target.allowed))
+    problems.push({
+      path,
+      message: 'authorization combines band 1 with other bands',
+    });
+  const pairs = legalPairs(value);
+  if (pairs === null && productSize(value.target.allowed) > 1)
+    problems.push({
+      path,
+      message:
+        'enumerate allowedPairs for widened score sets; never use a Cartesian product',
+    });
+  for (const pair of value.target.allowedPairs ?? pairs ?? []) {
+    if (
+      !(value.target.allowed.risk ?? []).includes(pair[0]) ||
+      !(value.target.allowed.authorization ?? []).includes(pair[1])
+    )
+      problems.push({
+        path,
+        message: `allowed pair ${String(pair[0])}/${String(pair[1])} is outside the allowed sets`,
+      });
+  }
   for (const id of value.supportingOpinionIds)
     if (!opinions.has(id))
       problems.push({ path, message: `unknown supporting opinion ${id}` });

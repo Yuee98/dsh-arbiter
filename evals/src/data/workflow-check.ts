@@ -1,8 +1,13 @@
 /** Identity, reference and actual-prefix validation for one root. */
+import {
+  checkPendingBoundary,
+  callSettlementProblems,
+} from './workflow-calls.js';
 import type { Finding } from './inspect.js';
 import type { Workflow, WorkflowEvent } from './group-types.js';
 import {
   branchOf,
+  branchIsAncestor,
   eventsOnPath,
   pendingOf,
   sessionPrefix,
@@ -145,6 +150,23 @@ function sessionProblems(workflow: Workflow, path: string): readonly Finding[] {
     }
   }
   workflow.events.forEach((event, index) => {
+    if (event.kind === 'message' && event.source === 'parent-relay') {
+      const parent = byId.get(event.sessionId)?.parentSessionId;
+      if (parent === undefined)
+        problems.push({
+          path: `${path}/events/${String(index)}`,
+          message: 'relay requires a direct parent session',
+        });
+      else if (event.senderSessionId !== parent)
+        problems.push({
+          path: `${path}/events/${String(index)}`,
+          message: 'relay sender must be the direct parent session',
+        });
+    } else if (event.kind === 'message' && event.senderSessionId !== undefined)
+      problems.push({
+        path: `${path}/events/${String(index)}`,
+        message: 'senderSessionId belongs only to parent-relay messages',
+      });
     if (!byId.has(event.sessionId))
       problems.push({
         path: `${path}/events/${String(index)}`,
@@ -193,6 +215,7 @@ function pointProblems(workflow: Workflow, path: string): readonly Finding[] {
         throw new Error(
           `pending call ${pending.callId} already has a result/settlement in this cutoff`,
         );
+      checkPendingBoundary(events, point, pending);
       if (
         session.parentSessionId !== undefined &&
         point.parentRead === undefined
@@ -225,6 +248,8 @@ function pointProblems(workflow: Workflow, path: string): readonly Finding[] {
         const target = points.get(previous);
         if (target === undefined)
           throw new Error(`unknown predecessor point ${previous}`);
+        if (!branchIsAncestor(workflow, branchOf(target), branchOf(point)))
+          throw new Error(`predecessor branch is not an ancestor: ${previous}`);
         if (target.sessionId === point.sessionId) {
           const previousPrefix = sessionPrefix(
             events,
@@ -325,7 +350,11 @@ export function checkWorkflow(
       });
   for (const branch of branches) {
     try {
-      problems.push(...pathProblems(eventsOnPath(workflow, branch), path));
+      const events = eventsOnPath(workflow, branch);
+      problems.push(
+        ...pathProblems(events, path),
+        ...callSettlementProblems(events, path),
+      );
     } catch (error) {
       problems.push({
         path: `${path}/branches`,

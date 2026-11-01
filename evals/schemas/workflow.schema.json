@@ -311,6 +311,9 @@
             "content": {
               "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
             },
+            "senderSessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
             "replyToAskId": {
               "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
             }

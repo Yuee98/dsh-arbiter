@@ -73,6 +73,7 @@ export type WorkflowEvent =
       readonly kind: 'message';
       readonly role: 'user' | 'assistant';
       readonly source: 'human' | 'agent' | 'parent-relay';
+      readonly senderSessionId?: string;
       readonly content: string;
       readonly replyToAskId?: string;
     })

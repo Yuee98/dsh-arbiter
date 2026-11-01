@@ -191,6 +191,7 @@ export function childWorkflow(): Workflow {
         kind: 'message',
         role: 'user',
         source: 'parent-relay',
+        senderSessionId: 'parent',
         content: '整理草稿。',
       },
       {
