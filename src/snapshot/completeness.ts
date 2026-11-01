@@ -31,7 +31,12 @@ import type {
   MaterialGap,
 } from '../review-contract/index.js';
 import type { MaterialCompleteness, MaterialGapItem } from '../types.js';
-import type { ProtectedOriginal } from './evidence.js';
+/** A required original/question the source could not supply. */
+interface ProtectedOriginal {
+  readonly source: 'session-human' | 'parent-human';
+  readonly reason: string;
+  readonly kind?: 'unreadable' | 'truncated';
+}
 
 /**
  * Truncation is reported, never promoted into a material failure.
@@ -51,6 +56,8 @@ import type { ProtectedOriginal } from './evidence.js';
 const TRUNCATION_BLOCKS = false;
 
 export interface CompletenessInput {
+  /** Observed source stops, distinct from token omissions and verdict windows. */
+  readonly sourceObservations?: readonly MaterialGapItem[];
   /**
    * Which segments the input budget had to trim.
    *
@@ -95,6 +102,7 @@ export interface CompletenessInput {
   readonly sessionRecordGap: string | null;
   readonly historyGap: readonly string[];
   readonly evidenceCount: number;
+  readonly evidenceKnownEmpty?: boolean;
   /** Calls an earlier turn contributed; dropped on purpose, never blocking. */
   readonly earlierTurnCalls: number;
   /** Why the tool window could not be attributed to one turn, or `null`. */
@@ -146,7 +154,7 @@ function sessionItems(input: CompletenessInput): MaterialGapItem[] {
         true,
       ),
     );
-  } else if (input.evidenceCount === 0) {
+  } else if (input.evidenceCount === 0 && input.evidenceKnownEmpty !== false) {
     // A readable session with nothing in it is a fact, not a loss: the review
     // can still score this call, and A2 is the honest authorization level.
     out.push(
@@ -166,8 +174,8 @@ function sessionItems(input: CompletenessInput): MaterialGapItem[] {
     out.push(
       item(
         drop.source,
-        'truncated',
-        `the configured evidence capacity cannot carry the newest ${drop.source} original, so a required authorization original was not submitted: ${drop.reason}`,
+        drop.kind ?? 'truncated',
+        `a required ${drop.source} original or its host-bound question was not submitted: ${drop.reason}`,
         true,
       ),
     );
@@ -377,6 +385,7 @@ export function buildCompleteness(
   input: CompletenessInput,
 ): MaterialCompleteness {
   const items = [
+    ...(input.sourceObservations ?? []),
     ...actionItems(input),
     ...sessionItems(input),
     ...parentItems(input),

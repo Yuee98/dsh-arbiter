@@ -155,13 +155,28 @@ export function renderCompactMaterial(
   snapshot: ReviewSnapshot,
   variant: ReviewVariant,
 ): string {
-  const parts = submissionParts(snapshot);
+  const parts = submissionParts(snapshot, variant.history);
   const audit = keepsAudit(variant.structure);
   return json({
     policy: compactPolicy(parts, audit),
     environment: compactEnvironment(parts, audit),
-    human_authorization: parts.authorization,
-    turn_tool_history: compactHistory(parts, variant.history),
+    ...(parts.prefix === undefined
+      ? {
+          human_authorization: parts.authorization,
+          turn_tool_history: compactHistory(parts, variant.history),
+        }
+      : {
+          ...(parts.prefix.parent === null
+            ? {}
+            : { parent_human_evidence: parts.prefix.parent }),
+          session_timeline: {
+            ...parts.prefix.local,
+            omissions: parts.prefix.omissions,
+          },
+          ...(variant.history === 'none'
+            ? { history_withheld: HISTORY_WITHHELD_NOTE }
+            : {}),
+        }),
     prior_verdicts: parts.prior,
     ...compactAction(parts),
     material_completeness: compactCompleteness(parts, audit),

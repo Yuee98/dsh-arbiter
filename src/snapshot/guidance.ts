@@ -202,9 +202,3 @@ export function projectRulesCopy(
     },
   };
 }
-export async function readProjectRules(
-  cwd: string,
-  config: ArbiterConfig['context']['projectRules'],
-): Promise<ProjectRulesResult> {
-  return projectRulesCopy(await readProjectRulesSource(cwd, config));
-}

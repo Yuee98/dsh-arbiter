@@ -74,6 +74,7 @@ afterEach(async () => {
 });
 
 interface StubSession {
+  readonly inheritedEventCount: number;
   readonly id: string;
   readonly header: {
     readonly id: string;
@@ -114,6 +115,7 @@ function makeSession(
   const events: SessionEventLike[] = [...log];
   return {
     id,
+    inheritedEventCount: 0,
     header: {
       id,
       cwd: process.cwd(),
@@ -716,6 +718,7 @@ describe('gate review input', () => {
     // Only the current turn's call is material; the earlier turn is an
     // ordinary exclusion, and the review still reached the model.
     expect(run.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo old"}',
       '{"command":"echo new"}',
     ]);
     expect(run.snapshot.completeness.status).not.toBe('insufficient');
@@ -1516,6 +1519,44 @@ describe('credential preparation at actual production boundaries', () => {
         `${'x'.repeat(3990)}${secret}\nOnly send 4 files to support@example.test`,
       ),
       { type: 'turn/start', seq: 2, data: { turn: 1 } },
+      {
+        type: 'tool/call',
+        seq: 3,
+        data: {
+          turn: 1,
+          callId: 'historical-result',
+          name: 'bash',
+          arguments: { command: 'echo old' },
+        },
+      },
+      {
+        type: 'tool/result',
+        seq: 4,
+        data: {
+          turn: 1,
+          message: {
+            source: { kind: 'tool', callId: 'historical-result' },
+            isError: false,
+            content: [
+              {
+                type: 'text',
+                channel: 'stdout',
+                text: JSON.stringify({
+                  echo: secret,
+                  count: 4,
+                  note: 'historical-result-text',
+                }),
+              },
+              { type: 'text', channel: 'stderr', text: secret },
+              {
+                type: 'image',
+                ref: '/tmp/' + secret + '.png',
+                data: 'RAW_BINARY_BODY_SENTINEL',
+              },
+            ],
+          },
+        },
+      },
     ];
     const session = makeSession('credential-root', events);
     const resolve = vi.fn(() =>
@@ -1544,7 +1585,15 @@ describe('credential preparation at actual production boundaries', () => {
       expect(JSON.stringify(wire)).not.toContain('synthetic-known-boundary');
       expect(JSON.stringify(wire)).toContain('support@example.test');
       expect(JSON.stringify(wire)).toContain('/tmp/key-document');
+      expect(JSON.stringify(wire)).toContain('historical-result-text');
+      expect(JSON.stringify(wire)).not.toContain('RAW_BINARY_BODY_SENTINEL');
       const stored = await persistedCall('credential-wire');
+      expect(
+        stored.snapshot.prefix?.local.events.some(
+          (event) =>
+            event.kind === 'result' && event.callId === 'historical-result',
+        ),
+      ).toBe(true);
       expect(wire).toMatchObject({
         state: renderDecisionRequest(renderChatUser(stored.snapshot)).state,
       });

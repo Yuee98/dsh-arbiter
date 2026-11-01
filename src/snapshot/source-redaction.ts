@@ -1,6 +1,6 @@
 /** Redact log material before the existing evidence/window readers impose caps. */
-import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import { structuredJson } from '../reviewer/credential-literals.js';
+import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import type { SessionLog } from './log.js';
 import type { SessionEventLike } from './types.js';
 import { copySourceBlock } from './content-redaction.js';
@@ -36,7 +36,10 @@ export function sourceContentText(content: unknown): string {
     })
     .join('\n');
 }
-function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
+export function redactSourceContent(
+  content: unknown,
+  redactor: CredentialRedactor,
+): unknown {
   redactor.validate(content);
   if (typeof content === 'string') return redactor.text(content);
   if (!Array.isArray(content)) return redactor.value(content);
@@ -74,7 +77,10 @@ function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
   }
   return result;
 }
-function discoverContent(content: unknown, redactor: CredentialRedactor): void {
+export function discoverSourceContent(
+  content: unknown,
+  redactor: CredentialRedactor,
+): void {
   redactor.validate(content);
   for (const group of textGroups(content)) redactor.discover(group.join(''));
   if (!Array.isArray(content)) {
@@ -100,9 +106,9 @@ export function discoverLog(
     const data = event.data;
     if (event.type === 'tool/call') redactor.discover(data['arguments']);
     if (data['content'] !== undefined)
-      discoverContent(data['content'], redactor);
+      discoverSourceContent(data['content'], redactor);
     if (record(data['message']))
-      discoverContent(data['message']['content'], redactor);
+      discoverSourceContent(data['message']['content'], redactor);
   }
 }
 export function redactLog(
@@ -131,13 +137,13 @@ export function redactLog(
           : { arguments: redactor.value(data['arguments']) }),
         ...(data['content'] === undefined
           ? {}
-          : { content: contentCopy(data['content'], redactor) }),
+          : { content: redactSourceContent(data['content'], redactor) }),
         ...(!record(message) || message['content'] === undefined
           ? {}
           : {
               message: {
                 ...message,
-                content: contentCopy(message['content'], redactor),
+                content: redactSourceContent(message['content'], redactor),
               },
             }),
       },

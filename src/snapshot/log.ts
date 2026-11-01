@@ -20,9 +20,20 @@ import type { SessionEventLike, SessionLike } from './types.js';
 
 /** Initial read plus one supplementary read; a third would be a retry loop. */
 const LOG_READ_ATTEMPTS = 2;
+/** Internal read protection, independent of prompt item settings. */
+export const SOURCE_EVENT_LIMIT = 16_384;
 
 /** How an event's turn was established. */
 export interface SessionLog {
+  readonly coverage?: {
+    readonly cutoff?: { readonly eventId: string; readonly seq: number } | null;
+    readonly protectedOriginalMissing?: string;
+    readonly compacted?: boolean;
+    readonly stopped: boolean;
+    readonly reason: string | null;
+    readonly fromSeq: number | null;
+    readonly access: 'range' | 'snapshot';
+  };
   readonly events: readonly SessionEventLike[];
   /** Events this session wrote itself; an inherited seed is excluded. */
   readonly own: readonly SessionEventLike[];
@@ -34,6 +45,68 @@ export interface SessionLog {
   /** Why the log could not be read, after the bounded retry. */
   readonly error: string | null;
   readonly attempts: number;
+}
+
+interface CapturedRange {
+  readonly events: readonly SessionEventLike[];
+  readonly own: readonly SessionEventLike[];
+  readonly coverage: NonNullable<SessionLog['coverage']>;
+}
+
+function validOffset(value: number | undefined): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0;
+}
+
+function captureRange(session: SessionLike): CapturedRange {
+  const end = session.seq;
+  const inherited = session.inheritedEventCount;
+  if (validOffset(end) && validOffset(inherited) && inherited <= end) {
+    const from = Math.max(inherited, end - SOURCE_EVENT_LIMIT);
+    const observed = session.snapshotEvents?.(from, end) ?? [];
+    const events = observed.filter(
+      (event) => event.seq >= from && event.seq < end,
+    );
+    return {
+      events,
+      own: events,
+      coverage: {
+        stopped: from > inherited,
+        reason:
+          from > inherited
+            ? 'source event read protection stopped before older events'
+            : null,
+        fromSeq: from,
+        access: 'range',
+      },
+    };
+  }
+  return captureSnapshot(session);
+}
+
+function captureSnapshot(session: SessionLike): CapturedRange {
+  const inherited = session.inheritedEventCount;
+  const events = session.snapshotEvents?.() ?? [];
+  const own = inheritedBoundary(session, events);
+  const uncertain =
+    session.header?.parentSession !== undefined &&
+    inherited === undefined &&
+    typeof session.ownEvents !== 'function';
+  return {
+    events: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
+    own: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
+    coverage: {
+      stopped: uncertain || own.length > SOURCE_EVENT_LIMIT,
+      reason: uncertain
+        ? 'the host did not identify the inherited seed boundary'
+        : own.length > SOURCE_EVENT_LIMIT
+          ? 'source event read protection stopped before older events'
+          : null,
+      fromSeq: uncertain
+        ? null
+        : (own.slice(-SOURCE_EVENT_LIMIT)[0]?.seq ?? null),
+      access: 'snapshot',
+    },
+  };
 }
 
 /** An unreadable log: nothing was observed, and that is not "empty". */
@@ -166,8 +239,7 @@ export function readSessionLog(
   }
   for (let attempt = 1; attempt <= LOG_READ_ATTEMPTS; attempt += 1) {
     try {
-      const events = session.snapshotEvents();
-      const own = inheritedBoundary(session, events);
+      const { events, own, coverage } = captureRange(session);
       return {
         events,
         own,
@@ -176,6 +248,7 @@ export function readSessionLog(
         readable: true,
         error: null,
         attempts: attempt,
+        coverage,
       };
     } catch (error) {
       if (attempt === LOG_READ_ATTEMPTS) {

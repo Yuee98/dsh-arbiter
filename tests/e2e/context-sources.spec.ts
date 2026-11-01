@@ -28,6 +28,10 @@ import { renderChatRequest } from '../../src/reviewer.js';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 interface HostSessions {
+  readonly createAssistantMessage: (input: {
+    source: { provider: string; model: string };
+    content: readonly { type: 'text'; text: string }[];
+  }) => unknown;
   readonly Session: {
     create(
       id: string,
@@ -376,7 +380,8 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
   if (
     host.Session === undefined ||
     llm.createUserMessage === undefined ||
-    llm.createToolResultMessage === undefined
+    llm.createToolResultMessage === undefined ||
+    llm.createAssistantMessage === undefined
   ) {
     throw new Error('pinned DSH session/llm exports are unavailable');
   }
@@ -596,17 +601,16 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
     );
     check(
       'V15',
-      'the current turn is the host turn, and earlier-turn tool calls are excluded',
+      'host turn attribution is retained and earlier-turn events remain visible',
       // The host wrote a real turn/end before turn 2, so the newest open turn is
       // this call's; the turn-1 call was a real tool/call with a result.
       snapshot.turn === 2 &&
         snapshot.context.length === 1 &&
-        !snapshot.context.some((call) =>
+        snapshot.context.some((call) =>
           call.arguments.includes('from the earlier turn'),
         ) &&
-        snapshot.completeness.items.some(
-          (item) => item.kind === 'unrelated' && !item.blocking,
-        ),
+        snapshot.prefix?.local.status.access === 'range' &&
+        !snapshot.completeness.items.some((item) => item.kind === 'unrelated'),
     );
     check(
       'V16',
@@ -672,6 +676,90 @@ test('real DSH sessions expose human originals, ask answers and compaction', asy
     );
 
     const request = renderChatRequest(snapshot);
+    const prefixSession = Session.create(
+      'prefix-native',
+      undefined,
+      hostHeader('prefix-native', workspace),
+    );
+    appendEvent(prefixSession, 'turn/start', { turn: 1 });
+    appendEvent(prefixSession, 'assistant/message', {
+      turn: 1,
+      step: 1,
+      message: llm.createAssistantMessage({
+        source: { provider: 'fixture', model: 'offline' },
+        content: [{ type: 'text', text: 'May I publish everything?' }],
+      }),
+      stream: [],
+    });
+    appendEvent(
+      prefixSession,
+      'user/message',
+      createUserMessage({
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: '可以' }],
+      }),
+    );
+    appendEvent(prefixSession, 'tool/call', {
+      turn: 1,
+      step: 1,
+      callId: 'native-old',
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'echo native' }),
+    });
+    appendEvent(prefixSession, 'tool/result', {
+      turn: 1,
+      step: 1,
+      message: createToolResultMessage({
+        callId: 'native-old',
+        isError: false,
+        content: [{ type: 'text', text: 'native observed output' }],
+      }),
+    });
+    appendEvent(prefixSession, 'tool/call', {
+      turn: 1,
+      step: 2,
+      callId: 'native-pending',
+      name: 'bash',
+      arguments: JSON.stringify({ command: 'echo pending' }),
+    });
+    appendEvent(
+      prefixSession,
+      'user/message',
+      createUserMessage({
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'NATIVE_FUTURE_SENTINEL' }],
+      }),
+    );
+    const prefixBuilt = await buildReviewSnapshot({
+      agent: { session: prefixSession },
+      tool: 'bash',
+      arguments: { command: 'echo pending' },
+      callId: 'native-pending',
+      cwd: workspace,
+      config: DEFAULT_CONFIG,
+      facts: null,
+      priorVerdicts: [],
+      sessionRecordGap: null,
+      configRevision: 'verify-prefix',
+    });
+    const nativeEvents = prefixBuilt.snapshot.prefix?.local.events ?? [];
+    check(
+      'V18',
+      'real host source IDs/order/cutoff preserve unbound short answers and observable results',
+      nativeEvents.map((entry) => entry.seq).join(',') === '1,2,3,4' &&
+        nativeEvents[0]?.kind === 'assistant' &&
+        nativeEvents[0].protected === false &&
+        nativeEvents[1]?.kind === 'human' &&
+        nativeEvents[1].binding === undefined &&
+        nativeEvents[1].protected === true &&
+        nativeEvents[1].messageId !== undefined &&
+        nativeEvents[3]?.kind === 'result' &&
+        nativeEvents[3].call?.eventId ===
+          JSON.stringify(['prefix-native', 3]) &&
+        prefixBuilt.snapshot.prefix?.local.status.cutoff?.seq === 4 &&
+        prefixBuilt.user.includes('native observed output') &&
+        !prefixBuilt.user.includes('NATIVE_FUTURE_SENTINEL'),
+    );
     check(
       'V8',
       'the rendered request carries the contract, the material blocks and the source ladder',

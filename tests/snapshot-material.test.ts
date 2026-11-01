@@ -142,6 +142,7 @@ function session(
 ): SessionLike {
   return {
     id,
+    inheritedEventCount: 0,
     header: {
       id,
       ...(parentSession === undefined
@@ -163,7 +164,7 @@ const base = {
 };
 
 describe('current-turn tool window', () => {
-  test('only the current turn contributes tool calls, oldest first', async () => {
+  test('all visible turns contribute tool events in native order', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       turnStart(1, 1, 1),
@@ -189,19 +190,21 @@ describe('current-turn tool window', () => {
     });
     expect(built.snapshot.turn).toBe(2);
     expect(built.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo old-one"}',
+      '{"command":"echo old-two"}',
       '{"command":"echo new-one"}',
       '{"command":"echo new-two"}',
     ]);
-    // The last turn is the one in progress: a turn is closed by `turn/end`, so
-    // the newest open turn is this call's, not the older one.
-    expect(built.snapshot.context).toHaveLength(2);
-    // The dropped earlier-turn calls are reported as an ordinary exclusion, not
-    // as missing material.
-    const exclusion = built.snapshot.completeness.items.find(
-      (entry) => entry.source === 'tool-window' && entry.kind === 'unrelated',
-    );
-    expect(exclusion?.blocking).toBe(false);
-    expect(exclusion?.reason).toContain('2 earlier-turn tool call(s)');
+    expect(
+      built.snapshot.prefix?.local.events
+        .filter((event) => event.kind === 'result')
+        .map((event) => event.seq),
+    ).toEqual([4, 6, 11, 13]);
+    expect(
+      built.snapshot.completeness.items.some(
+        (item) => item.kind === 'unrelated',
+      ),
+    ).toBe(false);
     expect(built.snapshot.completeness.status).not.toBe('insufficient');
   });
 
@@ -322,7 +325,7 @@ describe('current-turn tool window', () => {
     expect(built.snapshot.context[0]?.result).toEqual({ ok: false });
   });
 
-  test('a log that names no turn says so instead of claiming all history', async () => {
+  test('unknown turn remains null without excluding visible history', async () => {
     const cwd = await workspace();
     const main = session('main', [
       human(1, 1, 'clean the build'),
@@ -336,19 +339,16 @@ describe('current-turn tool window', () => {
       config: DEFAULT_CONFIG,
     });
     expect(built.snapshot.turn).toBeNull();
-    // The attribution gap is reported alongside the exclusion that resulted from
-    // it, so a reader sees both the loss and its cause.
+    expect(built.snapshot.context).toHaveLength(1);
     expect(
-      built.snapshot.completeness.items.map((entry) => entry.reason).join(' '),
-    ).toContain('named no turn');
-    // Attribution is unknown, not a failure: no call is presented as current, so
-    // the window is empty, and the review is not blocked by a limitation it
-    // cannot fix.
-    expect(built.snapshot.context).toEqual([]);
+      built.snapshot.prefix?.local.events.every(
+        (event) => event.turnId === null,
+      ),
+    ).toBe(true);
     expect(built.snapshot.completeness.status).not.toBe('insufficient');
   });
 
-  test('an announced turn is used before the pending call is recorded', async () => {
+  test('announced turn attribution does not filter prior tool events', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       turnStart(1, 1, 1),
@@ -373,6 +373,7 @@ describe('current-turn tool window', () => {
     });
     expect(built.snapshot.turn).toBe(2);
     expect(built.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo old"}',
       '{"command":"echo new"}',
     ]);
   });
@@ -402,7 +403,7 @@ describe('current-turn tool window', () => {
     expect(built.snapshot.context).toHaveLength(2);
   });
 
-  test('the tool window is capped by historyMaxItems, dropping the oldest', async () => {
+  test('historyMaxItems does not cap event-source tool candidates', async () => {
     const cwd = await workspace();
     const calls = Array.from({ length: 6 }, (_, index) => [
       toolCall(
@@ -429,13 +430,12 @@ describe('current-turn tool window', () => {
         context: { ...DEFAULT_CONFIG.context, historyMaxItems: 3 },
       },
     });
-    expect(built.snapshot.context.map((call) => call.arguments)).toEqual([
-      '{"command":"echo 3"}',
-      '{"command":"echo 4"}',
-      '{"command":"echo 5"}',
-    ]);
-    // A capacity cut is truncation, not missing material.
-    expect(built.snapshot.contextTruncated).toBe(true);
+    expect(built.snapshot.context.map((call) => call.arguments)).toEqual(
+      Array.from({ length: 6 }, (_, i) =>
+        JSON.stringify({ command: 'echo ' + String(i) }),
+      ),
+    );
+    expect(built.snapshot.contextTruncated).toBe(false);
     expect(built.snapshot.completeness.status).not.toBe('insufficient');
   });
 });
@@ -502,7 +502,7 @@ describe('cross-turn authorization', () => {
     ).toBe(true);
   });
 
-  test('the newest human statement survives even a one-item evidence budget', async () => {
+  test('all human candidates survive the old one-item evidence setting', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       ...Array.from({ length: 6 }, (_, index) =>
@@ -520,13 +520,16 @@ describe('cross-turn authorization', () => {
         context: { ...DEFAULT_CONFIG.context, evidenceMaxItems: 1 },
       },
     });
-    expect(built.snapshot.evidence).toHaveLength(1);
-    // Dropping the withdrawal would leave the reviewer applying a permit the
-    // human has already reversed.
+    expect(built.snapshot.evidence).toHaveLength(7);
     expect(built.snapshot.evidence[0]?.text).toBe(
       'this is the withdrawal: stop now',
     );
-    expect(built.snapshot.evidenceTruncated).toBe(true);
+    expect(
+      built.snapshot.prefix?.local.events
+        .filter((event) => event.protected)
+        .map((event) => event.seq),
+    ).toEqual([20]);
+    expect(built.snapshot.evidenceTruncated).toBe(false);
   });
 });
 
@@ -741,7 +744,7 @@ describe('material completeness', () => {
     expect(truncationFeedback(built.snapshot)).toContain('splitting');
   });
 
-  test('unrelated earlier-turn loss never blocks a normal review', async () => {
+  test('earlier turns remain visible without an exclusion gap', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       turnStart(1, 1, 1),
@@ -769,20 +772,17 @@ describe('material completeness', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    expect(built.snapshot.context).toEqual([]);
+    expect(built.snapshot.context).toHaveLength(4);
     expect(built.snapshot.completeness.status).not.toBe('insufficient');
-    // The exclusion is reported so a reader can tell it apart from "nothing ran".
     expect(
       built.snapshot.completeness.items.some(
         (entry) => entry.kind === 'unrelated',
       ),
-    ).toBe(true);
-    // It is not repeated in the reviewer's missing-input list: an ordinary
-    // exclusion is not a gap.
+    ).toBe(false);
     expect(built.snapshot.missing.join(' ')).not.toContain('earlier-turn');
   });
 
-  test('a truncated human permission is reported with its source, not blocking', async () => {
+  test('long protected human permission is not pre-truncated', async () => {
     const cwd = await workspace();
     const long = `${'a'.repeat(4_050)} and never touch /etc`;
     const main = session('main', [
@@ -796,19 +796,16 @@ describe('material completeness', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    expect(built.snapshot.evidence[0]?.truncated).toBe(true);
-    // The omission is described exactly, so a reader can see the cut even after
-    // the request is gone: source, kind, and the original length.
-    expect(built.snapshot.evidence[0]?.originalLength).toBe(long.length);
-    const gap = built.snapshot.completeness.items.find(
-      (entry) => entry.source === 'session-human' && entry.kind === 'truncated',
-    );
-    expect(gap?.reason).toContain('truncated');
-    // Truncation is an input fact, not a material failure: it does not decide
-    // the permission conclusion and it does not by itself fail the review.
-    expect(gap?.blocking).toBe(false);
+    expect(built.snapshot.evidence[0]?.text).toBe(long);
+    expect(built.snapshot.evidence[0]?.truncated).toBeUndefined();
+    expect(
+      built.snapshot.completeness.items.some(
+        (entry) =>
+          entry.source === 'session-human' && entry.kind === 'truncated',
+      ),
+    ).toBe(false);
     expect(built.snapshot.completeness.status).not.toBe('insufficient');
-    expect(built.snapshot.missing.join(' ')).toContain('truncated');
+    expect(built.user).toContain('and never touch /etc');
   });
 });
 
@@ -947,7 +944,7 @@ describe('human sources the host writes without rpcId', () => {
 });
 
 describe('protected authorization originals survive every cut', () => {
-  test('a one-item capacity keeps the newer withdrawal over the parent original', async () => {
+  test('old count capacity cannot discard either protected original', async () => {
     const cwd = await workspace();
     const parent = session('parent', [
       turnStart(1, 1, 1),
@@ -991,23 +988,19 @@ describe('protected authorization originals survive every cut', () => {
         },
       },
     });
-    // Capacity one cannot carry both protected originals. Keeping the approval
-    // and reporting a harmless cut would let the review score a reversed permit.
-    expect(built.snapshot.evidence).toHaveLength(1);
+    expect(built.snapshot.evidence).toHaveLength(3);
     expect(built.snapshot.evidence[0]?.text).toContain('stop: do not delete');
-    expect(built.snapshot.completeness.status).toBe('insufficient');
-    // The absent original is the parent's, excluded by capacity — not this
-    // session's, whose log was read fine and whose withdrawal was kept. The
-    // report must name the source actually missing, and the cause is a critical
-    // truncation rather than a failed read.
-    expect(built.snapshot.completeness.gaps).toEqual([
-      expect.objectContaining({ source: 'parent-human' }),
-    ]);
-    const drop = built.snapshot.completeness.items.find(
-      (entry) => entry.source === 'parent-human',
-    );
-    expect(drop?.kind).toBe('truncated');
-    expect(drop?.blocking).toBe(true);
+    expect(
+      built.snapshot.prefix?.local.events
+        .filter((event) => event.protected)
+        .map((event) => event.seq),
+    ).toEqual([5]);
+    expect(
+      built.snapshot.prefix?.parent?.events
+        .filter((event) => event.protected)
+        .map((event) => event.seq),
+    ).toEqual([2]);
+    expect(built.snapshot.completeness.gaps).toEqual([]);
   });
 
   test('budget trimming never drops the withdrawal for a newer parent message', async () => {
@@ -1077,7 +1070,7 @@ describe('protected authorization originals survive every cut', () => {
 });
 
 describe('a closed turn cannot become the current turn', () => {
-  test('a finished turn contributes no tool history to a later call', async () => {
+  test('finished turn remains historical while current attribution stays unknown', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       turnStart(1, 1, 1),
@@ -1093,17 +1086,16 @@ describe('a closed turn cannot become the current turn', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    // The newest bracket in the log is closed and no turn was announced, so the
-    // attribution is unknown rather than "the finished turn is still current".
     expect(built.snapshot.turn).toBeNull();
-    expect(built.snapshot.context).toEqual([]);
-    const gap = built.snapshot.completeness.items.find(
-      (entry) => entry.source === 'tool-window' && entry.kind === 'unreadable',
-    );
-    expect(gap?.reason ?? '').toContain('already closed');
+    expect(built.snapshot.context).toHaveLength(1);
+    expect(
+      built.snapshot.prefix?.local.events.find((event) => event.kind === 'call')
+        ?.turnId,
+    ).toBe('1');
+    expect(built.snapshot.completeness.gaps).toEqual([]);
   });
 
-  test('an unattributed call before the open bracket is not current history', async () => {
+  test('unattributed older calls retain unknown turn and original order', async () => {
     const cwd = await workspace();
     const events: SessionEventLike[] = [
       // Written before this turn's bracket and carrying no turn of its own.
@@ -1123,18 +1115,20 @@ describe('a closed turn cannot become the current turn', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    // The call inside the bracket is this turn's; the one before it is not.
     expect(built.snapshot.context.map((call) => call.arguments)).toEqual([
+      '{"command":"echo stray"}',
       '{"command":"echo inside"}',
     ]);
-    expect(built.snapshot.completeness.items).toContainEqual(
-      expect.objectContaining({ source: 'tool-window', kind: 'unrelated' }),
-    );
+    expect(
+      built.snapshot.prefix?.local.events
+        .filter((event) => event.kind === 'call')
+        .map((event) => event.turnId),
+    ).toEqual([null, '1']);
   });
 });
 
 describe('review threads: question scope and tool-history trim direction', () => {
-  test('an answer in the next turn keeps the question the previous turn ended with', async () => {
+  test('cross-turn adjacency does not establish explicit question binding', async () => {
     const cwd = await workspace();
     // Asking a question is how a turn normally ends, so the host writes
     // `turn/end`, then a new `turn/start`, then the human's answer. Treating that
@@ -1170,11 +1164,14 @@ describe('review threads: question scope and tool-history trim direction', () =>
       config: DEFAULT_CONFIG,
     });
     const answer = built.snapshot.evidence.find((item) => item.text === '同意');
-    expect(answer?.question).toContain('/workspace/app/build');
-    // It stays context on an explicit human instruction, and the answer is
-    // attributed to the turn the human gave it in.
+    expect(answer?.question).toBeUndefined();
     expect(answer?.evidence).toBe('explicit');
     expect(answer?.turn).toBe(2);
+    expect(
+      built.snapshot.prefix?.local.events.find(
+        (event) => event.kind === 'assistant',
+      ),
+    ).toMatchObject({ seq: 3, protected: false });
   });
 
   test('an intervening statement still makes the question stale across turns', async () => {
@@ -1290,6 +1287,15 @@ describe('review threads: question scope and tool-history trim direction', () =>
       ...steps,
       toolCall(90, 90, 'current', 'bash', { command: 'echo current' }, 1),
     ]);
+    const complete = await buildReviewSnapshot({
+      ...base,
+      agent: { session: main },
+      cwd,
+      config: {
+        ...DEFAULT_CONFIG,
+        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 100_000 },
+      },
+    });
     const built = await buildReviewSnapshot({
       ...base,
       agent: { session: main },
@@ -1301,7 +1307,7 @@ describe('review threads: question scope and tool-history trim direction', () =>
           // The shared contract is a large fixed preamble (rubric text, source
           // ladder, answer shape): the budget has to leave room above it before
           // any optional segment can be the thing that fails to fit.
-          maxInputTokens: 3_000,
+          maxInputTokens: complete.snapshot.budget.estimatedInputTokens - 500,
           historyMaxItems: 8,
         },
       },

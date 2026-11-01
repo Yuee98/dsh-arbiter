@@ -69,6 +69,7 @@ afterAll(() => {
 });
 
 interface StubSession {
+  readonly inheritedEventCount: number;
   readonly id: string;
   readonly header: {
     readonly id: string;
@@ -88,6 +89,7 @@ function makeSession(id: string, parentSession?: string): StubSession {
   const events: SessionEventLike[] = [];
   return {
     id,
+    inheritedEventCount: 0,
     header: {
       id,
       cwd: process.cwd(),
