@@ -566,34 +566,52 @@ test('the allocator admits the full bounded population through batched full rend
   expect(built.snapshot.prefix?.omissions).toEqual([]);
 }, 15000);
 
-test.each(['structured', 'structured-note', 'channels-and-media'] as const)(
+test.each([
+  'structured',
+  'structured-note',
+  'channels-and-media',
+  'mixed-array',
+] as const)(
   'a mixed %s result keeps its call and bounded fragment when unknown body fields are large',
   async (mode) => {
     const detail =
       'DETAIL_HEAD ' + 'large detail '.repeat(10000) + ' DETAIL_TAIL';
     const content =
-      mode !== 'channels-and-media'
-        ? {
-            text: 'small useful observation',
-            [mode === 'structured-note' ? 'note' : 'detail']: detail,
-          }
-        : [
+      mode === 'mixed-array'
+        ? [
             {
               type: 'text',
               channel: 'stdout',
               source: 'native-out',
+              text: 'actual observation',
+            },
+            ...Array.from({ length: 1000 }, () =>
+              'ordinary detail '.repeat(10),
+            ),
+            'DETAIL_TAIL',
+          ]
+        : mode !== 'channels-and-media'
+          ? {
               text: 'small useful observation',
-              detail,
-            },
-            {
-              type: 'text',
-              channel: 'stderr',
-              source: 'native-err',
-              text: 'actual error',
-              detail,
-            },
-            { type: 'image', url: 'https://example.invalid/media/reference' },
-          ];
+              [mode === 'structured-note' ? 'note' : 'detail']: detail,
+            }
+          : [
+              {
+                type: 'text',
+                channel: 'stdout',
+                source: 'native-out',
+                text: 'small useful observation',
+                detail,
+              },
+              {
+                type: 'text',
+                channel: 'stderr',
+                source: 'native-err',
+                text: 'actual error',
+                detail,
+              },
+              { type: 'image', url: 'https://example.invalid/media/reference' },
+            ];
     const events: ReviewEvent[] = [
       human(0, 'actual human original'),
       {
@@ -654,7 +672,9 @@ test.each(['structured', 'structured-note', 'channels-and-media'] as const)(
     const expectedLabels =
       mode === 'channels-and-media'
         ? ['stdout', 'stderr', 'https://example.invalid/media/reference']
-        : [];
+        : mode === 'mixed-array'
+          ? ['stdout']
+          : [];
     for (const label of expectedLabels)
       expect(JSON.stringify(result.body.content)).toContain(label);
     const expectedIdentity =
@@ -668,7 +688,12 @@ test.each(['structured', 'structured-note', 'channels-and-media'] as const)(
               state: 'omitted',
             },
           ]
-        : { format: 'json-fragment' };
+        : mode === 'mixed-array'
+          ? [
+              { type: 'text', channel: 'stdout', source: 'native-out' },
+              { format: 'json-fragment' },
+            ]
+          : { format: 'json-fragment' };
     expect(result.body.content).toMatchObject(expectedIdentity);
     const prefix = built.snapshot.prefix;
     if (prefix === undefined) throw new Error('missing actual prefix');

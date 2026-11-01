@@ -23,9 +23,26 @@ function labelled(value: unknown): boolean {
   );
 }
 
+function arrayCopy(value: readonly unknown[], scale: number): unknown[] {
+  const result: unknown[] = [];
+  let body: unknown[] = [];
+  const flush = () => {
+    if (body.length > 0) result.push(jsonFragment(body, scale));
+    body = [];
+  };
+  for (const entry of value) {
+    if (labelled(entry)) {
+      flush();
+      result.push(resultCopy(entry, scale, true));
+    } else body.push(entry);
+  }
+  flush();
+  return result;
+}
+
 function wholeCopy(value: unknown, scale: number): unknown {
   if (Array.isArray(value) && value.some(labelled))
-    return value.map((entry: unknown) => resultCopy(entry, scale, true));
+    return arrayCopy(value, scale);
   if (eventRecord(value)) {
     const hasIdentity = labelled(value);
     const identity: [string, unknown][] = [];
