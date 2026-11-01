@@ -103,11 +103,13 @@ describe('independent final host result collection', () => {
     const mirror = toolResultMaterial(
       { content, value: structuredClone(content) },
       new CredentialRedactor('session'),
+      {},
     );
     expect(mirror.parts).toHaveLength(2);
     const distinct = toolResultMaterial(
       { content, value: { count: 2 } },
       new CredentialRedactor('session'),
+      {},
     );
     expect(distinct.parts).toHaveLength(3);
     expect(distinct.parts.map((entry) => entry.channel)).toEqual([
@@ -119,6 +121,7 @@ describe('independent final host result collection', () => {
       toolResultMaterial(
         { content: [{ type: 'text', text: 'not json' }], value: null },
         new CredentialRedactor('session'),
+        {},
       ).parts,
     ).toHaveLength(2);
     expect(resultStatus({})).toBe('unknown');
@@ -200,6 +203,143 @@ describe('independent final host result collection', () => {
       unavailableReason: 'result-processing-failed',
     });
   });
+  test.each([false, true])(
+    'S01: invocation knowledge precedes same/different channel splitting (%s)',
+    (differentChannels) => {
+      const secret = 'opaque-workflow-secret-42';
+      const exec = {
+        ...fixture.exec('argument-split'),
+        arguments: Object.freeze({ token: secret }),
+      };
+      const content = Object.freeze([
+        Object.freeze({ type: 'text', text: 'opaque-', channel: 'stdout' }),
+        Object.freeze({
+          type: 'text',
+          text: 'workflow-secret-42',
+          channel: differentChannels ? 'stderr' : 'stdout',
+        }),
+      ]);
+      const result = Object.freeze({
+        isError: false,
+        content,
+        value: structuredClone(content),
+      });
+      const original = JSON.stringify({ result, arguments: exec.arguments });
+      fixture.observer.begin(exec);
+      fixture.observer.observe(exec, result);
+      const saved = fixture.audit.getToolResult('session', 'argument-split');
+      expect(saved.state).toBe('found');
+      expect(saved.metadata?.parts.map((part) => part.channel)).toEqual([
+        'stdout',
+        differentChannels ? 'stderr' : 'stdout',
+      ]);
+      expect(JSON.stringify(saved)).toContain('[redacted:v1:token:');
+      expect(JSON.stringify(saved)).not.toContain('workflow-secret-42');
+      expect(JSON.stringify(saved)).not.toContain('opaque-');
+      expect(
+        readFileSync(fixture.audit.databasePath).includes(Buffer.from(secret)),
+      ).toBe(false);
+      expect(JSON.stringify({ result, arguments: exec.arguments })).toBe(
+        original,
+      );
+    },
+  );
+  test.each(['content', 'value'] as const)(
+    'S02: ordinary omitted-state JSON survives in %s',
+    (location) => {
+      const business = Object.freeze({
+        type: 'invoice',
+        state: 'omitted',
+        total: 42,
+        reason: 'optional-detail-omitted',
+      });
+      const result =
+        location === 'content'
+          ? { content: [business] }
+          : {
+              content: [{ type: 'text', text: 'Invoice summarised' }],
+              value: business,
+            };
+      const original = JSON.stringify(result);
+      fixture.observer.observe(fixture.exec('business'), result);
+      const saved = fixture.audit.getToolResult('session', 'business');
+      expect(saved.metadata?.contentState).toBe('available');
+      expect(saved.metadata?.parts.at(-1)).toMatchObject({
+        kind: 'json',
+        channel: location,
+      });
+      const json = saved.metadata?.parts.at(-1);
+      if (json === undefined) throw new Error('missing JSON part');
+      const retained = Buffer.from(
+        saved.fragments.map((fragment) => fragment.text).join(''),
+      );
+      expect(
+        JSON.parse(
+          retained.subarray(json.start, json.start + json.bytes).toString(),
+        ),
+      ).toEqual(business);
+      expect(JSON.stringify(result)).toBe(original);
+    },
+  );
+  test('S02: ordinary omitted-state text and genuine media retain distinct provenance', () => {
+    fixture.observer.observe(fixture.exec('media-provenance'), {
+      content: [
+        { type: 'text', state: 'omitted', text: 'ordinary text survives' },
+        {
+          type: 'image',
+          data: 'BINARY_MEDIA_SENTINEL',
+          url: 'https://example.test/image',
+        },
+        { type: 'text', text: 'data:;base64,INLINE_MEDIA_SENTINEL' },
+        { type: 'text', text: 'data:image/png;base64,INLINE_IMAGE_SENTINEL' },
+      ],
+      value: { type: 'audio', data: 'AUDIO_MEDIA_SENTINEL' },
+    });
+    const saved = fixture.audit.getToolResult('session', 'media-provenance');
+    expect(saved.metadata?.parts.map((part) => part.kind)).toEqual([
+      'text',
+      'media',
+      'media',
+      'text',
+      'media',
+    ]);
+    expect(saved.metadata?.parts.at(-1)?.channel).toBe('value');
+    expect(JSON.stringify(saved)).toContain('ordinary text survives');
+    expect(JSON.stringify(saved)).not.toContain('MEDIA_SENTINEL');
+    expect(JSON.stringify(saved)).not.toContain('IMAGE_SENTINEL');
+  });
+  test('PR-B02: stale and saved executions remain terminal across duplicate notifications', () => {
+    const stale = fixture.exec('stale-repeat');
+    fixture.observer.begin(stale);
+    fixture.audit.clearCalls();
+    fixture.observer.observe(stale, {
+      content: [{ type: 'text', text: 'cleared-secret-body' }],
+    });
+    fixture.observer.begin(stale);
+    fixture.observer.observe(stale, {
+      content: [{ type: 'text', text: 'cleared-secret-body' }],
+    });
+    expect(fixture.audit.getToolResult('session', 'stale-repeat').state).toBe(
+      'absent',
+    );
+    const saved = fixture.exec('saved-repeat');
+    fixture.observer.begin(saved);
+    fixture.observer.observe(saved, {
+      content: [{ type: 'text', text: 'first final' }],
+    });
+    fixture.observer.observe(saved, {
+      content: [{ type: 'text', text: 'later final' }],
+    });
+    expect(
+      fixture.audit
+        .getToolResult('session', 'saved-repeat')
+        .fragments.map((part) => part.text)
+        .join(''),
+    ).toBe('first final');
+    expect(
+      fixture.session.events.filter((event) => event.type === RESULT_REFERENCE),
+    ).toHaveLength(2);
+  });
   test('clear fences an in-flight result and duplicate finalization never claims payload equality', () => {
     const old = fixture.exec('old');
     fixture.observer.begin(old);
@@ -222,11 +362,7 @@ describe('independent final host result collection', () => {
     const refs = fixture.session.events
       .filter((event) => event.type === RESULT_REFERENCE)
       .map((event) => resultReference(event, 'session'));
-    expect(refs.map((ref) => ref?.save)).toEqual([
-      'stale',
-      'saved',
-      'already-recorded',
-    ]);
+    expect(refs.map((ref) => ref?.save)).toEqual(['stale', 'saved']);
   });
   test.each(['disabled', 'audit-off', 'unmanaged', 'unloaded'] as const)(
     '%s stops observation without writes',

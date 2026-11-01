@@ -6,7 +6,11 @@ import type {
 } from '../audit.js';
 import { validateResultJson } from '../audit/tool-result-json.js';
 import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
-import { eventRecord, resultContent } from '../snapshot/event-content.js';
+import {
+  eventRecord,
+  mediaType,
+  resultContent,
+} from '../snapshot/event-content.js';
 import {
   discoverSourceContent,
   redactSourceContent,
@@ -20,31 +24,50 @@ export function resultStatus(result: ToolResultLike): ToolResultStatus {
       ? 'success'
       : 'unknown';
 }
-function channel(value: Record<string, unknown>): string {
-  return typeof value['channel'] === 'string' ? value['channel'] : 'content';
+function channel(value: Record<string, unknown>, fallback: string): string {
+  return typeof value['channel'] === 'string' ? value['channel'] : fallback;
 }
-function part(value: unknown): ToolResultPart {
+function projectedMedia(
+  value: Record<string, unknown>,
+  original: unknown,
+): boolean {
+  if (value['state'] !== 'omitted' || typeof value['type'] !== 'string')
+    return false;
+  if (typeof original === 'string') return true;
+  return (
+    eventRecord(original) &&
+    (mediaType(original) !== null ||
+      (original['type'] === 'text' &&
+        typeof original['text'] === 'string' &&
+        typeof value['text'] !== 'string'))
+  );
+}
+function part(
+  value: unknown,
+  original: unknown,
+  fallback = 'content',
+): ToolResultPart {
   if (typeof value === 'string')
-    return { kind: 'text', channel: 'content', text: value };
-  if (!eventRecord(value)) return { kind: 'json', channel: 'content', value };
+    return { kind: 'text', channel: fallback, text: value };
+  if (!eventRecord(value)) return { kind: 'json', channel: fallback, value };
   const source =
     typeof value['source'] === 'string' ? { source: value['source'] } : {};
-  if (value['state'] === 'omitted' && typeof value['type'] === 'string')
+  if (projectedMedia(value, original))
     return {
       kind: 'media',
-      channel: channel(value),
+      channel: channel(value, fallback),
       ...source,
-      mediaType: value['type'],
+      mediaType: String(value['type']),
       ...(typeof value['ref'] === 'string' ? { reference: value['ref'] } : {}),
     };
   if (value['type'] === 'text' && typeof value['text'] === 'string')
     return {
       kind: 'text',
-      channel: channel(value),
+      channel: channel(value, fallback),
       ...source,
       text: value['text'],
     };
-  return { kind: 'json', channel: channel(value), ...source, value };
+  return { kind: 'json', channel: channel(value, fallback), ...source, value };
 }
 function mirror(content: unknown, value: unknown): boolean {
   if (value !== undefined && JSON.stringify(content) === JSON.stringify(value))
@@ -99,8 +122,11 @@ function truncated(value: unknown): boolean {
 export function toolResultMaterial(
   result: ToolResultLike,
   redactor: CredentialRedactor,
+  argumentsValue: unknown,
 ): ResultMaterial {
   try {
+    validateResultJson(argumentsValue);
+    redactor.discover(argumentsValue);
     const content: unknown = result.content;
     const value: unknown = result.value;
     if (content !== undefined) {
@@ -118,12 +144,15 @@ export function toolResultMaterial(
     const parts =
       projected === undefined
         ? []
-        : (Array.isArray(projected) ? projected : [projected]).map(part);
+        : (Array.isArray(projected) ? projected : [projected]).map(
+            (entry, index) =>
+              part(entry, Array.isArray(content) ? content[index] : content),
+          );
     if (value !== undefined && !mirror(content, value)) {
       const safe = redactor.value(resultContent(value));
       parts.push(
-        eventRecord(safe) && safe['state'] === 'omitted'
-          ? part(safe)
+        eventRecord(safe) && projectedMedia(safe, value)
+          ? part(safe, value, 'value')
           : { kind: 'json', channel: 'value', value: safe },
       );
     }

@@ -427,7 +427,8 @@ function scanEvents(
     if (
       event === undefined ||
       base === undefined ||
-      reservedIds.has(base.eventId)
+      reservedIds.has(base.eventId) ||
+      context.log.redundantToolResults?.has(event.seq) === true
     )
       continue;
     total += bytes(event.data, SOURCE_BYTE_LIMIT - total);

@@ -7,7 +7,7 @@ import {
   projectRulesCopy,
   type ProjectRulesResult,
 } from './guidance.js';
-import type { ReviewEventSources } from '../types.js';
+import type { ReviewEventSource, ReviewEventSources } from '../types.js';
 import {
   beforePending,
   boundSourceLog,
@@ -73,7 +73,7 @@ function capturedEvents(
           ),
           parent:
             parentLog === undefined
-              ? null
+              ? unavailableParent(options.agent.session.header?.parentSession)
               : hostEventSource(
                   parentLog,
                   options.agent.session.header?.parentSession ?? 'unknown',
@@ -86,6 +86,23 @@ function capturedEvents(
       ? undefined
       : structuredClone(boundEventSources(eventSources));
   return frozenEvents;
+}
+function unavailableParent(
+  parentId: string | undefined,
+): ReviewEventSource | null {
+  return parentId === undefined
+    ? null
+    : {
+        status: {
+          sessionId: parentId,
+          status: 'unavailable',
+          cutoff: null,
+          fromSeq: null,
+          reason: 'direct parent session is unavailable',
+          access: 'snapshot',
+        },
+        events: [],
+      };
 }
 export async function captureSnapshotSources(
   options: SnapshotOptions,

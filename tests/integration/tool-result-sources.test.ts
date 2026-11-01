@@ -19,6 +19,7 @@ import {
   type SnapshotOptions,
 } from '../../src/snapshot.js';
 import { captureSnapshotSources } from '../../src/snapshot/sources.js';
+import { buildEventPrefix } from '../../src/snapshot/prefix.js';
 import * as guidance from '../../src/snapshot/guidance.js';
 import { CredentialRedactor } from '../../src/reviewer/credential-redactor.js';
 import { discoverLog } from '../../src/snapshot/source-redaction.js';
@@ -114,16 +115,129 @@ describe('receipt-bound historical result sources', () => {
       );
       const source = await captureSnapshotSources(options());
       const result = sourceEvents(source).filter(
-        (event) => event.kind === 'result' && event.body.state === 'present',
+        (event) => event.kind === 'result',
       );
       expect(result).toHaveLength(1);
       expect(result[0]?.seq).toBe(reference?.seq);
       expect(JSON.stringify(result)).toContain('visible-listing');
+      if (source.eventSources === undefined)
+        throw new Error('missing event sources');
+      const prefix = buildEventPrefix(source.eventSources, 'pending');
+      expect(
+        prefix.local.events.filter((event) => event.kind === 'result'),
+      ).toHaveLength(1);
+      const prepared = await prepareReviewSnapshot(options(), fixture.workflow);
+      expect(
+        prepared.bundle.snapshot.prefix?.local.events.filter(
+          (event) => event.kind === 'result',
+        ),
+      ).toHaveLength(1);
+      expect(prepared.bundle.user).toContain('visible-listing');
+      expect(prepared.bundle.user).not.toContain('not-provided');
       expect(
         sourceEvents(source).some(
           (event) => event.kind === 'call' && event.callId === 'query',
         ),
       ).toBe(true);
+    },
+  );
+  test('PR-B01: already-recorded notification does not compete with its earlier reference', async () => {
+    observe('duplicate-reference', 'one logical result');
+    const event = fixture.session.events.find(
+      (entry) => entry.type === RESULT_REFERENCE,
+    );
+    if (event?.data === null || typeof event?.data !== 'object')
+      throw new Error('missing reference');
+    fixture.session.append(RESULT_REFERENCE, {
+      ...event.data,
+      save: 'already-recorded',
+      receipt: null,
+    });
+    const source = await captureSnapshotSources(options());
+    expect(
+      sourceEvents(source).filter((entry) => entry.kind === 'result'),
+    ).toHaveLength(1);
+    expect(JSON.stringify(sourceEvents(source))).toContain(
+      'one logical result',
+    );
+  });
+  test.each(['text', 'keys'] as const)(
+    'PR-B03: cumulative raw discovery fails closed before scanning legal large %s results',
+    { timeout: 30_000 },
+    async (location) => {
+      const large = 'x'.repeat(12 * 1024 * 1024);
+      for (let index = 0; index < 4; index += 1) {
+        const callId = `discovery-${String(index)}`;
+        observe(callId, 'small stored result');
+        const event = fixture.session.events.at(-1);
+        if (event === undefined) throw new Error('missing native result');
+        fixture.session.events[event.seq] = {
+          ...event,
+          data: {
+            message: {
+              source: { kind: 'tool', callId },
+              content: [
+                {
+                  type: 'text',
+                  text: location === 'text' ? large : 'small',
+                  ...(location === 'keys'
+                    ? { metadata: { [large]: 'business value' } }
+                    : {}),
+                },
+              ],
+            },
+          },
+        };
+      }
+      const discover = vi.fn(fixture.reader.discover);
+      const read = vi.fn(fixture.reader.read);
+      await expect(
+        prepareReviewSnapshot(
+          options({ toolResults: { discover, read } }),
+          fixture.workflow,
+        ),
+      ).rejects.toThrow(/credential redaction.*processing protection/);
+      expect(discover).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+  test.each([
+    ['missing', 'unavailable'],
+    ['empty', 'known-empty'],
+    ['none', null],
+  ] as const)(
+    'PR-B04: reader preserves %s parent source semantics',
+    async (state, expectedStatus) => {
+      const parent = observationSession('parent');
+      const child = observationSession(
+        'child',
+        state === 'none' ? undefined : 'parent',
+      );
+      const withReader = options({
+        agent: { session: child },
+        sessions: { get: () => (state === 'empty' ? parent : undefined) },
+      });
+      const withoutReader = { ...withReader };
+      delete withoutReader.toolResults;
+      const actual = await prepareReviewSnapshot(
+        withReader,
+        new CredentialRedactor('child'),
+      );
+      const original = await prepareReviewSnapshot(
+        withoutReader,
+        new CredentialRedactor('child'),
+      );
+      expect(actual.bundle.snapshot.prefix).toBeDefined();
+      expect(original.bundle.snapshot.prefix).toBeDefined();
+      expect(actual.bundle.snapshot.prefix?.parent).toEqual(
+        original.bundle.snapshot.prefix?.parent,
+      );
+      expect(actual.bundle.snapshot.prefix?.parent?.status.status ?? null).toBe(
+        expectedStatus,
+      );
+      expect(actual.bundle.snapshot.prefix?.parent?.status.reason ?? null).toBe(
+        state === 'missing' ? 'direct parent session is unavailable' : null,
+      );
     },
   );
   test(

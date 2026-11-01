@@ -21,6 +21,7 @@ export class ToolResultObserver {
   private readonly host: HostEnvironment;
   private readonly admissions: SessionAdmissions;
   private readonly started = new WeakMap<ToolExecutionLike, Started>();
+  private readonly finalized = new WeakSet<ToolExecutionLike>();
   private active = true;
   constructor(host: HostEnvironment, admissions: SessionAdmissions) {
     this.host = host;
@@ -47,6 +48,7 @@ export class ToolResultObserver {
       : null;
   }
   begin(exec: ToolExecutionLike): void {
+    if (this.finalized.has(exec) || this.started.has(exec)) return;
     try {
       const audit = this.auditFor(exec);
       const generation = audit?.captureToolResultGeneration();
@@ -61,6 +63,8 @@ export class ToolResultObserver {
     if (started !== undefined) started.cwd = cwd;
   }
   observe(exec: ToolExecutionLike, result: ToolResultLike): void {
+    if (this.finalized.has(exec)) return;
+    this.finalized.add(exec);
     try {
       this.collect(exec, result);
     } catch {
@@ -84,6 +88,7 @@ export class ToolResultObserver {
     const material = toolResultMaterial(
       result,
       callRedactor(this.host, session),
+      exec.arguments,
     );
     const status = resultStatus(result);
     const saved = audit.saveToolResult({

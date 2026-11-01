@@ -54,12 +54,7 @@ function nativeCall(event: SessionLog['own'][number]): string | null {
     ? source['callId']
     : null;
 }
-/** Learn raw values before replacing redundant native bodies, never clone them. */
-export function prepareToolResultLog(
-  log: SessionLog,
-  sessionId: string,
-  reader: ToolResultSourceReader,
-): SessionLog {
+function referencePositions(log: SessionLog, sessionId: string) {
   const asks = new Set(
     log.own.flatMap((event) => {
       if (
@@ -77,22 +72,68 @@ export function prepareToolResultLog(
     }),
   );
   const refs = new Map<string, number>();
+  const duplicates = new Set<number>();
   for (const event of log.own) {
     const ref = resultReference(event, sessionId);
     if (
-      ref !== null &&
-      ref.tool !== 'ask_user_question' &&
-      !asks.has(ref.callId) &&
-      !refs.has(ref.callId)
+      ref === null ||
+      ref.tool === 'ask_user_question' ||
+      asks.has(ref.callId)
     )
-      refs.set(ref.callId, event.seq);
+      continue;
+    if (refs.has(ref.callId)) {
+      if (ref.save === 'already-recorded') duplicates.add(event.seq);
+    } else refs.set(ref.callId, event.seq);
   }
+  return { refs, duplicates };
+}
+/** Include key text inspected by credential discovery, without serializing raw bodies. */
+function discoveryBytes(value: unknown, remaining: number, depth = 0): number {
+  if (remaining < 0 || depth > 64) return Math.max(0, remaining) + 1;
+  if (typeof value !== 'object' || value === null)
+    return sourceBytes(value, remaining);
+  let total = 0;
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !('value' in descriptor))
+      return remaining + 1;
+    total += sourceBytes(key, remaining - total);
+    if (total > remaining) break;
+    total += discoveryBytes(descriptor.value, remaining - total, depth + 1);
+    if (total > remaining) break;
+  }
+  return Math.max(8, total);
+}
+/** Two bounded large originals may feed retained fragments; history cannot multiply work. */
+function discoverRemoved(
+  log: SessionLog,
+  removed: SessionLog['own'],
+  reader: ToolResultSourceReader,
+): void {
+  const limit = 2 * SOURCE_BYTE_LIMIT;
+  let total = 0;
+  for (const event of removed) {
+    total += discoveryBytes(event.data, limit - total);
+    if (total > limit)
+      throw new Error(
+        'credential redaction source discovery processing protection exceeded',
+      );
+  }
+  reader.discover({ ...log, events: removed, own: removed, turnOf: [] });
+}
+/** Learn raw values before replacing redundant native bodies, never clone them. */
+export function prepareToolResultLog(
+  log: SessionLog,
+  sessionId: string,
+  reader: ToolResultSourceReader,
+): SessionLog {
+  const { refs, duplicates } = referencePositions(log, sessionId);
   const removed = log.own.filter((event) => {
     const callId = nativeCall(event);
     const referenceSeq = callId === null ? undefined : refs.get(callId);
     return referenceSeq !== undefined && referenceSeq < event.seq;
   });
-  reader.discover({ ...log, events: removed, own: removed, turnOf: [] });
+  discoverRemoved(log, removed, reader);
   const seqs = new Set(removed.map((event) => event.seq));
   const own = log.own.map((event) => {
     if (!seqs.has(event.seq) || !eventRecord(event.data)) return event;
@@ -122,7 +163,12 @@ export function prepareToolResultLog(
           },
         };
   });
-  return { ...log, events: own, own };
+  return {
+    ...log,
+    events: own,
+    own,
+    redundantToolResults: new Set([...seqs, ...duplicates]),
+  };
 }
 function bodyOf(read: ToolResultRead): ReviewResultBody {
   const metadata = read.metadata;
