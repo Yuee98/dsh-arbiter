@@ -43,7 +43,7 @@ import { DatabaseSync } from 'node:sqlite';
  * file and called its rows current. There is no upgrade from one number to the
  * next — a mismatch means the audit history has to be reset.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /**
  * Record format this build writes and can fully interpret.
@@ -198,6 +198,22 @@ const SCHEMA_SQL = `
           considered INTEGER NOT NULL,
           created INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS tool_results (
+          session_id TEXT NOT NULL,
+          call_id TEXT NOT NULL,
+          result_id TEXT NOT NULL UNIQUE,
+          ts INTEGER NOT NULL,
+          storage TEXT NOT NULL,
+          metadata TEXT,
+          body TEXT,
+          file_ref TEXT UNIQUE,
+          failure TEXT,
+          PRIMARY KEY(session_id, call_id)
+        );
+        CREATE INDEX IF NOT EXISTS tool_results_ts ON tool_results(ts);
+        CREATE TABLE IF NOT EXISTS tool_result_garbage (
+          file_ref TEXT PRIMARY KEY
+        );
         CREATE TABLE IF NOT EXISTS meta (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -216,6 +232,8 @@ const REQUIRED_TABLES: readonly string[] = [
   'model_calls',
   'candidates',
   'analysis_runs',
+  'tool_results',
+  'tool_result_garbage',
   'meta',
 ];
 

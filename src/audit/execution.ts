@@ -79,3 +79,28 @@ export function evictedFor(
   if (early.has(callId) || early.size < MAX_EARLY_RESULTS) return null;
   return early.keys().next().value ?? null;
 }
+/** Returns whether a bounded early observation was evicted. */
+export function observeExecution(
+  db: DatabaseSync,
+  early: Map<string, EarlyResult>,
+  callId: string,
+  status: string,
+  at: number,
+): boolean {
+  const changed = markExecuted(db, callId, status, at);
+  if (changed !== 0 || early.has(callId)) return false;
+  const evicted = evictedFor(early, callId);
+  if (evicted !== null) early.delete(evicted);
+  early.set(callId, { status, at });
+  return evicted !== null;
+}
+export function applyEarlyExecution(
+  db: DatabaseSync,
+  early: Map<string, EarlyResult>,
+  callId: string,
+): void {
+  const result = early.get(callId);
+  if (result === undefined) return;
+  early.delete(callId);
+  markExecuted(db, callId, result.status, result.at);
+}
