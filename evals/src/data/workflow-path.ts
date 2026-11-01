@@ -101,3 +101,31 @@ export function branchIsAncestor(
   }
   return current === ancestor;
 }
+
+/** Check every source fact a predecessor used, regardless of its session. */
+export function requirePointOnPath(
+  events: readonly WorkflowEvent[],
+  point: WorkflowPoint,
+): void {
+  sessionPrefix(events, point.sessionId, point.cutoffEventId);
+  if (point.parentRead !== undefined)
+    sessionPrefix(
+      events,
+      point.parentRead.sessionId,
+      point.parentRead.cutoffEventId,
+    );
+  if ('callEventId' in point.pending) {
+    const id = point.pending.callEventId;
+    if (
+      !events.some(
+        (event) =>
+          event.eventId === id &&
+          event.kind === 'call' &&
+          event.sessionId === point.sessionId,
+      )
+    )
+      throw new Error(
+        'predecessor call is not reachable on the current branch',
+      );
+  }
+}

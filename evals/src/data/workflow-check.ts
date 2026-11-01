@@ -8,6 +8,7 @@ import type { Workflow, WorkflowEvent } from './group-types.js';
 import {
   branchOf,
   branchIsAncestor,
+  requirePointOnPath,
   eventsOnPath,
   pendingOf,
   sessionPrefix,
@@ -250,6 +251,7 @@ function pointProblems(workflow: Workflow, path: string): readonly Finding[] {
           throw new Error(`unknown predecessor point ${previous}`);
         if (!branchIsAncestor(workflow, branchOf(target), branchOf(point)))
           throw new Error(`predecessor branch is not an ancestor: ${previous}`);
+        requirePointOnPath(events, target);
         if (target.sessionId === point.sessionId) {
           const previousPrefix = sessionPrefix(
             events,

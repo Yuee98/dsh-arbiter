@@ -52,6 +52,7 @@ export function callSettlementProblems(
 ): readonly Finding[] {
   const problems: Finding[] = [];
   const results = new Set<string>();
+  const settled = new Set<string>();
   const blocked = new Set<string>();
   for (const event of events) {
     if (event.kind !== 'result' && event.kind !== 'settlement') continue;
@@ -65,6 +66,12 @@ export function callSettlementProblems(
           message: `blocked call cannot have an execution result: ${key}`,
         });
     } else {
+      if (settled.has(key))
+        problems.push({
+          path: where,
+          message: `duplicate terminal settlement for call ${key}`,
+        });
+      settled.add(key);
       if (results.has(key))
         problems.push({
           path: where,
