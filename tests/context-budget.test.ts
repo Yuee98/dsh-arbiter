@@ -202,6 +202,8 @@ describe('one complete request budget for both protocols', () => {
       'human',
     ]);
     expect(actual(above.snapshot)).toBe(b);
+    for (const built of [base, equal, above])
+      expect(built.user).toBe(renderChatUser(built.snapshot));
   });
   test('hard degradation shrinks global guidance first, preserves action and does not refill', async () => {
     const input = options(
@@ -230,6 +232,7 @@ describe('one complete request budget for both protocols', () => {
       'human',
     ]);
     expect(actual(built.snapshot)).toBeLessThanOrEqual(5000);
+    expect(built.user).toBe(renderChatUser(built.snapshot));
     expect(built.snapshot.completeness.gaps).toEqual([]);
   });
   test('protected original exceeding H remains whole with an explicit preparation failure', async () => {
@@ -255,6 +258,7 @@ describe('one complete request budget for both protocols', () => {
       ];
       const built = await buildReviewSnapshot(options(events));
       expect(actual(built.snapshot)).toBeLessThanOrEqual(6000);
+      expect(built.user).toBe(renderChatUser(built.snapshot));
       const calls =
         built.snapshot.prefix?.local.events.filter((e) => e.kind === 'call') ??
         [];

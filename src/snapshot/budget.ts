@@ -134,7 +134,10 @@ function chooseUnit(
       };
 }
 
-function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
+function fillOrdinary(
+  input: Allocation,
+  base: ReviewSnapshot,
+): ReturnType<typeof measured> {
   let current = base;
   let log: UnitLog[number][] = [];
   let batchSize = 64;
@@ -194,7 +197,7 @@ function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
     state = measured(input, current, log);
     tokens = state.tokens;
   }
-  return candidate(input, current, log);
+  return state;
 }
 
 function guidanceCopy(
@@ -286,12 +289,16 @@ export function truncateSnapshot(
   };
   const required = measured(input, baseSnapshot(original), []);
   const overHard = required.tokens > maxInputTokens;
-  const selected = overHard
-    ? hardDegrade(input, required.snapshot)
+  const ordinary = overHard
+    ? null
     : required.tokens > targetInputTokens
-      ? required.snapshot
+      ? required
       : fillOrdinary(input, required.snapshot);
-  const final = measureSnapshot(selected, renderers);
+  const selected = ordinary?.snapshot ?? hardDegrade(input, required.snapshot);
+  const final =
+    renderers === PRODUCTION_PACKAGE && ordinary !== null
+      ? ordinary
+      : measureSnapshot(selected, renderers);
   const snapshot: ReviewSnapshot = {
     ...selected,
     budget: {
@@ -309,6 +316,9 @@ export function truncateSnapshot(
       ],
     },
   };
-  const request = renderers.renderChat(snapshot);
+  const request =
+    renderers === PRODUCTION_PACKAGE
+      ? final.chat
+      : renderers.renderChat(snapshot);
   return { snapshot, system: request.system, user: request.user };
 }

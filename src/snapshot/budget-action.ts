@@ -56,7 +56,11 @@ export function scaledAction(
   return {
     ...action,
     arguments: { ...record, [field]: copy },
-    ...(action.programText === value ? { programText: copy } : {}),
+    ...(action.programText === value ||
+    (action.programText === undefined &&
+      (field === 'code' || field === 'program'))
+      ? { programText: copy }
+      : {}),
     truncated: {
       originalChars: value.length,
       retainedChars: copy.length,

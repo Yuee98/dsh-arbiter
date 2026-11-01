@@ -803,7 +803,7 @@ describe('budget and configuration edges', () => {
       ...base,
       agent: { session: main },
       tool: 'run_code',
-      arguments: { program, description: 'dup' },
+      arguments: { code: program, description: 'dup' },
       cwd,
       config: {
         ...DEFAULT_CONFIG,
@@ -823,7 +823,7 @@ describe('budget and configuration edges', () => {
         'expected the trimmed action to keep its object shape',
       );
     }
-    const code: unknown = Reflect.get(args, 'program');
+    const code: unknown = Reflect.get(args, 'code');
     expect(typeof code).toBe('string');
     expect(action.programText).toBe(code);
     if (typeof code !== 'string') throw new TypeError('expected a code string');
