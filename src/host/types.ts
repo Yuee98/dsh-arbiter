@@ -82,11 +82,9 @@ export interface ToolExecutionLike {
 }
 
 export interface ToolResultLike {
+  readonly value?: unknown;
   readonly isError?: boolean;
-  readonly content?: readonly {
-    readonly type?: string;
-    readonly text?: string;
-  }[];
+  readonly content?: readonly unknown[];
   readonly error?: { readonly message?: string };
 }
 

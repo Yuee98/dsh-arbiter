@@ -51,6 +51,7 @@ import {
 import { redactSnapshot, bindSnapshotRedactor } from './snapshot/redaction.js';
 import { workflowRedactor } from './snapshot/workflow.js';
 import type { CredentialRedactor } from './reviewer/credential-redactor.js';
+import type { ToolResultSourceReader } from './snapshot/tool-results.js';
 import { truncateSnapshot } from './snapshot/budget.js';
 import { redactCompletenessInput } from './snapshot/material-redaction.js';
 export type {
@@ -66,6 +67,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface SnapshotOptions {
+  readonly toolResults?: ToolResultSourceReader;
   /** A captured, allowlisted source adapter (workflow evals); host calls omit it. */
   readonly eventSources?: ReviewEventSources;
   readonly projectRulesMaterial?: ProjectRulesResult;
