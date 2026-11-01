@@ -14,6 +14,7 @@ import { CredentialRedactor } from './credential-redactor.js';
 import {
   isPreparedReviewRequest,
   reviewRequestCopy,
+  preparedScoreMode,
 } from './prepared-request.js';
 
 /** The two backends one review can run on. */
@@ -99,22 +100,24 @@ export function maskAttempt(
   const redactor =
     context ?? new CredentialRedactor(`review:${attempt.callId}`);
   redactor.addKnown(secrets);
+  const scores = preparedScoreMode(attempt.request, redactor, attempt.backend);
   if (!isPreparedReviewRequest(attempt.request, redactor))
     redactor.discover(attempt.request, true);
-  for (const material of [attempt.parsed, attempt.responseText, attempt.error])
-    redactor.discover(material, true);
+  for (const material of [attempt.parsed, attempt.responseText])
+    redactor.discover(material, scores);
+  redactor.discover(attempt.error);
   redactor.discover(attempt.rawUsage);
   const maskedRaw = redactor.value(attempt.rawUsage);
   return {
     ...attempt,
     failureKind: attempt.failureKind,
     request: reviewRequestCopy(attempt.request, redactor),
-    parsed: redactor.value(attempt.parsed, true),
+    parsed: redactor.value(attempt.parsed, scores),
     responseText:
       attempt.responseText === null
         ? null
-        : redactor.text(attempt.responseText, true),
-    error: attempt.error === null ? null : redactor.text(attempt.error, true),
+        : redactor.text(attempt.responseText, scores),
+    error: attempt.error === null ? null : redactor.text(attempt.error),
     rawUsage: maskedRaw,
     // Re-normalized from the masked payload rather than masked field by field:
     // the mapping is the production one, so a masked record cannot disagree with

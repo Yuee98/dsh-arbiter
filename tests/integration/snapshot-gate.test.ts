@@ -5,6 +5,7 @@ import * as snapshotModule from '../../src/snapshot.js';
 import { runDecisionTransport } from '../../src/reviewer/decision.js';
 import { CredentialRedactor } from '../../src/reviewer/credential-redactor.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
+import { readChatAnswer } from '../../src/reviewer/signals.js';
 import { NEW_SCALE_TYPESAFE } from '../helpers/decision-captures.js';
 import {
   renderChatUser,
@@ -976,9 +977,142 @@ function credentialGate(
       { callId, name: 'bash', arguments: args, signal, agent: { session } },
       allow,
     );
-  return { host, run, captured: llm.captured };
+  return { host, run, captured: llm.captured, llm: llm.llm };
 }
 describe('credential preparation at actual production boundaries', () => {
+  test.each(['Cookie', 'Set-Cookie'])(
+    '%s first cookie named Path is masked before actual wire and SQLite',
+    async (header) => {
+      const secret = 'synthetic-cookie-role-wire-private';
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`cookie-role-${header}`, [
+        human(1, 1, 'Only inspect 4 local files'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-cookie-review-auth' }),
+      );
+      const args = {
+        command: 'echo local',
+        [header]: `Path=${secret}${header === 'Set-Cookie' ? '; Path=/tmp/output; Max-Age=4; Secure' : ''}`,
+      };
+      try {
+        await harness.run(`cookie-role-call-${header}`, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(
+          secret,
+        );
+        const stored = await persistedCall(`cookie-role-call-${header}`);
+        expect(JSON.stringify(stored)).not.toContain(secret);
+        const retained =
+          header === 'Set-Cookie'
+            ? '; Path=/tmp/output; Max-Age=4; Secure'
+            : 'Path=[redacted:v1:';
+        expect(JSON.stringify(stored.snapshot.action.arguments)).toContain(
+          retained,
+        );
+        expect(args[header]).toContain(secret);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('malformed root Chat scores are rejected and masked in the actual attempt and SQLite', async () => {
+    const answer = JSON.stringify({
+      risk: 3,
+      authorization: 8,
+      error: 'request refused',
+    });
+    expect(readChatAnswer(answer).ok).toBe(false);
+    const session = makeSession('strict-chat-root', [
+      human(1, 1, 'Only inspect 4 files'),
+    ]);
+    const resolve = vi.fn(() =>
+      Promise.resolve({ value: 'not-read-for-chat' }),
+    );
+    const harness = credentialGate(session, 'unused', resolve, 20_000, 'chat');
+    if (harness.llm === undefined) throw new Error('missing Chat fixture');
+    const stream = vi
+      .spyOn(harness.llm, 'stream')
+      .mockImplementation(async function* () {
+        await Promise.resolve();
+        yield { type: 'text-delta', text: answer };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+      });
+    try {
+      expect(
+        (
+          await harness.run('strict-chat-root-call', {
+            command: 'echo local',
+            password: '8',
+          })
+        ).kind,
+      ).toBe('deny');
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(stream).toHaveBeenCalledTimes(1);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        const row = db
+          .prepare('SELECT response_text FROM model_calls WHERE call_id = ?')
+          .get('strict-chat-root-call');
+        const raw: unknown = row?.['response_text'];
+        if (typeof raw !== 'string') throw new Error('missing Chat attempt');
+        const hidden: unknown = expect.stringContaining('[redacted:v1:');
+        expect(JSON.parse(raw)).toMatchObject({
+          risk: 3,
+          authorization: hidden,
+          error: 'request refused',
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+    }
+  });
+  test.each(['１２３４', '١٢٣٤'])(
+    'Unicode decimal password %s preserves authorization quantities at actual boundaries',
+    async (value) => {
+      const endpoint = await credentialEndpoint();
+      const instruction = `Only send ${value} files to ops@example.test`;
+      const session = makeSession(`decimal-wire-${value}`, [
+        human(1, 1, instruction),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-ascii-wire-auth' }),
+      );
+      const args = {
+        command: 'echo local',
+        password: value,
+        path: `/tmp/q${value}`,
+        count: 4,
+      };
+      try {
+        await harness.run(`decimal-wire-call-${value}`, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        expect(JSON.stringify(endpoint.received[0]?.body)).toContain(
+          instruction,
+        );
+        const stored = await persistedCall(`decimal-wire-call-${value}`);
+        expect(stored.snapshot.evidence[0]?.text).toBe(instruction);
+        const hidden: unknown = expect.stringContaining('[redacted:v1:');
+        expect(stored.snapshot.action.arguments).toMatchObject({
+          password: hidden,
+          path: `/tmp/q${value}`,
+          count: 4,
+        });
+        expect(args.password).toBe(value);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
   test('known echoes in ordinary authorization and Cookie metadata never reach wire or retained SQL', async () => {
     const secret = 'synthetic-wire-semantic-echo';
     const endpoint = await credentialEndpoint();
@@ -991,7 +1125,7 @@ describe('credential preparation at actual production boundaries', () => {
     const args = {
       command: 'echo local',
       Authorization: `approved for ${secret}`,
-      Cookie: `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
+      'Set-Cookie': `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
     };
     try {
       await harness.run('semantic-echo-wire-call', args);
@@ -1007,7 +1141,7 @@ describe('credential preparation at actual production boundaries', () => {
       const cookie: unknown = expect.stringContaining('; Max-Age=4');
       expect(stored.snapshot.action.arguments).toMatchObject({
         Authorization: authorization,
-        Cookie: cookie,
+        'Set-Cookie': cookie,
       });
       expect(args.Authorization).toBe(`approved for ${secret}`);
     } finally {

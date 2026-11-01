@@ -12,6 +12,7 @@ import { templateIdOf } from './metadata.js';
 import {
   isPreparedReviewRequest,
   reviewRequestCopy,
+  preparedScoreMode,
 } from '../reviewer/prepared-request.js';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -22,6 +23,7 @@ function attemptCopy(
   attempt: CallRecord['modelAttempts'][number],
   redactor: CredentialRedactor,
 ): CallRecord['modelAttempts'][number] {
+  const scores = preparedScoreMode(attempt.request, redactor, attempt.backend);
   const request = reviewRequestCopy(attempt.request, redactor);
   const system =
     object(request) && typeof request['system'] === 'string'
@@ -44,9 +46,9 @@ function attemptCopy(
     responseText:
       attempt.responseText === null
         ? null
-        : redactor.text(attempt.responseText, true),
-    parsed: redactor.value(attempt.parsed, true),
-    error: attempt.error === null ? null : redactor.text(attempt.error, true),
+        : redactor.text(attempt.responseText, scores),
+    parsed: redactor.value(attempt.parsed, scores),
+    error: attempt.error === null ? null : redactor.text(attempt.error),
     usage: redactor.value(attempt.usage),
     normalizedUsage: redactor.value(attempt.normalizedUsage, true),
   };
@@ -75,14 +77,16 @@ export function redactCallRecord(
     record.trace.map((stage) => [stage.reason, stage.ruleName]),
   ]);
   for (const attempt of record.modelAttempts) {
+    const scores = preparedScoreMode(
+      attempt.request,
+      redactor,
+      attempt.backend,
+    );
     if (!isPreparedReviewRequest(attempt.request, redactor))
       redactor.discover(attempt.request, true);
-    for (const material of [
-      attempt.responseText,
-      attempt.parsed,
-      attempt.error,
-    ])
-      redactor.discover(material, true);
+    for (const material of [attempt.responseText, attempt.parsed])
+      redactor.discover(material, scores);
+    redactor.discover(attempt.error);
     redactor.discover([attempt.usage, attempt.normalizedUsage]);
   }
   if (

@@ -37,6 +37,7 @@ export function sourceContentText(content: unknown): string {
     .join('\n');
 }
 function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
+  redactor.validate(content);
   if (typeof content === 'string') return redactor.text(content);
   if (!Array.isArray(content)) return redactor.value(content);
   const result: unknown[] = [];
@@ -74,6 +75,7 @@ function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
   return result;
 }
 function discoverContent(content: unknown, redactor: CredentialRedactor): void {
+  redactor.validate(content);
   for (const group of textGroups(content)) redactor.discover(group.join(''));
   if (!Array.isArray(content)) {
     if (typeof content !== 'string') redactor.discover(content);

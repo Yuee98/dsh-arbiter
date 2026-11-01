@@ -1678,12 +1678,15 @@ describe('the score object is exempt while every header still masks', () => {
     if (attempt === undefined) throw new Error('no attempt was recorded');
     const text = attempt.responseText ?? '';
     expect(text).not.toContain('sk-forged');
-    // The rebuilt object keeps the answer and replaces only the member that is not
-    // part of a score, so a reader can still see what the provider claimed.
-    expect(text).toContain('"probabilities":{"9":1}');
+    // This Chat response is not a legal score pair. Its authentication object
+    // keeps its shape while its unverified values remain subject to redaction.
     const hidden: unknown = expect.stringContaining('[redacted:v1:');
     expect(JSON.parse(text)).toMatchObject({
-      authorization: { value: hidden },
+      authorization: {
+        type: hidden,
+        probabilities: { '9': hidden },
+        value: hidden,
+      },
     });
   });
 

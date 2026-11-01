@@ -205,7 +205,7 @@ export function reviewWith(
               // remember that the two fields carry the same risk.
               redactor.text(
                 transport.error ?? 'the reviewer produced no answer',
-                true,
+                false,
               ),
               transport.rejection?.partial ?? NO_PARTIAL,
             )
@@ -262,8 +262,12 @@ async function runTransport(
     throw new Error('a rendered review requires its material context');
   if (request.backend.kind === 'chat') {
     const rendered = pkg.renderChat(snapshot);
-    bindPreparedReviewRequest(rendered, context, () =>
-      pkg.renderChat(redactSnapshot(snapshot, context)),
+    bindPreparedReviewRequest(
+      rendered,
+      context,
+      () => pkg.renderChat(redactSnapshot(snapshot, context)),
+      rendered,
+      pkg.asksProbe ? 'chat-probe' : 'chat',
     );
     const result = await runChatTransport(
       { ...request.backend.transport, signal, readAnswer: pkg.readChat },
@@ -282,8 +286,12 @@ async function runTransport(
     };
   }
   const rendered = pkg.renderDecision(snapshot);
-  bindPreparedReviewRequest(rendered, context, () =>
-    pkg.renderDecision(redactSnapshot(snapshot, context)),
+  bindPreparedReviewRequest(
+    rendered,
+    context,
+    () => pkg.renderDecision(redactSnapshot(snapshot, context)),
+    rendered,
+    'decision',
   );
   const result = await runDecisionTransport(
     { ...request.backend.transport, signal, readAnswer: pkg.readDecision },

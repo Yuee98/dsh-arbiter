@@ -11,6 +11,25 @@ const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
 
 describe('safe source payloads', () => {
+  test.each(['discover', 'copy'])(
+    'source %s rejects oversized content before specialized block traversal',
+    (phase) => {
+      const content: unknown[] = [];
+      content.length = 100_001;
+      const log = readSessionLog({
+        snapshotEvents: () => [
+          { seq: 1, type: 'tool/result', data: { content } },
+        ],
+      });
+      const redactor = new CredentialRedactor(`source-limit-${phase}`);
+      expect(() => {
+        if (phase === 'discover') discoverLog(log, redactor);
+        else redactLog(log, redactor);
+      }).toThrow();
+      expect(content).toHaveLength(100_001);
+      expect(0 in content).toBe(false);
+    },
+  );
   test('known values equal to finite protocol tags never erase the current human projection', () => {
     const content = [
       { type: 'text', text: 'only inspect local files' },

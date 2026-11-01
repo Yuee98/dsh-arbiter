@@ -3,6 +3,7 @@ import {
   bindPreparedReviewRequest,
   isPreparedReviewRequest,
   reviewRequestCopy,
+  preparedScoreMode,
 } from './prepared-request.js';
 /**
  * The chat transport: one review's attempts through the host's LLM service.
@@ -113,8 +114,12 @@ function retainedChatRequest(
   if (typeof system !== 'string' || typeof user !== 'string')
     throw new Error('prepared chat material could not be safely retained');
   const copy = { ...request, system, user };
-  bindPreparedReviewRequest(copy, redactor, () =>
-    retainedChatRequest(request, redactor),
+  bindPreparedReviewRequest(
+    copy,
+    redactor,
+    () => retainedChatRequest(request, redactor),
+    copy,
+    preparedScoreMode(request, redactor, 'chat'),
   );
   return copy;
 }
@@ -138,10 +143,16 @@ function preparedChatMessages(
   const copy = () =>
     chatMessages(
       retainedChatRequest(request, redactor).user,
-      repair === null ? null : redactor.text(repair, true),
+      repair === null ? null : redactor.text(repair),
     );
   const messages = copy();
-  bindPreparedReviewRequest(messages, redactor, copy);
+  bindPreparedReviewRequest(
+    messages,
+    redactor,
+    copy,
+    messages,
+    preparedScoreMode(request, redactor, 'chat'),
+  );
   return messages;
 }
 
@@ -297,7 +308,7 @@ export async function runChatTransport(
       system: redactor.text(request.system, true),
       user: redactor.text(request.user),
     };
-    bindPreparedReviewRequest(request, redactor);
+    bindPreparedReviewRequest(request, redactor, undefined, request, 'chat');
   }
   let route: ChatRoute;
   try {
@@ -320,7 +331,10 @@ export async function runChatTransport(
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
       const answer = readAnswer(collected.text);
-      redactor.discover(collected.text, true);
+      redactor.discover(
+        collected.text,
+        preparedScoreMode(request, redactor, 'chat'),
+      );
       redactor.discover(collected.usage);
       attempts.push(
         attemptRecord({

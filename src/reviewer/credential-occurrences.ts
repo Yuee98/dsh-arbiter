@@ -3,8 +3,13 @@ import { authenticationCredentialSpans } from './credential-auth.js';
 import {
   credentialKind,
   explicitCredentialSpans,
-  isCookieAttribute,
 } from './credential-fields.js';
+import {
+  cookieFieldKind,
+  cookieHeaderSpans,
+  cookieSourceParts,
+  type CookieFieldKind,
+} from './credential-cookies.js';
 import {
   CREDENTIAL_MARKER_SOURCE,
   verifiedCredentialMarker,
@@ -17,23 +22,21 @@ export interface KnownCredential {
   readonly marker: string;
 }
 
-function cookieValues(text: string, offset = 0): CredentialValueSpan[] {
-  const first = text[0];
-  if (first !== undefined && ['"', "'", '`'].includes(first)) {
-    text = text.slice(1, text.at(-1) === first ? -1 : undefined);
-    offset += 1;
-  }
-  const result: CredentialValueSpan[] = [];
-  for (const match of text.matchAll(/(?:^|;\s*)([^=;\s]+)=([^;]*)/dg)) {
-    const range = match.indices?.[2];
-    if (range !== undefined && !isCookieAttribute(match[1] ?? ''))
-      result.push({
-        start: offset + range[0],
-        end: offset + range[1],
-        kind: 'cookie',
-      });
-  }
-  return result;
+function cookieValues(
+  text: string,
+  kind: CookieFieldKind,
+  offset = 0,
+): CredentialValueSpan[] {
+  return cookieSourceParts(text, kind, offset)
+    .filter((part) => !part.attribute)
+    .map((part) => {
+      let { valueStart: start, valueEnd: end } = part;
+      if (text[start - offset] === '"') {
+        start += 1;
+        if (text[end - offset - 1] === '"') end -= 1;
+      }
+      return { start, end, kind: 'cookie' };
+    });
 }
 
 function valueSpans(text: string, field: string): CredentialValueSpan[] {
@@ -42,11 +45,16 @@ function valueSpans(text: string, field: string): CredentialValueSpan[] {
     ...authenticationCredentialSpans(text),
   ];
   const values = spans.flatMap((span) =>
-    span.kind === 'cookie'
-      ? cookieValues(text.slice(span.start, span.end), span.start)
+    cookieFieldKind(span.kind) !== null
+      ? cookieValues(
+          text.slice(span.start, span.end),
+          cookieFieldKind(span.kind) ?? 'cookie',
+          span.start,
+        )
       : [payloadSpan(text, span)],
   );
-  if (field === 'cookie') values.push(...cookieValues(text));
+  const cookie = cookieFieldKind(field);
+  if (cookie !== null) values.push(...cookieValues(text, cookie));
   else if (field.length > 0)
     values.push(payloadSpan(text, { start: 0, end: text.length, kind: field }));
   for (const match of text.matchAll(
@@ -76,10 +84,26 @@ function payloadSpan(
   return { ...span, start, end };
 }
 
-function keySpans(text: string): readonly (readonly [number, number])[] {
-  return [...text.matchAll(/(?<![\w-])["']?([a-z][\w-]*)["']?\s*[:=]/giu)]
+function keySpans(
+  text: string,
+  field = '',
+): readonly (readonly [number, number])[] {
+  const fields = [
+    ...text.matchAll(/(?<![\w-])["']?([a-z][\w-]*)["']?\s*[:=]/giu),
+  ]
     .filter((match) => credentialKind(match[1] ?? '') !== null)
     .map((match) => [match.index, match.index + match[0].length] as const);
+  const headers = cookieHeaderSpans(text);
+  const root = cookieFieldKind(field);
+  if (root !== null) headers.push({ start: 0, end: text.length, kind: root });
+  for (const header of headers)
+    for (const part of cookieSourceParts(
+      text.slice(header.start, header.end),
+      cookieFieldKind(header.kind) ?? 'cookie',
+      header.start,
+    ))
+      if (part.attribute) fields.push([part.nameStart, part.nameEnd]);
+  return fields;
 }
 
 export function credentialLiteralContexts(
@@ -100,13 +124,14 @@ export function credentialLiteralContexts(
 }
 
 function ambiguous(value: string): boolean {
-  return /^\d+$/u.test(value) || Array.from(value).length < 4;
+  return /^\p{Decimal_Number}+$/u.test(value) || Array.from(value).length < 4;
 }
 
 /** Candidates are visited in order; no repeated full interval scan. */
 function covering(
   ranges: readonly (readonly [number, number])[],
   merge = true,
+  overlap = false,
 ): (start: number, end: number) => readonly [number, number] | undefined {
   const ordered = [...ranges].sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const retained: [number, number][] = [];
@@ -121,7 +146,10 @@ function covering(
     while (index < retained.length && (retained[index]?.[1] ?? 0) <= start)
       index += 1;
     const range = retained[index];
-    return range !== undefined && start >= range[0] && end <= range[1]
+    return range !== undefined &&
+      (overlap
+        ? start < range[1] && end > range[0]
+        : start >= range[0] && end <= range[1])
       ? range
       : undefined;
   };
@@ -151,9 +179,11 @@ export function knownCredentialSpans(
   const markers = [...text.matchAll(new RegExp(CREDENTIAL_MARKER_SOURCE, 'gu'))]
     .filter((match) => verifiedCredentialMarker(match[0]))
     .map((match) => [match.index, match.index + match[0].length] as const);
-  const keyAt = covering(keySpans(text));
+  const keyAt = covering(keySpans(text, field));
   const sensitiveAt = covering(
     valueSpans(text, field).map((span) => [span.start, span.end]),
+    true,
+    true,
   );
   const markerAt = covering(markers, false);
   const result: CredentialSpan[] = [];

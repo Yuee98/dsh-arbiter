@@ -6,6 +6,46 @@ const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
 
 describe('credential boundary regressions from the first PR review', () => {
+  test.each(['１２３４', '١٢٣٤', '𝟙𝟚𝟛𝟜'])(
+    'Unicode decimal credential %s preserves unrelated quantities and paths',
+    (value) => {
+      const redactor = new CredentialRedactor(`decimal-${value}`, [value]);
+      const identity = redactor.text(value);
+      expect(identity).toMatch(marker);
+      expect(
+        redactor.value({
+          password: value,
+          quantity: `Only send ${value} files`,
+          path: `/tmp/${value}`,
+        }),
+      ).toEqual({
+        password: identity,
+        quantity: `Only send ${value} files`,
+        path: `/tmp/${value}`,
+      });
+      const text = `Only send ${value} files; /tmp/${value}; password="${value}"; echo "${value}"`;
+      const expected = redactor.text(text);
+      expect(expected).toContain(`Only send ${value} files; /tmp/${value}`);
+      expect(
+        expected.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+      ).toHaveLength(2);
+      for (let at = 0; at <= text.length; at += 1)
+        expect(
+          redactor
+            .textBlockValues([text.slice(0, at), text.slice(at)])
+            .join(''),
+        ).toBe(expected);
+    },
+  );
+  test('all structured validation paths enforce declared sparse-array limits', () => {
+    for (const method of ['validate', 'discover', 'value'] as const) {
+      const content: unknown[] = [];
+      content.length = 100_001;
+      expect(() =>
+        new CredentialRedactor(`limit-${method}`)[method](content),
+      ).toThrow();
+    }
+  });
   test('an exact known credential takes precedence over ordinary authorization words', () => {
     const ordinary = new CredentialRedactor('ordinary-permission-word');
     expect(ordinary.value({ Authorization: 'approved' })).toEqual({
@@ -26,11 +66,11 @@ describe('credential boundary regressions from the first PR review', () => {
     expect(
       redactor.value({
         Authorization: `approved for ${secret}`,
-        Cookie: `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
+        'Set-Cookie': `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
       }),
     ).toEqual({
       Authorization: `approved for ${identity}`,
-      Cookie: `${identity}=${redactor.text('session-value')}; Path=/tmp/${identity}; Max-Age=4`,
+      'Set-Cookie': `${identity}=${redactor.text('session-value')}; Path=/tmp/${identity}; Max-Age=4`,
     });
   });
   test('short/numeric values keep explicit, whole-value and quoted identities without rewriting quantities or paths', () => {

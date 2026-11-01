@@ -4,7 +4,10 @@ import {
   knownCredentialSpans,
   credentialLiteralContexts,
 } from './credential-occurrences.js';
-import { CredentialScoreContext } from './credential-scores.js';
+import {
+  CredentialScoreContext,
+  type CredentialScoreMode,
+} from './credential-scores.js';
 import { extractJsonObject } from './json.js';
 import {
   quotedCredentialSpans,
@@ -26,11 +29,15 @@ import {
   credentialKind,
   maskExplicitFields,
   maskCredentialQueries,
-  isCookieAttribute,
   quotedValue,
   reQuote,
   type CredentialKind,
 } from './credential-fields.js';
+import {
+  cookieFieldKind,
+  cookieParts,
+  type CookieFieldKind,
+} from './credential-cookies.js';
 
 const MAX_TEXT = 16 * 1024 * 1024;
 const MAX_NODES = 100_000;
@@ -44,6 +51,19 @@ const JSON_OPENERS = new Set<string | undefined>(['{', '[', '"']);
 interface Secret {
   readonly value: string;
   readonly marker: string;
+}
+function unparsedAuthorization(
+  kind: string,
+  value: string,
+  quote: string,
+  decoded: boolean,
+): boolean {
+  return (
+    !decoded &&
+    kind === 'authorization' &&
+    quote === '' &&
+    ['{', '['].includes(value)
+  );
 }
 
 export class CredentialRedactor {
@@ -150,16 +170,19 @@ export class CredentialRedactor {
       credentialIdentity(this.#scope, value, 'opaque'),
     );
   }
-  private mask = (raw: string, kind: string): string => {
-    const { value, quote } = quotedValue(raw);
+  private mask = (raw: string, kind: string, decoded = false): string => {
+    const { value, quote } = decoded
+      ? { value: raw, quote: '' }
+      : quotedValue(raw);
     const known = this.#secrets.get(value);
     if (known !== undefined) return reQuote(known.marker, quote);
     if (kind === 'authorization' && AUTH_WORDS.test(value))
       return this.knownText(raw);
     // A malformed object's delimiter is not a credential vocabulary entry.
-    if (kind === 'authorization' && quote === '' && ['{', '['].includes(value))
+    if (unparsedAuthorization(kind, value, quote, decoded))
       return this.opaque(value);
-    if (kind === 'cookie') return reQuote(this.cookies(value), quote);
+    const cookie = cookieFieldKind(kind);
+    if (cookie !== null) return reQuote(this.cookies(value, cookie), quote);
     const category: CredentialKind =
       kind === 'password' || kind === 'private-key' ? kind : 'token';
     const scheme =
@@ -173,16 +196,42 @@ export class CredentialRedactor {
       );
     return reQuote(this.learn(value, category), quote);
   };
-  private cookies(value: string): string {
-    if (!value.includes('=')) return this.learn(value, 'cookie');
-    return value.replace(
-      /(^|;\s*)([^=;\s]+)=([^;]*)/gu,
-      (_match: string, separator: string, name: string, secret: string) => {
-        if (isCookieAttribute(name))
-          return `${separator}${name}=${this.knownText(secret)}`;
-        return `${separator}${this.knownText(name)}=${this.learn(secret, 'cookie')}`;
-      },
-    );
+  private cookieValue(raw: string): string {
+    const { value, quote } = raw.startsWith('"')
+      ? quotedValue(raw)
+      : { value: raw, quote: '' };
+    return reQuote(this.learn(value, 'cookie'), quote);
+  }
+  private nestedScan(text: string): string {
+    if (this.#jsonDepth >= 64) this.fail();
+    this.#jsonDepth += 1;
+    try {
+      return this.scan(text);
+    } finally {
+      this.#jsonDepth -= 1;
+    }
+  }
+  private cookies(value: string, kind: CookieFieldKind): string {
+    // Complete cookie/attribute knowledge before retaining the projected header.
+    for (const part of cookieParts(value, kind)) {
+      const raw = value.slice(part.valueStart, part.valueEnd);
+      if (part.attribute) this.nestedScan(raw);
+      else this.cookieValue(raw);
+    }
+    const known =
+      applyCredentialSpans(
+        [value],
+        knownCredentialSpans(value, this.#secrets.values(), kind),
+      )[0] ?? '';
+    const spans = cookieParts(known, kind).map((part) => {
+      const raw = known.slice(part.valueStart, part.valueEnd);
+      return {
+        start: part.valueStart,
+        end: part.valueEnd,
+        marker: part.attribute ? this.nestedScan(raw) : this.cookieValue(raw),
+      };
+    });
+    return applyCredentialSpans([known], spans)[0] ?? '';
   }
   private nestedField(parent: string, key: string): string {
     if (key !== 'value' || credentialKind(parent) === null) return key;
@@ -199,12 +248,18 @@ export class CredentialRedactor {
       return;
     }
     if (kind !== null) {
-      this.mask(item, /authorization/iu.test(field) ? 'authorization' : kind);
+      this.mask(
+        item,
+        /authorization/iu.test(field)
+          ? 'authorization'
+          : (cookieFieldKind(field) ?? kind),
+        true,
+      );
       return;
     }
     this.scan(this.knownText(item));
   }
-  discover(value: unknown, scores = false): void {
+  discover(value: unknown, scores: CredentialScoreMode = false): void {
     this.inspect(value, scores, true);
   }
   validate(value: unknown): void {
@@ -226,13 +281,17 @@ export class CredentialRedactor {
   private checkArrayLimit(value: object): void {
     if (Array.isArray(value) && value.length > MAX_NODES) this.fail();
   }
-  private inspect(value: unknown, scores: boolean, recognize: boolean): void {
+  private inspect(
+    value: unknown,
+    scores: CredentialScoreMode,
+    recognize: boolean,
+  ): void {
     if (recognize && scores && typeof value === 'string') {
       this.text(value, true);
       return;
     }
     const context = scores
-      ? new CredentialScoreContext(value, true)
+      ? new CredentialScoreContext(value, scores)
       : MATERIAL_CONTEXT;
     let nodes = 0;
     let chars = 0;
@@ -265,6 +324,7 @@ export class CredentialRedactor {
       } else if (item !== null && typeof item === 'object') {
         if (seen.has(item)) return;
         seen.add(item);
+        this.checkArrayLimit(item);
         for (const [key, entry] of Object.entries(item)) {
           visit(key, '', depth + 1, path);
           visit(
@@ -334,10 +394,13 @@ export class CredentialRedactor {
       )[0] ?? ''
     );
   }
-  private keyText(key: string, scores = false): string {
+  private keyText(key: string, scores: CredentialScoreMode = false): string {
     return credentialKind(key) === null ? this.text(key, scores) : key;
   }
-  private jsonText(text: string, scores: boolean): string | undefined {
+  private jsonText(
+    text: string,
+    scores: CredentialScoreMode,
+  ): string | undefined {
     const first = text.trimStart()[0];
     const candidate = JSON_OPENERS.has(first)
       ? text
@@ -361,7 +424,7 @@ export class CredentialRedactor {
       if (typeof body === 'string') safe = JSON.stringify(this.text(body));
       else {
         const context = scores
-          ? new CredentialScoreContext(body, true)
+          ? new CredentialScoreContext(body, scores)
           : MATERIAL_CONTEXT;
         const cleaned = this.value(body, scores);
         const spans = jsonCopySpans(candidate, cleaned, (key, path) =>
@@ -380,7 +443,7 @@ export class CredentialRedactor {
       this.#jsonDepth -= 1;
     }
   }
-  text(text: string, scores = false): string {
+  text(text: string, scores: CredentialScoreMode = false): string {
     this.check(text);
     const exact = this.#secrets.get(text);
     if (exact !== undefined) return exact.marker;
@@ -415,10 +478,10 @@ export class CredentialRedactor {
     );
     return this.knownText(this.scan(this.knownText(quoted)));
   }
-  value(value: unknown, scores = false): unknown {
+  value(value: unknown, scores: CredentialScoreMode = false): unknown {
     this.discover(value, scores);
     const context = scores
-      ? new CredentialScoreContext(value, true)
+      ? new CredentialScoreContext(value, scores)
       : MATERIAL_CONTEXT;
     const seen = new WeakSet<object>();
     let nodes = 0;
@@ -438,7 +501,10 @@ export class CredentialRedactor {
             ? this.text(item, context.system(path))
             : this.mask(
                 item,
-                /authorization/iu.test(field) ? 'authorization' : kind,
+                /authorization/iu.test(field)
+                  ? 'authorization'
+                  : (cookieFieldKind(field) ?? kind),
+                true,
               );
         chars += cleaned.length;
         if (chars > MAX_TEXT) this.fail();

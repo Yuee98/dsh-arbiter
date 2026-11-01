@@ -54,18 +54,33 @@ export function quotedCredentialSpans(
   return spans;
 }
 
+function nonoverlappingSpans(
+  ranges: CredentialSpan[],
+): readonly CredentialSpan[] {
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const result: CredentialSpan[] = [];
+  for (const range of ranges) {
+    const previous = result.at(-1);
+    if (previous === undefined || range.start >= previous.end)
+      result.push(range);
+    else if (range.end > previous.end)
+      throw new Error('credential source spans could not be safely mapped');
+  }
+  return result;
+}
+
 /** Keep source indices while replacing each span once, at its first block. */
 export function applyCredentialSpans(
   blocks: readonly string[],
   ranges: CredentialSpan[],
 ): readonly string[] {
-  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const replacements = nonoverlappingSpans(ranges);
   const output: string[] = [];
   let offset = 0;
   for (const block of blocks) {
     let cursor = 0;
     let text = '';
-    for (const range of ranges) {
+    for (const range of replacements) {
       if (
         range.end <= offset ||
         range.start >= offset + block.length ||

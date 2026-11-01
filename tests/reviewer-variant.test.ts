@@ -568,6 +568,45 @@ describe('the compact layouts keep the material facts', () => {
 });
 
 describe('the service keeps production and experiments apart', () => {
+  test('only an actual probe package preserves numeric scores beside its probe member', async () => {
+    const { reviewWith } = await import('../src/reviewer/service.js');
+    const pkg = variantPackage(variantOf({ prompt: 'recovery-probe' }));
+    const text = '{"risk":4,"authorization":7,"recoverability":"irreversible"}';
+    const input = {
+      ...SNAPSHOT,
+      sessionId: 'probe-credential-position',
+      action: {
+        ...SNAPSHOT.action,
+        arguments: { command: 'echo local', password: '7' },
+      },
+    };
+    const result = await reviewWith(pkg)({
+      snapshot: input,
+      callId: 'actual-probe-position',
+      signal: new AbortController().signal,
+      backend: offlineChatBackend({ scripts: [{ kind: 'text', text }] }),
+    });
+    expect(result.outcome.status).toBe('scored');
+    expect(JSON.parse(result.attempts[0]?.responseText ?? '')).toEqual({
+      risk: 4,
+      authorization: 7,
+      recoverability: 'irreversible',
+    });
+    expect(probesOf(pkg, result.attempts)).toEqual([
+      { status: 'answered', option: 'irreversible', raw: 'irreversible' },
+    ]);
+    const production = await review({
+      snapshot: { ...input, sessionId: 'production-no-probe-position' },
+      callId: 'not-a-probe-position',
+      signal: new AbortController().signal,
+      backend: offlineChatBackend({ scripts: [{ kind: 'text', text }] }),
+    });
+    expect(production.outcome.status).toBe('review-failure');
+    const hidden: unknown = expect.stringContaining('[redacted:v1:');
+    expect(
+      JSON.parse(production.attempts[0]?.responseText ?? ''),
+    ).toMatchObject({ authorization: hidden });
+  });
   test('reviews through the production package and reports no probe', async () => {
     const result = await review({
       snapshot: SNAPSHOT,

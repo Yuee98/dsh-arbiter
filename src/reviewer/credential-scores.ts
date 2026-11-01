@@ -1,6 +1,8 @@
 /** Score exceptions belong to protocol positions, never to a field name alone. */
 import { PROBE_OPTIONS } from './probe.js';
 
+export type CredentialScoreMode = boolean | 'chat' | 'chat-probe' | 'decision';
+
 type Role =
   | 'chat'
   | 'pair'
@@ -12,6 +14,7 @@ type Role =
   | 'chat-request'
   | 'envelope';
 const PAIR_KEYS = new Set(['risk', 'authorization', 'recoverability']);
+const CHAT_KEYS = new Set(['risk', 'authorization']);
 const ANSWER_KEYS = new Set([
   'type',
   'probabilities',
@@ -59,16 +62,38 @@ function questions(value: unknown): value is Record<string, unknown> {
     object(value) && question(value['risk']) && question(value['authorization'])
   );
 }
+function chatAnswer(
+  value: Record<string, unknown>,
+  mode: CredentialScoreMode,
+): boolean {
+  const probe = value['recoverability'];
+  const allowsProbe =
+    mode === 'chat-probe' ||
+    (mode === true &&
+      typeof probe === 'string' &&
+      PROBE_OPTIONS.some((option) => option === probe.trim().toLowerCase()));
+  const keys = Object.keys(value);
+  return (
+    band(value['risk']) &&
+    band(value['authorization']) &&
+    keys.every(
+      (key) => CHAT_KEYS.has(key) || (allowsProbe && key === 'recoverability'),
+    )
+  );
+}
 export class CredentialScoreContext {
   readonly #roles = new Map<string, Role>();
-  constructor(value: unknown, enabled: boolean) {
+  constructor(value: unknown, enabled: CredentialScoreMode) {
     if (!enabled || !object(value)) return;
-    this.initializeAnswers(value);
+    this.initializeAnswers(value, enabled);
     this.initializeRequests(value);
   }
-  private initializeAnswers(value: Record<string, unknown>): void {
-    if (band(value['risk']) && band(value['authorization']))
-      this.set([], 'chat');
+  private initializeAnswers(
+    value: Record<string, unknown>,
+    mode: CredentialScoreMode,
+  ): void {
+    if (mode !== 'decision' && chatAnswer(value, mode)) this.set([], 'chat');
+    if (mode === 'chat' || mode === 'chat-probe') return;
     // Root score-object fragments remain readable; nested errors get no role.
     if (
       (answer(value['risk']) && answer(value['authorization'])) ||

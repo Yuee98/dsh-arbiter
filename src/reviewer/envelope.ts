@@ -99,8 +99,7 @@ export function failureText(
   // Mask before bounding: truncating first can cut a credential in half, and a
   // half is no longer an exact-value match, so the visible prefix would survive
   // the mask that was supposed to remove it.
-  const masked =
-    redactor?.text(explanation, true) ?? redact(explanation, secrets);
+  const masked = redactor?.text(explanation) ?? redact(explanation, secrets);
   const bounded =
     masked.length > MAX_EXPLANATION
       ? `${masked.slice(0, MAX_EXPLANATION)}…`

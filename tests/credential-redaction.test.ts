@@ -59,7 +59,7 @@ describe('shared bounded credential materials', () => {
   });
   test('cookie attributes and authentication scheme retain their meaning', () => {
     const clean = new CredentialRedactor('attributes').text(
-      'Cookie: session=private-cookie; Path=/public; SameSite=Strict; Secure',
+      'Set-Cookie: session=private-cookie; Path=/public; SameSite=Strict; Secure',
     );
     expect(clean).toContain('Path=/public');
     expect(clean).toContain('SameSite=Strict');
@@ -205,7 +205,8 @@ describe('shared bounded credential materials', () => {
     expect(JSON.stringify(answer)).not.toContain(
       JSON.stringify(secret).slice(1, -1),
     );
-    expect(answer).toMatchObject({ risk: 3, authorization: 8 });
+    const authentication: unknown = expect.stringContaining('[redacted:v1:');
+    expect(answer).toMatchObject({ risk: 3, authorization: authentication });
   });
   test('escaped quoted credentials spanning blocks have one identity and no surviving fragments', () => {
     const redactor = new CredentialRedactor('escaped-blocks');

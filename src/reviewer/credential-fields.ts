@@ -4,6 +4,8 @@ import {
   credentialValueEnd,
 } from './credential-syntax.js';
 import type { CredentialValueSpan } from './credential-syntax.js';
+import { cookieFieldKind, cookieHeaderSpans } from './credential-cookies.js';
+import { applyCredentialSpans } from './credential-literals.js';
 /** Explicit credential syntax only: no entropy, string-length or generic key rule. */
 import type { CredentialMask } from './credential-auth.js';
 
@@ -36,39 +38,23 @@ const ASSIGNMENT = new RegExp(
   String.raw`(?<![\w-])((?:["']?)(?:password|passwd|pwd|token|private[_-]?key|secret[_-]?key)(?:["']?)\s*[:=]\s*)(${VALUE})`,
   'giu',
 );
-const COOKIE = new RegExp(
-  String.raw`(?<![\w-])((?:["']?)(?:set-cookie|cookie)(?:["']?)\s*[:=]\s*)(${QUOTED_CREDENTIAL_VALUE}|[^\r\n}"']+)`,
-  'giu',
-);
 const PEM =
   /-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z0-9]+ )?PRIVATE KEY-----|$)/gu;
 
-export function isCookieAttribute(name: string): boolean {
-  return /^(?:path|domain|expires|max-age|samesite)$/iu.test(name);
-}
-
 /** Value spans from the exact same assignment/cookie grammar used by masking. */
 export function explicitCredentialSpans(text: string): CredentialValueSpan[] {
-  const spans: CredentialValueSpan[] = [];
-  for (const [pattern, kind] of [
-    [ASSIGNMENT, 'credential'],
-    [COOKIE, 'cookie'],
-  ] as const) {
-    for (const match of text.matchAll(
-      new RegExp(pattern.source, `${pattern.flags}d`),
-    )) {
-      const range = match.indices?.[2];
-      if (range !== undefined)
-        spans.push({
-          start: range[0],
-          end: credentialValueEnd(text, match.index, range[0], range[1]),
-          kind:
-            kind === 'cookie'
-              ? kind
-              : (credentialKind((match[1] ?? '').replace(/["':=\s]/gu, '')) ??
-                'token'),
-        });
-    }
+  const spans: CredentialValueSpan[] = [...cookieHeaderSpans(text)];
+  for (const match of text.matchAll(
+    new RegExp(ASSIGNMENT.source, `${ASSIGNMENT.flags}d`),
+  )) {
+    const range = match.indices?.[2];
+    if (range !== undefined)
+      spans.push({
+        start: range[0],
+        end: credentialValueEnd(text, match.index, range[0], range[1]),
+        kind:
+          credentialKind((match[1] ?? '').replace(/["':=\s]/gu, '')) ?? 'token',
+      });
   }
   return spans;
 }
@@ -84,25 +70,29 @@ export function maskCredentialQueries(
     (match: string, separator: string, field: string, value: string) => {
       const kind = credentialKind(field);
       if (kind === null) return match;
-      const category = /authorization/iu.test(field) ? 'authorization' : kind;
+      const category = /authorization/iu.test(field)
+        ? 'authorization'
+        : (cookieFieldKind(field) ?? kind);
       return hold(`${separator}${field}=${mask(value, category)}`);
     },
   );
 }
 
 export function maskExplicitFields(text: string, mask: CredentialMask): string {
-  return text
-    .replace(PEM, (value) => mask(value, 'private-key'))
-    .replace(
-      COOKIE,
-      (_match: string, prefix: string, value: string) =>
-        `${prefix}${mask(value, 'cookie')}`,
-    )
-    .replace(
-      ASSIGNMENT,
-      (_match: string, prefix: string, value: string) =>
-        `${prefix}${mask(value, /pass|pwd/iu.test(prefix) ? 'password' : /key/iu.test(prefix) ? 'private-key' : 'token')}`,
-    );
+  const keys = text.replace(PEM, (value) => mask(value, 'private-key'));
+  const cookies =
+    applyCredentialSpans(
+      [keys],
+      cookieHeaderSpans(keys).map((span) => ({
+        ...span,
+        marker: mask(keys.slice(span.start, span.end), span.kind),
+      })),
+    )[0] ?? '';
+  return cookies.replace(
+    ASSIGNMENT,
+    (_match: string, prefix: string, value: string) =>
+      `${prefix}${mask(value, /pass|pwd/iu.test(prefix) ? 'password' : /key/iu.test(prefix) ? 'private-key' : 'token')}`,
+  );
 }
 
 export function quotedValue(value: string): {

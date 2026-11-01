@@ -255,7 +255,7 @@ function readResponse(options: {
   readonly redactor: CredentialRedactor;
 }): DecisionTransportResult {
   const { response, base, secrets } = options;
-  const responseText = options.redactor.text(options.text, true);
+  const responseText = options.redactor.text(options.text, 'decision');
   if (!response.ok) {
     let refusal: unknown;
     try {
@@ -382,6 +382,7 @@ export async function runDecisionTransport(
     redactor,
     () => retainedBody(ctx.decision, request, redactor),
     request,
+    'decision',
   );
   const timeout = AbortSignal.timeout(ctx.decision.timeoutMs);
   const signal = AbortSignal.any([ctx.signal, timeout]);
@@ -414,7 +415,7 @@ export async function runDecisionTransport(
     // the header the request used. This is the one place the credential is known,
     // so the known value is removed here rather than trusting the transport.
     const secrets = credential === undefined ? [] : [credential];
-    const message = redactor.text(raw, true);
+    const message = redactor.text(raw);
     return {
       attempts: [
         {
