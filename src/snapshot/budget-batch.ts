@@ -13,15 +13,16 @@ export function wholeBatch(options: {
   readonly target: number;
   readonly tokens: number;
   readonly renderers: BudgetRenderers;
+  readonly baseline: ReturnType<typeof measureSnapshot>;
   readonly finalize: (snapshot: ReviewSnapshot, log: UnitLog) => ReviewSnapshot;
 }): {
   readonly snapshot: ReviewSnapshot;
   readonly log: UnitLog;
   readonly tokens: number;
+  readonly measurement: ReturnType<typeof measureSnapshot>;
 } | null {
   if (options.units.length < 2) return null;
   let remaining = options.target - options.tokens;
-  let baseline: ReturnType<typeof measureSnapshot> | undefined;
   const additions: UnitLog[number][] = [];
   for (const unit of options.units) {
     const canonical = estimateTokenCount(JSON.stringify(unitContent(unit)));
@@ -29,7 +30,6 @@ export function wholeBatch(options: {
     if ((unit.capped && canonical > cap) || canonical > remaining) return null;
     // Unit envelopes are measured against the same fixed framework. Two tokens
     // cover list separators/rounding; aggregate omission notices cannot offset C.
-    baseline ??= measureSnapshot(options.base, options.renderers);
     const full = measureSnapshot(
       addUnits(options.base, [unit]),
       options.renderers,
@@ -37,9 +37,10 @@ export function wholeBatch(options: {
     const tokens =
       Math.max(
         canonical,
-        full.chat.estimatedInputTokens - baseline.chat.estimatedInputTokens,
+        full.chat.estimatedInputTokens -
+          options.baseline.chat.estimatedInputTokens,
         full.decision.estimatedInputTokens -
-          baseline.decision.estimatedInputTokens,
+          options.baseline.decision.estimatedInputTokens,
       ) + 2;
     if ((unit.capped && tokens > cap) || tokens > remaining) return null;
     additions.push({
@@ -55,6 +56,9 @@ export function wholeBatch(options: {
     addUnits(options.current, options.units),
     log,
   );
-  const tokens = measureSnapshot(snapshot, options.renderers).tokens;
-  return tokens > options.target ? null : { snapshot, log, tokens };
+  const measurement = measureSnapshot(snapshot, options.renderers);
+  const tokens = measurement.tokens;
+  return tokens > options.target
+    ? null
+    : { snapshot, log, tokens, measurement };
 }

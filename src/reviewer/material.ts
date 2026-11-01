@@ -182,6 +182,7 @@ export interface ActionParts {
    */
   readonly action: ReviewSnapshot['action'];
   readonly facts: ReviewSnapshot['facts'];
+  readonly factsOmitted?: true;
   readonly hint?: string;
 }
 
@@ -195,6 +196,11 @@ export function actionParts(snapshot: ReviewSnapshot): ActionParts {
   return {
     action: snapshot.action,
     facts: snapshot.facts,
+    ...(snapshot.facts === null &&
+    snapshot.budget.targetInputTokens !== undefined &&
+    snapshot.budget.truncatedSegments.includes('DERIVED_FACTS')
+      ? { factsOmitted: true as const }
+      : {}),
     ...(snapshot.hint === undefined ? {} : { hint: snapshot.hint }),
   };
 }
@@ -331,16 +337,28 @@ function priorVerdictsBlock(parts: PriorVerdictParts): string {
 
 /** The action block's production text. */
 function actionBlock(parts: ActionParts): string[] {
+  const facts = actionFacts(parts);
   return [
     ['PENDING_ACTION', json(parts.action)].join('\n'),
-    [
-      'ACTION_FACTS',
-      parts.facts === null ? NO_FACTS_TEXT : json(parts.facts),
-    ].join('\n'),
+    ['ACTION_FACTS', typeof facts === 'string' ? facts : json(facts)].join(
+      '\n',
+    ),
     ...(parts.hint === undefined
       ? []
       : [['REVIEW_HINT', parts.hint].join('\n')]),
   ];
+}
+
+/** A missing derived block distinguishes a budget omission from parsing failure. */
+export function actionFacts(
+  parts: ActionParts,
+): NonNullable<ReviewSnapshot['facts']> | string {
+  return (
+    parts.facts ??
+    (parts.factsOmitted === true
+      ? '(derived facts omitted by the input budget)'
+      : NO_FACTS_TEXT)
+  );
 }
 
 /** The completeness block's production text. */

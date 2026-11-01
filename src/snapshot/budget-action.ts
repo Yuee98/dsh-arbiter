@@ -2,10 +2,40 @@
 import type { ReviewSnapshot } from '../types.js';
 import { shortenedText, textFragment } from './budget-text.js';
 
+type Action = ReviewSnapshot['action'];
+
+function wholeAction(action: Action, scale: number): Action {
+  const { programText, ...rest } = action;
+  const text = JSON.stringify({
+    arguments: action.arguments,
+    ...(programText === undefined ? {} : { programText }),
+  });
+  const keep = Math.floor(text.length * Math.max(0, scale));
+  const fragment = textFragment(text, keep);
+  const copy = shortenedText(text, keep);
+  return {
+    ...rest,
+    arguments: {
+      format: 'json-fragment',
+      note: 'Incomplete serialized pending-action fields, not executable arguments.',
+      text: copy,
+    },
+    truncated: {
+      originalChars: text.length,
+      retainedChars: copy.length,
+      field: null,
+      omittedFrom: fragment.omittedFrom,
+      omittedTo: fragment.omittedTo,
+    },
+  };
+}
+
 export function scaledAction(
-  action: ReviewSnapshot['action'],
+  action: Action,
   scale: number,
-): ReviewSnapshot['action'] {
+  whole = false,
+): Action {
+  if (scale >= 1) return action;
   const args = action.arguments;
   const record =
     args !== null && typeof args === 'object' && !Array.isArray(args)
@@ -17,31 +47,20 @@ export function scaledAction(
       : ['code', 'program', 'command'].find(
           (key) => typeof record[key] === 'string',
         );
-  const value: unknown = field === undefined ? args : record?.[field];
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  if (scale >= 1) return action;
-  const keep = Math.floor(text.length * Math.max(0, scale));
-  const fragment = textFragment(text, keep);
-  const copy = shortenedText(text, keep);
+  if (whole || field === undefined) return wholeAction(action, scale);
+  const value: unknown = record?.[field];
+  if (typeof value !== 'string') return wholeAction(action, scale);
+  const keep = Math.floor(value.length * Math.max(0, scale));
+  const fragment = textFragment(value, keep);
+  const copy = shortenedText(value, keep);
   return {
     ...action,
-    arguments:
-      field === undefined
-        ? {
-            format: 'json-fragment',
-            note: 'Incomplete review copy, not a complete command.',
-            ...fragment,
-          }
-        : { ...record, [field]: copy },
-    ...(action.programText === undefined &&
-    field !== 'code' &&
-    field !== 'program'
-      ? {}
-      : { programText: copy }),
+    arguments: { ...record, [field]: copy },
+    ...(action.programText === value ? { programText: copy } : {}),
     truncated: {
-      originalChars: text.length,
+      originalChars: value.length,
       retainedChars: copy.length,
-      field: field ?? null,
+      field,
       omittedFrom: fragment.omittedFrom,
       omittedTo: fragment.omittedTo,
     },

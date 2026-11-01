@@ -69,31 +69,42 @@ function fitScale<T>(
   return best;
 }
 
-function unitCost(
-  input: Allocation,
-  current: ReviewSnapshot,
-  unit: BudgetUnit,
-): number {
-  // Canonical wrapping prevents aggregate notice changes cancelling unit cost.
-  return Math.max(
-    estimateTokenCount(JSON.stringify(unitContent(unit))),
-    contribution(current, addUnit(current, unit), input.renderers),
-  );
-}
-
 function chooseUnit(
   input: Allocation,
   current: ReviewSnapshot,
   log: UnitLog,
   unit: BudgetUnit,
   cap: number,
+  baseline: ReturnType<typeof measureSnapshot>,
 ): {
   readonly unit: BudgetUnit;
   readonly tokens: number;
   readonly truncated: boolean;
 } | null {
+  const costs = new Map<string, number>();
+  const costOf = (value: BudgetUnit): number => {
+    const content = JSON.stringify(unitContent(value));
+    const known = costs.get(content);
+    if (known !== undefined) return known;
+    const canonical = estimateTokenCount(content);
+    // Canonical cost is already a lower bound; impossible copies need no render.
+    const tokens =
+      unit.capped && canonical > cap
+        ? canonical
+        : Math.max(
+            canonical,
+            contribution(
+              current,
+              addUnit(current, value),
+              input.renderers,
+              baseline,
+            ),
+          );
+    costs.set(content, tokens);
+    return tokens;
+  };
   const fits = (value: BudgetUnit): boolean => {
-    const tokens = unitCost(input, current, value);
+    const tokens = costOf(value);
     if (unit.capped && tokens > cap) return false;
     const nextLog = [
       ...log,
@@ -108,8 +119,7 @@ function chooseUnit(
       measured(input, addUnit(current, value), nextLog).tokens <= input.target
     );
   };
-  if (fits(unit))
-    return { unit, tokens: unitCost(input, current, unit), truncated: false };
+  if (fits(unit)) return { unit, tokens: costOf(unit), truncated: false };
   if (!unit.capped) return null;
   // All results yield before arguments; every channel still shares this call's C.
   const withArguments = fitScale((scale) => scaledUnit(unit, scale, 1), fits);
@@ -119,7 +129,7 @@ function chooseUnit(
     ? null
     : {
         unit: selected,
-        tokens: unitCost(input, current, selected),
+        tokens: costOf(selected),
         truncated: true,
       };
 }
@@ -128,7 +138,9 @@ function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
   let current = base;
   let log: UnitLog[number][] = [];
   let batchSize = 64;
-  let tokens = measured(input, current, log).tokens;
+  let state = measured(input, current, log);
+  const baseline = measureSnapshot(base, input.renderers);
+  let tokens = state.tokens;
   for (let index = 0; index < input.units.length; index += 1) {
     const batch = wholeBatch({
       base,
@@ -138,12 +150,14 @@ function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
       target: input.target,
       tokens,
       renderers: input.renderers,
+      baseline,
       finalize: (value, entries) => candidate(input, value, entries),
     });
     if (batch !== null) {
       current = batch.snapshot;
       log = [...batch.log];
       tokens = batch.tokens;
+      state = { snapshot: batch.snapshot, ...batch.measurement };
       index += Math.min(batchSize, input.units.length - index) - 1;
       batchSize *= 2;
       continue;
@@ -168,13 +182,7 @@ function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
       estimateTokenCount(JSON.stringify(unitContent(unit))) > remaining
     )
       continue;
-    const selected = chooseUnit(
-      input,
-      candidate(input, current, log),
-      log,
-      unit,
-      cap,
-    );
+    const selected = chooseUnit(input, state.snapshot, log, unit, cap, state);
     if (selected === null) continue;
     current = addUnit(current, selected.unit);
     log.push({
@@ -183,7 +191,8 @@ function fillOrdinary(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
       tokens: selected.tokens,
       truncated: selected.truncated,
     });
-    tokens = measured(input, current, log).tokens;
+    state = measured(input, current, log);
+    tokens = state.tokens;
   }
   return candidate(input, current, log);
 }
@@ -205,7 +214,12 @@ function guidanceCopy(
       : { customRules: copy }),
     materials: snapshot.materials.map((material) =>
       material.id === id
-        ? { ...material, chars: copy.length, truncated: true }
+        ? {
+            ...material,
+            present: copy.length > 0,
+            chars: copy.length,
+            truncated: true,
+          }
         : material,
     ),
   };
@@ -221,19 +235,30 @@ function hardDegrade(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
     current = guidanceCopy(current, id, 0);
     if (fits(current)) return candidate(input, current, []);
   }
-  const fit = fitScale(
-    (scale) => ({ ...current, action: scaledAction(current.action, scale) }),
-    fits,
-  );
-  if (fit !== null) return candidate(input, fit, []);
-  const minimum = { ...current, action: scaledAction(current.action, 0) };
-  return candidate(
-    input,
-    measured(input, minimum, []).tokens < measured(input, current, []).tokens
-      ? minimum
-      : current,
-    [],
-  );
+  for (const whole of [false, true]) {
+    const fit = fitScale(
+      (scale) => ({
+        ...current,
+        action: scaledAction(current.action, scale, whole),
+      }),
+      fits,
+    );
+    if (fit !== null) return candidate(input, fit, []);
+  }
+  let minimum = current;
+  let minimumTokens = measured(input, minimum, []).tokens;
+  for (const whole of [false, true]) {
+    const value = {
+      ...current,
+      action: scaledAction(current.action, 0, whole),
+    };
+    const tokens = measured(input, value, []).tokens;
+    if (tokens < minimumTokens) {
+      minimum = value;
+      minimumTokens = tokens;
+    }
+  }
+  return candidate(input, minimum, []);
 }
 
 export function truncateSnapshot(

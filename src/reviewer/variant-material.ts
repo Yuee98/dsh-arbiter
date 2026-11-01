@@ -34,7 +34,7 @@ import {
   HISTORY_WITHHELD_NOTE,
   json,
   NONE_TEXT,
-  NO_FACTS_TEXT,
+  actionFacts,
   submissionParts,
 } from './material.js';
 import type { SubmissionParts } from './material.js';
@@ -120,8 +120,7 @@ function compactHistory(
 function compactAction(parts: SubmissionParts): object {
   return {
     pending_action: parts.action.action,
-    action_facts:
-      parts.action.facts === null ? NO_FACTS_TEXT : parts.action.facts,
+    action_facts: actionFacts(parts.action),
     ...(parts.action.hint === undefined
       ? {}
       : { review_hint: parts.action.hint }),

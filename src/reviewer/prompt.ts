@@ -112,6 +112,8 @@ const CHAT_SYSTEM_TOKENS = estimateTokenCount(renderChatSystem());
 const DECISION_QUESTION_TOKENS = estimateTokenCount(
   JSON.stringify(buildQuestions()),
 );
+const DECISION_PREFIX = `${decisionContract()}\n\n`;
+const DECISION_PREFIX_TOKENS = estimateTokenCount(DECISION_PREFIX);
 
 /** The chat user message: the whole submission, in the one shared order. */
 export function renderChatUser(snapshot: ReviewSnapshot): string {
@@ -120,7 +122,7 @@ export function renderChatUser(snapshot: ReviewSnapshot): string {
 
 /** The decision state: the same submission, prefixed by the same contract. */
 export function renderDecisionState(material: string): string {
-  return [decisionContract(), material].join('\n\n');
+  return DECISION_PREFIX + material;
 }
 
 /** Render the chat request for one snapshot. */
@@ -142,12 +144,39 @@ export function renderChatRequest(snapshot: ReviewSnapshot): ChatRequest {
  * result is identical to {@link renderChatUser} for the same snapshot.
  */
 export function renderDecisionRequest(material: string): DecisionRequest {
+  return decisionRequest(material, estimateTokenCount(material));
+}
+
+function decisionRequest(
+  material: string,
+  materialTokens: number,
+): DecisionRequest {
   const state = renderDecisionState(material);
   const questions = buildQuestions();
   return {
     state,
     questions,
-    estimatedInputTokens: estimateTokenCount(state) + DECISION_QUESTION_TOKENS,
+    // The fixed double newline ends a tokenx whitespace segment. A non-space
+    // material starts a new segment; leading whitespace takes the full path.
+    estimatedInputTokens:
+      (/^\S/u.test(material)
+        ? DECISION_PREFIX_TOKENS + materialTokens
+        : estimateTokenCount(state)) + DECISION_QUESTION_TOKENS,
+  };
+}
+
+/** Render both production protocols without recounting identical material. */
+export function renderChatDecisionPair(snapshot: ReviewSnapshot): {
+  readonly chat: ChatRequest;
+  readonly decision: DecisionRequest;
+} {
+  const chat = renderChatRequest(snapshot);
+  return {
+    chat,
+    decision: decisionRequest(
+      chat.user,
+      chat.estimatedInputTokens - CHAT_SYSTEM_TOKENS,
+    ),
   };
 }
 

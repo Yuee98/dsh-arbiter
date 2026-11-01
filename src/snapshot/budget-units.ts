@@ -126,15 +126,40 @@ function eventUnits(
   });
 }
 
+function newestOriginal(
+  base: Snapshot,
+  kind: 'session-human' | 'parent-human',
+  role: 'human-instruction' | 'direct-parent-instruction',
+): Snapshot['evidence'][number] | undefined {
+  let newest: Snapshot['evidence'][number] | undefined;
+  for (const item of base.evidence) {
+    if (
+      item.source.kind !== kind ||
+      item.role !== role ||
+      item.evidence !== 'explicit'
+    )
+      continue;
+    if (newest === undefined || item.ts >= newest.ts) newest = item;
+  }
+  return newest;
+}
+
 function legacyUnits(base: Snapshot): BudgetUnit[] {
-  const newestLocal = base.evidence.find(
-    (e) => e.source.kind === 'session-human',
+  const newestLocal = newestOriginal(
+    base,
+    'session-human',
+    'human-instruction',
   );
-  const newestParent = base.evidence.find(
-    (e) => e.source.kind === 'parent-human',
+  const newestParent = newestOriginal(
+    base,
+    'parent-human',
+    'direct-parent-instruction',
   );
+  const ordered = base.evidence
+    .map((evidence, index) => ({ evidence, index }))
+    .sort((a, b) => a.evidence.ts - b.evidence.ts || a.index - b.index);
   return [
-    ...base.evidence.flatMap((evidence, i): BudgetUnit[] =>
+    ...ordered.flatMap(({ evidence, index: i }, order): BudgetUnit[] =>
       evidence === newestLocal || evidence === newestParent
         ? []
         : [
@@ -146,7 +171,7 @@ function legacyUnits(base: Snapshot): BudgetUnit[] {
                   : evidence.source.kind === 'parent-human'
                     ? 1
                     : 2,
-              order: -i,
+              order,
               capped: false,
               kind: evidence.source.kind === 'parent-relay' ? 'relay' : 'human',
               evidence,
@@ -442,11 +467,11 @@ export function addUnit(snapshot: Snapshot, unit: BudgetUnit): Snapshot {
 
 export function baseSnapshot(snapshot: Snapshot): Snapshot {
   const { hint: _hint, ...rest } = snapshot;
-  const local = snapshot.evidence.find(
-    (e) => e.source.kind === 'session-human',
-  );
-  const parent = snapshot.evidence.find(
-    (e) => e.source.kind === 'parent-human',
+  const local = newestOriginal(snapshot, 'session-human', 'human-instruction');
+  const parent = newestOriginal(
+    snapshot,
+    'parent-human',
+    'direct-parent-instruction',
   );
   return {
     ...rest,

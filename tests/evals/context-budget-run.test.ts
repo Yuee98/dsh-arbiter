@@ -9,7 +9,12 @@ import {
   resumeRun,
 } from '../../evals/src/run/lifecycle.js';
 import { digestOf } from '../../evals/src/data/hash.js';
-import { caseMaterial } from '../../evals/src/run/material.js';
+import { caseFacts, caseMaterial } from '../../evals/src/run/material.js';
+import { variantPackage } from '../../src/reviewer/package.js';
+import {
+  defineVariant,
+  PRODUCTION_VARIANT,
+} from '../../src/reviewer/variant.js';
 import type { ReviewCase } from '../../evals/src/data/types.js';
 import type { RunFixture, RunPlan } from '../../evals/src/run/types.js';
 import type { LlmLike } from '../../src/reviewer/llm.js';
@@ -334,5 +339,304 @@ test('a repair exactly at context H is actually sent and recorded at that size',
     expect(exact.records[0]?.attempts[1]?.sent).not.toBe(false);
     expect(exact.records[0]?.status).toBe('reviewed');
     expect(exact.index.spent.attempts).toBe(2);
+  });
+});
+
+describe('PR1 source and degradation regressions through the actual legacy adapter', () => {
+  test('protects the latest actual local and parent originals instead of earlier tool facts and approvals', () => {
+    const entry: ReviewCase = {
+      ...sample,
+      input: {
+        ...sample.input,
+        evidence: [
+          { kind: 'material-quote', ref: 'TOOL_FACT', note: '工具结果原文' },
+          {
+            kind: 'material-quote',
+            ref: 'OLD_LOCAL_ALLOW',
+            note: '本会话人类原文',
+          },
+          {
+            kind: 'material-quote',
+            ref: 'OLD_PARENT_ALLOW',
+            note: '直接父会话人类原文',
+          },
+          {
+            kind: 'material-quote',
+            ref: 'LATEST_LOCAL_WITHDRAW',
+            note: '本会话人类原文',
+          },
+          {
+            kind: 'material-quote',
+            ref: 'LATEST_PARENT_WITHDRAW',
+            note: '直接父会话人类原文',
+          },
+        ],
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: 1,
+      maxInputTokens: 10000,
+    });
+    expect(material.snapshot.budget.targetExceededReason).toBe('base-input');
+    expect(material.snapshot.evidence.map((item) => item.text)).toEqual([
+      'LATEST_LOCAL_WITHDRAW',
+      'LATEST_PARENT_WITHDRAW',
+    ]);
+    expect(
+      material.snapshot.evidence.every((item) => item.evidence === 'explicit'),
+    ).toBe(true);
+  });
+
+  test('considers earlier originals newest first while retaining their original display positions', () => {
+    const newest = {
+      kind: 'material-quote' as const,
+      ref: 'LATEST_WITHDRAWAL',
+      note: '本会话人类原文',
+    };
+    const reference: ReviewCase = {
+      ...sample,
+      input: { ...sample.input, evidence: [newest] },
+    };
+    const base = caseMaterial(reference, 'chat', {
+      targetInputTokens: 1,
+      maxInputTokens: 20000,
+    });
+    const target = base.snapshot.budget.estimatedInputTokens + 2300;
+    const entry: ReviewCase = {
+      ...reference,
+      input: {
+        ...reference.input,
+        evidence: [
+          {
+            kind: 'material-quote',
+            ref: 'EARLIER_APPROVAL ' + 'old '.repeat(2000),
+            note: '本会话人类原文',
+          },
+          {
+            kind: 'material-quote',
+            ref: 'RECENT_AMENDMENT ' + 'middle '.repeat(2000),
+            note: '本会话人类原文',
+          },
+          newest,
+        ],
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: target,
+      maxInputTokens: target,
+    });
+    expect(
+      material.snapshot.evidence.map((item) => item.text.split(' ')[0]),
+    ).toEqual(['RECENT_AMENDMENT', 'LATEST_WITHDRAWAL']);
+  });
+
+  test.each(['full', 'compact', 'compact-no-audit'] as const)(
+    'reports parsed facts omitted by budget truthfully in %s',
+    (structure) => {
+      const entry: ReviewCase = {
+        ...sample,
+        input: {
+          ...sample.input,
+          action: {
+            name: 'bash',
+            arguments: { command: 'echo actual-parsed-action' },
+          },
+          evidence: [],
+        },
+      };
+      expect(caseFacts(entry)).not.toBeNull();
+      const pkg = variantPackage(
+        defineVariant({ ...PRODUCTION_VARIANT, structure }),
+      );
+      const material = caseMaterial(entry, 'chat', {
+        targetInputTokens: 1,
+        maxInputTokens: 10000,
+        pkg,
+      });
+      expect(material.snapshot.facts).toBeNull();
+      expect(material.snapshot.budget.truncatedSegments).toContain(
+        'DERIVED_FACTS',
+      );
+      expect(JSON.stringify(material.request)).toContain(
+        'facts omitted by the input budget',
+      );
+      expect(JSON.stringify(material.request)).not.toContain(
+        'the program could not be parsed',
+      );
+      const unknown: ReviewCase = {
+        ...entry,
+        input: {
+          ...entry.input,
+          action: { name: 'unknown-tool', arguments: {} },
+        },
+      };
+      expect(caseFacts(unknown)).toBeNull();
+      expect(
+        JSON.stringify(
+          caseMaterial(unknown, 'chat', {
+            targetInputTokens: 1,
+            maxInputTokens: 10000,
+            pkg,
+          }).request,
+        ),
+      ).toContain('the program could not be parsed');
+    },
+  );
+
+  test('degrades large action siblings when the preferred command field alone cannot fit H', () => {
+    const args = {
+      command: 'echo ok',
+      payload: 'PAYLOAD_HEAD ' + 'payload '.repeat(20000) + ' PAYLOAD_TAIL',
+    };
+    const entry: ReviewCase = {
+      ...sample,
+      input: {
+        ...sample.input,
+        action: { name: 'bash', arguments: args },
+        evidence: [],
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: 3000,
+      maxInputTokens: 4500,
+    });
+    expect(material.snapshot.budget.truncatedSegments).not.toContain(
+      'OVER_BUDGET',
+    );
+    expect(material.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
+      4500,
+    );
+    expect(material.snapshot.action.arguments).toMatchObject({
+      format: 'json-fragment',
+    });
+    expect(material.snapshot.action.truncated?.field).toBeNull();
+    expect(JSON.stringify(material.snapshot.action.arguments)).toContain(
+      'PAYLOAD_TAIL',
+    );
+    expect(args.payload).toHaveLength(
+      'PAYLOAD_HEAD '.length +
+        'payload '.repeat(20000).length +
+        ' PAYLOAD_TAIL'.length,
+    );
+  });
+
+  test('never replaces an independent programText with a different argument field', () => {
+    const programText = 'INDEPENDENT actual program';
+    const entry: ReviewCase = {
+      ...sample,
+      input: {
+        ...sample.input,
+        action: {
+          name: 'run_code',
+          arguments: {
+            code: 'CODE_HEAD ' + 'actual '.repeat(20000) + ' CODE_TAIL',
+          },
+          programText,
+        },
+        evidence: [],
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: 3000,
+      maxInputTokens: 4500,
+    });
+    expect(material.snapshot.action.programText).toBe(programText);
+    expect(material.snapshot.budget.truncatedSegments).not.toContain(
+      'OVER_BUDGET',
+    );
+    expect(material.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
+      4500,
+    );
+  });
+
+  test('whole-action fallback includes an independent program without inventing a duplicate', () => {
+    const args = {
+      command: 'echo ok',
+      payload: 'actual payload '.repeat(10000),
+    };
+    const programText =
+      'PROGRAM_HEAD ' + 'independent '.repeat(10000) + ' PROGRAM_TAIL';
+    const entry: ReviewCase = {
+      ...sample,
+      input: {
+        ...sample.input,
+        action: { name: 'run_code', arguments: args, programText },
+        evidence: [],
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: 3000,
+      maxInputTokens: 4500,
+    });
+    expect(material.snapshot.budget.truncatedSegments).not.toContain(
+      'OVER_BUDGET',
+    );
+    expect(material.snapshot.budget.estimatedInputTokens).toBeLessThanOrEqual(
+      4500,
+    );
+    expect(material.snapshot.action.programText).toBeUndefined();
+    expect(material.snapshot.action.arguments).toMatchObject({
+      format: 'json-fragment',
+    });
+    expect(JSON.stringify(material.snapshot.action.arguments)).toContain(
+      'PROGRAM_TAIL',
+    );
+    expect(material.snapshot.action.truncated?.originalChars).toBe(
+      JSON.stringify({ arguments: args, programText }).length,
+    );
+    expect(material.snapshot.action.truncated?.field).toBeNull();
+    expect(entry.input.action.programText).toBe(programText);
+    expect(entry.input.action.arguments).toEqual(args);
+  });
+
+  test('distinguishes available guidance fully omitted by budget from originally absent guidance', () => {
+    const input = {
+      ...sample.input,
+      action: {
+        name: 'bash',
+        arguments: { command: 'echo ' + 'large-action '.repeat(10000) },
+      },
+      evidence: [],
+    };
+    const entry: ReviewCase = {
+      ...sample,
+      input: {
+        ...input,
+        policy: {
+          ...input.policy,
+          customRules: 'global '.repeat(10000),
+          projectRules: 'project '.repeat(10000),
+        },
+      },
+    };
+    const material = caseMaterial(entry, 'chat', {
+      targetInputTokens: 3000,
+      maxInputTokens: 4500,
+    });
+    expect(material.snapshot.customRules).toBe('');
+    expect(material.snapshot.projectRules).toBeNull();
+    for (const source of material.snapshot.materials)
+      expect(source).toMatchObject({
+        enabled: true,
+        present: false,
+        chars: 0,
+        truncated: true,
+      });
+    const absent: ReviewCase = {
+      ...entry,
+      input: {
+        ...entry.input,
+        policy: { ...entry.input.policy, customRules: '', projectRules: null },
+      },
+    };
+    for (const source of caseMaterial(absent, 'chat', {
+      targetInputTokens: 3000,
+      maxInputTokens: 4500,
+    }).snapshot.materials)
+      expect(source).toMatchObject({
+        present: false,
+        chars: 0,
+        truncated: false,
+      });
   });
 });

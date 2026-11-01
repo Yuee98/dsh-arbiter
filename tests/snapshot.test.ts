@@ -803,7 +803,7 @@ describe('budget and configuration edges', () => {
       ...base,
       agent: { session: main },
       tool: 'run_code',
-      arguments: { code: program, description: 'dup' },
+      arguments: { program, description: 'dup' },
       cwd,
       config: {
         ...DEFAULT_CONFIG,
@@ -814,7 +814,7 @@ describe('budget and configuration edges', () => {
         },
       },
     });
-    // One submitted program body: both copies are the trimmed head, so the
+    // One submitted program body: both copies carry the same review fragment, so the
     // persisted snapshot cannot carry an untruncated duplicate.
     const action = built.snapshot.action;
     const args = action.arguments;
@@ -823,7 +823,7 @@ describe('budget and configuration edges', () => {
         'expected the trimmed action to keep its object shape',
       );
     }
-    const code: unknown = Reflect.get(args, 'code');
+    const code: unknown = Reflect.get(args, 'program');
     expect(typeof code).toBe('string');
     expect(action.programText).toBe(code);
     if (typeof code !== 'string') throw new TypeError('expected a code string');
