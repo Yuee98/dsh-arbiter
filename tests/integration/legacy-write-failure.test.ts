@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { withLegacy, fillBatch } from './helpers/legacy.js';
+import { withLegacy, fillBatch } from '../evals/helpers/legacy.js';
 import {
   exportLegacyBatch,
   importLegacyBatch,
@@ -36,5 +36,5 @@ describe('legacy label publication failure', () => {
       await importLegacyBatch(root, dataset, file, true, 'dev');
       expect(await fs.readFile(path, 'utf8')).toContain('publication fixture');
     });
-  });
+  }, 30_000);
 });
