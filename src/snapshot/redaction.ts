@@ -94,6 +94,8 @@ export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
   redactor: CredentialRedactor,
 ): T {
   redactor.discover([
+    snapshot.cwd,
+    snapshot.materials.map((item) => item.path),
     snapshot.action.arguments,
     snapshot.action.programText,
     snapshot.facts,
@@ -110,6 +112,10 @@ export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
       item.conflicts,
     ]),
     snapshot.missing,
+    snapshot.historyStatus.reason,
+    snapshot.completeness.note,
+    snapshot.completeness.gaps.map((gap) => gap.reason),
+    snapshot.completeness.items.map((item) => item.reason),
   ]);
   const text = (value: string) => redactor.text(value);
   return {

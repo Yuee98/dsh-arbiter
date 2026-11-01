@@ -81,6 +81,34 @@ function approve(): AbortSignal {
 }
 
 describe('the two protocols answer the same question', () => {
+  test('snapshot diagnostics complete credential knowledge before earlier material is copied', async () => {
+    const secret = 'synthetic-late-diagnostic-credential';
+    const input = snapshot({
+      sessionId: 'snapshot-diagnostic-order',
+      action: { name: 'bash', arguments: { command: `echo ${secret}` } },
+      completeness: {
+        status: 'complete',
+        items: [],
+        gaps: [],
+        note: `password=${secret}`,
+      },
+    });
+    const requests: unknown[] = [];
+    const result = await review({
+      snapshot: input,
+      callId: 'snapshot-diagnostic-order-call',
+      signal: approve(),
+      backend: offlineDecisionBackend({
+        scripts: [{ status: 200, body: JSON.stringify(NEW_SCALE_TYPESAFE) }],
+        requests,
+      }),
+    });
+    expect(result.outcome.status).toBe('scored');
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(requests)).not.toContain(secret);
+    expect(JSON.stringify(requests)).toContain('echo [redacted:v1:');
+    expect(input.action.arguments).toEqual({ command: `echo ${secret}` });
+  });
   test.each(['synthetic-chat-late-discovery', 'score'])(
     'chat retains newly labelled %s safely and masks it before a repair send',
     async (secret) => {
