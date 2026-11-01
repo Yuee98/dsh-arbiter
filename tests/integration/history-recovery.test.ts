@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { AuditStore } from '../../src/audit.js';
 import type { CallRecord } from '../../src/audit.js';
 import { apply } from '../../src/index.js';
+import { DecisionHistory } from '../../src/host/history.js';
 import {
   installSessionRecordApi,
   sessionRecordError,
@@ -257,6 +258,7 @@ interface HostHarness {
     readonly reset: boolean;
     readonly reason: string | null;
   };
+  readonly remember: (sessionId: string, item: PriorVerdictItem) => void;
   readonly cacheCopies: () => readonly (readonly [
     string,
     readonly PriorVerdictItem[],
@@ -449,6 +451,11 @@ async function harness(options: {
   return {
     ctx,
     cacheCopies: () => [...applied.runtime.priorVerdicts],
+    remember: (sessionId, item) => {
+      if (!(applied.history instanceof DecisionHistory))
+        throw new Error('history owner unavailable');
+      applied.history.rememberPrior(sessionId, item);
+    },
     sessions: options.sessions,
     captured,
     /**
@@ -2742,3 +2749,34 @@ test.each(['unavailable', 'invalid'] as const)(
     }
   },
 );
+
+test('one live session enforces serialized byte capacity without repeatedly serializing its full cache', async () => {
+  const session = makeSession('session-1');
+  const host = await harness({
+    sessions: new Map([['session-1', session]]),
+    auditDisabled: true,
+  });
+  try {
+    const reason = 'actual observed explanation '.repeat(2600);
+    for (let index = 0; index < 1000; index += 1)
+      host.remember('session-1', {
+        ts: index,
+        callId: `large-live-${String(index)}`,
+        tool: 'bash',
+        fingerprint: 'fixture',
+        trace: ['deny'],
+        result: 'deny',
+        configRevision: 'test',
+        reason,
+      });
+    const copies = host.cacheCopies()[0]?.[1] ?? [];
+    expect(copies.length).toBeGreaterThan(0);
+    expect(copies.length).toBeLessThan(1000);
+    expect(copies.at(-1)?.callId).toBe('large-live-999');
+    expect(Buffer.byteLength(JSON.stringify(copies))).toBeLessThanOrEqual(
+      64 * 1024 * 1024,
+    );
+  } finally {
+    await host.dispose();
+  }
+});

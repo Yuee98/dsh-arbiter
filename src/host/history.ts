@@ -50,6 +50,24 @@ const CACHE_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export class DecisionHistory {
   private readonly host: HostEnvironment;
+  private readonly itemSizes = new WeakMap<PriorVerdictItem, number>();
+
+  private itemBytes(item: PriorVerdictItem): number {
+    const known = this.itemSizes.get(item);
+    if (known !== undefined) return known;
+    const bytes = Buffer.byteLength(JSON.stringify(item));
+    this.itemSizes.set(item, bytes);
+    return bytes;
+  }
+
+  private copyBytes(items: readonly PriorVerdictItem[]): number {
+    return (
+      2 +
+      Math.max(0, items.length - 1) +
+      items.reduce((sum, item) => sum + this.itemBytes(item), 0)
+    );
+  }
+
   private readonly cacheAccounting = new Map<
     string,
     { readonly items: readonly PriorVerdictItem[]; readonly bytes: number }
@@ -65,12 +83,18 @@ export class DecisionHistory {
       if (!runtime.priorVerdicts.has(id)) this.cacheAccounting.delete(id);
     }
     const limited = selectWindow(candidates, CACHE_SESSION_ITEMS);
-    const items = limited.selected;
-    let bytes = Buffer.byteLength(JSON.stringify(items));
-    while (bytes > CACHE_TOTAL_BYTES && items.length > 0) {
-      items.shift();
-      bytes = Buffer.byteLength(JSON.stringify(items));
+    const selected = limited.selected;
+    let from = selected.length;
+    let bytes = 2;
+    for (let index = selected.length - 1; index >= 0; index -= 1) {
+      const item = selected[index];
+      if (item === undefined) continue;
+      const extra = this.itemBytes(item) + Number(from < selected.length);
+      if (bytes + extra > CACHE_TOTAL_BYTES) break;
+      bytes += extra;
+      from = index;
     }
+    const items = selected.slice(from);
     // Runtime ownership survives plugin reloads. An incomplete copy invalidates
     // its recovered marker so the next window performs the same bounded refill.
     if (items.length < candidates.length)
@@ -86,7 +110,7 @@ export class DecisionHistory {
       if (entry?.items !== values) {
         entry = {
           items: values,
-          bytes: Buffer.byteLength(JSON.stringify(values)),
+          bytes: this.copyBytes(values),
         };
         this.cacheAccounting.set(id, entry);
       }
