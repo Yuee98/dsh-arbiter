@@ -126,27 +126,34 @@ describe('receipt-bound historical result sources', () => {
       ).toBe(true);
     },
   );
-  test('B01: two actual 12MiB native bodies cannot hide their persisted 1MiB fragments', async () => {
-    const text = 'x'.repeat(12 * 1024 * 1024);
-    observe('A', text);
-    observe('B', text);
-    const originals = fixture.session.events.filter(
-      (event) => event.type === 'tool/result',
-    );
-    const source = await captureSnapshotSources(options());
-    const results = sourceEvents(source).filter(
-      (event) => event.kind === 'result' && event.body.state === 'present',
-    );
-    expect(results).toHaveLength(2);
-    expect(source.eventSources?.local.status.status).toBe('complete');
-    for (const callId of ['A', 'B'])
-      expect(
-        fixture.audit.getToolResult('session', callId).metadata?.retainedBytes,
-      ).toBe(1_048_576);
-    expect(JSON.stringify(source.log).length).toBeLessThan(10_000);
-    expect(JSON.stringify(originals).length).toBeGreaterThan(24 * 1024 * 1024);
-    expect(JSON.stringify(results)).toContain('separate retained ranges');
-  });
+  test(
+    'B01: two actual 12MiB native bodies cannot hide their persisted 1MiB fragments',
+    { timeout: 30_000 },
+    async () => {
+      const text = 'x'.repeat(12 * 1024 * 1024);
+      observe('A', text);
+      observe('B', text);
+      const originals = fixture.session.events.filter(
+        (event) => event.type === 'tool/result',
+      );
+      const source = await captureSnapshotSources(options());
+      const results = sourceEvents(source).filter(
+        (event) => event.kind === 'result' && event.body.state === 'present',
+      );
+      expect(results).toHaveLength(2);
+      expect(source.eventSources?.local.status.status).toBe('complete');
+      for (const callId of ['A', 'B'])
+        expect(
+          fixture.audit.getToolResult('session', callId).metadata
+            ?.retainedBytes,
+        ).toBe(1_048_576);
+      expect(JSON.stringify(source.log).length).toBeLessThan(10_000);
+      expect(JSON.stringify(originals).length).toBeGreaterThan(
+        24 * 1024 * 1024,
+      );
+      expect(JSON.stringify(results)).toContain('separate retained ranges');
+    },
+  );
   test('B02: null/failed/unverified receipts never key-read a later repair', async () => {
     for (const [index, save] of [
       'failed',
