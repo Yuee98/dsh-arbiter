@@ -241,6 +241,55 @@ describe('formal run-plan T/H and persisted v1 material', () => {
   });
 });
 
+test('unsafe material preparation refuses only that cell before reservation or provider dispatch', async () => {
+  await withArea(async (area) => {
+    const guarded: ReviewCase = {
+      ...sample,
+      caseId: 'guarded-material',
+      input: {
+        ...sample.input,
+        action: {
+          name: 'unknown-tool',
+          arguments: { entries: Array.from({ length: 100001 }, () => 0) },
+        },
+      },
+    };
+    const provider = scriptedLlm(['{"risk":2,"authorization":10}']);
+    const plan = planOf({
+      caseIds: [guarded.caseId, sample.caseId],
+      transport: 'live',
+      fixture: null,
+      targets: [chatTarget('chat-a', { maxRepairRetries: 0 })],
+      context: { targetInputTokens: 6000, maxInputTokens: 10000 },
+      bounds: bounds({
+        concurrency: 1,
+        maxAttempts: 1,
+        maxInputTokens: 100000,
+      }),
+    });
+    const result = await execute(
+      join(area.path, 'run'),
+      plan,
+      [guarded, sample],
+      null,
+      provider.llm,
+    );
+    expect(result.index.cells.map((cell) => cell.status)).toEqual([
+      'unresolvable',
+      'reviewed',
+    ]);
+    expect(result.index.cells.map((cell) => cell.attempts)).toEqual([0, 1]);
+    expect(provider.sent).toHaveLength(1);
+    expect(result.index.spent.attempts).toBe(1);
+    expect(result.records.map((record) => record.case.caseId)).toEqual([
+      sample.caseId,
+    ]);
+    expect(JSON.stringify(result.index.cells[0])).toContain(
+      'material_preparation_failed',
+    );
+  });
+});
+
 describe('actual repair sends and trusted presend ledger', () => {
   test.each([false, true])(
     'context H enforces repair while preserving first usage (oversized=%s)',

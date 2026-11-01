@@ -124,7 +124,10 @@ function chooseUnit(
   // All results yield before arguments; every channel still shares this call's C.
   const withArguments = fitScale((scale) => scaledUnit(unit, scale, 1), fits);
   const selected =
-    withArguments ?? fitScale((scale) => scaledUnit(unit, 0, scale), fits);
+    withArguments ??
+    fitScale((scale) => scaledUnit(unit, scale, 1, true), fits) ??
+    fitScale((scale) => scaledUnit(unit, 0, scale), fits) ??
+    fitScale((scale) => scaledUnit(unit, 0, scale, true), fits);
   return selected === null
     ? null
     : {
@@ -177,6 +180,9 @@ function fillOrdinary(
       Math.min(
         estimateTokenCount(JSON.stringify(unitContent(unit))),
         estimateTokenCount(JSON.stringify(unitContent(scaledUnit(unit, 0, 0)))),
+        estimateTokenCount(
+          JSON.stringify(unitContent(scaledUnit(unit, 0, 0, true))),
+        ),
       ) > cap
     )
       continue;

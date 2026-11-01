@@ -11,15 +11,11 @@ import { prefixCompatibility } from './prefix.js';
 
 export type UnitLog = NonNullable<ReviewSnapshot['budget']['units']>;
 
-function trimmedKinds(units: readonly BudgetUnit[], log: UnitLog) {
+function trimmedUnits(units: readonly BudgetUnit[], log: UnitLog) {
   const selected = new Map(log.map((entry) => [entry.id, entry]));
-  return new Set(
-    units
-      .filter(
-        (unit) =>
-          !selected.has(unit.id) || selected.get(unit.id)?.truncated === true,
-      )
-      .map((unit) => unit.kind),
+  return units.filter(
+    (unit) =>
+      !selected.has(unit.id) || selected.get(unit.id)?.truncated === true,
   );
 }
 
@@ -66,8 +62,28 @@ function extraNotes(
   original: ReviewSnapshot,
   current: ReviewSnapshot,
   kinds: ReadonlySet<BudgetUnit['kind']>,
+  omitted: readonly BudgetUnit[],
 ): MaterialGapItem[] {
   const items: MaterialGapItem[] = [];
+  if (kinds.has('reference')) {
+    const sources = new Set(
+      omitted.flatMap((unit) => {
+        const kind = unit.evidence?.source.kind;
+        return unit.kind === 'reference' &&
+          (kind === 'session-human' || kind === 'parent-human')
+          ? [kind]
+          : [];
+      }),
+    );
+    for (const source of sources)
+      items.push({
+        source,
+        kind: 'truncated',
+        blocking: false,
+        reason:
+          'Non-authorizing evidence references were omitted by the input budget.',
+      });
+  }
   if (current.customRules !== original.customRules)
     items.push({
       source: 'custom-rules',
@@ -90,10 +106,11 @@ function segmentsOf(
   flags: MaterialTrims,
   custom: boolean,
   hint: boolean,
+  references: boolean,
 ): string[] {
   const values: readonly [boolean, string][] = [
     [flags.action, 'ACTION'],
-    [flags.evidence, 'EVIDENCE'],
+    [flags.evidence || references, 'EVIDENCE'],
     [flags.toolArguments || flags.checkpoints, 'CONTEXT'],
     [flags.priorVerdicts, 'PRIOR_VERDICTS'],
     [flags.projectRules, 'PROJECT_RULES'],
@@ -111,11 +128,12 @@ export function describeBudget(
   units: readonly BudgetUnit[],
   log: UnitLog,
 ): ReviewSnapshot {
-  const kinds = trimmedKinds(units, log);
+  const omitted = trimmedUnits(units, log);
+  const kinds = new Set(omitted.map((unit) => unit.kind));
   const flags = trimFlags(original, current, kinds);
   const prefix = prefixWithOmissions(original.prefix, current.prefix);
   const input = buildCompleteness({ ...material, trimmed: flags });
-  const extra = extraNotes(original, current, kinds);
+  const extra = extraNotes(original, current, kinds, omitted);
   const evidence = new Set(current.evidence);
   const completeness = {
     ...input,
@@ -134,7 +152,8 @@ export function describeBudget(
         }
       : {}),
     facts: flags.derivedFacts ? current.facts : original.facts,
-    evidenceTruncated: original.evidenceTruncated || flags.evidence,
+    evidenceTruncated:
+      original.evidenceTruncated || flags.evidence || kinds.has('reference'),
     contextTruncated:
       original.contextTruncated || flags.toolArguments || flags.checkpoints,
     historyTruncated: original.historyTruncated || flags.priorVerdicts,
@@ -146,6 +165,7 @@ export function describeBudget(
         flags,
         current.customRules !== original.customRules,
         kinds.has('hint'),
+        kinds.has('reference'),
       ),
       units: log,
     },

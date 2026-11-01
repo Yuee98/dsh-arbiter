@@ -431,10 +431,18 @@ function prepare(
   if (target === undefined) {
     return { reason: `target ${cell.targetId} is not in the plan` };
   }
-  const material = caseMaterial(caseEntry, cell.protocol, {
-    ...options.plan.context,
-    pkg,
-  });
+  let material: Prepared['material'];
+  try {
+    material = caseMaterial(caseEntry, cell.protocol, {
+      ...options.plan.context,
+      pkg,
+    });
+  } catch {
+    return {
+      reason:
+        'material_preparation_failed: material could not be safely prepared',
+    };
+  }
   if (
     material.snapshot.budget.truncatedSegments.includes('OVER_BUDGET') ||
     material.material.estimatedInputTokens > options.plan.context.maxInputTokens

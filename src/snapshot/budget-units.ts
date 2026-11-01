@@ -5,6 +5,7 @@ import type {
   ReviewSnapshot,
 } from '../types.js';
 import { jsonFragment, shortenedText } from './budget-text.js';
+import { resultCopy } from './budget-results.js';
 
 type Snapshot = ReviewSnapshot;
 export interface BudgetUnit {
@@ -19,6 +20,7 @@ export interface BudgetUnit {
     | 'prior'
     | 'assistant'
     | 'facts'
+    | 'reference'
     | 'hint'
     | 'checkpoint';
   readonly area?: 'local' | 'parent';
@@ -64,6 +66,7 @@ function priorityOf(
     prior: 4,
     assistant: 5,
     facts: 6,
+    reference: 6,
     hint: 7,
     checkpoint: 8,
   }[kind];
@@ -126,6 +129,16 @@ function eventUnits(
   });
 }
 
+function originalHuman(item: Snapshot['evidence'][number]): boolean {
+  return (
+    item.evidence === 'explicit' &&
+    ((item.source.kind === 'session-human' &&
+      item.role === 'human-instruction') ||
+      (item.source.kind === 'parent-human' &&
+        item.role === 'direct-parent-instruction'))
+  );
+}
+
 function newestOriginal(
   base: Snapshot,
   kind: 'session-human' | 'parent-human',
@@ -133,11 +146,7 @@ function newestOriginal(
 ): Snapshot['evidence'][number] | undefined {
   let newest: Snapshot['evidence'][number] | undefined;
   for (const item of base.evidence) {
-    if (
-      item.source.kind !== kind ||
-      item.role !== role ||
-      item.evidence !== 'explicit'
-    )
+    if (item.source.kind !== kind || item.role !== role || !originalHuman(item))
       continue;
     if (newest === undefined || item.ts >= newest.ts) newest = item;
   }
@@ -159,25 +168,28 @@ function legacyUnits(base: Snapshot): BudgetUnit[] {
     .map((evidence, index) => ({ evidence, index }))
     .sort((a, b) => a.evidence.ts - b.evidence.ts || a.index - b.index);
   return [
-    ...ordered.flatMap(({ evidence, index: i }, order): BudgetUnit[] =>
-      evidence === newestLocal || evidence === newestParent
-        ? []
-        : [
-            {
-              id: `evidence:${String(i)}`,
-              priority:
-                evidence.source.kind === 'session-human'
-                  ? 0
-                  : evidence.source.kind === 'parent-human'
-                    ? 1
-                    : 2,
-              order,
-              capped: false,
-              kind: evidence.source.kind === 'parent-relay' ? 'relay' : 'human',
-              evidence,
-            },
-          ],
-    ),
+    ...ordered.flatMap(({ evidence, index: i }, order): BudgetUnit[] => {
+      if (evidence === newestLocal || evidence === newestParent) return [];
+      const kind =
+        evidence.source.kind === 'parent-relay'
+          ? 'relay'
+          : originalHuman(evidence)
+            ? 'human'
+            : 'reference';
+      return [
+        {
+          id: `evidence:${String(i)}`,
+          priority: priorityOf(
+            kind,
+            evidence.source.kind === 'parent-human' ? 'parent' : 'local',
+          ),
+          order,
+          capped: false,
+          kind,
+          evidence,
+        },
+      ];
+    }),
     ...base.context.map((context, i): BudgetUnit => ({
       id: `context:${String(i)}`,
       priority: 3,
@@ -318,31 +330,11 @@ export function candidateUnits(base: Snapshot): readonly BudgetUnit[] {
   );
 }
 
-/** Retain actual channel labels while shortening each observed text block. */
-function resultCopy(value: unknown, scale: number): unknown {
-  if (scale >= 1) return value;
-  if (typeof value === 'string')
-    return shortenedText(value, Math.floor(value.length * scale));
-  if (Array.isArray(value))
-    return value.map((entry: unknown) => resultCopy(entry, scale));
-  if (value !== null && typeof value === 'object') {
-    const record = Object.fromEntries(Object.entries(value));
-    const textKeys = ['text', 'stdout', 'stderr', 'output', 'content'];
-    if (textKeys.some((key) => key in record))
-      return Object.fromEntries(
-        Object.entries(record).map(([key, item]) => [
-          key,
-          textKeys.includes(key) ? resultCopy(item, scale) : item,
-        ]),
-      );
-  }
-  return jsonFragment(value, scale);
-}
-
 export function scaledUnit(
   unit: BudgetUnit,
   bodyScale = 1,
   argumentScale = 1,
+  wholeResults = false,
 ): BudgetUnit {
   return {
     ...unit,
@@ -360,7 +352,11 @@ export function scaledUnit(
                 ...event,
                 body: {
                   ...event.body,
-                  content: resultCopy(event.body.content, bodyScale),
+                  content: resultCopy(
+                    event.body.content,
+                    bodyScale,
+                    wholeResults,
+                  ),
                 },
               };
             if (event.kind === 'assistant' || event.kind === 'checkpoint')

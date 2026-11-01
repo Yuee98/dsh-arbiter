@@ -565,3 +565,133 @@ test('the allocator admits the full bounded population through batched full rend
   expect(actual(built.snapshot)).toBeLessThanOrEqual(5000000);
   expect(built.snapshot.prefix?.omissions).toEqual([]);
 }, 15000);
+
+test.each(['structured', 'structured-note', 'channels-and-media'] as const)(
+  'a mixed %s result keeps its call and bounded fragment when unknown body fields are large',
+  async (mode) => {
+    const detail =
+      'DETAIL_HEAD ' + 'large detail '.repeat(10000) + ' DETAIL_TAIL';
+    const content =
+      mode !== 'channels-and-media'
+        ? {
+            text: 'small useful observation',
+            [mode === 'structured-note' ? 'note' : 'detail']: detail,
+          }
+        : [
+            {
+              type: 'text',
+              channel: 'stdout',
+              source: 'native-out',
+              text: 'small useful observation',
+              detail,
+            },
+            {
+              type: 'text',
+              channel: 'stderr',
+              source: 'native-err',
+              text: 'actual error',
+              detail,
+            },
+            { type: 'image', url: 'https://example.invalid/media/reference' },
+          ];
+    const events: ReviewEvent[] = [
+      human(0, 'actual human original'),
+      {
+        kind: 'call',
+        sessionId: 'local',
+        turnId: '1',
+        eventId: 'mixed-call',
+        seq: 1,
+        callId: 'mixed',
+        tool: 'bash',
+        arguments: { command: 'echo observation' },
+      },
+      {
+        kind: 'result',
+        sessionId: 'local',
+        turnId: '1',
+        eventId: 'mixed-result',
+        seq: 2,
+        callId: 'mixed',
+        status: 'failure',
+        exitCode: 7,
+        body: {
+          state: 'present',
+          content,
+          truncations: [
+            { source: 'upstream', note: 'actual upstream truncation' },
+          ],
+        },
+      },
+    ];
+    const built = await buildReviewSnapshot(options(events));
+    const selected =
+      built.snapshot.prefix?.local.events.filter(
+        (event) => event.kind === 'call' || event.kind === 'result',
+      ) ?? [];
+    expect(selected.map((event) => event.eventId)).toEqual([
+      'mixed-call',
+      'mixed-result',
+    ]);
+    expect(selected[0]).toMatchObject({
+      arguments: { command: 'echo observation' },
+    });
+    const result = selected.find((event) => event.kind === 'result');
+    if (result?.kind !== 'result' || result.body.state !== 'present')
+      throw new Error('missing retained actual result');
+    expect(result).toMatchObject({
+      callId: 'mixed',
+      status: 'failure',
+      exitCode: 7,
+      body: {
+        truncations: [
+          { source: 'upstream', note: 'actual upstream truncation' },
+        ],
+      },
+    });
+    expect(JSON.stringify(result.body.content)).toContain('json-fragment');
+    expect(JSON.stringify(result.body.content)).toContain('DETAIL_TAIL');
+    const expectedLabels =
+      mode === 'channels-and-media'
+        ? ['stdout', 'stderr', 'https://example.invalid/media/reference']
+        : [];
+    for (const label of expectedLabels)
+      expect(JSON.stringify(result.body.content)).toContain(label);
+    const expectedIdentity =
+      mode === 'channels-and-media'
+        ? [
+            { type: 'text', channel: 'stdout', source: 'native-out' },
+            { type: 'text', channel: 'stderr', source: 'native-err' },
+            {
+              type: 'image',
+              ref: 'https://example.invalid/media/reference',
+              state: 'omitted',
+            },
+          ]
+        : { format: 'json-fragment' };
+    expect(result.body.content).toMatchObject(expectedIdentity);
+    const prefix = built.snapshot.prefix;
+    if (prefix === undefined) throw new Error('missing actual prefix');
+    const without = {
+      ...built.snapshot,
+      prefix: {
+        ...prefix,
+        local: {
+          ...prefix.local,
+          events: prefix.local.events.filter(
+            (event) => !selected.some((retained) => retained === event),
+          ),
+        },
+      },
+    };
+    const chat =
+      renderChatRequest(built.snapshot).estimatedInputTokens -
+      renderChatRequest(without).estimatedInputTokens;
+    const decision =
+      renderDecisionRequest(renderChatUser(built.snapshot))
+        .estimatedInputTokens -
+      renderDecisionRequest(renderChatUser(without)).estimatedInputTokens;
+    expect(Math.max(chat, decision)).toBeLessThanOrEqual(600);
+    expect(actual(built.snapshot)).toBeLessThanOrEqual(6000);
+  },
+);

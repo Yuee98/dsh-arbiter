@@ -32,6 +32,11 @@ import type {
 } from '../../../src/types.js';
 import { prepareReviewSnapshot } from '../../../src/snapshot.js';
 import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
+import {
+  bindSnapshotRedactor,
+  redactSnapshot,
+} from '../../../src/snapshot/redaction.js';
+import { redactCompletenessInput } from '../../../src/snapshot/material-redaction.js';
 import { boundEventSources } from '../../../src/snapshot/source-guard.js';
 import { parentChain } from '../../../src/host/admission.js';
 import type { ReviewEvent, ReviewEventSource } from '../../../src/types.js';
@@ -276,7 +281,7 @@ function authorityOf(entry: Evidence): {
  * snapshot: the comparison is about presentation and reading, never about the material.
  */
 export function caseMaterial(
-  caseEntry: ReviewCase,
+  entry: ReviewCase,
   protocol: RunProtocol,
   options: {
     readonly maxInputTokens: number;
@@ -285,6 +290,7 @@ export function caseMaterial(
     readonly pkg?: ReviewPackage;
   },
 ): CaseMaterial {
+  const caseEntry = structuredClone(entry);
   const pkg = options.pkg ?? PRODUCTION_PACKAGE;
   const input = caseEntry.input;
   const guidance = caseGuidance(
@@ -354,14 +360,29 @@ export function caseMaterial(
       buildCompleteness({ ...completenessInput, trimmed: NO_TRIMS }),
     ),
   };
+  // Discover the full captured material before any field or its key can be clipped.
+  const redactor = new CredentialRedactor(caseEntry.caseId);
+  redactor.discover(completenessInput);
+  const safeBase = redactSnapshot(base, redactor);
+  const material = redactCompletenessInput(completenessInput, redactor);
   const rendered = truncateSnapshot(
-    base,
+    {
+      ...safeBase,
+      materials: safeBase.materials.map((item) => ({
+        ...item,
+        chars:
+          item.id === 'project-rules'
+            ? (safeBase.projectRules?.length ?? 0)
+            : safeBase.customRules.length,
+      })),
+    },
     options.maxInputTokens,
-    completenessInput,
+    material,
     options.targetInputTokens,
     pkg,
   );
   const snapshot = rendered.snapshot;
+  bindSnapshotRedactor(snapshot, redactor);
   // The package's own renderer, so the fingerprint, the estimate and the request the
   // transport will send are one value. `estimatedInputTokens` is read from it rather than
   // recomputed: a second estimate here could disagree with what the provider receives.
