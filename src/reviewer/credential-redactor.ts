@@ -152,9 +152,9 @@ export class CredentialRedactor {
   }
   private mask = (raw: string, kind: string): string => {
     const { value, quote } = quotedValue(raw);
-    if (kind === 'authorization' && AUTH_WORDS.test(value)) return raw;
     const known = this.#secrets.get(value);
     if (known !== undefined) return reQuote(known.marker, quote);
+    if (kind === 'authorization' && AUTH_WORDS.test(value)) return raw;
     // A malformed object's delimiter is not a credential vocabulary entry.
     if (kind === 'authorization' && quote === '' && ['{', '['].includes(value))
       return this.opaque(value);

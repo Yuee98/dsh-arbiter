@@ -1201,7 +1201,7 @@ describe('credential preparation at actual production boundaries', () => {
       }
     },
   );
-  test.each(['text', 'score', '4'])(
+  test.each(['text', 'score', '4', 'approved'])(
     'a credential equal to %s keeps typed source and the exact final rendered wire view',
     async (secret) => {
       const endpoint = await credentialEndpoint();
@@ -1214,6 +1214,7 @@ describe('credential preparation at actual production boundaries', () => {
         const result = await harness.run(`protocol-wire-call-${secret}`, {
           command: 'echo local',
           password: secret,
+          Authorization: secret,
           path: '/tmp/q4',
           count: 4,
         });
@@ -1236,6 +1237,7 @@ describe('credential preparation at actual production boundaries', () => {
         const masked: unknown = expect.stringContaining('[redacted:v1:');
         expect(stored.snapshot.action.arguments).toMatchObject({
           password: masked,
+          Authorization: masked,
           path: '/tmp/q4',
           count: 4,
         });

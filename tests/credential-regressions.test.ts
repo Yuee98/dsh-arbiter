@@ -6,6 +6,19 @@ const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
 
 describe('credential boundary regressions from the first PR review', () => {
+  test('an exact known credential takes precedence over ordinary authorization words', () => {
+    const ordinary = new CredentialRedactor('ordinary-permission-word');
+    expect(ordinary.value({ Authorization: 'approved' })).toEqual({
+      Authorization: 'approved',
+    });
+    const known = new CredentialRedactor('known-permission-word', ['approved']);
+    const identity = known.text('approved');
+    expect(identity).toMatch(marker);
+    expect(known.value({ Authorization: 'approved' })).toEqual({
+      Authorization: identity,
+    });
+    expect(known.text('Authorization: approved')).toContain(identity);
+  });
   test('short/numeric values keep explicit, whole-value and quoted identities without rewriting quantities or paths', () => {
     const redactor = new CredentialRedactor('short-context', [
       '4',
