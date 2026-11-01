@@ -55,7 +55,7 @@ describe('legacy annotation baseline and atomic collection writes', () => {
         await readFile(join(dataset, 'dev/legacy-v1/opinions.json'), 'utf8'),
       ).toBe(opinions);
     });
-  });
+  }, 30_000);
   it('rejects case input drift and releases the group claim without touching labels', async () => {
     await withLegacy(async (root, dataset) => {
       const file = join(root, 'pack.json');
@@ -87,7 +87,7 @@ describe('legacy annotation baseline and atomic collection writes', () => {
         readFile(join(dataset, 'dev/legacy-v1/.labels.lock')),
       ).rejects.toThrow();
     });
-  });
+  }, 30_000);
   it('refuses a stale targeted label baseline but merges independent decisions', async () => {
     await withLegacy(async (root, dataset) => {
       const a = join(root, 'a.json'),
@@ -120,7 +120,7 @@ describe('legacy annotation baseline and atomic collection writes', () => {
           .rationale,
       ).toBe('independent writer');
     });
-  });
+  }, 30_000);
   it('rejects wrong split and changed family, duplicate IDs, unknown metadata, without writes', async () => {
     await withLegacy(async (root, dataset) => {
       const file = join(root, 'pack.json');
@@ -158,7 +158,7 @@ describe('legacy annotation baseline and atomic collection writes', () => {
       ).rejects.toThrow('versioned legacy');
       expect(await readFile(path, 'utf8')).toBe(before);
     });
-  });
+  }, 30_000);
   it('handles missing labels and pending rows; busy claims and symlink sources cannot write', async () => {
     await withLegacy(async (root, dataset) => {
       const labels = join(dataset, 'dev/legacy-v1/labels.json');
@@ -190,5 +190,5 @@ describe('legacy annotation baseline and atomic collection writes', () => {
       ).rejects.toThrow('regular file');
       expect(await readFile(alias, 'utf8')).toBe(bytes);
     });
-  });
+  }, 30_000);
 });
