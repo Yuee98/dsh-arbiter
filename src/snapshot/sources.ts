@@ -8,8 +8,13 @@ import {
   type ProjectRulesResult,
 } from './guidance.js';
 import type { ReviewEventSources } from '../types.js';
-import { beforePending, boundSourceLog } from './host-events.js';
+import {
+  beforePending,
+  boundSourceLog,
+  hostEventSource,
+} from './host-events.js';
 import { boundEventSources } from './source-guard.js';
+import { resultContent } from './event-content.js';
 import { currentTurnOf } from './window.js';
 import { redactEventSources } from './prefix-redaction.js';
 import { discoverLog, redactLog } from './source-redaction.js';
@@ -82,6 +87,28 @@ export async function captureSnapshotSources(
     createdAt: Date.now(),
   };
 }
+/** Omit ordinary result media using original tags after complete raw discovery.
+ * Human ask answers retain their original content/block processing path.
+ */
+function redactCapturedLog(
+  log: SessionLog,
+  redactor: CredentialRedactor,
+  sessionId: string,
+  parentId?: string,
+  parent = false,
+): SessionLog {
+  const ordinaryResults = new Set(
+    hostEventSource(log, sessionId, parentId, parent).events.flatMap((event) =>
+      event.kind === 'result' ? [event.seq] : [],
+    ),
+  );
+  return redactLog(log, redactor, (event, content) =>
+    event.type === 'tool/result' && ordinaryResults.has(event.seq)
+      ? resultContent(content)
+      : content,
+  );
+}
+
 export function redactSnapshotSources(
   source: SnapshotSources,
   options: SnapshotOptions,
@@ -107,10 +134,23 @@ export function redactSnapshotSources(
     ...(source.eventSources === undefined
       ? {}
       : { eventSources: redactEventSources(source.eventSources, redactor) }),
-    log: redactLog(source.log, redactor),
+    log: redactCapturedLog(
+      source.log,
+      redactor,
+      options.agent.session.id ?? 'unknown',
+      options.agent.session.header?.parentSession,
+    ),
     ...(source.parentLog === undefined
       ? {}
-      : { parentLog: redactLog(source.parentLog, redactor) }),
+      : {
+          parentLog: redactCapturedLog(
+            source.parentLog,
+            redactor,
+            options.agent.session.header?.parentSession ?? 'unknown',
+            undefined,
+            true,
+          ),
+        }),
     project: projectRulesCopy(source.project, redactor),
     createdAt: source.createdAt,
   };

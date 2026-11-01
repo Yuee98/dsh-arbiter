@@ -91,6 +91,30 @@ describe('real grouped workflow source -> production material', () => {
       Reflect.get(second, 'promptFingerprint'),
     );
   });
+  test('CW123-PR-B02 workflow duplicate JSON is checked before media projection', async () => {
+    const original = workflow();
+    const raw =
+      '{"password":"first-value","password":"second-value","media":{"type":"image/png","data":"BINARY_SENTINEL"}}';
+    const root = {
+      ...original,
+      events: original.events.map((event) =>
+        event.kind === 'result' && event.eventId === 'scan-result'
+          ? { ...event, body: { state: 'present' as const, content: raw } }
+          : event,
+      ),
+    };
+    const dataset = await loadWorkflow(root, {}, { references: false });
+    expect(dataset.problems).toEqual([]);
+    await expect(
+      workflowMaterial(
+        dataset,
+        root.rootId,
+        'format-clean',
+        'chat',
+        materialOptions,
+      ),
+    ).rejects.toThrow(/credential|duplicate|JSON/iu);
+  });
   test.each(['chat', 'decision'] as const)(
     'CW123-PR-B02 %s actual workflow request omits MIME-typed binary bodies',
     async (protocol) => {
@@ -106,6 +130,7 @@ describe('real grouped workflow source -> production material', () => {
                   content: [
                     {
                       type: 'audio/mpeg',
+                      password: 'audio/mpeg',
                       encoding: 'base64',
                       data: 'MIME_WIRE_BINARY_SENTINEL',
                       reference: 'audio-ref',

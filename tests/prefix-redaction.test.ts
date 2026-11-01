@@ -27,6 +27,97 @@ const input = {
 };
 
 describe('new event material shares captured credential preparation', () => {
+  test('CW123-PR-B02 media-like JSON in a foreground human answer remains original human content', async () => {
+    const original = JSON.stringify({
+      type: 'image/png',
+      data: 'HUMAN_ORIGINAL_SENTINEL',
+    });
+    const prepared = await prepareReviewSnapshot(
+      {
+        ...input,
+        agent: {
+          session: {
+            id: 'answer-media',
+            inheritedEventCount: 0,
+            snapshotEvents: () => [
+              {
+                seq: 0,
+                type: 'tool/call',
+                data: {
+                  callId: 'ask',
+                  name: 'ask_user_question',
+                  arguments: {
+                    questions: [
+                      { id: 'q', question: 'What should be recorded?' },
+                    ],
+                  },
+                },
+              },
+              {
+                seq: 1,
+                type: 'tool/result',
+                data: {
+                  message: {
+                    source: { kind: 'tool', callId: 'ask' },
+                    isError: false,
+                    content: JSON.stringify({
+                      answers: [{ id: 'q', selected: [], custom: original }],
+                    }),
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      new CredentialRedactor('human-original-media'),
+    );
+    expect(prepared.bundle.snapshot.prefix?.local.events[1]).toMatchObject({
+      kind: 'human',
+      text: original,
+      binding: { status: 'bound' },
+    });
+    expect(prepared.bundle.user).toContain('HUMAN_ORIGINAL_SENTINEL');
+  });
+  test('CW123-PR-B02 original duplicate JSON is validated before media projection can rewrite it', async () => {
+    const raw =
+      '{"password":"first-value","password":"second-value","media":{"type":"image/png","data":"BINARY_SENTINEL"}}';
+    await expect(
+      prepareReviewSnapshot(
+        {
+          ...input,
+          agent: {
+            session: {
+              id: 'duplicate-media',
+              inheritedEventCount: 0,
+              snapshotEvents: () => [
+                {
+                  seq: 0,
+                  type: 'user/message',
+                  data: {
+                    source: { kind: 'user' },
+                    content: 'Only local work',
+                  },
+                },
+                {
+                  seq: 1,
+                  type: 'tool/result',
+                  data: {
+                    message: {
+                      source: { kind: 'tool', callId: 'old' },
+                      isError: false,
+                      content: raw,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+        new CredentialRedactor('duplicate-media'),
+      ),
+    ).rejects.toThrow();
+  });
   test.each(['chat', 'decision'] as const)(
     'workflow %s results redact split credentials while preserving source block tags',
     async (protocol) => {

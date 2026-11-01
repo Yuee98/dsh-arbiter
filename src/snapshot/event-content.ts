@@ -126,7 +126,7 @@ function mediaOf(value: Record<string, unknown>, type: string): ReviewMedia {
   };
 }
 
-/** The caller uses already-redacted source data; this is a type projection. */
+/** Text-only media projection; the caller owns credential discovery/copy order. */
 export function resultContent(value: unknown, depth = 0): unknown {
   if (depth > 64) return { omitted: 'structured result nesting limit' };
   if (typeof value === 'string') return resultString(value, depth);
@@ -142,8 +142,29 @@ export function resultContent(value: unknown, depth = 0): unknown {
   );
 }
 
+function truncationNotes(
+  value: unknown,
+): { source: 'upstream' | 'collection'; note: string }[] {
+  return Array.isArray(value)
+    ? value.flatMap(
+        (
+          item: unknown,
+        ): { source: 'upstream' | 'collection'; note: string }[] => {
+          if (!eventRecord(item) || typeof item['note'] !== 'string') return [];
+          const source = item['source'];
+          return source === 'upstream' || source === 'collection'
+            ? [{ source, note: item['note'] }]
+            : [];
+        },
+      )
+    : [];
+}
+
 /** Preserve explicit collection/upstream states rather than inferring success. */
-export function resultBody(value: unknown): ReviewResultBody {
+export function resultBody(
+  value: unknown,
+  options: { readonly deferMedia?: boolean } = {},
+): ReviewResultBody {
   if (!eventRecord(value))
     return { state: 'unavailable', reason: 'not-provided' };
   if (value['state'] === 'empty') return { state: 'empty' };
@@ -183,25 +204,10 @@ export function resultBody(value: unknown): ReviewResultBody {
     return { state: 'unavailable', reason: 'not-provided' };
   if (content === '' || (Array.isArray(content) && content.length === 0))
     return { state: 'empty' };
-  const truncations = value['truncations'];
-  const notes: { source: 'upstream' | 'collection'; note: string }[] =
-    Array.isArray(truncations)
-      ? truncations.flatMap(
-          (
-            item: unknown,
-          ): { source: 'upstream' | 'collection'; note: string }[] => {
-            if (!eventRecord(item) || typeof item['note'] !== 'string')
-              return [];
-            const source = item['source'];
-            return source === 'upstream' || source === 'collection'
-              ? [{ source, note: item['note'] }]
-              : [];
-          },
-        )
-      : [];
+  const notes = truncationNotes(value['truncations']);
   return {
     state: 'present',
-    content: resultContent(content),
+    content: options.deferMedia === true ? content : resultContent(content),
     ...(notes.length === 0 ? {} : { truncations: notes }),
   };
 }

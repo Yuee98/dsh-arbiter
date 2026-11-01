@@ -114,6 +114,8 @@ export function discoverLog(
 export function redactLog(
   log: SessionLog,
   redactor: CredentialRedactor,
+  // Applied after raw discovery by the caller, before payload fields are masked.
+  projectContent?: (event: SessionEventLike, content: unknown) => unknown,
 ): SessionLog {
   const copies = new WeakMap<SessionEventLike, SessionEventLike>();
   const copy = (event: SessionEventLike): SessionEventLike => {
@@ -128,6 +130,11 @@ export function redactLog(
       return event;
     const previous = copies.get(event);
     if (previous !== undefined) return previous;
+    const contentCopy = (content: unknown) =>
+      redactSourceContent(
+        projectContent === undefined ? content : projectContent(event, content),
+        redactor,
+      );
     const result = {
       ...event,
       data: {
@@ -137,13 +144,13 @@ export function redactLog(
           : { arguments: redactor.value(data['arguments']) }),
         ...(data['content'] === undefined
           ? {}
-          : { content: redactSourceContent(data['content'], redactor) }),
+          : { content: contentCopy(data['content']) }),
         ...(!record(message) || message['content'] === undefined
           ? {}
           : {
               message: {
                 ...message,
-                content: redactSourceContent(message['content'], redactor),
+                content: contentCopy(message['content']),
               },
             }),
       },

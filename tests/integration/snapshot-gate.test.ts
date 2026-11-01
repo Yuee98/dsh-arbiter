@@ -1551,6 +1551,7 @@ describe('credential preparation at actual production boundaries', () => {
               {
                 type: 'application/octet-stream',
                 encoding: 'base64',
+                password: 'application/octet-stream',
                 ref: '/tmp/' + secret + '.png',
                 data: 'RAW_BINARY_BODY_SENTINEL',
               },

@@ -10,6 +10,7 @@ import {
   discoverSourceContent,
   redactSourceContent,
 } from './source-redaction.js';
+import { resultContent } from './event-content.js';
 import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 
 function material(event: ReviewEvent): unknown {
@@ -35,7 +36,7 @@ function bodyCopy(
   if (body.state === 'present')
     return {
       ...body,
-      content: redactSourceContent(body.content, redactor),
+      content: redactSourceContent(resultContent(body.content), redactor),
       ...(body.truncations === undefined
         ? {}
         : {

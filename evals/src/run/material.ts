@@ -466,7 +466,8 @@ function workflowEvent(event: WorkflowEvent): ReviewEvent | null {
         kind: 'result',
         callId: event.callId,
         status: event.status,
-        body: resultBody(event.body),
+        // Preserve original blocks until shared discovery checks their complete syntax.
+        body: resultBody(event.body, { deferMedia: true }),
       };
     case 'ask':
       return {
