@@ -463,6 +463,7 @@ export function inspectDataset(
   raw: RawDataset,
   checkers: Checkers,
   current: CurrentVersions,
+  layout: 'single' | 'collection' = 'single',
 ): DatasetInspection {
   const problems: Finding[] = raw.problems.map((problem) => ({
     path: problem.path,
@@ -485,11 +486,17 @@ export function inspectDataset(
 
   problems.push(
     ...duplicateIds(cases, (item) => item.caseId, 'case'),
-    ...fileMatchesId(cases, (item) => item.caseId, 'case'),
+    ...(layout === 'single'
+      ? fileMatchesId(cases, (item) => item.caseId, 'case')
+      : []),
     ...duplicateIds(labels, (item) => item.caseId, 'label'),
-    ...fileMatchesId(labels, (item) => item.caseId, 'label'),
+    ...(layout === 'single'
+      ? fileMatchesId(labels, (item) => item.caseId, 'label')
+      : []),
     ...duplicateIds(reviews, (item) => item.caseId, 'reviews'),
-    ...fileMatchesId(reviews, (item) => item.caseId, 'reviews'),
+    ...(layout === 'single'
+      ? fileMatchesId(reviews, (item) => item.caseId, 'reviews')
+      : []),
   );
   if (manifest === null) {
     problems.push({

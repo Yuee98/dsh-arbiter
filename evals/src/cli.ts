@@ -18,6 +18,7 @@
 import './cli/register.ts';
 
 const { runCli } = await import('./cli/run.js');
+const { runGroupedCli } = await import('./data/group-command.js');
 
 const argv = process.argv.slice(2);
 const askedForHelp =
@@ -42,11 +43,13 @@ const onInterrupt = (): void => {
 process.on('SIGINT', onInterrupt);
 process.on('SIGTERM', onInterrupt);
 
-process.exitCode = await runCli(argv, {
+const io = {
   root: new URL('../../', import.meta.url).pathname,
   out: (line: string) => process.stdout.write(`${line}\n`),
   err: (line: string) => process.stderr.write(`${line}\n`),
   signal: lifetime.signal,
-});
+};
+process.exitCode =
+  (await runGroupedCli(argv, io, runCli)) ?? (await runCli(argv, io));
 // Help is a successful request for information, not a misuse of the command.
 if (askedForHelp) process.exitCode = 0;
