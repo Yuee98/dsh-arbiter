@@ -504,7 +504,7 @@ describe('result facts and whole-prefix snapshot integration', () => {
       state: 'present',
       content: [
         { type: 'text', text: 'stdout real text' },
-        { type: 'image', data: 'BASE64_SENTINEL', ref: 'asset.png' },
+        { type: 'image', data: 'BASE64_SENTINEL', reference: 'asset.png' },
         {
           type: 'json',
           value: { count: 7, audio: 'data:audio/wav;base64,BINARY_SENTINEL' },

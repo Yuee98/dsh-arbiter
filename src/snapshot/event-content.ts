@@ -103,6 +103,7 @@ function reference(value: Record<string, unknown>): string | undefined {
   );
   const raw =
     value['ref'] ??
+    value['reference'] ??
     value['uri'] ??
     value['url'] ??
     nested?.['url'] ??
