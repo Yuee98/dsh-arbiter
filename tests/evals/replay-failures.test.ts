@@ -15,6 +15,7 @@
  * answer.
  */
 
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -25,6 +26,7 @@ import {
   reportForRun,
 } from '../../evals/src/metrics/index.js';
 import { REPLAY_FILES } from '../../evals/src/replay/write.js';
+import { recordPathOf } from '../../evals/src/run/artifact.js';
 
 import { REPOSITORY_ROOT, withArea } from './helpers/report-run.js';
 import {
@@ -300,12 +302,11 @@ describe('the derived report keeps a failure and its reported usage', () => {
 });
 
 describe('an answer that cannot be reconstructed is reported', () => {
-  it('lists a decision body that masking left unreadable rather than repairing it', async () => {
+  it('lists a legacy decision body that masking left unreadable rather than repairing it', async () => {
     await withArea(async (created) => {
-      // A decision answer whose `authorization` member carries no `type` is not a score
-      // object by the masker's test, so it is rewritten as `[redacted]` and the stored
-      // body is no longer JSON. That is the documented masking limitation, and a replay
-      // must report it instead of scoring from a repaired body.
+      // Older masking replaced a score object without `type` with a bare marker.
+      // Preserve a real run's parsed answer/outcome but explicitly install that
+      // historical stored body: current masking keeps the JSON structure intact.
       const directory = await decisionRun(join(created.path, 'run'), {
         [decisionCellOf(CASE)]: {
           status: 200,
@@ -317,8 +318,18 @@ describe('an answer that cannot be reconstructed is reported', () => {
           }),
         },
       });
+      const original = await cellRecordOf(directory, decisionCellOf(CASE));
+      await writeFile(
+        join(directory, recordPathOf(decisionCellOf(CASE))),
+        JSON.stringify({
+          ...original,
+          attempts: original.attempts.map((attempt) => ({
+            ...attempt,
+            responseText: '{"answers":{"authorization":[redacted]}}',
+          })),
+        }),
+      );
       const stored = await cellRecordOf(directory, decisionCellOf(CASE));
-      // The masking did change the body, which is what makes this case meaningful.
       const body = stored.attempts[0]?.responseText ?? '';
       expect(() => JSON.parse(body) as unknown).toThrow();
 
@@ -341,6 +352,37 @@ describe('an answer that cannot be reconstructed is reported', () => {
       const record = await cellRecordOf(derived, decisionCellOf(CASE));
       expect(record.outcome).toEqual(stored.outcome);
       expect(lineage.notes.join('\n')).toContain('不可回放');
+    });
+  });
+
+  it('replays the current structure-preserving decision body without repairing it', async () => {
+    await withArea(async (created) => {
+      const answer = {
+        answers: {
+          risk: { type: 'score', probabilities: tenWay('3') },
+          authorization: { probabilities: tenWay('8') },
+        },
+      };
+      const directory = await decisionRun(join(created.path, 'run'), {
+        [decisionCellOf(CASE)]: { status: 200, body: JSON.stringify(answer) },
+      });
+      const stored = await cellRecordOf(directory, decisionCellOf(CASE));
+      const body: unknown = JSON.parse(stored.attempts[0]?.responseText ?? '');
+      expect(body).toEqual(answer);
+      const result = await replay({
+        directory,
+        output: join(created.path, 'derived'),
+      });
+      expect(result.code).toBe(0);
+      const lineage = await lineageOf(
+        join(
+          created.path,
+          'derived/text-strict-at-least-ask-available',
+          REPLAY_FILES.lineage,
+        ),
+      );
+      expect(lineage.cells[0]?.disposition).toBe('re-derived');
+      expect(lineage.totals.notReplayable).toBe(0);
     });
   });
 

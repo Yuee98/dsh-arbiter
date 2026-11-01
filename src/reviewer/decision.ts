@@ -27,6 +27,11 @@ import {
 import { DECISION_PROTOCOL } from './contract.js';
 import type { DecisionRequest } from './prompt.js';
 import { CredentialRedactor } from './credential-redactor.js';
+import {
+  bindPreparedReviewRequest,
+  isPreparedReviewRequest,
+  reviewRequestCopy,
+} from './prepared-request.js';
 import { readDecisionAnswer, type ParsedAnswer } from './signals.js';
 import { normalizeUsage } from './usage.js';
 
@@ -155,7 +160,7 @@ function record(value: unknown): value is Record<string, unknown> {
 function requestBody(
   decision: ArbiterConfig['reviewer']['decision'],
   request: DecisionRequest,
-): unknown {
+): Record<string, unknown> {
   // The flat body is the default because two of the three known entries take it;
   // only the generic Cloudflare entry wraps, and its pathname says so.
   return requestShapeOf(decision.url) === 'wrapped'
@@ -168,6 +173,20 @@ function requestBody(
         state: request.state,
         questions: request.questions,
       };
+}
+function retainedBody(
+  decision: ArbiterConfig['reviewer']['decision'],
+  request: DecisionRequest,
+  redactor: CredentialRedactor,
+): unknown {
+  const retained = reviewRequestCopy(request, redactor);
+  if (!record(retained) || typeof retained['state'] !== 'string')
+    throw new Error('prepared decision material could not be safely retained');
+  return requestBody(decision, {
+    ...request,
+    state: retained['state'],
+    questions: retained['questions'],
+  });
 }
 
 /** The record shared by every path that got as far as sending a request. */
@@ -351,12 +370,19 @@ export async function runDecisionTransport(
   }
   const redactor = ctx.redactor ?? new CredentialRedactor(`decision:${callId}`);
   redactor.addKnown(credential === undefined ? [] : [credential]);
-  request = {
-    ...request,
-    state: redactor.text(request.state),
-    questions: redactor.value(request.questions),
-  };
+  if (!isPreparedReviewRequest(request, redactor))
+    request = {
+      ...request,
+      state: redactor.text(request.state),
+      questions: redactor.value(request.questions, true),
+    };
   const body = requestBody(ctx.decision, request);
+  bindPreparedReviewRequest(
+    body,
+    redactor,
+    () => retainedBody(ctx.decision, request, redactor),
+    request,
+  );
   const timeout = AbortSignal.timeout(ctx.decision.timeoutMs);
   const signal = AbortSignal.any([ctx.signal, timeout]);
   const startedAt = Date.now();

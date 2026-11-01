@@ -1,4 +1,9 @@
 import { CredentialRedactor } from './credential-redactor.js';
+import {
+  bindPreparedReviewRequest,
+  isPreparedReviewRequest,
+  reviewRequestCopy,
+} from './prepared-request.js';
 /**
  * The chat transport: one review's attempts through the host's LLM service.
  *
@@ -96,6 +101,50 @@ function chatMessages(
   ];
 }
 
+function retainedChatRequest(
+  request: ChatRequest,
+  redactor: CredentialRedactor,
+): ChatRequest {
+  const retained = reviewRequestCopy(request, redactor);
+  if (retained === null || typeof retained !== 'object')
+    throw new Error('prepared chat material could not be safely retained');
+  const system: unknown = Reflect.get(retained, 'system');
+  const user: unknown = Reflect.get(retained, 'user');
+  if (typeof system !== 'string' || typeof user !== 'string')
+    throw new Error('prepared chat material could not be safely retained');
+  const copy = { ...request, system, user };
+  bindPreparedReviewRequest(copy, redactor, () =>
+    retainedChatRequest(request, redactor),
+  );
+  return copy;
+}
+
+function retainedChatAttempt(
+  request: ChatRequest,
+  messages: StreamOptionsLike['messages'],
+  redactor: CredentialRedactor,
+): { readonly system: string; readonly messages: unknown } {
+  return {
+    system: retainedChatRequest(request, redactor).system,
+    messages: reviewRequestCopy(messages, redactor),
+  };
+}
+
+function preparedChatMessages(
+  request: ChatRequest,
+  repair: string | null,
+  redactor: CredentialRedactor,
+): StreamOptionsLike['messages'] {
+  const copy = () =>
+    chatMessages(
+      retainedChatRequest(request, redactor).user,
+      repair === null ? null : redactor.text(repair, true),
+    );
+  const messages = copy();
+  bindPreparedReviewRequest(messages, redactor, copy);
+  return messages;
+}
+
 /**
  * The options for one attempt.
  *
@@ -137,19 +186,34 @@ function attemptRecord(options: {
   readonly error: string | null;
   readonly failureKind: AttemptFailureKind | null;
   readonly rawUsage: unknown;
+  readonly redactor: CredentialRedactor;
 }): ReviewAttempt {
+  const frozenRequest = {
+    provider: options.route.provider,
+    model: options.route.model,
+    system: options.request.system,
+    messages: options.messages,
+  };
+  bindPreparedReviewRequest(
+    frozenRequest,
+    options.redactor,
+    () => ({
+      ...frozenRequest,
+      ...retainedChatAttempt(
+        options.request,
+        options.messages,
+        options.redactor,
+      ),
+    }),
+    options.messages,
+  );
   return {
     attemptId: attemptIdOf(options.callId, options.attempt + 1),
     callId: options.callId,
     attempt: options.attempt + 1,
     backend: 'chat',
     protocol: CHAT_PROTOCOL,
-    request: {
-      provider: options.route.provider,
-      model: options.route.model,
-      system: options.request.system,
-      messages: options.messages,
-    },
+    request: frozenRequest,
     responseText: options.responseText,
     parsed: options.parsed,
     error: options.error,
@@ -175,6 +239,7 @@ function routeFailure(error: string): ChatTransportResult {
  * only place that reads `ChatStreamError`'s fields.
  */
 function transportFailure(parts: {
+  readonly redactor: CredentialRedactor;
   readonly error: unknown;
   readonly callId: string;
   readonly attempt: number;
@@ -197,6 +262,7 @@ function transportFailure(parts: {
   return {
     failure,
     attempt: attemptRecord({
+      redactor: parts.redactor,
       callId: parts.callId,
       attempt: parts.attempt,
       route: parts.route,
@@ -223,13 +289,16 @@ export async function runChatTransport(
   callId: string,
 ): Promise<ChatTransportResult> {
   const redactor = ctx.redactor ?? new CredentialRedactor(`chat:${callId}`);
-  redactor.discover(request.system, true);
-  redactor.discover(request.user);
-  request = {
-    ...request,
-    system: redactor.text(request.system, true),
-    user: redactor.text(request.user),
-  };
+  if (!isPreparedReviewRequest(request, redactor)) {
+    redactor.discover(request.system, true);
+    redactor.discover(request.user);
+    request = {
+      ...request,
+      system: redactor.text(request.system, true),
+      user: redactor.text(request.user),
+    };
+    bindPreparedReviewRequest(request, redactor);
+  }
   let route: ChatRoute;
   try {
     route = chatRoute(ctx.chat, ctx.session);
@@ -243,23 +312,23 @@ export async function runChatTransport(
   const maxAttempts = 1 + ctx.chat.maxRepairRetries;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
-    const messages = chatMessages(
-      request.user,
-      repair === null ? null : redactor.text(repair, true),
-    );
+    const current = retainedChatRequest(request, redactor);
+    const messages = preparedChatMessages(request, repair, redactor);
     const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
     const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
-    const options = streamOptions(route, request, messages, ctx, attemptSignal);
+    const options = streamOptions(route, current, messages, ctx, attemptSignal);
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
       const answer = readAnswer(collected.text);
-      redactor.discover([collected.text, collected.usage], true);
+      redactor.discover(collected.text, true);
+      redactor.discover(collected.usage);
       attempts.push(
         attemptRecord({
+          redactor,
           callId,
           attempt,
           route,
-          request,
+          request: current,
           messages,
           startedAt,
           responseText: collected.text,
@@ -277,11 +346,12 @@ export async function runChatTransport(
       rejection = answer;
     } catch (error) {
       const failed = transportFailure({
+        redactor,
         error,
         callId,
         attempt,
         route,
-        request,
+        request: current,
         messages,
         startedAt,
         timedOut: attemptTimeout.aborted && !ctx.signal.aborted,

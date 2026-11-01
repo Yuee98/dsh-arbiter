@@ -1,4 +1,11 @@
 import { jsonCopySpans } from './credential-json.js';
+import { uniqueCredentialRecord } from './credential-record.js';
+import {
+  knownCredentialSpans,
+  credentialLiteralContexts,
+} from './credential-occurrences.js';
+import { CredentialScoreContext } from './credential-scores.js';
+import { extractJsonObject } from './json.js';
 import {
   quotedCredentialSpans,
   applyCredentialSpans,
@@ -18,6 +25,8 @@ import { maskAuthentication } from './credential-auth.js';
 import {
   credentialKind,
   maskExplicitFields,
+  maskCredentialQueries,
+  isCookieAttribute,
   quotedValue,
   reQuote,
   type CredentialKind,
@@ -30,6 +39,8 @@ const MAX_VOCABULARY = 256 * 1024;
 const MARKER = new RegExp(CREDENTIAL_MARKER_SOURCE, 'gu');
 const AUTH_WORDS =
   /^(?:(?:approved|allowed|denied|granted|forbidden|permitted|delegated)(?:$|\s+(?:for|to|by|within|only|under)\b)|true$|false$|none$)/iu;
+const MATERIAL_CONTEXT = new CredentialScoreContext(undefined, false);
+const JSON_OPENERS = new Set<string | undefined>(['{', '[', '"']);
 interface Secret {
   readonly value: string;
   readonly marker: string;
@@ -63,6 +74,9 @@ export class CredentialRedactor {
     this.check('');
     return new CredentialRedactor(this.#scope, [], this);
   }
+  get revision(): number {
+    return this.#secrets.size;
+  }
   addKnown(values: readonly string[]): void {
     for (const value of values) this.learn(value, 'credential', true);
   }
@@ -78,11 +92,12 @@ export class CredentialRedactor {
       if (item === null || typeof item !== 'object') return item;
       if (active.has(item)) return '[circular]';
       active.add(item);
+      this.checkArrayLimit(item);
       const result = Array.isArray(item)
         ? item.map(copy)
-        : Object.fromEntries(
+        : uniqueCredentialRecord(
             Object.entries(item).map(([key, entry]) => [
-              this.knownText(key),
+              this.keyText(key),
               copy(entry),
             ]),
           );
@@ -138,6 +153,8 @@ export class CredentialRedactor {
   private mask = (raw: string, kind: string): string => {
     const { value, quote } = quotedValue(raw);
     if (kind === 'authorization' && AUTH_WORDS.test(value)) return raw;
+    const known = this.#secrets.get(value);
+    if (known !== undefined) return reQuote(known.marker, quote);
     // A malformed object's delimiter is not a credential vocabulary entry.
     if (kind === 'authorization' && quote === '' && ['{', '['].includes(value))
       return this.opaque(value);
@@ -160,8 +177,7 @@ export class CredentialRedactor {
     return value.replace(
       /(^|;\s*)([^=;\s]+)=([^;]*)/gu,
       (_match: string, separator: string, name: string, secret: string) => {
-        if (/^(?:path|domain|expires|max-age|samesite)$/iu.test(name))
-          return `${separator}${name}=${secret}`;
+        if (isCookieAttribute(name)) return `${separator}${name}=${secret}`;
         return `${separator}${name}=${this.learn(secret, 'cookie')}`;
       },
     );
@@ -173,64 +189,122 @@ export class CredentialRedactor {
   private discoverScalar(
     item: string | number,
     field: string,
-    scores: boolean,
+    score: boolean,
   ): void {
     const kind = credentialKind(field);
     if (typeof item === 'number') {
-      if (kind !== null && !(scores && field === 'authorization'))
-        this.learn(String(item), kind);
+      if (kind !== null && !score) this.learn(String(item), kind);
       return;
     }
     if (kind !== null) {
       this.mask(item, /authorization/iu.test(field) ? 'authorization' : kind);
       return;
     }
-    this.scan(this.knownText(item), scores);
+    this.scan(this.knownText(item));
   }
   discover(value: unknown, scores = false): void {
+    this.inspect(value, scores, true);
+  }
+  validate(value: unknown): void {
+    this.inspect(value, false, false);
+  }
+  private childField(
+    field: string,
+    key: string,
+    array: boolean,
+    path: readonly string[],
+    context: CredentialScoreContext,
+    entry: unknown,
+  ): string {
+    if (context.extra(path, key, entry)) return 'token';
+    if (array || (credentialKind(field) !== null && !context.member(path)))
+      return field;
+    return this.nestedField(field, key);
+  }
+  private checkArrayLimit(value: object): void {
+    if (Array.isArray(value) && value.length > MAX_NODES) this.fail();
+  }
+  private inspect(value: unknown, scores: boolean, recognize: boolean): void {
+    if (recognize && scores && typeof value === 'string') {
+      this.text(value, true);
+      return;
+    }
+    const context = scores
+      ? new CredentialScoreContext(value, true)
+      : MATERIAL_CONTEXT;
     let nodes = 0;
     let chars = 0;
     const seen = new WeakSet<object>();
-    const visit = (item: unknown, field = '', depth = 0): void => {
+    const scalar = (
+      item: string | number,
+      field: string,
+      path: readonly string[],
+    ): void => {
+      if (typeof item === 'string') chars += item.length;
+      if (chars > MAX_TEXT) this.fail();
+      if (!recognize) return;
+      if (typeof item === 'string' && context.literal(path, item)) return;
+      if (typeof item === 'string' && context.system(path)) {
+        this.text(item, true);
+        return;
+      }
+      this.discoverScalar(item, field, context.numeric(path));
+    };
+    const visit = (
+      item: unknown,
+      field: string,
+      depth: number,
+      path: readonly string[],
+    ): void => {
       nodes += 1;
       if (nodes > MAX_NODES || depth > 64) this.fail();
       if (typeof item === 'string' || typeof item === 'number') {
-        if (typeof item === 'string') chars += item.length;
-        if (chars > MAX_TEXT) this.fail();
-        this.discoverScalar(item, field, scores);
+        scalar(item, field, path);
       } else if (item !== null && typeof item === 'object') {
         if (seen.has(item)) return;
         seen.add(item);
         for (const [key, entry] of Object.entries(item)) {
-          visit(key, '', depth + 1);
+          visit(key, '', depth + 1, path);
           visit(
             entry,
-            Array.isArray(item) ? field : this.nestedField(field, key),
+            this.childField(
+              field,
+              key,
+              Array.isArray(item),
+              path,
+              context,
+              entry,
+            ),
             depth + 1,
+            context.active ? [...path, key] : path,
           );
         }
+        seen.delete(item);
       }
     };
     try {
-      visit(value);
+      visit(value, '', 0, []);
     } catch {
       this.#failed = true;
       throw new Error('credential redaction could not safely process material');
     }
   }
-  private scan(text: string, scores: boolean): string {
+  private scan(text: string): string {
     this.check(text);
     // Protect issued syntax from being re-read as `token:...` inside a marker.
     // Tokens are local and absent from input; only exact tokens are restored.
     let prefix = '\0crd';
     while (text.includes(prefix)) prefix += 'x';
     const replacements = new Map<string, string>();
+    const hold = (value: string): string => {
+      const token = `${prefix}${String(replacements.size)}\0`;
+      replacements.set(token, value);
+      return token;
+    };
     const protect = (value: string): string =>
       value.replace(MARKER, (marker) => {
         if (!this.isMarker(marker)) return marker;
-        const token = `${prefix}${String(replacements.size)}\0`;
-        replacements.set(token, marker);
-        return token;
+        return hold(marker);
       });
     const restore = (value: string): string => {
       let restored = value;
@@ -240,94 +314,130 @@ export class CredentialRedactor {
     };
     const mask = (value: string, kind: string): string =>
       protect(this.mask(restore(value), kind));
-    const masked = maskExplicitFields(
-      maskAuthentication(protect(text), mask, scores),
-      mask,
+    const queried = maskCredentialQueries(
+      protect(text),
+      (value, kind) => this.mask(restore(value), kind),
+      hold,
     );
+    const masked = maskExplicitFields(maskAuthentication(queried, mask), mask);
     return restore(masked);
   }
-  knownText(text: string): string {
+  knownText(text: string, field = ''): string {
     this.check(text);
-    const secrets = [...this.#secrets.values()].sort(
-      (a, b) => b.value.length - a.value.length,
-    );
-    if (secrets.length === 0) return text;
-    const byValue = new Map(
-      secrets.map((entry) => [entry.value, entry.marker]),
-    );
-    const escaped = secrets.map(({ value }) =>
-      value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
-    );
-    const known = new RegExp(escaped.join('|'), 'gu');
-    const pattern = new RegExp(`${MARKER.source}|${escaped.join('|')}`, 'gu');
-    return text.replace(
-      pattern,
-      (value) =>
-        byValue.get(value) ??
-        (this.isMarker(value)
-          ? value
-          : value.replace(known, (secret) => byValue.get(secret) ?? secret)),
+    if (this.#secrets.size === 0) return text;
+    return (
+      applyCredentialSpans(
+        [text],
+        knownCredentialSpans(text, this.#secrets.values(), field),
+      )[0] ?? ''
     );
   }
-  private discoverAnswer(text: string): void {
+  private keyText(key: string, scores = false): string {
+    return credentialKind(key) === null ? this.text(key, scores) : key;
+  }
+  private jsonText(text: string, scores: boolean): string | undefined {
+    const first = text.trimStart()[0];
+    const candidate = JSON_OPENERS.has(first)
+      ? text
+      : scores
+        ? extractJsonObject(text)
+        : text;
+    const opening = candidate.trimStart()[0];
+    if (!JSON_OPENERS.has(opening)) return undefined;
     let body: unknown;
     try {
-      body = JSON.parse(text);
+      body = JSON.parse(candidate);
     } catch {
-      return;
+      return undefined;
     }
-    this.discover(body, true);
+    if (body === null || (typeof body !== 'object' && typeof body !== 'string'))
+      return undefined;
+    if (this.#jsonDepth >= 64) this.fail();
+    this.#jsonDepth += 1;
+    try {
+      let safe: string;
+      if (typeof body === 'string') safe = JSON.stringify(this.text(body));
+      else {
+        const context = scores
+          ? new CredentialScoreContext(body, true)
+          : MATERIAL_CONTEXT;
+        const cleaned = this.value(body, scores);
+        const spans = jsonCopySpans(candidate, cleaned, (key, path) =>
+          context.key(path, key) ? key : this.keyText(key),
+        );
+        safe = applyCredentialSpans([candidate], spans)[0] ?? '';
+      }
+      if (candidate === text) return safe;
+      const start = text.indexOf(candidate);
+      return (
+        this.text(text.slice(0, start)) +
+        safe +
+        this.text(text.slice(start + candidate.length))
+      );
+    } finally {
+      this.#jsonDepth -= 1;
+    }
   }
   text(text: string, scores = false): string {
     this.check(text);
     const exact = this.#secrets.get(text);
     if (exact !== undefined) return exact.marker;
-    const first = text.trimStart()[0];
-    if (scores) this.discoverAnswer(text);
-    if (!scores && (first === '{' || first === '[')) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        /* Ordinary prose, not a JSON value. */
-      }
-      if (parsed !== null && typeof parsed === 'object') {
+    const json = this.jsonText(text, scores);
+    if (json !== undefined) return json;
+    // Decode quoted literals for exact known-value matching without exposing a
+    // JSON-escaped echo. Unchanged prose/formatting is kept byte-for-byte.
+    const context = credentialLiteralContexts(text);
+    const quoted = text.replace(
+      /"(?:\\.|[^"\\])*"/gu,
+      (literal, start: number) => {
+        let value: unknown;
+        try {
+          value = JSON.parse(literal);
+        } catch {
+          return literal;
+        }
+        if (typeof value !== 'string') return literal;
+        const field = context(start, start + literal.length);
+        if (field === null) return literal;
+        if (field.length > 0) return this.mask(literal, field);
         if (this.#jsonDepth >= 64) this.fail();
         this.#jsonDepth += 1;
+        let cleaned: string;
         try {
-          const cleaned = this.value(parsed);
-          const spans = jsonCopySpans(text, cleaned, (key) => this.text(key));
-          return applyCredentialSpans([text], spans)[0] ?? '';
+          cleaned = this.text(value);
         } finally {
           this.#jsonDepth -= 1;
         }
-      }
-    }
-    // Decode quoted literals for exact known-value matching without exposing a
-    // JSON-escaped echo. Unchanged prose/formatting is kept byte-for-byte.
-    const quoted = text.replace(/"(?:\\.|[^"\\])*"/gu, (literal) => {
-      let value: unknown;
-      try {
-        value = JSON.parse(literal);
-      } catch {
-        return literal;
-      }
-      if (typeof value !== 'string') return literal;
-      const cleaned = this.knownText(value);
-      return cleaned === value ? literal : JSON.stringify(cleaned);
-    });
-    return this.knownText(this.scan(this.knownText(quoted), scores));
+        return cleaned === value ? literal : JSON.stringify(cleaned);
+      },
+    );
+    return this.knownText(this.scan(this.knownText(quoted)));
   }
   value(value: unknown, scores = false): unknown {
     this.discover(value, scores);
+    const context = scores
+      ? new CredentialScoreContext(value, true)
+      : MATERIAL_CONTEXT;
     const seen = new WeakSet<object>();
     let nodes = 0;
     let chars = 0;
-    const copy = (item: unknown, field = ''): unknown => {
+    const copy = (
+      item: unknown,
+      field: string,
+      path: readonly string[],
+    ): unknown => {
       nodes += 1;
       if (nodes > MAX_NODES) this.fail();
       if (typeof item === 'string') {
-        const cleaned = this.text(item, scores);
+        if (context.literal(path, item)) return item;
+        const kind = credentialKind(field);
+        const cleaned =
+          kind === null
+            ? this.text(item, context.system(path))
+            : this.mask(
+                item,
+                /authorization/iu.test(field) ? 'authorization' : kind,
+              );
         chars += cleaned.length;
         if (chars > MAX_TEXT) this.fail();
         return cleaned;
@@ -335,25 +445,36 @@ export class CredentialRedactor {
       if (
         typeof item === 'number' &&
         credentialKind(field) !== null &&
-        !(scores && field === 'authorization')
+        !context.numeric(path)
       )
         return this.knownText(String(item));
       if (item === null || typeof item !== 'object') return item;
       if (seen.has(item)) return '[circular]';
       seen.add(item);
+      this.checkArrayLimit(item);
       const result = Array.isArray(item)
-        ? Object.values(item).map((entry) => copy(entry, field))
-        : Object.fromEntries(
+        ? item.map((entry: unknown, index) =>
+            copy(
+              entry,
+              field,
+              context.active ? [...path, String(index)] : path,
+            ),
+          )
+        : uniqueCredentialRecord(
             Object.entries(item).map(([key, entry]) => [
-              this.text(key, scores),
-              copy(entry, this.nestedField(field, key)),
+              context.key(path, key) ? key : this.keyText(key),
+              copy(
+                entry,
+                this.childField(field, key, false, path, context, entry),
+                context.active ? [...path, key] : path,
+              ),
             ]),
           );
       seen.delete(item);
       return result;
     };
     try {
-      return copy(value);
+      return copy(value, '', []);
     } catch {
       this.#failed = true;
       throw new Error('credential redaction could not safely process material');
@@ -376,30 +497,26 @@ export class CredentialRedactor {
     const json = structuredJson(joined);
     if (json && blocks.length === 1) return [processed];
     // Preserve normal block separators; carry a secret spanning a split as one marker.
-    const ranges: { start: number; end: number; marker: string }[] = [];
-    for (const entry of json ? [] : this.#secrets.values()) {
-      let start = joined.indexOf(entry.value);
-      while (start >= 0) {
-        if (ranges.length >= MAX_NODES) this.fail();
-        ranges.push({
-          start,
-          end: start + entry.value.length,
-          marker: entry.marker,
-        });
-        start = joined.indexOf(entry.value, start + entry.value.length);
-      }
-    }
+    const ranges = json
+      ? []
+      : knownCredentialSpans(joined, this.#secrets.values());
+    const context = credentialLiteralContexts(joined);
     ranges.push(
       ...(json
-        ? jsonCopySpans(joined, JSON.parse(processed), (key) => this.text(key))
+        ? jsonCopySpans(joined, JSON.parse(processed), (key) =>
+            this.keyText(key),
+          )
         : quotedCredentialSpans(
             joined,
-            this.#secrets.values(),
+            (decoded, start, end) => {
+              const field = context(start, end);
+              return field === null
+                ? []
+                : knownCredentialSpans(decoded, this.#secrets.values(), field);
+            },
             MAX_NODES - ranges.length,
           )),
     );
-    return applyCredentialSpans(blocks, ranges).map((block) =>
-      json ? block : this.text(block),
-    );
+    return applyCredentialSpans(blocks, ranges);
   }
 }

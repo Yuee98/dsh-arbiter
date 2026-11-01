@@ -3,6 +3,7 @@ import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import { structuredJson } from '../reviewer/credential-literals.js';
 import type { SessionLog } from './log.js';
 import type { SessionEventLike } from './types.js';
+import { copySourceBlock } from './content-redaction.js';
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -47,7 +48,7 @@ function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
       block['type'] !== 'text' ||
       typeof block['text'] !== 'string'
     ) {
-      result.push(redactor.value(block));
+      result.push(copySourceBlock(block, redactor));
       index += 1;
       continue;
     }
@@ -67,14 +68,7 @@ function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
     }
     const safe = redactor.textBlockValues(text);
     group.forEach((entry, at) => {
-      const metadata = redactor.value(
-        Object.fromEntries(
-          Object.entries(entry).filter(([key]) => key !== 'text'),
-        ),
-      );
-      if (!record(metadata))
-        throw new Error('credential text block could not be safely copied');
-      result.push({ ...metadata, text: safe[at] ?? '' });
+      result.push(copySourceBlock(entry, redactor, safe[at] ?? ''));
     });
   }
   return result;

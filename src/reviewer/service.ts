@@ -43,6 +43,7 @@ import {
   bindSnapshotRedactor,
 } from '../snapshot/redaction.js';
 import { prepareDecisionCredential } from './decision.js';
+import { bindPreparedReviewRequest } from './prepared-request.js';
 import { aggregateUsage, type UsageAggregate } from './usage.js';
 
 // Direct service consumers (including evals) need the same cross-call knowledge
@@ -256,8 +257,14 @@ async function runTransport(
   callId: string,
   signal: AbortSignal,
 ): Promise<TransportRun> {
+  const context = snapshotRedactor(snapshot);
+  if (context === undefined)
+    throw new Error('a rendered review requires its material context');
   if (request.backend.kind === 'chat') {
     const rendered = pkg.renderChat(snapshot);
+    bindPreparedReviewRequest(rendered, context, () =>
+      pkg.renderChat(redactSnapshot(snapshot, context)),
+    );
     const result = await runChatTransport(
       { ...request.backend.transport, signal, readAnswer: pkg.readChat },
       rendered,
@@ -274,9 +281,13 @@ async function runTransport(
       secrets: result.secrets,
     };
   }
+  const rendered = pkg.renderDecision(snapshot);
+  bindPreparedReviewRequest(rendered, context, () =>
+    pkg.renderDecision(redactSnapshot(snapshot, context)),
+  );
   const result = await runDecisionTransport(
     { ...request.backend.transport, signal, readAnswer: pkg.readDecision },
-    pkg.renderDecision(snapshot),
+    rendered,
     callId,
   );
   return {

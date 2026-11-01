@@ -4,13 +4,9 @@ export interface CredentialSpan {
   readonly end: number;
   readonly marker: string;
 }
-interface KnownValue {
-  readonly value: string;
-  readonly marker: string;
-}
 export function structuredJson(text: string): boolean {
   const first = text.trimStart()[0];
-  if (first !== '{' && first !== '[') return false;
+  if (first !== '{' && first !== '[' && first !== '"') return false;
   try {
     return JSON.parse(text) !== null;
   } catch {
@@ -19,11 +15,14 @@ export function structuredJson(text: string): boolean {
 }
 export function quotedCredentialSpans(
   text: string,
-  secrets: Iterable<KnownValue>,
+  select: (
+    decoded: string,
+    start: number,
+    end: number,
+  ) => readonly CredentialSpan[],
   limit: number,
 ): CredentialSpan[] {
   const spans: CredentialSpan[] = [];
-  const known = [...secrets];
   for (const match of text.matchAll(/"(?:\\.|[^"\\])*"/gu)) {
     let decoded: unknown;
     try {
@@ -32,20 +31,9 @@ export function quotedCredentialSpans(
       continue;
     }
     if (typeof decoded !== 'string') continue;
-    const found: CredentialSpan[] = [];
-    for (const secret of known) {
-      let at = decoded.indexOf(secret.value);
-      while (at >= 0) {
-        if (spans.length + found.length >= limit)
-          throw new Error('credential text span limit exceeded');
-        found.push({
-          start: at,
-          end: at + secret.value.length,
-          marker: secret.marker,
-        });
-        at = decoded.indexOf(secret.value, at + secret.value.length);
-      }
-    }
+    const found = select(decoded, match.index, match.index + match[0].length);
+    if (spans.length + found.length > limit)
+      throw new Error('credential text span limit exceeded');
     if (found.length === 0) continue;
     const points = new Set(found.flatMap((span) => [span.start, span.end]));
     const raw = new Map<number, number>();

@@ -4,7 +4,7 @@ import type { CredentialSpan } from './credential-literals.js';
 export function jsonCopySpans(
   text: string,
   cleaned: unknown,
-  cleanKey: (key: string) => string,
+  cleanKey: (key: string, path: readonly string[]) => string,
 ): CredentialSpan[] {
   const spans: CredentialSpan[] = [];
   const token =
@@ -17,14 +17,18 @@ export function jsonCopySpans(
   const skip = (): void => {
     while (/\s/u.test(text[cursor] ?? '') && cursor < text.length) cursor += 1;
   };
-  const scalar = (value?: unknown, key = false): string => {
+  const scalar = (
+    value?: unknown,
+    key = false,
+    path: readonly string[] = [],
+  ): string => {
     skip();
     token.lastIndex = cursor;
     const match = token.exec(text);
     if (match === null) return fail();
     const original: unknown = JSON.parse(match[0]);
     const next =
-      key && typeof original === 'string' ? cleanKey(original) : value;
+      key && typeof original === 'string' ? cleanKey(original, path) : value;
     if (next === undefined) return fail();
     const replacement = JSON.stringify(next);
     if (original !== next)
@@ -32,18 +36,27 @@ export function jsonCopySpans(
     cursor = token.lastIndex;
     return typeof original === 'string' ? original : '';
   };
-  const member = (value: object, keys: Set<string>, depth: number): void => {
-    const name = scalar(undefined, true);
-    const safeName = cleanKey(name);
+  const member = (
+    value: object,
+    keys: Set<string>,
+    depth: number,
+    path: readonly string[],
+  ): void => {
+    const name = scalar(undefined, true, path);
+    const safeName = cleanKey(name, path);
     // Duplicate/colliding keys cannot be mapped back without ambiguity.
     if (keys.has(safeName) || !Object.hasOwn(value, safeName)) fail();
     keys.add(safeName);
     skip();
     if (text[cursor] !== ':') fail();
     cursor += 1;
-    visit(Reflect.get(value, safeName), depth + 1);
+    visit(Reflect.get(value, safeName), depth + 1, [...path, name]);
   };
-  const visit = (value: unknown, depth = 0): void => {
+  const visit = (
+    value: unknown,
+    depth: number,
+    path: readonly string[],
+  ): void => {
     nodes += 1;
     if (nodes > 100_000 || depth > 64) fail();
     skip();
@@ -66,9 +79,9 @@ export function jsonCopySpans(
         cursor += 1;
       }
       if (array) {
-        visit(Reflect.get(value, index), depth + 1);
+        visit(Reflect.get(value, index), depth + 1, [...path, String(index)]);
       } else {
-        member(value, keys, depth);
+        member(value, keys, depth, path);
       }
       index += 1;
       skip();
@@ -76,7 +89,7 @@ export function jsonCopySpans(
     if (Object.keys(value).length !== index) fail();
     cursor += 1;
   };
-  visit(cleaned);
+  visit(cleaned, 0, []);
   skip();
   if (cursor !== text.length) fail();
   return spans;

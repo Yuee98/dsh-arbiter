@@ -11,6 +11,10 @@
 import type { UsageNormalized } from './usage.js';
 import { normalizeUsage } from './usage.js';
 import { CredentialRedactor } from './credential-redactor.js';
+import {
+  isPreparedReviewRequest,
+  reviewRequestCopy,
+} from './prepared-request.js';
 
 /** The two backends one review can run on. */
 export type ReviewerBackend = 'chat' | 'decision';
@@ -95,21 +99,16 @@ export function maskAttempt(
   const redactor =
     context ?? new CredentialRedactor(`review:${attempt.callId}`);
   redactor.addKnown(secrets);
-  redactor.discover(
-    [
-      attempt.request,
-      attempt.parsed,
-      attempt.responseText,
-      attempt.error,
-      attempt.rawUsage,
-    ],
-    true,
-  );
+  if (!isPreparedReviewRequest(attempt.request, redactor))
+    redactor.discover(attempt.request, true);
+  for (const material of [attempt.parsed, attempt.responseText, attempt.error])
+    redactor.discover(material, true);
+  redactor.discover(attempt.rawUsage);
   const maskedRaw = redactor.value(attempt.rawUsage);
   return {
     ...attempt,
     failureKind: attempt.failureKind,
-    request: redactor.value(attempt.request, true),
+    request: reviewRequestCopy(attempt.request, redactor),
     parsed: redactor.value(attempt.parsed, true),
     responseText:
       attempt.responseText === null

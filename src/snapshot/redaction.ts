@@ -6,17 +6,37 @@ import type {
 } from '../types.js';
 import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 
-const CONTEXTS = new WeakMap<object, CredentialRedactor>();
+const CONTEXTS = new WeakMap<
+  object,
+  { readonly redactor: CredentialRedactor; readonly revision: number }
+>();
 export function snapshotRedactor(
   snapshot: object,
 ): CredentialRedactor | undefined {
-  return CONTEXTS.get(snapshot);
+  return CONTEXTS.get(snapshot)?.redactor;
 }
 export function bindSnapshotRedactor(
   snapshot: object,
   redactor: CredentialRedactor,
 ): void {
-  CONTEXTS.set(snapshot, redactor);
+  CONTEXTS.set(snapshot, { redactor, revision: redactor.revision });
+}
+/** Retain the sent view unless newly recognized credentials require a safer copy.
+ * Historical budgets continue to describe the actual send, never a new estimate.
+ */
+export function retainedSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
+  snapshot: T,
+  redactor: CredentialRedactor,
+): T {
+  const prepared = CONTEXTS.get(snapshot);
+  if (
+    prepared?.redactor === redactor &&
+    prepared.revision === redactor.revision
+  )
+    return snapshot;
+  const copied = redactSnapshot(snapshot, redactor);
+  bindSnapshotRedactor(copied, redactor);
+  return copied;
 }
 
 function factsCopy(

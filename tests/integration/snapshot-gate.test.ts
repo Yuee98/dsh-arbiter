@@ -2,6 +2,9 @@ import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { vi } from 'vitest';
 import * as snapshotModule from '../../src/snapshot.js';
+import { runDecisionTransport } from '../../src/reviewer/decision.js';
+import { CredentialRedactor } from '../../src/reviewer/credential-redactor.js';
+import { DEFAULT_CONFIG } from '../../src/config.js';
 import { NEW_SCALE_TYPESAFE } from '../helpers/decision-captures.js';
 import {
   renderChatUser,
@@ -886,7 +889,10 @@ describe('the host turn clock', () => {
 });
 
 /** Actual gate + local HTTP endpoint + production SQLite writer, with synthetic secrets. */
-async function credentialEndpoint() {
+async function credentialEndpoint(
+  reply: unknown = NEW_SCALE_TYPESAFE,
+  status = 200,
+) {
   const received: { body: unknown; authorization: string | undefined }[] = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -894,8 +900,8 @@ async function credentialEndpoint() {
     request.on('end', () => {
       const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       received.push({ body, authorization: request.headers.authorization });
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify(NEW_SCALE_TYPESAFE));
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(reply));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -973,6 +979,272 @@ function credentialGate(
   return { host, run, captured: llm.captured };
 }
 describe('credential preparation at actual production boundaries', () => {
+  test('credentials first labelled by the provider are removed from all retained call material', async () => {
+    const secret = 'synthetic-provider-first-discovery';
+    const endpoint = await credentialEndpoint(
+      { error: { password: secret } },
+      500,
+    );
+    const session = makeSession('provider-first-discovery', [
+      human(1, 1, `inspect ${secret}`),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: 'synthetic-prepared-auth' }),
+    );
+    try {
+      await harness.run('provider-first-discovery-call', {
+        command: 'echo local',
+      });
+      await harness.host.currentAudit()?.flush();
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        for (const table of ['calls', 'snapshots', 'model_calls']) {
+          const rows = db.prepare(`SELECT * FROM ${table}`).all();
+          expect(rows.length).toBeGreaterThan(0);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+        }
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test.each([
+    {
+      name: 'query',
+      command:
+        'curl https://example.test/?access_token=synthetic-query-secret&recipient=ops@example.test&count=4',
+      secret: 'synthetic-query-secret',
+      retained: '&recipient=ops@example.test&count=4',
+    },
+    {
+      name: 'unclosed',
+      command: 'echo password="synthetic-unclosed-secret',
+      secret: 'synthetic-unclosed-secret',
+      retained: 'echo password=',
+    },
+  ])(
+    '$name credentials are masked through the gate, rendered request and raw SQLite',
+    async ({ name, command, secret, retained }) => {
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`syntax-wire-${name}`, [
+        human(1, 1, 'Only inspect 4 files for ops@example.test'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-wire-auth' }),
+      );
+      const args = { command };
+      const callId = `syntax-wire-call-${name}`;
+      try {
+        await harness.run(callId, args);
+        await harness.host.currentAudit()?.flush();
+        expect(endpoint.received).toHaveLength(1);
+        const stored = await persistedCall(callId);
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        expect(endpoint.received[0]?.body).toMatchObject({
+          state: expected.state,
+          questions: expected.questions,
+        });
+        expect(expected.state).not.toContain(secret);
+        expect(expected.state).toContain(retained);
+        expect(expected.state).toContain(
+          'Only inspect 4 files for ops@example.test',
+        );
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          const rows = db
+            .prepare('SELECT * FROM calls WHERE call_id = ?')
+            .all(callId);
+          expect(rows).toHaveLength(1);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+        } finally {
+          db.close();
+        }
+        expect(args.command).toBe(command);
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test('a JSON string provider failure masks an unclosed quoted credential before SQLite', async () => {
+    const secret = 'synthetic-provider-unclosed-secret';
+    const endpoint = await credentialEndpoint(`password="${secret}`, 500);
+    const session = makeSession('provider-string-error', [
+      human(1, 1, 'inspect local files'),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: 'synthetic-provider-auth' }),
+    );
+    try {
+      expect(
+        (
+          await harness.run('provider-string-error-call', {
+            command: 'echo local',
+          })
+        ).kind,
+      ).toBe('deny');
+      await harness.host.currentAudit()?.flush();
+      expect(endpoint.received).toHaveLength(1);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        const rows = db
+          .prepare('SELECT * FROM model_calls WHERE call_id = ?')
+          .all('provider-string-error-call');
+        expect(rows).toHaveLength(1);
+        expect(JSON.stringify(rows)).not.toContain(secret);
+        const raw: unknown = rows[0]?.['response_text'];
+        if (typeof raw !== 'string') throw new Error('missing response text');
+        expect(JSON.parse(raw)).toContain('[redacted:v1:');
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test('an unbound rendered lookalike still masks raw input even with a shared context', async () => {
+    const secret = 'synthetic-unbound-private-password';
+    const endpoint = await credentialEndpoint();
+    const redactor = new CredentialRedactor('unbound-real-transport');
+    const request = renderDecisionRequest(
+      `ordinary recipient=ops@example.test count=4; password="${secret}"`,
+    );
+    const serialized: unknown = JSON.parse(JSON.stringify(request));
+    if (serialized === null || typeof serialized !== 'object')
+      throw new Error('request clone missing');
+    const state: unknown = Reflect.get(serialized, 'state');
+    const questions: unknown = Reflect.get(serialized, 'questions');
+    if (typeof state !== 'string') throw new Error('request state missing');
+    try {
+      await runDecisionTransport(
+        {
+          redactor,
+          fetch: globalThis.fetch,
+          credentials: undefined,
+          decision: {
+            ...DEFAULT_CONFIG.reviewer.decision,
+            url: endpoint.url,
+            model: 'test-model',
+            apiKeyRef: '',
+            timeoutMs: 5000,
+          },
+          signal: new AbortController().signal,
+        },
+        {
+          state,
+          questions,
+          estimatedInputTokens: request.estimatedInputTokens,
+        },
+        'unbound-real-call',
+      );
+      expect(endpoint.received).toHaveLength(1);
+      expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(secret);
+      expect(JSON.stringify(endpoint.received[0]?.body)).toContain(
+        'ops@example.test',
+      );
+      expect(request.state).toContain(secret);
+    } finally {
+      await endpoint.stop();
+    }
+  });
+  test.each([987654321, 8])(
+    'nested provider authorization=%s is masked in the actual attempt and raw SQLite',
+    async (value) => {
+      const endpoint = await credentialEndpoint(
+        { error: { authorization: value } },
+        500,
+      );
+      const session = makeSession(`provider-error-${String(value)}`, [
+        human(1, 1, 'only inspect local files'),
+      ]);
+      const harness = credentialGate(session, endpoint.url, () =>
+        Promise.resolve({ value: 'synthetic-error-auth' }),
+      );
+      try {
+        const result = await harness.run(
+          `provider-error-call-${String(value)}`,
+          { command: 'echo local' },
+        );
+        expect(result.kind).toBe('deny');
+        expect(endpoint.received).toHaveLength(1);
+        await harness.host.currentAudit()?.flush();
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          const rows = db
+            .prepare('SELECT response_text FROM model_calls WHERE call_id = ?')
+            .all(`provider-error-call-${String(value)}`);
+          expect(rows).toHaveLength(1);
+          const raw: unknown = rows[0]?.['response_text'];
+          if (typeof raw !== 'string')
+            throw new Error('provider response not stored');
+          const parsed: unknown = JSON.parse(raw);
+          const masked: unknown = expect.stringContaining('[redacted:v1:');
+          expect(parsed).toMatchObject({ error: { authorization: masked } });
+        } finally {
+          db.close();
+        }
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
+  test.each(['text', 'score', '4'])(
+    'a credential equal to %s keeps typed source and the exact final rendered wire view',
+    async (secret) => {
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`protocol-wire-${secret}`, [
+        human(1, 1, 'Only send 4 files to ops@example.test'),
+      ]);
+      const resolve = vi.fn(() => Promise.resolve({ value: secret }));
+      const harness = credentialGate(session, endpoint.url, resolve);
+      try {
+        const result = await harness.run(`protocol-wire-call-${secret}`, {
+          command: 'echo local',
+          password: secret,
+          path: '/tmp/q4',
+          count: 4,
+        });
+        // This fixed R5/A6 response reaches the existing fallback denial; the
+        // boundary proof is that the real review happened with intact material.
+        expect(result.kind).toBe('deny');
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).toHaveBeenCalledTimes(1);
+        expect(endpoint.received).toHaveLength(1);
+        expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+        const stored = await persistedCall(`protocol-wire-call-${secret}`);
+        expect(stored.snapshot.evidence[0]?.text).toBe(
+          'Only send 4 files to ops@example.test',
+        );
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        expect(endpoint.received[0]?.body).toMatchObject({
+          state: expected.state,
+          questions: expected.questions,
+        });
+        const masked: unknown = expect.stringContaining('[redacted:v1:');
+        expect(stored.snapshot.action.arguments).toMatchObject({
+          password: masked,
+          path: '/tmp/q4',
+          count: 4,
+        });
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
   test('late-known credential is removed before every cap; exact wire snapshot and real auth survive rotation', async () => {
     const secret = 'synthetic-known-boundary-original-credential';
     const endpoint = await credentialEndpoint();

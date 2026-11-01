@@ -11,6 +11,65 @@ const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
 
 describe('safe source payloads', () => {
+  test('known values equal to finite protocol tags never erase the current human projection', () => {
+    const content = [
+      { type: 'text', text: 'only inspect local files' },
+      {
+        type: 'image',
+        mimeType: 'image/png',
+        reference: 'image-secret-ref',
+        attachment: {
+          attachmentId: 'image-secret-id',
+          mediaType: 'image/png',
+          width: 4,
+          bytes: 8,
+          name: 'image',
+        },
+      },
+    ];
+    const log = readSessionLog({
+      snapshotEvents: () => [
+        { seq: 1, type: 'user/message', data: { content } },
+      ],
+    });
+    const redactor = new CredentialRedactor('protocol-fields', [
+      'text',
+      'type',
+      'image',
+      'mediaType',
+      'width',
+      'bytes',
+    ]);
+    discoverLog(log, redactor);
+    const safe = redactLog(log, redactor);
+    expect(safe.events[0]?.data).toMatchObject({
+      content: [
+        { type: 'text', text: 'only inspect local files' },
+        {
+          type: 'image',
+          mimeType: 'image/png',
+          reference: masked,
+          attachment: {
+            attachmentId: masked,
+            mediaType: 'image/png',
+            width: 4,
+            bytes: 8,
+            name: masked,
+          },
+        },
+      ],
+    });
+    const event = safe.events[0];
+    if (
+      event === undefined ||
+      event.data === null ||
+      typeof event.data !== 'object'
+    )
+      throw new Error('safe event missing');
+    expect(sourceContentText(Reflect.get(event.data, 'content'))).toBe(
+      'only inspect local files',
+    );
+  });
   test('tool results keep structured payloads, media metadata and original block positions', () => {
     const content = [
       { type: 'text', text: 'pass', annotations: { page: 3 } },

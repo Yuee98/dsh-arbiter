@@ -3817,3 +3817,124 @@ describe('shared credential material audit copies', () => {
     }
   });
 });
+
+describe('schema discovery precedes every durable projection', () => {
+  test.each([
+    'description-first',
+    'description-last',
+    'sibling-first',
+    'arguments-first',
+  ] as const)(
+    '%s cannot leave an earlier credential echo in raw SQLite',
+    async (order) => {
+      const { store } = await makeStore();
+      const secret = 'synthetic-schema-order-regression';
+      const sensitive =
+        order === 'description-last'
+          ? {
+              default: secret,
+              description: `Previous value was ${secret}`,
+              type: 'string',
+            }
+          : {
+              type: 'string',
+              description: `Previous value was ${secret}`,
+              default: secret,
+            };
+      const schema = {
+        type: 'object',
+        properties: {
+          note: { type: 'string', default: secret },
+          ...(order === 'arguments-first' ? {} : { password: sensitive }),
+          count: { type: 'integer', default: 4 },
+        },
+      };
+      const source = record({
+        callId: `schema-order-${order}`,
+        result: 'review-allow',
+        argumentsSchema: schema,
+        arguments:
+          order === 'arguments-first'
+            ? { password: secret }
+            : { command: 'echo local' },
+      });
+      const original = JSON.stringify(source);
+      store.enqueue(source);
+      await store.flush();
+      const db = new DatabaseSync(store.databasePath);
+      try {
+        const row = db
+          .prepare(
+            'SELECT arguments_schema, arguments FROM calls WHERE call_id = ?',
+          )
+          .get(source.callId);
+        expect(row).toBeDefined();
+        expect(JSON.stringify(row)).not.toContain(secret);
+        const encoded = stringField(row, 'arguments_schema');
+        expect(encoded).toContain('[redacted:v1:');
+        expect(JSON.parse(encoded)).toMatchObject({
+          type: 'object',
+          properties: { count: { type: 'integer', default: 4 } },
+        });
+        expect(JSON.stringify(source)).toBe(original);
+      } finally {
+        db.close();
+        store.close();
+      }
+    },
+  );
+});
+
+describe('schema protocol vocabulary is separate from literal credential material', () => {
+  test('type and string remain schema grammar but matching default data is masked in raw SQLite', async () => {
+    const { store } = await makeStore();
+    const schema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string', default: 'string' },
+        metadata: { default: { type: 'string' } },
+        count: { type: 'integer', default: 4 },
+      },
+      required: ['path'],
+    };
+    const original = JSON.stringify(schema);
+    store.enqueue(
+      record({
+        callId: 'schema-vocabulary',
+        result: 'review-allow',
+        arguments: { password: 'string', token: 'type' },
+        argumentsSchema: schema,
+      }),
+    );
+    await store.flush();
+    const db = new DatabaseSync(store.databasePath);
+    try {
+      const row = db
+        .prepare('SELECT arguments_schema FROM calls WHERE call_id = ?')
+        .get('schema-vocabulary');
+      const encoded = stringField(row, 'arguments_schema');
+      const hidden: unknown = expect.stringContaining('[redacted:v1:');
+      const decoded: unknown = JSON.parse(encoded);
+      expect(decoded).toMatchObject({
+        type: 'object',
+        properties: {
+          path: { type: 'string', default: hidden },
+          count: { type: 'integer', default: 4 },
+        },
+        required: ['path'],
+      });
+      if (decoded === null || typeof decoded !== 'object')
+        throw new Error('schema object missing');
+      const properties: unknown = Reflect.get(decoded, 'properties');
+      if (properties === null || typeof properties !== 'object')
+        throw new Error('schema properties missing');
+      const metadata: unknown = Reflect.get(properties, 'metadata');
+      expect(JSON.stringify(metadata)).not.toContain('"string"');
+      expect(JSON.stringify(metadata)).not.toContain('"type"');
+      expect(JSON.stringify(schema)).toBe(original);
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
+});

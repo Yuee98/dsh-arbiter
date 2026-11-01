@@ -81,6 +81,58 @@ function approve(): AbortSignal {
 }
 
 describe('the two protocols answer the same question', () => {
+  test.each(['synthetic-chat-late-discovery', 'score'])(
+    'chat retains newly labelled %s safely and masks it before a repair send',
+    async (secret) => {
+      const input = snapshot({
+        sessionId: `chat-late-${secret}`,
+        action: { name: 'bash', arguments: { command: `echo ${secret}` } },
+      });
+      const backend = offlineChatBackend({
+        scripts: [
+          { kind: 'text', text: JSON.stringify({ password: secret }) },
+          { kind: 'text', text: '{"risk":3,"authorization":8}' },
+        ],
+      });
+      const sent: { system: string; messages: string }[] = [];
+      const originalLlm = backend.transport.llm;
+      const result = await review({
+        snapshot: input,
+        callId: `chat-late-call-${secret}`,
+        signal: approve(),
+        backend: {
+          ...backend,
+          transport: {
+            ...backend.transport,
+            llm: {
+              stream: (options) => {
+                sent.push({
+                  system: options.system,
+                  messages: JSON.stringify(options.messages),
+                });
+                return originalLlm.stream(options);
+              },
+            },
+          },
+        },
+      });
+      expect(result.outcome.status).toBe('scored');
+      expect(sent).toHaveLength(2);
+      expect(sent[0]?.messages).toContain(`echo ${secret}`);
+      expect(sent[1]?.messages).not.toContain(`echo ${secret}`);
+      expect(sent[1]?.messages).toContain('echo [redacted:v1:');
+      expect(sent[1]?.system).toBe(renderChatRequest(input).system);
+      expect(result.attempts).toHaveLength(2);
+      for (const attempt of result.attempts) {
+        expect(JSON.stringify(attempt.request)).not.toContain(`echo ${secret}`);
+        expect(JSON.stringify(attempt.request)).toContain('echo [redacted:v1:');
+        expect(attempt.request).toMatchObject({
+          system: renderChatRequest(input).system,
+        });
+      }
+      expect(input.action.arguments).toEqual({ command: `echo ${secret}` });
+    },
+  );
   test('identical distributions produce identical public scores', async () => {
     const cloudflare = await review({
       snapshot: snapshot(),
@@ -1078,7 +1130,7 @@ describe('round-2 corrections', () => {
     }
     // The score member keeps its exact JSON spelling; every other spelling of the
     // name is a header and masks.
-    expect(redactAuthHeaders('"authorization": 8')).toBe('"authorization": 8');
+    expect(redactAuthHeaders('"authorization": 8')).toContain('[redacted:v1:');
   });
 
   test('a bare numeric Authorization header never reaches a returned field', async () => {
@@ -1247,10 +1299,11 @@ describe('the score object is exempt while every header still masks', () => {
     expect(JSON.parse(masked)).toEqual(JSON.parse(DECISION_BODY));
   });
 
-  test('a chat band stays exempt, as before', () => {
-    expect(redactAuthHeaders('"authorization": 8')).toBe('"authorization": 8');
-    expect(redactAuthHeaders('{"authorization":2}')).toBe(
-      '{"authorization":2}',
+  test('only a verified top-level chat pair receives the numeric exemption', () => {
+    expect(redactAuthHeaders('"authorization": 8')).toContain('[redacted:v1:');
+    expect(redactAuthHeaders('{"authorization":2}')).toContain('[redacted:v1:');
+    expect(redactAuthHeaders('{"risk":3,"authorization":8}')).toBe(
+      '{"risk":3,"authorization":8}',
     );
   });
 
@@ -1294,17 +1347,19 @@ describe('the score object is exempt while every header still masks', () => {
     // this key is masked as a whole rather than kept intact.
     const nested =
       '{"authorization":{"wrapper":{"type":"score"},"value":"Bearertoken"}}';
-    expect(redactAuthHeaders(nested)).toContain(
-      '"authorization":[redacted:v1:',
-    );
-    // A different answer type, and an object with no type at all, are not scores:
-    // both are masked as a whole at that key instead of being kept intact.
+    const hidden: unknown = expect.stringContaining('[redacted:v1:');
+    const decoded: unknown = JSON.parse(redactAuthHeaders(nested));
+    expect(decoded).toMatchObject({
+      authorization: { wrapper: { type: hidden }, value: hidden },
+    });
+    // Unverified object-shaped credentials retain structure while all values mask.
     expect(
       redactAuthHeaders('{"authorization":{"type":"noul","noul":0.5}}'),
-    ).toContain('"authorization":[redacted:v1:');
-    expect(redactAuthHeaders('{"authorization":{"value":"TOK"}}')).toContain(
-      '"authorization":[redacted:v1:',
+    ).not.toContain('noul');
+    const scalar: unknown = JSON.parse(
+      redactAuthHeaders('{"authorization":{"value":"TOK"}}'),
     );
+    expect(scalar).toMatchObject({ authorization: { value: hidden } });
   });
 
   test('a forged score object cannot carry a credential beside a real distribution', () => {
@@ -1387,12 +1442,6 @@ describe('the score object is exempt while every header still masks', () => {
         'legend key',
         '{"authorization":{"type":"score","probabilities":{"9":1},"legend":{"Authorization: Bearer PRIVATE_TOKEN":"normal"}}}',
       ],
-      // A second `type` is not part of any answer this contract asks for, and its
-      // value must not be restored just because the first one qualified the object.
-      [
-        'duplicate type',
-        '{"authorization":{"type":"score","probabilities":{"9":1},"type":"Authorization: Bearer PRIVATE_TOKEN"}}',
-      ],
       // A distribution is keyed by level; a key that is not a level is not a level.
       [
         'probabilities key',
@@ -1412,6 +1461,13 @@ describe('the score object is exempt while every header still masks', () => {
         leaked: redactAuthHeaders(input).includes('PRIVATE_TOKEN'),
       }).toEqual({ label, leaked: false });
     }
+    // Duplicate keys are ambiguous even in provider JSON: fail safely instead
+    // of restoring the overwritten credential or claiming the fragment survived.
+    expect(() =>
+      redactAuthHeaders(
+        '{"authorization":{"type":"score","probabilities":{"9":1},"type":"Authorization: Bearer PRIVATE_TOKEN"}}',
+      ),
+    ).toThrow('could not be safely mapped');
     // A legitimate answer is unaffected by these rules.
     const legit =
       '{"authorization":{"type":"score","probabilities":{"9":1},"score":1,"legend":{"9":"mass delete"},"confidence":0.5}}';
@@ -1449,7 +1505,12 @@ describe('the score object is exempt while every header still masks', () => {
       '{"a":{"authorization":{"type":"score","probabilities":{"9":1}}},"b":{"authorization":{"type":"score","probabilities":{"8":1}}}}';
     const masked = redactAuthHeaders(siblings);
     expect(() => JSON.parse(masked) as unknown).not.toThrow();
-    expect(masked).toContain('"probabilities":{"8":1}');
+    const hidden: unknown = expect.stringContaining('[redacted:v1:');
+    const decoded: unknown = JSON.parse(masked);
+    expect(decoded).toMatchObject({
+      a: { authorization: { probabilities: { '9': hidden } } },
+      b: { authorization: { probabilities: { '8': hidden } } },
+    });
   });
 
   test('a nested score object masks end to end', async () => {
@@ -1592,7 +1653,10 @@ describe('the score object is exempt while every header still masks', () => {
     // The rebuilt object keeps the answer and replaces only the member that is not
     // part of a score, so a reader can still see what the provider claimed.
     expect(text).toContain('"probabilities":{"9":1}');
-    expect(text).toContain('"value":[redacted]');
+    const hidden: unknown = expect.stringContaining('[redacted:v1:');
+    expect(JSON.parse(text)).toMatchObject({
+      authorization: { value: hidden },
+    });
   });
 
   test('a decision attempt with no known secret still masks a structured echo', async () => {
