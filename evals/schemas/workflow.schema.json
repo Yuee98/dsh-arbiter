@@ -1,0 +1,892 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json",
+  "title": "Workflow source, not a rendered view",
+  "description": "Stable IDs and host session order. Parent reads are per-point snapshots; source metadata never automatically enters a prompt. Cross-record references are checked by the loader.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rootId", "provenance", "task", "sessions", "events", "points"],
+  "properties": {
+    "rootId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "lineageId": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "origin", "collectedAt", "captureMethod"],
+      "properties": {
+        "source": {
+          "description": "Whether the material came from a real workflow, was rebuilt from one, or was written for the dataset.",
+          "type": "string",
+          "enum": ["real", "reconstructed", "synthetic"]
+        },
+        "origin": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "collectedAt": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/date"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "sourceId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "captureMethod": {
+          "enum": ["manual", "programmatic", "isolated-host", "user-artifact"]
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "task": {
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "cwd": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "description": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        }
+      }
+    },
+    "sessions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/session"
+      }
+    },
+    "branches": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/branch"
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/event"
+      }
+    },
+    "points": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/point"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relationId", "kind", "pointIds", "description"],
+        "properties": {
+          "relationId": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "kind": {
+            "enum": ["controlled", "natural"]
+          },
+          "pointIds": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "uniqueItems": true
+          },
+          "description": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["callId", "tool", "arguments", "route"],
+      "properties": {
+        "callId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "tool": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "arguments": {},
+        "cwd": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "route": {
+          "enum": ["reviewer", "bypass", "ask"]
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "parentSessionId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        }
+      }
+    },
+    "cutoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "eventId"],
+      "properties": {
+        "sessionId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branchId", "parentBranchId", "fork"],
+      "properties": {
+        "branchId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "parentBranchId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "fork": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/cutoff"
+          }
+        }
+      }
+    },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "callId",
+            "tool",
+            "arguments",
+            "route"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "call"
+            },
+            "callId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "tool": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "arguments": {},
+            "cwd": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "route": {
+              "enum": ["reviewer", "bypass", "ask"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "role",
+            "source",
+            "content"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "message"
+            },
+            "role": {
+              "enum": ["user", "assistant"]
+            },
+            "source": {
+              "enum": ["human", "agent", "parent-relay"]
+            },
+            "content": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "senderSessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "replyToAskId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "callId",
+            "status",
+            "body"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "result"
+            },
+            "callId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "status": {
+              "enum": ["success", "failure", "unknown"]
+            },
+            "body": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "content"],
+                  "properties": {
+                    "state": {
+                      "const": "present"
+                    },
+                    "content": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "object"
+                        },
+                        {
+                          "type": "array"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "truncations": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["source", "note"],
+                        "properties": {
+                          "source": {
+                            "enum": ["upstream", "collection"]
+                          },
+                          "note": {
+                            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state"],
+                  "properties": {
+                    "state": {
+                      "const": "empty"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "reason"],
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    },
+                    "reason": {
+                      "enum": ["not-provided", "unreadable", "lost"]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "media"],
+                  "properties": {
+                    "state": {
+                      "const": "omitted"
+                    },
+                    "media": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type", "note"],
+                        "properties": {
+                          "type": {
+                            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                          },
+                          "ref": {
+                            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                          },
+                          "note": {
+                            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "askId",
+            "channel",
+            "question"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "ask"
+            },
+            "askId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "channel": {
+              "enum": ["agent", "approval"]
+            },
+            "question": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "callId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "askId",
+            "content"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "answer"
+            },
+            "askId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "content": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "callId",
+            "outcome"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "settlement"
+            },
+            "callId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "outcome": {
+              "enum": ["allowed", "denied", "aborted", "failed"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "sessionId",
+            "seq",
+            "turnId",
+            "kind",
+            "content"
+          ],
+          "properties": {
+            "eventId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "time": {
+              "type": "number"
+            },
+            "branchId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "kind": {
+              "const": "checkpoint"
+            },
+            "content": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            }
+          }
+        }
+      ]
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pointId",
+        "primaryViewId",
+        "sessionId",
+        "cutoffEventId",
+        "pending"
+      ],
+      "properties": {
+        "pointId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "primaryViewId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "sessionId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "branchId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "cutoffEventId": {
+          "anyOf": [
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["callEventId"],
+              "properties": {
+                "callEventId": {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                }
+              }
+            },
+            {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/action"
+            }
+          ]
+        },
+        "parentRead": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sessionId", "cutoffEventId", "status"],
+          "properties": {
+            "sessionId": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+            },
+            "cutoffEventId": {
+              "anyOf": [
+                {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "enum": ["complete", "partial", "unavailable"]
+            }
+          }
+        },
+        "predecessorPointId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        }
+      }
+    },
+    "label": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "referenceId",
+        "rootId",
+        "pointId",
+        "viewId",
+        "source",
+        "humanConfirmed",
+        "scoringEligible",
+        "versions",
+        "batchId",
+        "supportingOpinionIds",
+        "target"
+      ],
+      "properties": {
+        "referenceId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "rootId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "pointId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "viewId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "source": {
+          "enum": ["human", "human-inherited", "model-consensus", "unresolved"]
+        },
+        "humanConfirmed": {
+          "type": "boolean"
+        },
+        "scoringEligible": {
+          "type": "boolean"
+        },
+        "versions": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+        },
+        "batchId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "supportingOpinionIds": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+          },
+          "uniqueItems": true
+        },
+        "target": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/labelTarget"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "opinion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "pointId",
+        "viewId",
+        "batchId",
+        "outcome",
+        "opinion",
+        "independentBehaviour",
+        "responseRef",
+        "rationale",
+        "evidence"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "pointId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "viewId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "batchId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "outcome": {
+          "enum": ["answered", "partial", "failed", "missing"]
+        },
+        "opinion": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/opinion"
+        },
+        "independentBehaviour": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "deny",
+                "escalate",
+                "insufficient-material",
+                "review-failure"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseRef": {
+          "type": ["string", "null"]
+        },
+        "rationale": {
+          "type": ["string", "null"]
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/evidence"
+          }
+        },
+        "error": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        }
+      }
+    }
+  }
+}

@@ -71,7 +71,9 @@ export function versionsMatch(
  * would invent combinations the adjudicator rejected, and there is no arithmetic
  * shortcut that recovers the ones they meant.
  */
-export function legalPairs(label: ReviewLabel): readonly ScorePair[] | null {
+export function legalPairs(
+  label: Pick<ReviewLabel, 'target'>,
+): readonly ScorePair[] | null {
   const { allowed, allowedPairs } = label.target;
   if (allowed.risk === null || allowed.authorization === null) return null;
   if (allowedPairs !== undefined && allowedPairs.length > 0)

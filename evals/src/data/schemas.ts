@@ -29,6 +29,13 @@ import type {
   RubricSnapshot,
 } from './types.js';
 
+import type {
+  RecordCollection,
+  Workflow,
+  WorkflowLabel,
+  WorkflowOpinion,
+} from './group-types.js';
+
 /** The committed schema directory, resolved from this module, not the cwd. */
 export const SCHEMA_DIRECTORY = fileURLToPath(
   new URL('../../schemas/', import.meta.url),
@@ -53,6 +60,14 @@ export type Checker<T> = (value: unknown) => Checked<T>;
 
 /** Every document kind's checker. */
 export interface Checkers {
+  readonly workflows: Checker<RecordCollection<Workflow>>;
+  readonly groupedCases: Checker<RecordCollection<ReviewCase>>;
+  readonly groupedLabels: Checker<
+    RecordCollection<WorkflowLabel | ReviewLabel>
+  >;
+  readonly groupedOpinions: Checker<
+    RecordCollection<WorkflowOpinion | CaseReviews>
+  >;
   readonly case: Checker<ReviewCase>;
   readonly label: Checker<ReviewLabel>;
   readonly reviews: Checker<CaseReviews>;
@@ -84,7 +99,12 @@ export function describeErrors(
   return errors
     .map((error) => {
       const where = error.instancePath === '' ? '/' : error.instancePath;
-      return `${where} ${error.message ?? 'is invalid'}`;
+      const property: unknown = error.params['additionalProperty'];
+      const detail =
+        error.keyword === 'additionalProperties' && typeof property === 'string'
+          ? ` (${property})`
+          : '';
+      return `${where} ${error.message ?? 'is invalid'}${detail}`;
     })
     .join('; ');
 }
@@ -127,6 +147,24 @@ export async function compileCheckers(
     ajv.addSchema(document);
   }
   return {
+    workflows: checkerOf(
+      compile<RecordCollection<Workflow>>(ajv, 'group-workflows'),
+    ),
+    groupedCases: checkerOf(
+      compile<RecordCollection<ReviewCase>>(ajv, 'group-cases'),
+    ),
+    groupedLabels: checkerOf(
+      compile<RecordCollection<WorkflowLabel | ReviewLabel>>(
+        ajv,
+        'group-labels',
+      ),
+    ),
+    groupedOpinions: checkerOf(
+      compile<RecordCollection<WorkflowOpinion | CaseReviews>>(
+        ajv,
+        'group-opinions',
+      ),
+    ),
     case: checkerOf(compile<ReviewCase>(ajv, 'case')),
     label: checkerOf(compile<ReviewLabel>(ajv, 'label')),
     reviews: checkerOf(compile<CaseReviews>(ajv, 'reviews')),
