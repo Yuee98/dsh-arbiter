@@ -396,4 +396,6 @@ pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev
 
 `core-v1` 单文件数据、历史 `evals/annotation-pack/core-v1.pack.json` 和历史运行／实验记录保留原义，只读消费；旧单文件 `import --write` 会拒绝，历史 v1 题本仍可验证。`export --out` 和 `report --out` 均保护新旧源文件、历史题本和本地批次基准，包括损坏文件与符号链接别名；`--force` 只允许覆盖普通报告。
 
+加载与标注路由共享 `manifest.json` 优先级：混合布局继续使用旧单文件数据源，其分组格式预览可仅展示部分案例。没有根 manifest 的 legacy 源则按保留的历史清单校验所选 split 的完整成员和 family，删除或替换案例不能让 `check-all` 通过；未选 split 的文件仍不读取。
+
 新运行／实验需显式指定 `datasetId: legacy-v1` 和 `datasetPath: evals/datasets/reviewer-v2`。未提供 caseIds 时按 split 读取；显式 caseIds 优先于 split，保留原有跨 split 选择与顺序语义。报告按冻结案例列表定位实际组，显示集合文件与 record 路径。旧运行仍读取其原 core-v1 路径，不自动改用新标签，也不重写历史计划或结果。
