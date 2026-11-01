@@ -130,7 +130,7 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | 用户审查指引 | `context.customRules`（自由文本；可包含持续授权） | 取消 2000／合计 3000 字符前置上限，由 T/H 处理；按已确认来源优先级解释，不直接改写代码策略 |
 | 项目审查指引 | `projectRules.enabled`（已确认默认 true）/ `projectRules.files`（`.dsh/arbiter.md`, `.arbiter.md`） | 布尔、相对路径；用户负责内容，每次新快照取得当前文本，已发出的快照不变，不逐次认可 |
 | checkpoint | 最新可读一条候选，低优先级 | 受 C 与普通剩余预算约束 |
-| 读取与缓存保护 | 内部事件／字节读取保护；缓存单会话 4096 条、总体 16384 条／64 MiB | 独立于 T/H，淘汰副本后可有界补读，不删除源日志；全量快照宿主只能提供有界后处理 |
+| 读取与缓存保护 | 内部事件／字节读取保护；缓存单会话 4096 条、总体 16384 条／64 MiB（序列化 UTF-8 计量） | 独立于 T/H，淘汰副本后可有界补读，不删除源日志；全量快照宿主只能提供有界后处理 |
 | 探针 | **无探针**：生产包 `asksProbe: false`，请求里没有 `recoverability` 一问 | 不可配置；旧 `probeMode`（`assist`／`override`）报 `policy.retired` |
 | 判定策略 | `policy.version` 只有 `arbiter-policy-v3`；档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名 | **没有可调阈值**；旧 `tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress` 及 `normal`／`progress` 策略块一律报 `policy.retired`，不迁移 |
 | chat 后端 | temperature（0）/ maxTokens（10000）/ maxRepairRetries（1）/ timeoutMs（20000） | 范围；`maxTokens` 默认值从 400 提高，因为 400 时模型把预算耗在思考上、返回不了 JSON |
