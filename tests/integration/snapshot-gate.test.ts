@@ -1567,6 +1567,22 @@ describe('credential preparation at actual production boundaries', () => {
                 type: 'image_url',
                 image_url: 'https://example.com/retained-gate-image.png',
               },
+              {
+                type: 'image_url',
+                image_url: '\tdata:image/png;base64,C01_GATE_BINARY_SENTINEL',
+              },
+              {
+                type: 'image',
+                source: 'd\ta\tt\ta:image/png;base64,C01_GATE_BINARY_SENTINEL',
+              },
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: 'GH4436744794_GATE_BINARY_SENTINEL',
+                },
+              },
             ],
           },
         },
@@ -1602,6 +1618,10 @@ describe('credential preparation at actual production boundaries', () => {
       expect(JSON.stringify(wire)).toContain('historical-result-text');
       expect(JSON.stringify(wire)).not.toContain('RAW_BINARY_BODY_SENTINEL');
       expect(JSON.stringify(wire)).not.toContain('INLINE_GATE_BINARY_SENTINEL');
+      expect(JSON.stringify(wire)).not.toContain('C01_GATE_BINARY_SENTINEL');
+      expect(JSON.stringify(wire)).not.toContain(
+        'GH4436744794_GATE_BINARY_SENTINEL',
+      );
       expect(JSON.stringify(wire)).toContain('historical-media-origin');
       expect(JSON.stringify(wire)).toContain('historical-inline-origin');
       expect(JSON.stringify(wire)).toContain(
@@ -1637,6 +1657,12 @@ describe('credential preparation at actual production boundaries', () => {
           expect(JSON.stringify(rows)).not.toContain(secret);
           expect(JSON.stringify(rows)).not.toContain(
             'synthetic-known-boundary',
+          );
+          expect(JSON.stringify(rows)).not.toContain(
+            'C01_GATE_BINARY_SENTINEL',
+          );
+          expect(JSON.stringify(rows)).not.toContain(
+            'GH4436744794_GATE_BINARY_SENTINEL',
           );
         }
       } finally {

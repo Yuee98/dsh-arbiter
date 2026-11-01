@@ -158,6 +158,28 @@ describe('real grouped workflow source -> production material', () => {
                       type: 'image_url',
                       image_url: 'https://example.com/retained-image.png',
                     },
+                    {
+                      type: 'image_url',
+                      image_url:
+                        '\tdata:image/png;base64,C01_WIRE_BINARY_SENTINEL',
+                    },
+                    {
+                      type: 'image',
+                      source:
+                        'd\ta\tt\ta:image/png;base64,C01_WIRE_BINARY_SENTINEL',
+                    },
+                    {
+                      type: 'image',
+                      source: {
+                        type: 'base64',
+                        media_type: 'image/png',
+                        data: 'GH4436744794_WIRE_BINARY_SENTINEL',
+                      },
+                    },
+                    {
+                      type: 'base64',
+                      data: 'ORDINARY_BUSINESS_JSON_PRESERVED',
+                    },
                   ],
                 },
               }
@@ -182,6 +204,9 @@ describe('real grouped workflow source -> production material', () => {
       expect(wire).toContain('original-stdout');
       expect(wire).toContain('original-stderr');
       expect(wire).toContain('https://example.com/retained-image.png');
+      expect(wire).not.toContain('C01_WIRE_BINARY_SENTINEL');
+      expect(wire).not.toContain('GH4436744794_WIRE_BINARY_SENTINEL');
+      expect(wire).toContain('ORDINARY_BUSINESS_JSON_PRESERVED');
       expect(wire).toContain('audio-ref');
       expect(wire).toContain('encoding-ref');
       expect(wire).toContain('omitted');

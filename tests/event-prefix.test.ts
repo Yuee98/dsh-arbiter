@@ -516,6 +516,161 @@ describe('source read protections and isolation', () => {
 });
 
 describe('result facts and whole-prefix snapshot integration', () => {
+  test.each([
+    ['leading tab', '\tdata:image/png;base64,C01_BINARY_SENTINEL'],
+    ['scheme tabs', 'd\ta\tt\ta:image/png;base64,C01_BINARY_SENTINEL'],
+    ['scheme line breaks', 'd\ra\nt\ta:image/png;base64,C01_BINARY_SENTINEL'],
+    [
+      'leading ASCII controls',
+      '\u0000 \tDATA:image/png;base64,C01_BINARY_SENTINEL',
+    ],
+  ])(
+    'C01 %s cannot turn inline media into a reference or source',
+    (_name, uri) => {
+      for (const key of [
+        'ref',
+        'reference',
+        'uri',
+        'url',
+        'image_url',
+        'source',
+      ]) {
+        const body = resultBody({
+          content: { type: 'image', channel: 'stderr', [key]: uri },
+        });
+        expect(JSON.stringify(body)).not.toContain('C01_BINARY_SENTINEL');
+        expect(body).toMatchObject({
+          state: 'present',
+          content: { channel: 'stderr', state: 'omitted' },
+        });
+      }
+      expect(
+        JSON.stringify(
+          resultBody({
+            content: { type: 'image_url', image_url: { url: uri } },
+          }),
+        ),
+      ).not.toContain('C01_BINARY_SENTINEL');
+      const plain = '\tdata:text/plain,ordinary text';
+      expect(resultBody({ content: plain })).toEqual({
+        state: 'present',
+        content: plain,
+      });
+      const reference = '\thttps://example.com/original.png';
+      expect(
+        resultBody({ content: { type: 'image_url', image_url: reference } }),
+      ).toMatchObject({ state: 'present', content: { ref: reference } });
+      const ordinary = {
+        type: 'base64',
+        data: 'BUSINESS_TEXT_PRESERVED',
+        note: 'd a t a:image/png;base64,ordinary text',
+      };
+      expect(resultBody({ content: ordinary })).toEqual({
+        state: 'present',
+        content: ordinary,
+      });
+      for (const literal of [
+        '\u00a0data:image/png;base64,REFERENCE_LITERAL_TEXT',
+        'd a t a:image/png;base64,REFERENCE_LITERAL_TEXT',
+      ])
+        expect(
+          resultBody({ content: { type: 'image', reference: literal } }),
+        ).toMatchObject({ state: 'present', content: { ref: literal } });
+    },
+  );
+  test.each([
+    {
+      type: 'image_url',
+      image_url: '\tdata:image/png;base64,C01_BINARY_SENTINEL',
+    },
+    {
+      type: 'image',
+      source: 'd\ta\tt\ta:image/png;base64,C01_BINARY_SENTINEL',
+    },
+  ])(
+    'C01 native snapshot and actual user omit whitespace media $type',
+    async (media) => {
+      const original = '\tdata:image/png;base64,HUMAN_ORIGINAL_SENTINEL';
+      const built = await buildReviewSnapshot({
+        ...options,
+        agent: {
+          session: session([
+            human(0, original),
+            call(1, 'old'),
+            result(2, 'old', [media]),
+            call(3, 'pending'),
+          ]),
+        },
+      });
+      expect(JSON.stringify(built.snapshot)).not.toContain(
+        'C01_BINARY_SENTINEL',
+      );
+      expect(built.user).not.toContain('C01_BINARY_SENTINEL');
+      expect(built.snapshot.prefix?.local.events[0]).toMatchObject({
+        kind: 'human',
+        text: original,
+      });
+      expect(built.user).toContain('HUMAN_ORIGINAL_SENTINEL');
+    },
+  );
+  test.each([
+    {
+      type: 'base64',
+      media_type: 'image/png',
+      data: 'GH4436744794_BINARY_SENTINEL',
+    },
+    { type: 'base64', data: 'GH4436744794_BINARY_SENTINEL' },
+    { media_type: 'image/png', data: 'GH4436744794_BINARY_SENTINEL' },
+  ])(
+    'GH4436744794 explicitly encoded media source remains opaque %#',
+    async (source) => {
+      const media = { type: 'image', channel: 'stdout', source };
+      expect(JSON.stringify(resultBody({ content: media }))).not.toContain(
+        'GH4436744794_BINARY_SENTINEL',
+      );
+      const built = await buildReviewSnapshot({
+        ...options,
+        agent: {
+          session: session([
+            human(0, 'inspect'),
+            call(1, 'old'),
+            result(2, 'old', [media]),
+          ]),
+        },
+      });
+      expect(JSON.stringify(built.snapshot)).not.toContain(
+        'GH4436744794_BINARY_SENTINEL',
+      );
+      expect(built.user).not.toContain('GH4436744794_BINARY_SENTINEL');
+      expect(
+        resultBody({
+          content: {
+            type: 'image',
+            source: { encoding: 'utf8', data: 'ordinary source text' },
+          },
+        }),
+      ).toMatchObject({
+        state: 'present',
+        content: { source: { encoding: 'utf8', data: 'ordinary source text' } },
+      });
+      expect(
+        resultBody({
+          content: { type: 'base64', data: 'ordinary business JSON' },
+        }),
+      ).toEqual({
+        state: 'present',
+        content: { type: 'base64', data: 'ordinary business JSON' },
+      });
+      const json = {
+        media_type: 'application/json',
+        data: { message: 'ordinary business JSON' },
+      };
+      expect(resultBody({ content: json })).toEqual({
+        state: 'present',
+        content: json,
+      });
+    },
+  );
   test.each(['stdout', 'stderr'])(
     'CW123-PR-B06 inline media preserves %s and safe source metadata across text chunks',
     (channel) => {

@@ -26,8 +26,15 @@ function textBlock(
   );
 }
 
+/** Match URI schemes using ASCII URL whitespace without rewriting source text. */
+function mediaUrlInput(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) <= 0x20) start += 1;
+  return value.slice(start).replace(/[\t\n\r]/gu, '');
+}
+
 function resultString(value: string, depth: number): unknown {
-  const inline = /^data:([^;,]*)([^,]*),/iu.exec(value);
+  const inline = /^data:([^;,]*)([^,]*),/iu.exec(mediaUrlInput(value));
   if (
     inline !== null &&
     (/;base64(?:;|$)/iu.test(inline[2] ?? '') ||
@@ -106,10 +113,13 @@ function resultArray(value: readonly unknown[], depth: number): unknown[] {
   return result;
 }
 
-function encodedBody(value: Record<string, unknown>): boolean {
+function encodedBody(
+  value: Record<string, unknown>,
+  encoding: unknown = value['encoding'],
+): boolean {
   return (
-    typeof value['encoding'] === 'string' &&
-    /^(?:base64|base64url|binary)$/iu.test(value['encoding']) &&
+    typeof encoding === 'string' &&
+    /^(?:base64|base64url|binary)$/iu.test(encoding) &&
     (typeof value['data'] === 'string' || Array.isArray(value['data']))
   );
 }
@@ -119,6 +129,7 @@ function mediaType(value: Record<string, unknown>): string | null {
   const mime =
     value['mimeType'] ??
     value['mime_type'] ??
+    value['media_type'] ??
     (typeof type === 'string' &&
     /^(?:image|audio|video|application)\//iu.test(type)
       ? type
@@ -149,7 +160,9 @@ function reference(value: Record<string, unknown>): string | undefined {
     nested?.['url'] ??
     nested?.['uri'] ??
     (typeof value['image_url'] === 'string' ? value['image_url'] : undefined);
-  return typeof raw === 'string' && !/^data:/iu.test(raw) ? raw : undefined;
+  return typeof raw === 'string' && !/^data:/iu.test(mediaUrlInput(raw))
+    ? raw
+    : undefined;
 }
 
 function mediaOf(value: Record<string, unknown>, type: string): ReviewMedia {
@@ -161,12 +174,29 @@ function mediaOf(value: Record<string, unknown>, type: string): ReviewMedia {
   };
 }
 
+/** A source inside known media can declare its encoding through its type tag. */
+function resultMediaSource(value: unknown, depth: number): unknown {
+  if (!eventRecord(value)) return resultContent(value, depth);
+  const encoding = value['encoding'] ?? value['type'];
+  return resultContent(
+    encodedBody(value, encoding) ? { ...value, encoding } : value,
+    depth,
+  );
+}
+
 function mediaOrigin(value: Record<string, unknown>, depth: number) {
   return Object.fromEntries(
     ['channel', 'source'].flatMap((key) =>
       value[key] === undefined
         ? []
-        : [[key, resultContent(value[key], depth + 1)]],
+        : [
+            [
+              key,
+              key === 'source'
+                ? resultMediaSource(value[key], depth + 1)
+                : resultContent(value[key], depth + 1),
+            ],
+          ],
     ),
   );
 }
