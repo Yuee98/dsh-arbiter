@@ -14,7 +14,13 @@ import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 
 function material(event: ReviewEvent): unknown {
   if (event.kind === 'call') return [event.arguments, event.cwd];
-  if (event.kind === 'result') return event.body;
+  if (event.kind === 'result') {
+    // Content discovery must retain its actual text-block boundaries.
+    // The common source helper handles it before this metadata-only pass.
+    if (event.body.state === 'present')
+      return event.body.truncations?.map((entry) => entry.note);
+    return event.body.state === 'omitted' ? event.body.media : null;
+  }
   if (event.kind === 'settlement') return null;
   return [
     event.text,

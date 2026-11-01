@@ -45,7 +45,9 @@ describe('new event material shares captured credential preparation', () => {
                   ],
                 },
               }
-            : event,
+            : event.eventId === 'request'
+              ? { ...event, content: 'split-workflow-' }
+              : event,
         ),
       };
       const dataset = await loadWorkflow(root, {}, { references: false });
@@ -57,6 +59,10 @@ describe('new event material shares captured credential preparation', () => {
         protocol,
         { config, configRevision: 'fixture', credentialValues: ['text'] },
       );
+      expect(material.snapshot.prefix?.local.events[0]).toMatchObject({
+        kind: 'human',
+        text: 'split-workflow-',
+      });
       const result = material.snapshot.prefix?.local.events.find(
         (event) => event.kind === 'result',
       );
