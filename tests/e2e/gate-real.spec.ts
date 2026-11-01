@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, expect } from './fixtures.js';
 import { resolveDshCommand } from './dsh/profile.js';
 import type { ContextLike } from '../../src/host/types.js';
+import type { SessionLike } from '../../src/snapshot.js';
 
 /**
  * The real host gate, not only the HTTP tester.
@@ -171,6 +172,14 @@ function isToolRuntime(value: unknown): value is HostToolRuntime {
   );
 }
 
+/** Await the real Cordis fiber teardown before removing its owned home. */
+async function disposeFiber(value: unknown): Promise<void> {
+  if (!isRecordValue(value) || typeof value['dispose'] !== 'function')
+    throw new Error('missing Cordis fiber disposer');
+  const pending: unknown = Reflect.apply(value['dispose'], value, []);
+  await pending;
+}
+
 /** The first string argument a fixture tool received, for the reached log. */
 function firstArgument(args: unknown): string {
   if (!isRecordValue(args)) return '';
@@ -262,6 +271,7 @@ async function mountGate(options: {
     decision?: (name: string) => GateDecision;
   } = {};
   const disposers: (() => unknown)[] = [];
+  const routing: { session?: SessionLike } = {};
 
   const Context = constructorOf(cordis['Context'], 'Context');
   const SystemPrompt = constructorOf(
@@ -304,7 +314,7 @@ async function mountGate(options: {
       defaultMode: 'workspace-write',
       resolve: () => ({ mode: 'workspace-write' }),
     });
-    scope.provide('sessions', { get: () => session });
+    scope.provide('sessions', { get: () => routing.session ?? session });
     scope.provide('approval', {
       config: { policy: 'ask' },
       request: () => Promise.resolve('unavailable'),
@@ -342,15 +352,22 @@ async function mountGate(options: {
     box.runtime = runtime;
   }
 
-  // `apply` registers the gate on the same context; the plugin's own
-  // `tools/pre-execute` listener is what decides the call.
-  apply(context, options.config ?? CONFIG);
-  // Wait for the plugin scope to mount instead of assuming a fixed delay.
+  // Strict service reads hide providers until their Cordis fiber is active.
+  // Never initialize the plugin while its explicit private home is unavailable.
   const deadline = Date.now() + 15_000;
-  while (box.runtime === undefined) {
+  while (
+    box.runtime === undefined ||
+    context.get('profileContext')?.home !== home
+  ) {
     if (Date.now() > deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+
+  if (context.get('profileContext')?.home !== home)
+    throw new Error('private profile provider did not activate');
+  // Preserve the original root listener scope; dispose that real root fiber.
+  apply(context, options.config ?? CONFIG);
+  disposers.push(() => disposeFiber(context.fiber));
 
   // The gate reviews only a session the user enabled, so the fixture states
   // that admission the way the host does: one ignorable plugin record.
@@ -364,6 +381,7 @@ async function mountGate(options: {
       log.push({ type, data, seq: log.length, ignorable: true });
     },
   };
+  routing.session = gateSession;
   appendAdmission(gateSession);
 
   const runtime = box.runtime;
@@ -410,14 +428,12 @@ async function mountGate(options: {
       return decision;
     },
     dispose: async () => {
-      for (const dispose of disposers.splice(0)) {
-        try {
-          Reflect.apply(dispose, undefined, []);
-        } catch {
-          /* best effort during teardown */
-        }
+      try {
+        for (const dispose of disposers.splice(0))
+          await Promise.resolve(Reflect.apply(dispose, undefined, []));
+      } finally {
+        await rm(home, { recursive: true, force: true });
       }
-      await rm(home, { recursive: true, force: true });
     },
   };
 }
