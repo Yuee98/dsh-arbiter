@@ -46,6 +46,23 @@ function resultString(value: string, depth: number): unknown {
     : JSON.stringify(projected);
 }
 
+function resultTextBlock(
+  entry: Record<string, unknown> & { readonly text: string },
+  projected: unknown,
+  depth: number,
+): Record<string, unknown> {
+  const { text: _text, ...metadata } = entry;
+  const safe = resultContent(metadata, depth + 1);
+  return {
+    ...(eventRecord(safe) ? safe : {}),
+    ...(typeof projected === 'string'
+      ? { text: projected }
+      : eventRecord(projected)
+        ? projected
+        : {}),
+  };
+}
+
 function resultArray(value: readonly unknown[], depth: number): unknown[] {
   const result: unknown[] = [];
   let index = 0;
@@ -70,8 +87,9 @@ function resultArray(value: readonly unknown[], depth: number): unknown[] {
     );
     if (typeof projected !== 'string') {
       result.push(
-        projected,
-        ...group.slice(1).map((entry) => ({ ...entry, text: '' })),
+        ...group.map((entry, at) =>
+          resultTextBlock(entry, at === 0 ? projected : '', depth),
+        ),
       );
       continue;
     }
@@ -82,9 +100,7 @@ function resultArray(value: readonly unknown[], depth: number): unknown[] {
           ? projected.slice(offset)
           : projected.slice(offset, offset + entry.text.length);
       offset += entry.text.length;
-      const { text: _text, ...metadata } = entry;
-      const safe = resultContent(metadata, depth + 1);
-      result.push({ ...(eventRecord(safe) ? safe : {}), text });
+      result.push(resultTextBlock(entry, text, depth));
     }
   }
   return result;
@@ -131,7 +147,8 @@ function reference(value: Record<string, unknown>): string | undefined {
     value['uri'] ??
     value['url'] ??
     nested?.['url'] ??
-    nested?.['uri'];
+    nested?.['uri'] ??
+    (typeof value['image_url'] === 'string' ? value['image_url'] : undefined);
   return typeof raw === 'string' && !/^data:/iu.test(raw) ? raw : undefined;
 }
 
@@ -144,6 +161,16 @@ function mediaOf(value: Record<string, unknown>, type: string): ReviewMedia {
   };
 }
 
+function mediaOrigin(value: Record<string, unknown>, depth: number) {
+  return Object.fromEntries(
+    ['channel', 'source'].flatMap((key) =>
+      value[key] === undefined
+        ? []
+        : [[key, resultContent(value[key], depth + 1)]],
+    ),
+  );
+}
+
 /** Text-only media projection; the caller owns credential discovery/copy order. */
 export function resultContent(value: unknown, depth = 0): unknown {
   if (depth > 64) return { omitted: 'structured result nesting limit' };
@@ -151,7 +178,12 @@ export function resultContent(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return resultArray(value, depth);
   if (!eventRecord(value)) return value;
   const type = mediaType(value);
-  if (type !== null) return { ...mediaOf(value, type), state: 'omitted' };
+  if (type !== null)
+    return {
+      ...mediaOf(value, type),
+      ...mediaOrigin(value, depth),
+      state: 'omitted',
+    };
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,

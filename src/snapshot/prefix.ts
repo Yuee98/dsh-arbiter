@@ -321,17 +321,33 @@ export function prefixCompatibility(prefix: ReviewPrefix): {
 }
 
 /** Existing history ablation withholds tool records and summaries, never humans. */
+function withoutToolHistory(source: ReviewEventSource): ReviewEventSource {
+  const referencedQuestions = new Set(
+    source.events.flatMap((event) =>
+      event.kind === 'human' && event.binding?.questionEventId !== undefined
+        ? [event.binding.questionEventId]
+        : [],
+    ),
+  );
+  return {
+    ...source,
+    events: source.events.filter((event) => {
+      if (event.kind === 'question')
+        return referencedQuestions.has(event.eventId);
+      return (
+        event.kind !== 'call' &&
+        event.kind !== 'result' &&
+        event.kind !== 'settlement' &&
+        event.kind !== 'checkpoint'
+      );
+    }),
+  };
+}
+
 export function prefixWithoutHistory(prefix: ReviewPrefix): ReviewPrefix {
   return {
     ...prefix,
-    local: {
-      ...prefix.local,
-      events: prefix.local.events.filter(
-        (event) =>
-          event.kind !== 'call' &&
-          event.kind !== 'result' &&
-          event.kind !== 'checkpoint',
-      ),
-    },
+    local: withoutToolHistory(prefix.local),
+    parent: prefix.parent === null ? null : withoutToolHistory(prefix.parent),
   };
 }

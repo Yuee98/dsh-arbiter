@@ -1554,6 +1554,18 @@ describe('credential preparation at actual production boundaries', () => {
                 password: 'application/octet-stream',
                 ref: '/tmp/' + secret + '.png',
                 data: 'RAW_BINARY_BODY_SENTINEL',
+                channel: 'stderr',
+                source: { eventId: 'historical-media-origin' },
+              },
+              {
+                type: 'text',
+                channel: 'stdout',
+                source: 'historical-inline-origin',
+                text: 'data:image/png;base64,INLINE_GATE_BINARY_SENTINEL',
+              },
+              {
+                type: 'image_url',
+                image_url: 'https://example.com/retained-gate-image.png',
               },
             ],
           },
@@ -1589,6 +1601,12 @@ describe('credential preparation at actual production boundaries', () => {
       expect(JSON.stringify(wire)).toContain('/tmp/key-document');
       expect(JSON.stringify(wire)).toContain('historical-result-text');
       expect(JSON.stringify(wire)).not.toContain('RAW_BINARY_BODY_SENTINEL');
+      expect(JSON.stringify(wire)).not.toContain('INLINE_GATE_BINARY_SENTINEL');
+      expect(JSON.stringify(wire)).toContain('historical-media-origin');
+      expect(JSON.stringify(wire)).toContain('historical-inline-origin');
+      expect(JSON.stringify(wire)).toContain(
+        'https://example.com/retained-gate-image.png',
+      );
       const stored = await persistedCall('credential-wire');
       expect(
         stored.snapshot.prefix?.local.events.some(

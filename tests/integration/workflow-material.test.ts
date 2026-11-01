@@ -142,6 +142,22 @@ describe('real grouped workflow source -> production material', () => {
                       reference: 'encoding-ref',
                     },
                     'data:application/octet-stream;base64,DATA_URI_WIRE_BINARY_SENTINEL',
+                    {
+                      type: 'text',
+                      channel: 'stdout',
+                      source: 'original-stdout',
+                      text: 'data:image/png;base64,STDOUT_BINARY_SENTINEL',
+                    },
+                    {
+                      type: 'text',
+                      channel: 'stderr',
+                      source: 'original-stderr',
+                      text: 'data:image/png;base64,STDERR_BINARY_SENTINEL',
+                    },
+                    {
+                      type: 'image_url',
+                      image_url: 'https://example.com/retained-image.png',
+                    },
                   ],
                 },
               }
@@ -161,6 +177,11 @@ describe('real grouped workflow source -> production material', () => {
       expect(wire).not.toContain('MIME_WIRE_BINARY_SENTINEL');
       expect(wire).not.toContain('ENCODING_WIRE_BINARY_SENTINEL');
       expect(wire).not.toContain('DATA_URI_WIRE_BINARY_SENTINEL');
+      expect(wire).not.toContain('STDOUT_BINARY_SENTINEL');
+      expect(wire).not.toContain('STDERR_BINARY_SENTINEL');
+      expect(wire).toContain('original-stdout');
+      expect(wire).toContain('original-stderr');
+      expect(wire).toContain('https://example.com/retained-image.png');
       expect(wire).toContain('audio-ref');
       expect(wire).toContain('encoding-ref');
       expect(wire).toContain('omitted');
@@ -384,7 +405,42 @@ describe('real grouped workflow source -> production material', () => {
   test.each(['full', 'compact', 'compact-no-audit'] as const)(
     '%s layouts preserve all source facts or explicitly withhold tool history',
     async (structure) => {
-      const dataset = await loadWorkflow();
+      const original = workflow();
+      const root = {
+        ...original,
+        events: original.events.flatMap((event) => [
+          ...(event.eventId === 'scan-result'
+            ? [
+                {
+                  eventId: 'scan-settlement',
+                  sessionId: 'main',
+                  seq: 5,
+                  turnId: 'turn-1',
+                  kind: 'settlement' as const,
+                  callId: 'scan',
+                  outcome: 'allowed' as const,
+                },
+              ]
+            : []),
+          ...(event.eventId === 'build-call'
+            ? [
+                {
+                  eventId: 'unanswered-ask',
+                  sessionId: 'main',
+                  seq: 15,
+                  turnId: 'turn-2',
+                  kind: 'ask' as const,
+                  askId: 'unanswered',
+                  channel: 'agent' as const,
+                  question: 'UNANSWERED_ASK_SENTINEL',
+                },
+              ]
+            : []),
+          { ...event, seq: event.seq * 2 },
+        ]),
+      };
+      const dataset = await loadWorkflow(root);
+      expect(dataset.problems).toEqual([]);
       for (const protocol of ['chat', 'decision'] as const) {
         for (const history of ['current-turn', 'none'] as const) {
           const pkg = variantPackage(variant(structure, history));
@@ -403,6 +459,10 @@ describe('real grouped workflow source -> production material', () => {
           expect(wire.includes('withheld')).toBe(history === 'none');
           expect(wire.includes('scan-result')).toBe(history !== 'none');
           expect(wire.includes('clean-result')).toBe(history !== 'none');
+          expect(wire.includes('UNANSWERED_ASK_SENTINEL')).toBe(
+            history !== 'none',
+          );
+          expect(wire.includes('scan-settlement')).toBe(history !== 'none');
           expect(wire).not.toContain('FUTURE_FAILURE_SENTINEL');
         }
       }

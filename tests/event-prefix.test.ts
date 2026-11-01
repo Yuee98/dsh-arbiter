@@ -12,6 +12,7 @@ import { SOURCE_BYTE_LIMIT } from '../src/snapshot/source-guard.js';
 import {
   buildEventPrefix,
   prefixProtectedGaps,
+  prefixWithoutHistory,
 } from '../src/snapshot/prefix.js';
 import { trimPrefix } from '../src/snapshot/prefix-budget.js';
 import { resultBody } from '../src/snapshot/event-content.js';
@@ -192,6 +193,39 @@ describe('native identities, cutoff and candidate ordering', () => {
 });
 
 describe('explicit host question binding', () => {
+  test('CW123-PR-B05 withheld history keeps only questions referenced by actual answers', () => {
+    const built = prefix([
+      human(0, 'inspect status'),
+      call(
+        1,
+        'answered',
+        { questions: [{ id: 'q', question: 'Only local?' }] },
+        'ask_user_question',
+      ),
+      result(
+        2,
+        'answered',
+        JSON.stringify({ answers: [{ id: 'q', selected: ['yes'] }] }),
+        false,
+      ),
+      call(
+        3,
+        'unanswered',
+        { questions: [{ id: 'q', question: 'UNANSWERED_ASK_SENTINEL' }] },
+        'ask_user_question',
+      ),
+      call(4, 'tool'),
+      result(5, 'tool', 'tool history'),
+    ]);
+    const hidden = prefixWithoutHistory(built);
+    expect(hidden.local.events.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+    expect(hidden.local.events[2]).toMatchObject({
+      kind: 'human',
+      binding: { status: 'bound', questionEventId: '["local",1]' },
+    });
+    expect(hidden.local.status).toEqual(built.local.status);
+    expect(JSON.stringify(hidden)).not.toContain('UNANSWERED_ASK_SENTINEL');
+  });
   test('answer IDs cannot bind a different question in the same ask batch', () => {
     const asked = call(
       1,
@@ -482,6 +516,93 @@ describe('source read protections and isolation', () => {
 });
 
 describe('result facts and whole-prefix snapshot integration', () => {
+  test.each(['stdout', 'stderr'])(
+    'CW123-PR-B06 inline media preserves %s and safe source metadata across text chunks',
+    (channel) => {
+      for (const chunks of [1, 2]) {
+        const uri = 'data:image/png;base64,INLINE_CHANNEL_BODY_SENTINEL';
+        const body = resultBody({
+          content: Array.from({ length: chunks }, (_, index) => ({
+            type: 'text',
+            channel,
+            source: `source-${String(index)}`,
+            text:
+              chunks === 1
+                ? uri
+                : index === 0
+                  ? uri.slice(0, 20)
+                  : uri.slice(20),
+            metadata: {
+              image: { type: 'image/png', data: 'METADATA_BINARY_SENTINEL' },
+            },
+          })),
+        });
+        expect(body).toMatchObject({
+          state: 'present',
+          content: [
+            { channel, source: 'source-0', state: 'omitted' },
+            ...Array.from({ length: chunks - 1 }, (_, index) => ({
+              channel,
+              source: `source-${String(index + 1)}`,
+              text: '',
+            })),
+          ],
+        });
+        expect(JSON.stringify(body)).not.toContain(
+          'INLINE_CHANNEL_BODY_SENTINEL',
+        );
+        expect(JSON.stringify(body)).not.toContain('METADATA_BINARY_SENTINEL');
+      }
+    },
+  );
+  test.each(['stdout', 'stderr'])(
+    'CW123-PR-B06 explicit media also preserves its %s origin',
+    (channel) => {
+      expect(
+        resultBody({
+          content: {
+            type: 'image/png',
+            channel,
+            source: { eventId: 'original-result' },
+            data: 'DIRECT_BINARY_SENTINEL',
+          },
+        }),
+      ).toMatchObject({
+        state: 'present',
+        content: {
+          channel,
+          source: { eventId: 'original-result' },
+          state: 'omitted',
+        },
+      });
+    },
+  );
+  test.each(['direct', 'json'])(
+    'CW123-PR-B07 %s image_url strings preserve non-inline references',
+    (form) => {
+      const image = {
+        type: 'image_url',
+        image_url: 'https://example.com/retained-image.png',
+      };
+      const body = resultBody({
+        content: form === 'direct' ? image : JSON.stringify(image),
+      });
+      expect(JSON.stringify(body)).toContain(
+        'https://example.com/retained-image.png',
+      );
+      expect(JSON.stringify(body)).toContain('omitted');
+      expect(
+        JSON.stringify(
+          resultBody({
+            content: {
+              ...image,
+              image_url: 'data:image/png;base64,INLINE_REF_SENTINEL',
+            },
+          }),
+        ),
+      ).not.toContain('INLINE_REF_SENTINEL');
+    },
+  );
   test.each(['image/png', 'audio/mpeg', 'application/octet-stream'])(
     'CW123-PR-B02 explicit data URI %s never expands its encoded body',
     (type) => {
