@@ -1,5 +1,5 @@
 /** SQLite audit queue and lifecycle. Persistence never gates a permission outcome. */
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { ArbiterConfig, ReviewScores } from './types.js';
@@ -19,7 +19,7 @@ export type {
   CandidateRecord,
   StoredCall,
 } from './audit/types.js';
-import { hash, json } from './audit/rows.js';
+export { fingerprintOf } from './audit/rows.js';
 import { clampPageSize } from './audit/call-list.js';
 import { auditRefusal, openAuditSchema } from './audit/schema.js';
 import { writeCallRecord } from './audit/writer.js';
@@ -52,9 +52,16 @@ import {
   retentionPolicyOf,
 } from './audit/ownership.js';
 import { clearCalls, runRetention } from './audit/retention.js';
+import type {
+  ToolResultObservation,
+  ToolResultLookup,
+} from './audit/tool-result-types.js';
+export type * from './audit/tool-result-types.js';
+import { ToolResultAccess } from './audit/tool-result-access.js';
+import { auditSidecarBytes, auditTotalBytes } from './audit/footprint.js';
 import {
-  evictedFor,
-  markExecuted,
+  observeExecution,
+  applyEarlyExecution,
   markStarted,
   type EarlyResult,
 } from './audit/execution.js';
@@ -71,9 +78,7 @@ export interface AuditRetentionOutcome {
   /** True when the newest record alone already exceeds the byte target. */
   readonly irreducible: boolean;
   readonly bytes: number;
-}
-export function fingerprintOf(tool: string, args: unknown): string {
-  return `${tool}:${hash(json(args)).slice(0, 24)}`;
+  readonly cleanupPending?: boolean;
 }
 export class AuditStore {
   /**
@@ -87,6 +92,7 @@ export class AuditStore {
    */
   private readonly db: DatabaseSync | null;
   private readonly path: string;
+  private readonly resultAccess: ToolResultAccess;
   private config: ArbiterConfig['audit'];
   private queue: {
     readonly record: CallRecord;
@@ -118,6 +124,15 @@ export class AuditStore {
   constructor(path: string, config: ArbiterConfig['audit']) {
     this.path = path;
     this.config = config;
+    this.resultAccess = new ToolResultAccess(
+      path,
+      () => this.open,
+      () => this.config.enabled,
+      () => this.retention.days,
+      (error) => {
+        this.markDegraded(error);
+      },
+    );
     mkdirSync(dirname(path), { recursive: true });
     // The version is read from the file header before any connection exists, so
     // a file this build refuses is never opened, recovered or checkpointed.
@@ -128,7 +143,7 @@ export class AuditStore {
       this.lastError = refusal;
       this.degraded = true;
     } else {
-      const db = new DatabaseSync(path);
+      const db = new DatabaseSync(path, { timeout: 1_000 });
       this.db = db;
       // A database this build must not modify is checked *before* any mutating
       // pragma: `journal_mode = WAL` rewrites the file header, so running it
@@ -156,6 +171,7 @@ export class AuditStore {
       retentionDays: claim.days,
       retentionBytes: claim.bytes,
     };
+    if (this.open !== null && this.config.enabled) this.recoverToolResults();
     if (claim.conflict) {
       this.degraded = true;
       this.lastError =
@@ -244,15 +260,7 @@ export class AuditStore {
    * belong to the database's own budget.
    */
   private get auxiliaryBytes(): number {
-    let total = 0;
-    for (const candidate of [`${this.path}-wal`, `${this.path}-shm`]) {
-      try {
-        total += statSync(candidate).size;
-      } catch {
-        // A missing sidecar is normal.
-      }
-    }
-    return total;
+    return auditSidecarBytes(this.path);
   }
 
   /**
@@ -263,19 +271,22 @@ export class AuditStore {
    * silently exceed the user's budget.
    */
   get databaseBytes(): number {
-    let total = 0;
-    for (const candidate of [
-      this.path,
-      `${this.path}-wal`,
-      `${this.path}-shm`,
-    ]) {
-      try {
-        total += statSync(candidate).size;
-      } catch {
-        // A missing sidecar is normal.
-      }
-    }
-    return total;
+    return auditTotalBytes(this.path, () => {
+      this.markDegraded(new Error('result-footprint-unavailable'));
+    });
+  }
+
+  captureToolResultGeneration(): string | null {
+    return this.resultAccess.generation();
+  }
+  saveToolResult(observation: ToolResultObservation) {
+    return this.resultAccess.save(observation);
+  }
+  getToolResult(...args: ToolResultLookup) {
+    return this.resultAccess.get(...args);
+  }
+  recoverToolResults() {
+    return this.resultAccess.recover();
   }
 
   health(): AuditHealth {
@@ -601,17 +612,8 @@ export class AuditStore {
     const db = this.open;
     if (db === null) return;
     try {
-      const changed = markExecuted(db, callId, status, at);
-      if (changed === 0 && !this.earlyResults.has(callId)) {
-        // The record has not been inserted yet (or was dropped). Remember the
-        // observation so it is applied when the row appears.
-        const evicted = evictedFor(this.earlyResults, callId);
-        if (evicted !== null) {
-          this.earlyResults.delete(evicted);
-          this.dropped += 1;
-        }
-        this.earlyResults.set(callId, { status, at });
-      }
+      if (observeExecution(db, this.earlyResults, callId, status, at))
+        this.dropped += 1;
     } catch (error) {
       this.markDegraded(error);
     }
@@ -636,11 +638,9 @@ export class AuditStore {
 
   /** Apply an observation that arrived before its record was stored. */
   private applyEarlyResult(callId: string): void {
-    const early = this.earlyResults.get(callId);
-    if (early === undefined || this.db === null) return;
-    this.earlyResults.delete(callId);
+    if (this.db === null) return;
     try {
-      markExecuted(this.db, callId, early.status, early.at);
+      applyEarlyExecution(this.db, this.earlyResults, callId);
     } catch (error) {
       this.markDegraded(error);
     }
@@ -789,7 +789,8 @@ export class AuditStore {
     // clear; they would be inserted afterwards and resurrect the cleared
     // history. The cutoff makes them discardable by any store on this path.
     markCleared(this.path);
-    return { ok: true, deleted: cleared };
+    const reclaimed = this.recoverToolResults();
+    return { ok: reclaimed.ok, deleted: cleared };
   }
 
   /** Drain synchronously, so a caller can rely on the queue being empty after. */
@@ -825,11 +826,12 @@ export class AuditStore {
     const days = retentionDays ?? policy?.days ?? this.config.retentionDays;
     const bytes = retentionBytes ?? policy?.bytes ?? this.config.retentionBytes;
     // Scheduled from an interval, so a throw here would escape into the host.
-    return (
-      this.guard((db) =>
-        runRetention(db, now, days, bytes, () => this.auxiliaryBytes),
-      ) ?? { deleted: 0, irreducible: false, bytes: this.databaseBytes }
-    );
+    const outcome = this.guard((db) =>
+      runRetention(db, now, days, bytes, () => this.auxiliaryBytes, this.path),
+    ) ?? { deleted: 0, irreducible: false, bytes: this.databaseBytes };
+    if (outcome.cleanupPending)
+      this.markDegraded(new Error('result-cleanup-pending'));
+    return outcome;
   }
 
   async flush(): Promise<void> {
@@ -854,6 +856,4 @@ export class AuditStore {
     }
   }
 }
-export function resolveAuditPath(dshHome: string): string {
-  return `${dshHome}/arbiter/arbiter.db`;
-}
+export { resolveAuditPath } from './audit/footprint.js';

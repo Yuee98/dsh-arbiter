@@ -1,11 +1,21 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { asRow, rowNumber, rowChanges } from './rows.js';
+import {
+  clearToolResults,
+  expireToolResults,
+  retentionGroupCount,
+  oldestRetentionGroups,
+  deleteRetentionGroup,
+} from './tool-result-retention.js';
+import { toolResultFileBytes } from './tool-result-files.js';
+import { recoverToolResults } from './tool-results.js';
 export function clearCalls(db: DatabaseSync): number {
   const count = rowNumber(
     asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
   );
   db.exec('BEGIN IMMEDIATE');
   try {
+    clearToolResults(db);
     db.exec('DELETE FROM calls');
     db.exec('DELETE FROM candidates');
     // Clearing the audit records must not leave their template content behind:
@@ -82,6 +92,7 @@ export interface RetentionOutcome {
   readonly irreducible: boolean;
   /** Total bytes the target applies to, including the WAL and SHM sidecars. */
   readonly bytes: number;
+  readonly cleanupPending?: boolean;
 }
 
 /**
@@ -119,98 +130,56 @@ export function runRetention(
   now: number,
   retentionDays: number,
   retentionBytes: number,
-  /**
-   * Total bytes of auxiliary audit files (the WAL and SHM sidecars).
-   *
-   * These are reported separately from the database because deleting rows can
-   * never reclaim them, and they must not be confused with SQLite's free pages:
-   * a freelist page is reclaimable database space, not an auxiliary file.
-   */
   auxiliaryBytes: () => number,
+  bodyPath: string,
 ): RetentionOutcome {
-  try {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  } catch {
-    // Continue with the current page counts.
-  }
-  const cutoff = now - retentionDays * 24 * 60 * 60 * 1_000;
-  let deleted = rowChanges(
-    db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
-  );
-  // Reclaim after the age-based deletion, not before it: expired calls are what
-  // make their templates orphaned, and reclaiming them now keeps that content
-  // out of the capacity decision below.
-  reclaimShared(db, cutoff);
-  // The deletion above grew the WAL, and WAL content is reclaimable. Checkpoint
-  // it before measuring, or its bytes would be counted as capacity that the
-  // database can never get back and would trigger needless eviction.
-  const checkpointed = checkpoint(db);
-  let guard = 0;
-  // Auxiliary files cannot be reclaimed by deleting rows, so the database budget
-  // is what remains of the target after them. The budget is derived from the
-  // real auxiliary size, never from `total - occupied`: that difference includes
-  // SQLite's free pages, which compaction can reclaim and which must therefore
-  // stay inside the database's own budget.
-  const databaseBudget = Math.max(0, retentionBytes - auxiliaryBytes());
-  // When a reader blocked the checkpoint, the WAL still holds reclaimable bytes.
-  // They are not evidence that the database needs to shrink, so this pass defers
-  // the capacity decision instead of deleting calls for space it cannot measure
-  // honestly.
-  if (!checkpointed) {
-    return {
-      deleted,
-      irreducible: false,
-      bytes: occupiedBytes(db) + auxiliaryBytes(),
-    };
-  }
-  while (occupiedBytes(db) > databaseBudget && guard < 40) {
-    guard += 1;
-    const remaining = rowNumber(
-      asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
-    );
+  const cutoff = now - retentionDays * 86_400_000;
+  let deleted = expireRecords(db, cutoff);
+  let cleanupPending = !recoverToolResults(db, bodyPath).ok;
+  let checkpointed = checkpoint(db);
+  const total = (): number =>
+    occupiedBytes(db) + auxiliaryBytes() + toolResultFileBytes(bodyPath);
+  for (
+    let guard = 0;
+    guard < 40 && !cleanupPending && checkpointed && total() > retentionBytes;
+    guard += 1
+  ) {
+    const remaining = retentionGroupCount(db);
     if (remaining <= 1) break;
-    const average = asRow(
-      db
-        .prepare(
-          `SELECT AVG(
-               length(arguments) + length(trace) + length(effect) +
-               COALESCE(length(scores), 0) + COALESCE(length(usage), 0) + 256
-             ) AS average FROM calls`,
-        )
-        .get(),
-    );
-    const excess = occupiedBytes(db) - databaseBudget;
-    const batch = Math.max(
-      1,
-      Math.min(
-        32,
-        Math.ceil(excess / Math.max(rowNumber(average['average'], 1_024), 256)),
-      ),
-    );
-    const changes = rowChanges(
-      db
-        .prepare(
-          `DELETE FROM calls WHERE call_id IN (
-               SELECT call_id FROM calls ORDER BY ts ASC LIMIT ?
-             )`,
-        )
-        .run(Math.min(batch, remaining - 1)),
-    );
-    if (changes === 0) break;
-    deleted += changes;
-    // A deleted call may have been the last reference to shared content.
-    reclaimShared(db, cutoff);
+    const groups = oldestRetentionGroups(db, Math.min(32, remaining - 1));
+    for (const group of groups) {
+      if (total() <= retentionBytes) break;
+      deleted += deleteRetentionGroup(db, group.sessionId, group.callId);
+      cleanupPending = !recoverToolResults(db, bodyPath).ok;
+      reclaimShared(db, cutoff);
+      checkpointed = checkpoint(db);
+      // Reclaim failure cannot justify sacrificing another unrelated record.
+      if (cleanupPending || !checkpointed) break;
+    }
   }
-  // Final pass: the loop may have removed the last reference to shared rows.
   reclaimShared(db, cutoff);
-  if (deleted > 0 || occupiedBytes(db) + auxiliaryBytes() > retentionBytes)
-    compact(db);
-  // VACUUM writes a fresh WAL. Checkpoint it before reporting, or the final
-  // footprint would include bytes the checkpoint is about to reclaim.
+  if (deleted > 0 || total() > retentionBytes) compact(db);
   checkpoint(db);
-  // After compaction the physical footprint may still exceed the target because
-  // the single newest call (or a sidecar) is larger than it. Say so rather than
-  // deleting the last record to satisfy a number.
-  const irreducible = occupiedBytes(db) > databaseBudget;
-  return { deleted, irreducible, bytes: occupiedBytes(db) + auxiliaryBytes() };
+  const bytes = total();
+  return {
+    deleted,
+    irreducible: !cleanupPending && checkpointed && bytes > retentionBytes,
+    bytes,
+    ...(cleanupPending ? { cleanupPending: true } : {}),
+  };
+}
+function expireRecords(db: DatabaseSync, cutoff: number): number {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    expireToolResults(db, cutoff);
+    const deleted = rowChanges(
+      db.prepare('DELETE FROM calls WHERE ts < ?').run(cutoff),
+    );
+    reclaimShared(db, cutoff);
+    db.exec('COMMIT');
+    return deleted;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }

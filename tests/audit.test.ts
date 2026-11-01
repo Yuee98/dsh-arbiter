@@ -1916,7 +1916,7 @@ describe('a database from an older release is refused, not migrated', () => {
     writer.exec('DROP TABLE stages');
     expect(
       numberField(writer.prepare('PRAGMA user_version').get(), 'user_version'),
-    ).toBe(3);
+    ).toBe(4);
     const leftover = readdirSync(source).sort();
     expect(leftover).toContain('arbiter.db-wal');
     for (const file of leftover)
@@ -1952,7 +1952,7 @@ describe('a database from an older release is refused, not migrated', () => {
     const path = join(dir, 'arbiter.db');
 
     // A current database whose *effective* version was later raised inside an
-    // uncheckpointed WAL. The main file's header still says 3, so a header-only
+    // uncheckpointed WAL. The main file's header still says 4, so a header-only
     // comparison would accept it and only notice after opening the original —
     // which is exactly the connection that rewrites the sidecars.
     const seed = new AuditStore(
@@ -1973,7 +1973,7 @@ describe('a database from an older release is refused, not migrated', () => {
         readFileSync(join(source, file)),
       );
     // The premise: the header alone still reports this build's version.
-    expect(readFileSync(path).readUInt32BE(60)).toBe(3);
+    expect(readFileSync(path).readUInt32BE(60)).toBe(4);
     const files = readdirSync(dir).sort();
     const digests = new Map(
       files.map((file) => [file, hashFile(readFileSync(join(dir, file)))]),
@@ -2037,7 +2037,7 @@ describe('a current database reopens with its own records', () => {
     const check = new DatabaseSync(path, { readOnly: true });
     expect(
       numberField(check.prepare('PRAGMA user_version').get(), 'user_version'),
-    ).toBe(3);
+    ).toBe(4);
     check.close();
   });
 

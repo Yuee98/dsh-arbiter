@@ -8,6 +8,9 @@ import type {
 export function json(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
+export function fingerprintOf(tool: string, args: unknown): string {
+  return `${tool}:${hash(json(args)).slice(0, 24)}`;
+}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
