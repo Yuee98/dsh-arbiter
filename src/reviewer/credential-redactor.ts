@@ -154,7 +154,8 @@ export class CredentialRedactor {
     const { value, quote } = quotedValue(raw);
     const known = this.#secrets.get(value);
     if (known !== undefined) return reQuote(known.marker, quote);
-    if (kind === 'authorization' && AUTH_WORDS.test(value)) return raw;
+    if (kind === 'authorization' && AUTH_WORDS.test(value))
+      return this.knownText(raw);
     // A malformed object's delimiter is not a credential vocabulary entry.
     if (kind === 'authorization' && quote === '' && ['{', '['].includes(value))
       return this.opaque(value);
@@ -177,8 +178,9 @@ export class CredentialRedactor {
     return value.replace(
       /(^|;\s*)([^=;\s]+)=([^;]*)/gu,
       (_match: string, separator: string, name: string, secret: string) => {
-        if (isCookieAttribute(name)) return `${separator}${name}=${secret}`;
-        return `${separator}${name}=${this.learn(secret, 'cookie')}`;
+        if (isCookieAttribute(name))
+          return `${separator}${name}=${this.knownText(secret)}`;
+        return `${separator}${this.knownText(name)}=${this.learn(secret, 'cookie')}`;
       },
     );
   }

@@ -979,6 +979,42 @@ function credentialGate(
   return { host, run, captured: llm.captured };
 }
 describe('credential preparation at actual production boundaries', () => {
+  test('known echoes in ordinary authorization and Cookie metadata never reach wire or retained SQL', async () => {
+    const secret = 'synthetic-wire-semantic-echo';
+    const endpoint = await credentialEndpoint();
+    const session = makeSession('semantic-echo-wire', [
+      human(1, 1, 'Only inspect 4 files'),
+    ]);
+    const harness = credentialGate(session, endpoint.url, () =>
+      Promise.resolve({ value: secret }),
+    );
+    const args = {
+      command: 'echo local',
+      Authorization: `approved for ${secret}`,
+      Cookie: `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
+    };
+    try {
+      await harness.run('semantic-echo-wire-call', args);
+      await harness.host.currentAudit()?.flush();
+      expect(endpoint.received).toHaveLength(1);
+      expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+      expect(JSON.stringify(endpoint.received[0]?.body)).not.toContain(secret);
+      const stored = await persistedCall('semantic-echo-wire-call');
+      expect(JSON.stringify(stored)).not.toContain(secret);
+      const authorization: unknown = expect.stringContaining(
+        'approved for [redacted:v1:',
+      );
+      const cookie: unknown = expect.stringContaining('; Max-Age=4');
+      expect(stored.snapshot.action.arguments).toMatchObject({
+        Authorization: authorization,
+        Cookie: cookie,
+      });
+      expect(args.Authorization).toBe(`approved for ${secret}`);
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
   test('credentials first labelled by the provider are removed from all retained call material', async () => {
     const secret = 'synthetic-provider-first-discovery';
     const endpoint = await credentialEndpoint(

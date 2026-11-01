@@ -19,6 +19,20 @@ describe('credential boundary regressions from the first PR review', () => {
     });
     expect(known.text('Authorization: approved')).toContain(identity);
   });
+  test('ordinary authorization and Cookie metadata retain structure while masking known echoes', () => {
+    const secret = 'synthetic-semantic-echo-secret';
+    const redactor = new CredentialRedactor('semantic-known-echo', [secret]);
+    const identity = redactor.text(secret);
+    expect(
+      redactor.value({
+        Authorization: `approved for ${secret}`,
+        Cookie: `${secret}=session-value; Path=/tmp/${secret}; Max-Age=4`,
+      }),
+    ).toEqual({
+      Authorization: `approved for ${identity}`,
+      Cookie: `${identity}=${redactor.text('session-value')}; Path=/tmp/${identity}; Max-Age=4`,
+    });
+  });
   test('short/numeric values keep explicit, whole-value and quoted identities without rewriting quantities or paths', () => {
     const redactor = new CredentialRedactor('short-context', [
       '4',
