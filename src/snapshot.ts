@@ -50,6 +50,7 @@ import { redactSnapshot, bindSnapshotRedactor } from './snapshot/redaction.js';
 import { workflowRedactor } from './snapshot/workflow.js';
 import type { CredentialRedactor } from './reviewer/credential-redactor.js';
 import { truncateSnapshot } from './snapshot/budget.js';
+import { redactCompletenessInput } from './snapshot/material-redaction.js';
 export type {
   SessionEventLike,
   SessionLike,
@@ -385,7 +386,14 @@ function assembleSnapshot(
     completeness,
     missing: missingLines(completeness),
   };
-  return { base: redactSnapshot(base, redactor), material };
+  // Budget candidates rebuild diagnostics, so their inputs must share the same
+  // completed knowledge and safe text as the snapshot they will overwrite.
+  redactor.discover(material);
+  const safeBase = redactSnapshot(base, redactor);
+  return {
+    base: safeBase,
+    material: redactCompletenessInput(material, redactor),
+  };
 }
 
 /** Capture once; the caller may finalize after resolving its actual credential. */

@@ -749,7 +749,9 @@ describe('gate review input', () => {
     const broken = {
       ...parent,
       snapshotEvents: () => {
-        throw new Error('parent log unreadable');
+        throw new Error(
+          'parent log unreadable: password=synthetic-parent-diagnostic; inspect /tmp/output',
+        );
       },
     };
     const reviewer = reviewerLlm({ risk: 3, authorization: 8 });
@@ -812,6 +814,7 @@ describe('gate review input', () => {
     // The persisted structure is what the detail view reads, so both the
     // escalation and the gap are explainable after the fact.
     expect(stored.snapshot.missing.join(' ')).toContain('parent session');
+    expect(JSON.stringify(stored)).not.toContain('synthetic-parent-diagnostic');
   });
 });
 
@@ -980,6 +983,72 @@ function credentialGate(
   return { host, run, captured: llm.captured, llm: llm.llm };
 }
 describe('credential preparation at actual production boundaries', () => {
+  test.each(['chat', 'decision'] as const)(
+    '%s diagnostic reconstruction is safe on the actual wire and in every retained SQL table',
+    async (backend) => {
+      const secret = `synthetic-${backend}-record-diagnostic`;
+      const diagnostic = `password=${secret}; inspect /tmp/output for ops@example.test, count 4`;
+      const endpoint = await credentialEndpoint();
+      const session = makeSession(`diagnostic-${backend}`, [
+        human(1, 1, 'Only inspect 4 files for ops@example.test'),
+      ]);
+      const resolve = vi.fn(() =>
+        Promise.resolve({ value: 'synthetic-selected-auth' }),
+      );
+      const harness = credentialGate(
+        session,
+        endpoint.url,
+        resolve,
+        20_000,
+        backend,
+      );
+      const callId = `diagnostic-${backend}-call`;
+      harness.host.runtime.sessionRecordErrors.set(callId, diagnostic);
+      const args = { command: 'echo local' };
+      try {
+        await harness.run(callId, args);
+        await harness.host.currentAudit()?.flush();
+        const stored = await persistedCall(callId);
+        const wire = backend === 'chat' ? harness.captured : endpoint.received;
+        expect(wire).toHaveLength(1);
+        expect.soft(JSON.stringify(wire)).not.toContain(secret);
+        expect.soft(JSON.stringify(stored.snapshot)).not.toContain(secret);
+        expect(stored.snapshot.completeness.gaps).toEqual([]);
+        expect(stored.snapshot.missing.join(' ')).toContain('/tmp/output');
+        expect(stored.snapshot.missing.join(' ')).toContain('count 4');
+        const expected = renderDecisionRequest(renderChatUser(stored.snapshot));
+        const expectedWire =
+          backend === 'chat'
+            ? { user: renderChatUser(stored.snapshot) }
+            : { state: expected.state, questions: expected.questions };
+        const actualWire =
+          backend === 'chat'
+            ? { user: harness.captured[0]?.user }
+            : endpoint.received[0]?.body;
+        expect.soft(actualWire).toMatchObject(expectedWire);
+        const db = new DatabaseSync(
+          harness.host.currentAudit()?.databasePath ?? '',
+        );
+        try {
+          for (const table of ['calls', 'snapshots', 'model_calls']) {
+            const rows = db.prepare(`SELECT * FROM ${table}`).all();
+            expect(rows.length).toBeGreaterThan(0);
+            expect.soft(JSON.stringify(rows)).not.toContain(secret);
+          }
+        } finally {
+          db.close();
+        }
+        expect(resolve).toHaveBeenCalledTimes(backend === 'decision' ? 1 : 0);
+        expect(harness.host.runtime.sessionRecordErrors.get(callId)).toBe(
+          diagnostic,
+        );
+        expect(args).toEqual({ command: 'echo local' });
+      } finally {
+        harness.host.currentAudit()?.close();
+        await endpoint.stop();
+      }
+    },
+  );
   test.each(['Cookie', 'Set-Cookie'])(
     '%s first cookie named Path is masked before actual wire and SQLite',
     async (header) => {

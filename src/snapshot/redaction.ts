@@ -1,6 +1,7 @@
 /** Material-only projection: typed provenance/score/status metadata stays unchanged. */
 import type {
   DerivedFacts,
+  HistoryStatus,
   PriorVerdictItem,
   ReviewSnapshot,
 } from '../types.js';
@@ -89,6 +90,26 @@ function priorCopy(
         }),
   };
 }
+function historyCopy(
+  history: HistoryStatus,
+  redactor: CredentialRedactor,
+): HistoryStatus {
+  const nullable = (value: string | null) =>
+    value === null ? null : redactor.text(value);
+  const source = (item: HistoryStatus['sources']['memory']) => ({
+    ...item,
+    unavailable: nullable(item.unavailable),
+  });
+  return {
+    ...history,
+    reason: nullable(history.reason),
+    sources: {
+      memory: source(history.sources.memory),
+      session: source(history.sources.session),
+      audit: source(history.sources.audit),
+    },
+  };
+}
 export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
   snapshot: T,
   redactor: CredentialRedactor,
@@ -113,6 +134,9 @@ export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
     ]),
     snapshot.missing,
     snapshot.historyStatus.reason,
+    Object.values(snapshot.historyStatus.sources).map(
+      (source) => source.unavailable,
+    ),
     snapshot.completeness.note,
     snapshot.completeness.gaps.map((gap) => gap.reason),
     snapshot.completeness.items.map((item) => item.reason),
@@ -154,13 +178,7 @@ export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
       priorCopy(item, redactor),
     ),
     missing: snapshot.missing.map(text),
-    historyStatus: {
-      ...snapshot.historyStatus,
-      reason:
-        snapshot.historyStatus.reason === null
-          ? null
-          : text(snapshot.historyStatus.reason),
-    },
+    historyStatus: historyCopy(snapshot.historyStatus, redactor),
     completeness: {
       ...snapshot.completeness,
       note:
