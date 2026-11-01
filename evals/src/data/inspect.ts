@@ -52,10 +52,19 @@ export type FindingOrigin = 'manifest' | 'case' | 'label' | 'reviews';
 
 /** The part of a dataset one finding is about, by the file it names. */
 export function findingOrigin(finding: Finding): FindingOrigin {
-  if (finding.path.startsWith('labels/') || finding.path.startsWith('label'))
+  if (
+    finding.path.startsWith('labels/') ||
+    finding.path.startsWith('label') ||
+    /\/labels\.json#/.test(finding.path)
+  )
     return 'label';
-  if (finding.path.startsWith('reviews/')) return 'reviews';
-  if (finding.path.startsWith('cases/')) return 'case';
+  if (
+    finding.path.startsWith('reviews/') ||
+    /\/opinions\.json#/.test(finding.path)
+  )
+    return 'reviews';
+  if (finding.path.startsWith('cases/') || /\/cases\.json#/.test(finding.path))
+    return 'case';
   return 'manifest';
 }
 
@@ -463,7 +472,7 @@ export function inspectDataset(
   raw: RawDataset,
   checkers: Checkers,
   current: CurrentVersions,
-  layout: 'single' | 'collection' = 'single',
+  layout: 'single' | 'collection' = raw.layout ?? 'single',
 ): DatasetInspection {
   const problems: Finding[] = raw.problems.map((problem) => ({
     path: problem.path,

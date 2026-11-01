@@ -11,6 +11,9 @@
  * the typed value — asserting it here would make every later check advisory.
  */
 
+import { access } from 'node:fs/promises';
+import { isLegacyCollection, readLegacyDataset } from './legacy-read.js';
+import type { DatasetSelection } from './legacy-read.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -28,6 +31,7 @@ export interface ReadProblem {
 
 /** What a dataset directory contained, before any checking. */
 export interface RawDataset {
+  readonly layout?: 'single' | 'collection';
   /** `manifest.json`, or null when it is absent or unparsable. */
   readonly manifest: Sourced | null;
   readonly cases: readonly Sourced[];
@@ -130,7 +134,20 @@ async function readCollection(
  * cases yet, and the inspector reports that as its own problem so even a skeleton
  * produces a readable list of what is missing.
  */
-export async function readDataset(dataset: string): Promise<RawDataset> {
+export async function readDataset(
+  dataset: string,
+  selection: DatasetSelection = {},
+): Promise<RawDataset> {
+  let hasManifest = false;
+  try {
+    await access(join(dataset, 'manifest.json'));
+    hasManifest = true;
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+      throw error;
+  }
+  if (!hasManifest && (await isLegacyCollection(dataset)))
+    return readLegacyDataset(dataset, selection);
   const problems: ReadProblem[] = [];
   let manifest: Sourced | null = null;
   try {

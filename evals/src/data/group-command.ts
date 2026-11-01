@@ -1,3 +1,4 @@
+import { runLegacyCommand } from '../annotation/legacy-command.js';
 /** A narrow registration for grouped check; legacy commands keep their existing parser. */
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -173,10 +174,15 @@ export async function runGroupedCli(
   legacy: LegacyRunner,
 ): Promise<number | null> {
   try {
+    const legacyResult = await runLegacyCommand(argv, io);
+    if (legacyResult !== null) return legacyResult;
     if (argv.length === 1 && argv[0] === 'check-all')
       return await checkAll(io, legacy);
     if (argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
       io.out(`grouped source checks:\n${USAGE}`);
+      io.out(
+        'legacy migration: migrate-legacy <destination> [--check]\nlegacy annotation: export <dataset> --split dev|calibration|holdout --out <file>\n                   import <dataset> --split dev|calibration|holdout --fill <file> [--write]',
+      );
       return null;
     }
     if (argv[0] !== 'check' || !argv.includes('--format')) return null;
