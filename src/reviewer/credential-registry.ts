@@ -1,7 +1,25 @@
 /** Live workflow knowledge has an owner, finite bounds, and no silent eviction.
  * Weak owner/domain indexes don't keep a finished plugin or SQLite connection alive.
  */
+import { realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { CredentialRedactor } from './credential-redactor.js';
+
+/** SQLite reports physical filenames, while host domains can contain aliases. */
+function credentialDomain(domain: string): string {
+  if (!isAbsolute(domain)) return domain;
+  try {
+    return realpathSync(domain);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      error.code !== 'ENOENT'
+    )
+      throw error;
+    return join(realpathSync(dirname(domain)), basename(domain));
+  }
+}
 
 const OWNERS = new WeakMap<object, CredentialRegistry>();
 const DOMAINS = new Map<string, WeakRef<CredentialRegistry>>();
@@ -53,29 +71,37 @@ export class CredentialRegistry {
     return this.context(root);
   }
 }
+/** Preserve a live domain's knowledge rather than replacing it with an owner. */
+function bindDomain(key: string, registry: CredentialRegistry): void {
+  const established = DOMAINS.get(key)?.deref();
+  if (established !== undefined && established !== registry)
+    throw new Error(
+      'credential registry conflicts with established file domain',
+    );
+  if (!DOMAINS.has(key) && DOMAINS.size >= MAX_SCOPES * 8)
+    throw new Error('credential registry owner limit exceeded');
+  DOMAINS.set(key, new WeakRef(registry));
+}
 export function credentialRegistry(
   owner: object,
   domain?: string | null,
 ): CredentialRegistry {
+  const key = domain == null ? domain : credentialDomain(domain);
   const previous = OWNERS.get(owner);
   if (previous !== undefined) {
-    if (domain != null) {
-      if (!DOMAINS.has(domain) && DOMAINS.size >= MAX_SCOPES * 8)
-        throw new Error('credential registry owner limit exceeded');
-      DOMAINS.set(domain, new WeakRef(previous));
-    }
+    if (key != null) bindDomain(key, previous);
     return previous;
   }
-  let registry = domain == null ? undefined : DOMAINS.get(domain)?.deref();
+  let registry = key == null ? undefined : DOMAINS.get(key)?.deref();
   if (registry === undefined) {
     registry = new CredentialRegistry();
-    if (domain != null) {
+    if (key != null) {
       // Reclaim dead index entries only; never evict a live workflow's vocabulary.
       for (const [key, reference] of DOMAINS)
         if (reference.deref() === undefined) DOMAINS.delete(key);
       if (DOMAINS.size >= MAX_SCOPES * 8)
         throw new Error('credential registry owner limit exceeded');
-      DOMAINS.set(domain, new WeakRef(registry));
+      DOMAINS.set(key, new WeakRef(registry));
     }
   }
   OWNERS.set(owner, registry);

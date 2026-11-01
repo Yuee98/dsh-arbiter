@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,7 +23,9 @@ export function resultObservation(
   };
 }
 export function resultFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'arbiter-tool-results-'));
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), 'arbiter-tool-results-')),
+  );
   const path = join(root, 'audit.db');
   const stores: AuditStore[] = [];
   const open = () => {

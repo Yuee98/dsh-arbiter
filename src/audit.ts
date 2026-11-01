@@ -58,7 +58,7 @@ import type {
 } from './audit/tool-result-types.js';
 export type * from './audit/tool-result-types.js';
 import { ToolResultAccess } from './audit/tool-result-access.js';
-import { auditSidecarBytes, auditTotalBytes } from './audit/footprint.js';
+import * as footprint from './audit/footprint.js';
 import {
   observeExecution,
   applyEarlyExecution,
@@ -124,26 +124,26 @@ export class AuditStore {
   private released = false;
 
   constructor(path: string, config: ArbiterConfig['audit']) {
-    this.path = path;
+    mkdirSync(dirname(path), { recursive: true });
+    this.path = footprint.auditStoragePath(path);
     this.config = config;
     this.resultAccess = new ToolResultAccess(
-      path,
+      this.path,
       () => this.open,
       () => this.config.enabled,
       () => this.retention.days,
       this.markDegraded.bind(this),
     );
-    mkdirSync(dirname(path), { recursive: true });
     // The version is read from the file header before any connection exists, so
     // a file this build refuses is never opened, recovered or checkpointed.
-    const refusal = auditRefusal(path);
+    const refusal = auditRefusal(this.path);
     if (refusal !== null) {
       this.db = null;
       this.pausedReason = refusal;
       this.lastError = refusal;
       this.degraded = true;
     } else {
-      const db = new DatabaseSync(path, { timeout: 1_000 });
+      const db = new DatabaseSync(this.path, { timeout: 1_000 });
       this.db = db;
       // A database this build must not modify is checked *before* any mutating
       // pragma: `journal_mode = WAL` rewrites the file header, so running it
@@ -165,7 +165,7 @@ export class AuditStore {
     // One effective retention policy per database path: a second store for the
     // same file adopts the owner's values instead of changing cleanup semantics
     // for rows the other profile also sees.
-    const claim = claimRetention(path, this.member, this.config);
+    const claim = claimRetention(this.path, this.member, this.config);
     this.config = {
       ...this.config,
       retentionDays: claim.days,
@@ -260,7 +260,7 @@ export class AuditStore {
    * belong to the database's own budget.
    */
   private get auxiliaryBytes(): number {
-    return auditSidecarBytes(this.path);
+    return footprint.auditSidecarBytes(this.path);
   }
 
   /**
@@ -271,7 +271,7 @@ export class AuditStore {
    * silently exceed the user's budget.
    */
   get databaseBytes(): number {
-    return auditTotalBytes(this.path, () => {
+    return footprint.auditTotalBytes(this.path, () => {
       this.markDegraded(new Error('result-footprint-unavailable'));
     });
   }
