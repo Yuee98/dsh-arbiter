@@ -238,7 +238,7 @@ describe('export and import', () => {
     });
   });
 
-  it('turns a filled pack into a label file', async () => {
+  it('validates historical fills but refuses writing the single-file source', async () => {
     await withDataset(async (dataset) => {
       await seed(dataset, { labels: false });
       const pack = join(dataset.path, 'pack.json');
@@ -262,15 +262,11 @@ describe('export and import', () => {
           ['import', dataset.path, '--fill', pack, '--write'],
           imported.io,
         ),
-      ).toBe(0);
-      expect(imported.out).toContain('wrote 1 labels');
-      const label = await readDocument(
-        join(dataset.path, 'labels/case-a.json'),
-        schemas.label,
-      );
-      expect(label.caseId).toBe('case-a');
-      expect(label.inputHash).toBe(hash);
-      expect(label.target.status).toBe('approved');
+      ).toBe(1);
+      expect(imported.err.join('\n')).toContain('read-only');
+      await expect(
+        readFile(join(dataset.path, 'labels/case-a.json'), 'utf8'),
+      ).rejects.toThrow();
     });
   });
 

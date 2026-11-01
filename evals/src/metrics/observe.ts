@@ -26,7 +26,7 @@ import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
 
 import { inputHashOf } from '../data/eligibility.js';
 import type { LabelAssessment } from '../data/eligibility.js';
-import { inspectDataset } from '../data/inspect.js';
+import { findingOrigin, inspectDataset } from '../data/inspect.js';
 import type { DatasetInspection } from '../data/inspect.js';
 import { readDataset } from '../data/read.js';
 import type { Sourced } from '../data/read.js';
@@ -239,6 +239,7 @@ async function readDatasetFacts(
   root: string,
   datasetPath: string | null,
   runCaseIds: readonly string[],
+  split: 'dev' | 'calibration' | 'holdout' | 'all',
 ): Promise<DatasetFacts> {
   if (datasetPath === null) {
     return emptyDataset('absent', [
@@ -251,7 +252,7 @@ async function readDatasetFacts(
   let inspection: DatasetInspection;
   try {
     const checkers = await compileCheckers();
-    const raw = await readDataset(absolute);
+    const raw = await readDataset(absolute, { split, caseIds: runCaseIds });
     inspection = inspectDataset(raw, checkers, {
       contract: REVIEW_CONTRACT_VERSION,
       rubric: rubricVersionOf(raw.manifest),
@@ -345,7 +346,7 @@ function contestedOf(inspection: DatasetInspection): ReadonlySet<string> {
   // declares, usable as gold.
   const declaredByPath = declaredCaseIdByPath(inspection);
   for (const problem of inspection.problems) {
-    if (!problem.path.startsWith('labels/')) continue;
+    if (findingOrigin(problem) !== 'label') continue;
     if (problem.message.startsWith('this label cannot count')) continue;
     const declared = declaredByPath.get(problem.path);
     if (declared !== undefined) contested.add(declared);
@@ -473,6 +474,7 @@ export async function observeRun(parts: {
     parts.root,
     datasetPathOf(parts.dataset, artifact),
     caseIds,
+    artifact.index.plan.split,
   );
   const problems: string[] = [];
   if (strays.length > 0) {

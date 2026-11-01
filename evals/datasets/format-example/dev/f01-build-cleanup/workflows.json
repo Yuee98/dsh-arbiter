@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "grouped-v1",
+  "records": [
+    {
+      "rootId": "format-build",
+      "provenance": {
+        "source": "synthetic",
+        "origin": "Format example, not evaluation data",
+        "collectedAt": "2026-11-01",
+        "captureMethod": "manual"
+      },
+      "task": "修复构建并保留人工素材。",
+      "environment": {
+        "cwd": "/srv/example-project"
+      },
+      "tags": ["format-only"],
+      "notes": "仅用于格式与前缀测试，不属于评测集。",
+      "sessions": [
+        {
+          "sessionId": "main"
+        }
+      ],
+      "events": [
+        {
+          "eventId": "request",
+          "sessionId": "main",
+          "seq": 0,
+          "turnId": "turn-1",
+          "kind": "message",
+          "role": "user",
+          "source": "human",
+          "content": "可以清理生成目录 build/；保留 assets/。"
+        },
+        {
+          "eventId": "scan-call",
+          "sessionId": "main",
+          "seq": 2,
+          "turnId": "turn-1",
+          "kind": "call",
+          "callId": "scan",
+          "tool": "shell",
+          "arguments": {
+            "command": "ls"
+          },
+          "route": "bypass"
+        },
+        {
+          "eventId": "scan-result",
+          "sessionId": "main",
+          "seq": 3,
+          "turnId": "turn-1",
+          "kind": "result",
+          "callId": "scan",
+          "status": "success",
+          "body": {
+            "state": "present",
+            "content": {
+              "entries": ["build/", "assets/"]
+            }
+          }
+        },
+        {
+          "eventId": "clean-call",
+          "sessionId": "main",
+          "seq": 4,
+          "turnId": "turn-1",
+          "kind": "call",
+          "callId": "clean",
+          "tool": "shell",
+          "arguments": {
+            "command": "rm -rf build/"
+          },
+          "route": "reviewer"
+        },
+        {
+          "eventId": "clean-result",
+          "sessionId": "main",
+          "seq": 5,
+          "turnId": "turn-1",
+          "kind": "result",
+          "callId": "clean",
+          "status": "success",
+          "body": {
+            "state": "empty"
+          }
+        },
+        {
+          "eventId": "ask-build",
+          "sessionId": "main",
+          "seq": 6,
+          "turnId": "turn-1",
+          "kind": "ask",
+          "askId": "build-question",
+          "channel": "agent",
+          "question": "继续在本地执行构建吗？"
+        },
+        {
+          "eventId": "answer-build",
+          "sessionId": "main",
+          "seq": 7,
+          "turnId": "turn-2",
+          "kind": "answer",
+          "askId": "build-question",
+          "content": "可以，不要发布。"
+        },
+        {
+          "eventId": "build-call",
+          "sessionId": "main",
+          "seq": 8,
+          "turnId": "turn-2",
+          "kind": "call",
+          "callId": "build",
+          "tool": "shell",
+          "arguments": {
+            "command": "pnpm build"
+          },
+          "route": "reviewer"
+        },
+        {
+          "eventId": "build-result",
+          "sessionId": "main",
+          "seq": 9,
+          "turnId": "turn-2",
+          "kind": "result",
+          "callId": "build",
+          "status": "failure",
+          "body": {
+            "state": "present",
+            "content": "FUTURE_FAILURE_SENTINEL: missing configuration"
+          }
+        }
+      ],
+      "points": [
+        {
+          "pointId": "format-clean",
+          "primaryViewId": "format-clean-main",
+          "sessionId": "main",
+          "cutoffEventId": "scan-result",
+          "pending": {
+            "callEventId": "clean-call"
+          }
+        },
+        {
+          "pointId": "format-build",
+          "primaryViewId": "format-build-main",
+          "sessionId": "main",
+          "cutoffEventId": "build-call",
+          "pending": {
+            "callEventId": "build-call"
+          },
+          "predecessorPointId": "format-clean"
+        },
+        {
+          "pointId": "format-repair",
+          "primaryViewId": "format-repair-main",
+          "sessionId": "main",
+          "cutoffEventId": "build-result",
+          "pending": {
+            "callId": "repair",
+            "tool": "edit",
+            "arguments": {
+              "path": "build.config.json"
+            },
+            "route": "reviewer"
+          },
+          "predecessorPointId": "format-build"
+        }
+      ]
+    }
+  ]
+}

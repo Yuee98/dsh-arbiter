@@ -1,3 +1,4 @@
+import { datasetEvidence } from '../data/source-evidence.js';
 /**
  * The `report` command: read a saved run and write its three-layer report.
  *
@@ -175,11 +176,16 @@ function protectedEvidenceOf(parts: {
     parts.settings.dataset,
     parts.observation.artifact,
   );
-  if (base === null) return evidence;
+  if (base === null)
+    return [
+      ...evidence,
+      ...datasetEvidence(parts.root, 'evals/datasets/reviewer-v2'),
+    ];
   const absolute = base.startsWith('/') ? base : resolve(parts.root, base);
   // The manifest is protected as a file and the three document directories as directories: a
   // report written over `manifest.json` would replace the dataset's own table of contents,
   // which every later check depends on.
+  evidence.push(...datasetEvidence(parts.root, absolute));
   evidence.push({ path: join(absolute, 'manifest.json'), kind: 'file' });
   for (const name of ['cases', 'labels', 'reviews']) {
     evidence.push({ path: join(absolute, name), kind: 'directory' });

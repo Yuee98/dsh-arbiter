@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://dsh-arbiter.dev/schemas/evals/group-opinions.schema.json",
+  "title": "group-opinions",
+  "description": "Role is given by the file name; split/business group by directories. Unsupported versions are rejected, never guessed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "records"],
+  "properties": {
+    "schemaVersion": {
+      "const": "grouped-v1"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/reviews.schema.json"
+          },
+          {
+            "$ref": "https://dsh-arbiter.dev/schemas/evals/workflow.schema.json#/definitions/opinion"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -43,46 +43,86 @@ const legalDistribution = (): fc.Arbitrary<Record<string, number>> =>
       return out;
     });
 
-/** Move mass from a lower level to a higher one: the FOSD-style step. */
-function shiftUp(
-  distribution: Record<string, number>,
+// Denominator 2^10 keeps every value and sum exact in binary and in its
+// serialized decimal spelling (at most ten decimal places). General normalized
+// doubles and fractional transfers can change a CDF at an exact-half boundary.
+const MASS_UNITS = 1_024;
+function moveUnits(
+  masses: readonly number[],
   from: number,
   to: number,
-  amount: number,
-): Record<string, number> {
-  const out = { ...distribution };
-  out[String(from)] = (out[String(from)] ?? 0) - amount;
-  out[String(to)] = (out[String(to)] ?? 0) + amount;
-  return out;
+  share: number,
+) {
+  const shifted = [...masses];
+  const amount = Math.floor(((masses[from] ?? 0) * share) / MASS_UNITS);
+  shifted[from] = (shifted[from] ?? 0) - amount;
+  shifted[to] = (shifted[to] ?? 0) + amount;
+  const probabilities = (units: readonly number[]) =>
+    Object.fromEntries(
+      units.map((mass, index) => [String(index), mass / MASS_UNITS]),
+    );
+  return { before: probabilities(masses), after: probabilities(shifted) };
 }
+const dominancePair = () =>
+  fc
+    .tuple(
+      fc.array(fc.integer({ min: 0, max: MASS_UNITS }), {
+        minLength: 9,
+        maxLength: 9,
+      }),
+      fc.integer({ min: 0, max: 8 }),
+      fc.integer({ min: 1, max: 9 }),
+      fc.integer({ min: 0, max: MASS_UNITS }),
+    )
+    .map(([cuts, lowIndex, highIndex, share]) => {
+      const edges = [0, ...cuts.sort((a, b) => a - b), MASS_UNITS];
+      const masses = edges
+        .slice(1)
+        .map((edge, index) => edge - (edges[index] ?? 0));
+      const from = Math.min(lowIndex, highIndex - 1);
+      const to = Math.max(highIndex, from + 1);
+      return moveUnits(masses, from, to, share);
+    });
 
 describe('first-order stochastic dominance', () => {
   test('shifting mass upward never lowers the band', () => {
-    // If one distribution puts at least as much mass at or above every level as
-    // another, its band cannot be lower. The generator builds exactly that pair,
-    // so the comparison is a genuine dominance relation, not a coincidence.
     fc.assert(
-      fc.property(
-        legalDistribution(),
-        fc.integer({ min: 0, max: 8 }),
-        fc.integer({ min: 1, max: 9 }),
-        fc.double({ min: 0, max: 1, noNaN: true }),
-        (distribution, lowIndex, highIndex, fraction) => {
-          const from = Math.min(lowIndex, highIndex - 1);
-          const to = Math.max(highIndex, from + 1);
-          const available = distribution[String(from)] ?? 0;
-          if (available <= 0) return true;
-          const shifted = shiftUp(distribution, from, to, available * fraction);
-          for (const rule of ['risk', 'authorization'] as const) {
-            expect(bandFromNative(shifted, rule)).toBeGreaterThanOrEqual(
-              bandFromNative(distribution, rule),
-            );
-          }
-          return true;
-        },
-      ),
+      fc.property(dominancePair(), ({ before, after }) => {
+        let beforeCdf = 0;
+        let afterCdf = 0;
+        for (let level = 0; level < 10; level += 1) {
+          beforeCdf += before[String(level)] ?? 0;
+          afterCdf += after[String(level)] ?? 0;
+          expect(afterCdf).toBeLessThanOrEqual(beforeCdf);
+        }
+        expect(beforeCdf).toBe(1);
+        expect(afterCdf).toBe(1);
+        for (const rule of ['risk', 'authorization'] as const)
+          expect(bandFromNative(after, rule)).toBeGreaterThanOrEqual(
+            bandFromNative(before, rule),
+          );
+        return true;
+      }),
       { numRuns: 300 },
     );
+  });
+
+  test('moving integer mass preserves an exact half below the cutoff and crosses it only when required', () => {
+    const masses = [32, 32, 0, 192, 256, 0, 512, 0, 0, 0];
+    const below = moveUnits(masses, 0, 1, 512);
+    expect(
+      Object.values(below.after)
+        .slice(0, 5)
+        .reduce((sum, mass) => sum + mass, 0),
+    ).toBe(0.5);
+    expect(JSON.stringify(below.after)).toContain('"0":0.015625');
+    expect(bandFromNative(below.before, 'risk')).toBe(7);
+    expect(bandFromNative(below.after, 'risk')).toBe(7);
+    expect(bandFromNative(below.before, 'authorization')).toBe(5);
+    expect(bandFromNative(below.after, 'authorization')).toBe(5);
+    const across = moveUnits(masses, 4, 6, 512);
+    expect(bandFromNative(across.after, 'risk')).toBe(7);
+    expect(bandFromNative(across.after, 'authorization')).toBe(7);
   });
 
   test('a band is always between one and ten', () => {
