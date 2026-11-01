@@ -750,7 +750,10 @@ describe('gate review input', () => {
       ...parent,
       snapshotEvents: () => {
         throw new Error(
-          'parent log unreadable: password=synthetic-parent-diagnostic; inspect /tmp/output',
+          JSON.stringify({
+            password: { value: 'synthetic-parent-diagnostic' },
+            path: '/tmp/output',
+          }),
         );
       },
     };
@@ -791,7 +794,10 @@ describe('gate review input', () => {
       {
         callId: 'call-unreadable-parent',
         name: 'bash',
-        arguments: { command: 'rm -rf build' },
+        arguments: {
+          command: 'rm -rf build',
+          note: 'synthetic-parent-diagnostic',
+        },
         signal: new AbortController().signal,
         agent: { session: child },
       },
@@ -814,7 +820,21 @@ describe('gate review input', () => {
     // The persisted structure is what the detail view reads, so both the
     // escalation and the gap are explainable after the fact.
     expect(stored.snapshot.missing.join(' ')).toContain('parent session');
-    expect(JSON.stringify(stored)).not.toContain('synthetic-parent-diagnostic');
+    expect
+      .soft(JSON.stringify(stored))
+      .not.toContain('synthetic-parent-diagnostic');
+    const db = new DatabaseSync(
+      join(process.env['DSH_HOME'] ?? '', 'arbiter', 'arbiter.db'),
+    );
+    try {
+      const rows = db
+        .prepare('SELECT content FROM snapshots WHERE call_id = ?')
+        .all('call-unreadable-parent');
+      expect(rows).toHaveLength(1);
+      expect(JSON.stringify(rows)).not.toContain('synthetic-parent-diagnostic');
+    } finally {
+      db.close();
+    }
   });
 });
 

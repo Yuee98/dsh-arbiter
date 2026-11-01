@@ -13,6 +13,22 @@ import {
 } from '../src/snapshot/completeness.js';
 
 describe('diagnostic material stays safe through budget reconstruction', () => {
+  test.each([false, true])(
+    'JSON string discovery precedes every sibling projection (reverse=%s)',
+    (reverse) => {
+      const secret = 'synthetic-json-diagnostic-sibling-secret';
+      const diagnostic = JSON.stringify({ password: { value: secret } });
+      const value = reverse
+        ? { error: diagnostic, note: secret }
+        : { note: secret, error: diagnostic };
+      const redactor = new CredentialRedactor(
+        `json-diagnostic-siblings-${String(reverse)}`,
+      );
+      const safe = redactor.value(value);
+      expect(JSON.stringify(safe)).not.toContain(secret);
+      expect(value.note).toBe(secret);
+    },
+  );
   test('all diagnostic fields share masking without changing completeness roles or counts', () => {
     const secret = 'synthetic-all-diagnostic-private';
     const diagnostic = `password=${secret}; /tmp/output count 4`;
@@ -67,7 +83,7 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
   });
   test('a credential first labelled only in history-source diagnostics masks earlier material', async () => {
     const secret = 'synthetic-source-only-diagnostic';
-    const diagnostic = `password=${secret}`;
+    const diagnostic = JSON.stringify({ password: { value: secret } });
     const history: HistoryStatus = {
       coverage: 'partial',
       windowTruncated: false,
@@ -112,11 +128,29 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
     expect(args.command).toContain(secret);
     expect(history.sources.audit.unavailable).toBe(diagnostic);
   });
-  test.each(['session', 'parent', 'record', 'history'] as const)(
-    '%s diagnostics are safe on initial and credential-finalized builds',
-    async (source) => {
-      const secret = `synthetic-${source}-diagnostic-private`;
-      const diagnostic = `password=${secret}; inspect /tmp/output for ops@example.test, count 4`;
+  test.each(
+    (['session', 'parent', 'record', 'history'] as const).flatMap((source) =>
+      (['assignment', 'json', 'encoded'] as const).map((format) => ({
+        source,
+        format,
+      })),
+    ),
+  )(
+    '$source/$format diagnostics are safe before source caps and credential-finalized builds',
+    async ({ source, format }) => {
+      const secret = `synthetic-${source}-${format}-diagnostic-${'private'.repeat(16)}-tail`;
+      const json = JSON.stringify({
+        password: { value: secret },
+        path: '/tmp/output',
+        recipient: 'ops@example.test',
+        count: 4,
+      });
+      const diagnostic =
+        format === 'assignment'
+          ? `password=${secret}; inspect /tmp/output for ops@example.test, count 4`
+          : format === 'json'
+            ? json
+            : JSON.stringify(json);
       const history: HistoryStatus = {
         coverage: 'partial',
         windowTruncated: false,
@@ -134,9 +168,26 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
       const session = {
         id: `diagnostic-${source}`,
         header: source === 'parent' ? { parentSession: 'parent' } : {},
-        snapshotEvents: source === 'session' ? fail : () => [],
+        snapshotEvents:
+          source === 'session'
+            ? fail
+            : () => [
+                {
+                  type: 'user/message',
+                  seq: 1,
+                  data: {
+                    source: { kind: 'user', rpcId: 'diagnostic-user' },
+                    content: [
+                      { type: 'text', text: `${'x'.repeat(3968)}${secret}` },
+                    ],
+                  },
+                },
+              ],
       };
-      const args = { command: `echo ${'ordinary '.repeat(2000)}` };
+      const args = {
+        command: `echo ${'ordinary '.repeat(2000)}`,
+        note: secret,
+      };
       const preparation = await prepareReviewSnapshot({
         agent: { session },
         sessions: { get: () => ({ id: 'parent', snapshotEvents: fail }) },
@@ -149,6 +200,7 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
           context: {
             ...DEFAULT_CONFIG.context,
             maxInputTokens: 4000,
+            customRules: `${'x'.repeat(1968)}${secret}`,
             projectRules: {
               ...DEFAULT_CONFIG.context.projectRules,
               enabled: false,
@@ -167,6 +219,9 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
       ]) {
         expect(JSON.stringify(built.snapshot)).not.toContain(secret);
         expect(built.user).not.toContain(secret);
+        expect(JSON.stringify(built.snapshot)).not.toContain(
+          secret.slice(0, 32),
+        );
         expect(built.snapshot.missing.join(' ')).toContain('[redacted:v1:');
         expect(built.snapshot.missing.join(' ')).toContain('/tmp/output');
         expect(built.snapshot.budget.truncatedSegments).toContain('ACTION');
@@ -180,6 +235,7 @@ describe('diagnostic material stays safe through budget reconstruction', () => {
         );
       }
       expect(args.command).toBe(`echo ${'ordinary '.repeat(2000)}`);
+      expect(args.note).toBe(secret);
       expect(history.sources.audit.unavailable).toBe(diagnostic);
     },
   );

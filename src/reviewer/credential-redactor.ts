@@ -257,7 +257,11 @@ export class CredentialRedactor {
       );
       return;
     }
-    this.scan(this.knownText(item));
+    // JSON and decoded literals must finish the same recognition as projection
+    // before any earlier sibling or source can be retained or truncated.
+    if (JSON_OPENERS.has(item.trimStart()[0]) || item.includes('"'))
+      this.text(item);
+    else this.scan(this.knownText(item));
   }
   discover(value: unknown, scores: CredentialScoreMode = false): void {
     this.inspect(value, scores, true);
@@ -287,7 +291,7 @@ export class CredentialRedactor {
     recognize: boolean,
   ): void {
     if (recognize && scores && typeof value === 'string') {
-      this.text(value, true);
+      this.text(value, scores);
       return;
     }
     const context = scores

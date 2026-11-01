@@ -60,6 +60,11 @@ export function redactSnapshotSources(
   discoverLog(source.log, redactor);
   if (source.parentLog !== undefined) discoverLog(source.parentLog, redactor);
   redactor.discover([
+    source.log.error,
+    source.parentLog?.error,
+    source.project.missing,
+    options.sessionRecordGap,
+    options.historyStatus,
     source.project.text,
     options.config.context.customRules,
     options.arguments,
