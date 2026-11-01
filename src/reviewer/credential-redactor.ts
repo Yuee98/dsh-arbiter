@@ -1,5 +1,7 @@
+import { jsonCopySpans } from './credential-json.js';
 import {
   quotedCredentialSpans,
+  applyCredentialSpans,
   structuredJson,
 } from './credential-literals.js';
 /** Bounded, transient credential vocabulary. Never serialize a raw-value mapping.
@@ -294,9 +296,8 @@ export class CredentialRedactor {
         this.#jsonDepth += 1;
         try {
           const cleaned = this.value(parsed);
-          return JSON.stringify(cleaned) === JSON.stringify(parsed)
-            ? text
-            : JSON.stringify(cleaned);
+          const spans = jsonCopySpans(text, cleaned, (key) => this.text(key));
+          return applyCredentialSpans([text], spans)[0] ?? '';
         } finally {
           this.#jsonDepth -= 1;
         }
@@ -360,15 +361,23 @@ export class CredentialRedactor {
   }
   /** Continuations of ONE logical text only. Independent channels use separate calls. */
   textBlocks(blocks: readonly string[]): string {
+    const output = this.textBlockValues(blocks);
+    return structuredJson(blocks.join(''))
+      ? output.join('')
+      : output.join('\n');
+  }
+  /** Safe copies at the original block indices; a spanning replacement starts in its first block. */
+  textBlockValues(blocks: readonly string[]): readonly string[] {
     if (blocks.length > MAX_NODES) this.fail();
     if (blocks.reduce((total, block) => total + block.length, 0) > MAX_TEXT)
       this.fail();
     const joined = blocks.join('');
     const processed = this.text(joined);
-    if (structuredJson(joined)) return processed;
+    const json = structuredJson(joined);
+    if (json && blocks.length === 1) return [processed];
     // Preserve normal block separators; carry a secret spanning a split as one marker.
     const ranges: { start: number; end: number; marker: string }[] = [];
-    for (const entry of this.#secrets.values()) {
+    for (const entry of json ? [] : this.#secrets.values()) {
       let start = joined.indexOf(entry.value);
       while (start >= 0) {
         if (ranges.length >= MAX_NODES) this.fail();
@@ -381,34 +390,16 @@ export class CredentialRedactor {
       }
     }
     ranges.push(
-      ...quotedCredentialSpans(
-        joined,
-        this.#secrets.values(),
-        MAX_NODES - ranges.length,
-      ),
+      ...(json
+        ? jsonCopySpans(joined, JSON.parse(processed), (key) => this.text(key))
+        : quotedCredentialSpans(
+            joined,
+            this.#secrets.values(),
+            MAX_NODES - ranges.length,
+          )),
     );
-    ranges.sort((a, b) => a.start - b.start || b.end - a.end);
-    const output: string[] = [];
-    let offset = 0;
-    for (const block of blocks) {
-      let cursor = 0;
-      let text = '';
-      for (const range of ranges) {
-        if (
-          range.end <= offset ||
-          range.start >= offset + block.length ||
-          range.end <= offset + cursor
-        )
-          continue;
-        const start = Math.max(cursor, range.start - offset);
-        text +=
-          block.slice(cursor, start) +
-          (range.start >= offset ? range.marker : '');
-        cursor = Math.min(block.length, range.end - offset);
-      }
-      output.push(this.text(text + block.slice(cursor)));
-      offset += block.length;
-    }
-    return output.join('\n');
+    return applyCredentialSpans(blocks, ranges).map((block) =>
+      json ? block : this.text(block),
+    );
   }
 }

@@ -65,3 +65,33 @@ export function quotedCredentialSpans(
   }
   return spans;
 }
+
+/** Keep source indices while replacing each span once, at its first block. */
+export function applyCredentialSpans(
+  blocks: readonly string[],
+  ranges: CredentialSpan[],
+): readonly string[] {
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+  const output: string[] = [];
+  let offset = 0;
+  for (const block of blocks) {
+    let cursor = 0;
+    let text = '';
+    for (const range of ranges) {
+      if (
+        range.end <= offset ||
+        range.start >= offset + block.length ||
+        range.end <= offset + cursor
+      )
+        continue;
+      const start = Math.max(cursor, range.start - offset);
+      text +=
+        block.slice(cursor, start) +
+        (range.start >= offset ? range.marker : '');
+      cursor = Math.min(block.length, range.end - offset);
+    }
+    output.push(text + block.slice(cursor));
+    offset += block.length;
+  }
+  return output;
+}
