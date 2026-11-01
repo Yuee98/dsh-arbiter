@@ -32,9 +32,7 @@ import type {
 } from '../../../src/types.js';
 import { prepareReviewSnapshot } from '../../../src/snapshot.js';
 import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
-import { snapshotRedactor } from '../../../src/snapshot/redaction.js';
 import { boundEventSources } from '../../../src/snapshot/source-guard.js';
-import { redactEventSources } from '../../../src/snapshot/prefix-redaction.js';
 import { parentChain } from '../../../src/host/admission.js';
 import type { ReviewEvent, ReviewEventSource } from '../../../src/types.js';
 import { resultBody } from '../../../src/snapshot/event-content.js';
@@ -610,6 +608,13 @@ export async function workflowMaterial(
           ).some((event) => event.kind === 'checkpoint'),
         );
   const eventSources = boundEventSources({ local, parent });
+  // Input identity is canonical source content; process-local credential markers
+  // belong only to the actual request fingerprint. Only this digest is exposed.
+  const inputHash = digestOf({
+    ...eventSources,
+    cwd: source.pending.cwd ?? source.environment?.cwd ?? '',
+    pending: source.pending,
+  });
   const chain = parentChain(
     source.sessionId,
     (id) =>
@@ -670,10 +675,6 @@ export async function workflowMaterial(
       ? prepared.rebuild(options.credentialValues)
       : prepared.bundle;
   const snapshot = built.snapshot;
-  const redactor = snapshotRedactor(snapshot);
-  if (redactor === undefined)
-    throw new Error('workflow snapshot redactor is unavailable');
-  const cleanedSource = redactEventSources(eventSources, redactor);
   const pkg = options.pkg ?? PRODUCTION_PACKAGE;
   const request =
     protocol === 'chat'
@@ -683,17 +684,7 @@ export async function workflowMaterial(
     snapshot,
     request,
     material: {
-      inputHash: digestOf({
-        ...cleanedSource,
-        cwd: snapshot.cwd,
-        pending: {
-          ...source.pending,
-          arguments: redactor.value(source.pending.arguments),
-          ...(source.pending.cwd === undefined
-            ? {}
-            : { cwd: redactor.text(source.pending.cwd) }),
-        },
-      }),
+      inputHash,
       promptFingerprint: digestOf({ protocol, request }),
       estimatedInputTokens: request.estimatedInputTokens,
       maxInputTokens: snapshot.budget.maxInputTokens,

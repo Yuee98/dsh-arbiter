@@ -1,3 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { REPOSITORY_ROOT } from '../evals/helpers/dataset.js';
 import { describe, expect, test } from 'vitest';
 import { workflowMaterial } from '../../evals/src/run/material.js';
 import { loadWorkflow } from '../evals/helpers/grouped.js';
@@ -35,6 +40,97 @@ function variant(
 }
 
 describe('real grouped workflow source -> production material', () => {
+  test('CW123-PR-B04 canonical input hashes survive independent process credential keys', async () => {
+    const moduleUrl = (path: string) =>
+      pathToFileURL(join(REPOSITORY_ROOT, path)).href;
+    const source = `import ${JSON.stringify(moduleUrl('evals/src/cli/register.ts'))};
+      const {workflowMaterial}=await import(${JSON.stringify(moduleUrl('evals/src/run/material.ts'))});
+      const {workflow}=await import(${JSON.stringify(moduleUrl('tests/evals/fixtures/workflow.ts'))});
+      const {loadWorkflow}=await import(${JSON.stringify(moduleUrl('tests/evals/helpers/grouped.ts'))});
+      const {DEFAULT_CONFIG}=await import(${JSON.stringify(moduleUrl('src/config.ts'))});
+      const original=workflow();
+      const root={...original,events:original.events.map((event)=>event.eventId==='request'?{...event,content:'password=process-stable-credential; inspect /tmp/output'}:event)};
+      const dataset=await loadWorkflow(root,{}, {references:false});
+      if(dataset.problems.length) throw new Error('invalid process fixture');
+      const config={...DEFAULT_CONFIG,context:{...DEFAULT_CONFIG.context,maxInputTokens:100000,projectRules:{...DEFAULT_CONFIG.context.projectRules,enabled:false}}};
+      const material=await workflowMaterial(dataset,root.rootId,'format-clean','chat',{config,configRevision:'fixture'});
+      const changed={...root,events:root.events.map((event)=>event.eventId==='request'?{...event,content:'password=another-process-credential; inspect /tmp/output'}:event)};
+      const changedDataset=await loadWorkflow(changed,{}, {references:false});
+      const different=await workflowMaterial(changedDataset,changed.rootId,'format-clean','chat',{config,configRevision:'fixture'});
+      const wire=JSON.stringify(material.request);
+      console.log(JSON.stringify({inputHash:material.material.inputHash,changedInputHash:different.material.inputHash,promptFingerprint:material.material.promptFingerprint,rawPresent:wire.includes('process-stable-credential'),markerPresent:wire.includes('[redacted:v1:')}));`;
+    const run = async () => {
+      const result = await promisify(execFile)(
+        process.execPath,
+        ['--input-type=module', '--eval', source],
+        { cwd: REPOSITORY_ROOT, timeout: 15000 },
+      );
+      const value: unknown = JSON.parse(result.stdout);
+      return value;
+    };
+    const [first, second] = await Promise.all([run(), run()]);
+    expect(first).toMatchObject({ rawPresent: false, markerPresent: true });
+    expect(second).toMatchObject({ rawPresent: false, markerPresent: true });
+    if (
+      first === null ||
+      typeof first !== 'object' ||
+      second === null ||
+      typeof second !== 'object'
+    )
+      throw new Error('invalid subprocess material');
+    expect(Reflect.get(first, 'inputHash')).toBe(
+      Reflect.get(second, 'inputHash'),
+    );
+    expect(Reflect.get(first, 'changedInputHash')).not.toBe(
+      Reflect.get(first, 'inputHash'),
+    );
+    expect(Reflect.get(first, 'changedInputHash')).toBe(
+      Reflect.get(second, 'changedInputHash'),
+    );
+    expect(Reflect.get(first, 'promptFingerprint')).not.toBe(
+      Reflect.get(second, 'promptFingerprint'),
+    );
+  });
+  test.each(['chat', 'decision'] as const)(
+    'CW123-PR-B02 %s actual workflow request omits MIME-typed binary bodies',
+    async (protocol) => {
+      const original = workflow();
+      const root = {
+        ...original,
+        events: original.events.map((event) =>
+          event.kind === 'result' && event.eventId === 'scan-result'
+            ? {
+                ...event,
+                body: {
+                  state: 'present' as const,
+                  content: [
+                    {
+                      type: 'audio/mpeg',
+                      encoding: 'base64',
+                      data: 'MIME_WIRE_BINARY_SENTINEL',
+                      reference: 'audio-ref',
+                    },
+                  ],
+                },
+              }
+            : event,
+        ),
+      };
+      const dataset = await loadWorkflow(root, {}, { references: false });
+      expect(dataset.problems).toEqual([]);
+      const material = await workflowMaterial(
+        dataset,
+        root.rootId,
+        'format-clean',
+        protocol,
+        materialOptions,
+      );
+      const wire = JSON.stringify(material.request);
+      expect(wire).not.toContain('MIME_WIRE_BINARY_SENTINEL');
+      expect(wire).toContain('audio-ref');
+      expect(wire).toContain('omitted');
+    },
+  );
   test('visible source settlements stay observations without fabricated reviewer traces', async () => {
     const original = workflow();
     const events = original.events.map((event) => ({

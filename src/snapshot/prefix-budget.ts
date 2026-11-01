@@ -8,9 +8,6 @@ function unitKey(event: ReviewEvent): string {
     event.kind === 'settlement'
   )
     return JSON.stringify(['call', event.callId]);
-  if (event.kind === 'question') return JSON.stringify(['ask', event.askId]);
-  if (event.kind === 'human' && event.binding !== undefined)
-    return JSON.stringify(['ask', event.binding.askId]);
   return JSON.stringify(['event', event.eventId]);
 }
 
@@ -24,8 +21,24 @@ function removableUnits(
     group.push(event);
     groups.set(key, group);
   }
+  const requiredQuestions = new Set(
+    events.flatMap((event) =>
+      event.kind === 'human' &&
+      event.binding?.status === 'bound' &&
+      event.binding.questionEventId !== undefined
+        ? [event.binding.questionEventId]
+        : [],
+    ),
+  );
   return [...groups.values()]
-    .filter((group) => !group.some((event) => event.protected === true))
+    .filter(
+      (group) =>
+        !group.some(
+          (event) =>
+            event.protected === true ||
+            (event.kind === 'question' && requiredQuestions.has(event.eventId)),
+        ),
+    )
     .sort(
       (a, b) =>
         Number(b[0]?.kind === 'checkpoint') -

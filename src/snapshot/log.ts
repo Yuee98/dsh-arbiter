@@ -84,13 +84,10 @@ function captureRange(session: SessionLike): CapturedRange {
 }
 
 function captureSnapshot(session: SessionLike): CapturedRange {
-  const inherited = session.inheritedEventCount;
   const events = session.snapshotEvents?.() ?? [];
-  const own = inheritedBoundary(session, events);
-  const uncertain =
-    session.header?.parentSession !== undefined &&
-    inherited === undefined &&
-    typeof session.ownEvents !== 'function';
+  const boundary = inheritedBoundary(session, events);
+  const own = boundary.own;
+  const uncertain = !boundary.known;
   return {
     events: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
     own: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
@@ -131,6 +128,8 @@ function isEventLike(value: unknown): value is SessionEventLike {
   return (
     isRecord(value) &&
     typeof value['seq'] === 'number' &&
+    Number.isSafeInteger(value['seq']) &&
+    value['seq'] >= 0 &&
     typeof value['type'] === 'string'
   );
 }
@@ -148,30 +147,44 @@ function eventTurn(event: SessionEventLike): number | null {
  * events, and `inheritedEventCount` is the offset where they start. Neither is
  * required — a plain session object simply has no inherited prefix.
  */
+function ownSnapshot(
+  session: SessionLike,
+  events: readonly SessionEventLike[],
+): readonly SessionEventLike[] | null {
+  if (typeof session.ownEvents !== 'function') return null;
+  try {
+    const own: unknown = session.ownEvents();
+    if (
+      !Array.isArray(own) ||
+      own.length > events.length ||
+      !own.every(isEventLike)
+    )
+      return null;
+    const observed = new Set(events.map((event) => event.seq));
+    if (own.some((event: SessionEventLike) => !observed.has(event.seq)))
+      return null;
+    const ids = new Set(own.map((event: SessionEventLike) => event.seq));
+    return events.filter((event) => ids.has(event.seq));
+  } catch {
+    return null;
+  }
+}
+
 function inheritedBoundary(
   session: SessionLike,
   events: readonly SessionEventLike[],
-): readonly SessionEventLike[] {
-  if (typeof session.ownEvents === 'function') {
-    try {
-      const own: unknown = session.ownEvents();
-      if (
-        Array.isArray(own) &&
-        own.length <= events.length &&
-        own.every(isEventLike)
-      ) {
-        return own;
-      }
-    } catch {
-      // Fall through to the offset; a failing accessor is not a second reader.
-    }
-  }
+): { readonly own: readonly SessionEventLike[]; readonly known: boolean } {
+  const own = ownSnapshot(session, events);
+  if (own !== null) return { own, known: true };
   const offset = session.inheritedEventCount;
-  if (typeof offset === 'number' && Number.isInteger(offset)) {
-    if (offset > 0 && offset < events.length) return events.slice(offset);
-    if (offset === events.length) return [];
-  }
-  return events;
+  if (validOffset(offset) && offset <= events.length)
+    return { own: events.slice(offset), known: true };
+  const mainWithoutBoundary =
+    offset === undefined &&
+    typeof session.ownEvents !== 'function' &&
+    session.header?.parentSession === undefined &&
+    session.header?.origin !== 'subagent';
+  return { own: mainWithoutBoundary ? events : [], known: mainWithoutBoundary };
 }
 
 /**

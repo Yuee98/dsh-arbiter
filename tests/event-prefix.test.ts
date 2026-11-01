@@ -13,6 +13,7 @@ import {
   buildEventPrefix,
   prefixProtectedGaps,
 } from '../src/snapshot/prefix.js';
+import { trimPrefix } from '../src/snapshot/prefix-budget.js';
 import { resultBody } from '../src/snapshot/event-content.js';
 
 function event(
@@ -299,6 +300,93 @@ describe('explicit host question binding', () => {
 });
 
 describe('source read protections and isolation', () => {
+  test.each([
+    'throw',
+    'invalid-own',
+    'foreign-own',
+    'negative',
+    'fractional',
+    'overflow',
+    'non-finite',
+  ] as const)(
+    'CW123-PR-B01 failed inherited boundary %s cannot promote a parent seed',
+    (failure) => {
+      const child: SessionLike = {
+        id: 'child',
+        header: { parentSession: 'parent' },
+        snapshotEvents: () => [human(0, 'PARENT_SEED')],
+      };
+      if (failure === 'throw')
+        child.ownEvents = () => {
+          throw new Error('own read failed');
+        };
+      else if (failure === 'invalid-own')
+        Reflect.set(child, 'ownEvents', () => ['invalid']);
+      else if (failure === 'foreign-own')
+        Reflect.set(child, 'ownEvents', () => [human(1, 'FUTURE_FOREIGN')]);
+      else
+        Reflect.set(
+          child,
+          'inheritedEventCount',
+          failure === 'negative'
+            ? -1
+            : failure === 'fractional'
+              ? 0.5
+              : failure === 'overflow'
+                ? 2
+                : Number.NaN,
+        );
+      const log = readSessionLog(child);
+      const source = hostEventSource(log, 'child', 'parent');
+      expect(log.own).toEqual([]);
+      expect(source.status.status).toBe('stopped');
+      expect(source.status.reason).toContain('inherited seed boundary');
+      expect(JSON.stringify(source)).not.toContain('PARENT_SEED');
+      expect(
+        prefixProtectedGaps(
+          buildEventPrefix({ local: source, parent: null }, 'pending'),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+  test.each([false, true])(
+    'CW123-PR-B01 successful own reader identifies a captured subset (empty=%s)',
+    (empty) => {
+      const events = [human(0, 'PARENT_SEED'), human(1, 'child original')];
+      const own = vi.fn(() => (empty ? [] : events.slice(1)));
+      const log = readSessionLog({
+        id: 'child',
+        header: { parentSession: 'parent' },
+        snapshotEvents: () => events,
+        ownEvents: own,
+      });
+      expect(own).toHaveBeenCalledTimes(1);
+      expect(log.own.map((event) => event.seq)).toEqual(empty ? [] : [1]);
+      expect(hostEventSource(log, 'child', 'parent').status.status).toBe(
+        empty ? 'known-empty' : 'complete',
+      );
+    },
+  );
+  test('CW123-PR-B01 valid offset recovers a failed own reader without rereading the source', () => {
+    const read = vi.fn(() => [
+      human(0, 'PARENT_SEED'),
+      human(1, 'child original'),
+    ]);
+    const log = readSessionLog({
+      id: 'child',
+      header: { parentSession: 'parent' },
+      snapshotEvents: read,
+      inheritedEventCount: 1,
+      ownEvents: () => {
+        throw new Error('own failed');
+      },
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(log.own.map((event) => event.seq)).toEqual([1]);
+    expect(hostEventSource(log, 'child', 'parent').status.status).toBe(
+      'complete',
+    );
+  });
   test('absolute inherited offset larger than window cannot turn seed into local events', () => {
     const read = vi.fn((from = 0, end = 20_002) =>
       [
@@ -394,6 +482,146 @@ describe('source read protections and isolation', () => {
 });
 
 describe('result facts and whole-prefix snapshot integration', () => {
+  test.each(['image/png', 'audio/mpeg', 'application/octet-stream'])(
+    'CW123-PR-B02 MIME type %s cannot expose encoded media through JSON or direct bodies',
+    (type) => {
+      const media = {
+        type,
+        encoding: 'base64',
+        data: 'BINARY_MIME_SENTINEL',
+        reference: 'asset-ref',
+      };
+      for (const content of [[media], JSON.stringify({ attachment: media })]) {
+        const projected = resultBody({ state: 'present', content });
+        const wire = JSON.stringify(projected);
+        expect(wire).not.toContain('BINARY_MIME_SENTINEL');
+        expect(wire).toContain(type);
+        expect(wire).toContain('asset-ref');
+        expect(wire).toContain('omitted');
+      }
+      expect(
+        resultBody({
+          content: {
+            type: 'application/json',
+            value: { count: 4, path: '/tmp/output' },
+          },
+        }),
+      ).toMatchObject({
+        state: 'present',
+        content: { value: { count: 4, path: '/tmp/output' } },
+      });
+    },
+  );
+  test.each(['local', 'parent'] as const)(
+    'CW123-PR-B03 an older answer to the same protected ask is removable in %s',
+    async (area) => {
+      const ask = call(
+        0,
+        'repeat-ask',
+        { questions: [{ id: 'q', question: 'Only local?' }] },
+        'ask_user_question',
+      );
+      const answer = (seq: number, text: string) =>
+        result(
+          seq,
+          'repeat-ask',
+          JSON.stringify({ answers: [{ id: 'q', selected: [text] }] }),
+          false,
+        );
+      const latest = answer(2, 'yes only local');
+      const build = (events: readonly SessionEventLike[], limit: number) =>
+        buildReviewSnapshot({
+          ...options,
+          agent: {
+            session:
+              area === 'local'
+                ? session(events)
+                : session([human(4, 'local latest')], 'parent'),
+          },
+          ...(area === 'parent'
+            ? {
+                sessions: { get: () => ({ ...session(events), id: 'parent' }) },
+              }
+            : {}),
+          config: {
+            ...options.config,
+            context: { ...options.config.context, maxInputTokens: limit },
+          },
+        });
+      const minimal = await build([ask, latest], 100_000);
+      const built = await build(
+        [ask, answer(1, 'EARLIER_ANSWER '.repeat(3000)), latest],
+        minimal.estimatedInputTokens + 200,
+      );
+      const events =
+        area === 'local'
+          ? built.snapshot.prefix?.local.events
+          : built.snapshot.prefix?.parent?.events;
+      expect(built.snapshot.budget.truncatedSegments).not.toContain(
+        'OVER_BUDGET',
+      );
+      expect(
+        events
+          ?.filter(
+            (event) =>
+              event.sessionId === (area === 'local' ? 'local' : 'parent'),
+          )
+          .map((event) => event.seq),
+      ).toEqual([0, 2]);
+      expect(
+        events?.find((event) => event.kind === 'human' && event.seq === 2),
+      ).toMatchObject({
+        protected: true,
+        binding: {
+          status: 'bound',
+          questionEventId: JSON.stringify([
+            area === 'local' ? 'local' : 'parent',
+            0,
+          ]),
+        },
+      });
+      expect(built.user).not.toContain('EARLIER_ANSWER');
+      expect(built.user).toContain('Only local?');
+    },
+  );
+  test('CW123-PR-B03 trimming older answers never leaves a retained answer without its question', () => {
+    const ask = call(
+      0,
+      'old-ask',
+      { questions: [{ id: 'q', question: 'Which folder?' }] },
+      'ask_user_question',
+    );
+    const answer = (seq: number) =>
+      result(
+        seq,
+        'old-ask',
+        JSON.stringify({ answers: [{ id: 'q', selected: ['build/'] }] }),
+        false,
+      );
+    let current = prefix([
+      ask,
+      answer(1),
+      answer(2),
+      human(3, 'latest unrelated'),
+    ]);
+    for (let step = 0; step < 6; step += 1) {
+      const next = trimPrefix(current);
+      if (next === null) break;
+      current = next.prefix;
+      const retainedIds = new Set(
+        current.local.events.map((event) => event.eventId),
+      );
+      const danglingQuestions = current.local.events.flatMap((event) =>
+        event.kind === 'human' &&
+        event.binding?.questionEventId !== undefined &&
+        !retainedIds.has(event.binding.questionEventId)
+          ? [event.binding.questionEventId]
+          : [],
+      );
+      expect(danglingQuestions).toEqual([]);
+    }
+    expect(current.local.events.map((event) => event.seq)).toEqual([3]);
+  });
   test('JSON text cannot carry binary media through contiguous text blocks', () => {
     const json = JSON.stringify({
       count: 2,

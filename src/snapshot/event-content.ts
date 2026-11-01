@@ -83,7 +83,13 @@ function resultArray(value: readonly unknown[], depth: number): unknown[] {
 
 function mediaType(value: Record<string, unknown>): string | null {
   const type = value['type'];
-  const mime = value['mimeType'] ?? value['mime_type'];
+  const mime =
+    value['mimeType'] ??
+    value['mime_type'] ??
+    (typeof type === 'string' &&
+    /^(?:image|audio|video|application)\//iu.test(type)
+      ? type
+      : undefined);
   if (
     typeof mime === 'string' &&
     !/^(?:text\/|application\/(?:[\w.+-]+\+)?(?:json|xml)(?:;|$))/iu.test(mime)
