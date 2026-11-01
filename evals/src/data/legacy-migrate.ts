@@ -7,6 +7,7 @@ import { compileCheckers } from './schemas.js';
 import { inspectDataset } from './inspect.js';
 import { canonicalJson } from './hash.js';
 import { legacyMetadata } from './legacy-metadata.js';
+import { destinationsInside } from '../report/write.js';
 
 async function assertDirectories(destination: string): Promise<void> {
   for (const relative of [
@@ -38,8 +39,15 @@ export async function migrateLegacy(
   destination: string,
   write: boolean,
 ): Promise<readonly string[]> {
-  if (resolve(source) === resolve(destination))
-    throw new Error('migration source and destination must differ');
+  if (
+    destinationsInside(
+      [resolve(destination)],
+      [{ path: resolve(source), kind: 'directory' }],
+    ).length > 0
+  )
+    throw new Error(
+      'migration destination would modify protected historical source',
+    );
   const meta = await legacyMetadata();
   const checked = inspectDataset(
     await readDataset(source),

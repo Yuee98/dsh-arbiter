@@ -1,6 +1,14 @@
-import { readFile, readdir, writeFile, mkdir, symlink } from 'node:fs/promises';
+import {
+  readFile,
+  readdir,
+  writeFile,
+  mkdir,
+  symlink,
+  cp,
+  lstat,
+} from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { readDataset } from '../../evals/src/data/read.js';
 import { readGroupedDataset } from '../../evals/src/data/group-read.js';
@@ -14,21 +22,53 @@ const old = join(REPOSITORY_ROOT, 'evals/datasets/core-v1');
 const current = { contract: 'review-contract-v1', rubric: 'review-rubric-v1' };
 const checkers = await compileCheckers();
 
+async function treeBytes(directory: string): Promise<readonly unknown[]> {
+  return await Promise.all(
+    (await readdir(directory, { recursive: true }))
+      .sort()
+      .map(async (path) => [
+        path,
+        (await lstat(join(directory, path))).isFile()
+          ? await readFile(join(directory, path), 'utf8')
+          : null,
+      ]),
+  );
+}
+
 describe('legacy migration equivalence', () => {
+  it('refuses nested historical destinations and ancestor aliases without creating files', async () => {
+    await withDataset(async (area) => {
+      const source = join(area.path, 'core-v1');
+      await cp(old, source, { recursive: true });
+      const alias = join(area.path, 'alias');
+      await symlink(source, alias);
+      const before = await treeBytes(source);
+      for (const target of [
+        join(source, 'labels'),
+        join(source, 'new/nested'),
+        join(alias, 'labels/new'),
+      ]) {
+        await expect(migrateLegacy(source, target, true)).rejects.toThrow(
+          'historical source',
+        );
+        expect(await treeBytes(source)).toEqual(before);
+      }
+    });
+  });
   it('preserves every original object independently of conversion and keeps 51/49/2, 204, 16 and13/22/16', async () => {
-    expect(
-      spawnSync(
-        'git',
-        [
-          'diff',
-          '--exit-code',
-          '28ee54f05a131b8cc4c1568e951fda5bbdc748d3',
-          '--',
-          'evals/datasets/core-v1',
-        ],
-        { cwd: REPOSITORY_ROOT },
-      ).status,
-    ).toBe(0);
+    // Pin the retained source bytes without requiring history in a shallow checkout.
+    const paths = ['manifest.json'];
+    for (const role of ['cases', 'labels', 'reviews'])
+      for (const file of await readdir(join(old, role)))
+        paths.push(`${role}/${file}`);
+    const historical = createHash('sha256');
+    for (const path of paths.sort()) {
+      historical.update(path + '\0');
+      historical.update(await readFile(join(old, path)));
+    }
+    expect(historical.digest('hex')).toBe(
+      '54560f97689f3573d93dbc9026b45b856d7665a28f6a972dc9889569a543fb1f',
+    );
     const loaded = inspectDataset(
       await readDataset(join(REPOSITORY_ROOT, 'evals/datasets/reviewer-v2')),
       checkers,

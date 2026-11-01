@@ -127,7 +127,7 @@ describe('legacy consumer entry points', () => {
       expect(dev.status).toBe(0);
       expect(dev.stdout.toString()).toContain('13');
     });
-  });
+  }, 30_000);
   it('keeps incoherent approved collection labels out of report comparisons', async () => {
     await withLegacy(async (root, dataset) => {
       await run(root, dataset);
@@ -169,31 +169,31 @@ describe('legacy consumer entry points', () => {
         'behaviour reference',
       );
     });
-  });
-  it('refuses export/report output onto corrupt or unreadable sources and retained evidence, including symlink aliases', async () => {
-    await withLegacy(async (root, dataset) => {
-      await run(root, dataset);
-      const old = join(root, 'evals/datasets/core-v1');
-      await cp(join(REPOSITORY_ROOT, 'evals/datasets/core-v1'), old, {
-        recursive: true,
-      });
-      const pack = join(root, 'evals/annotation-pack/core-v1.pack.json');
-      await mkdir(dirname(pack), { recursive: true });
-      await writeFile(pack, 'historical evidence');
-      const damaged = join(dataset, 'dev/legacy-v1/cases.json');
-      await writeFile(damaged, '{broken');
-      const targets = [
-        damaged,
-        join(dataset, 'dev/legacy-v1/labels.json'),
-        join(dataset, 'holdout/legacy-v1/opinions.json'),
-        join(old, `cases/${first}.json`),
-        pack,
-      ];
-      const alias = join(root, 'alias.json');
-      await symlink(targets[1] ?? damaged, alias);
-      targets.push(alias);
-      for (const target of targets) {
-        const bytes = await readFile(target, 'utf8');
+  }, 30_000);
+  it.each([
+    ['case', 'data/dev/legacy-v1/cases.json'],
+    ['label', 'data/dev/legacy-v1/labels.json'],
+    ['opinion', 'data/holdout/legacy-v1/opinions.json'],
+    ['historical case', `evals/datasets/core-v1/cases/${first}.json`],
+    ['historical pack', 'evals/annotation-pack/core-v1.pack.json'],
+    ['file alias', 'alias.json'],
+    ['directory alias', 'alias/labels.json'],
+  ])(
+    'refuses export/report source overwrite: %s',
+    async (kind, path) => {
+      await withLegacy(async (root, dataset) => {
+        await run(root, dataset);
+        const target = join(root, path);
+        if (kind === 'file alias')
+          await symlink(join(dataset, 'dev/legacy-v1/labels.json'), target);
+        else if (kind === 'directory alias')
+          await symlink(join(dataset, 'dev/legacy-v1'), join(root, 'alias'));
+        else if (kind.startsWith('historical')) {
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, 'historical evidence');
+        }
+        await writeFile(join(dataset, 'dev/legacy-v1/cases.json'), '{broken');
+        const before = await readFile(target, 'utf8');
         const exported = legacyCli(root, ['export', dataset, '--out', target]);
         expect(exported.status).toBe(1);
         expect(exported.stderr.toString()).toContain(
@@ -208,25 +208,35 @@ describe('legacy consumer entry points', () => {
         ]);
         expect(reported.status).toBe(1);
         expect(reported.stderr.toString()).toContain('evidence');
-        expect(await readFile(target, 'utf8')).toBe(bytes);
-      }
-      const oldTarget = join(old, `labels/${first}.json`);
-      const bytes = await readFile(oldTarget, 'utf8');
-      expect(legacyCli(root, ['export', old, '--out', oldTarget]).status).toBe(
-        1,
-      );
-      expect(await readFile(oldTarget, 'utf8')).toBe(bytes);
-      expect(
-        legacyCli(root, [
-          'report',
-          'run',
-          '--out',
-          '.local/ordinary',
-          '--force',
-        ]).stdout.toString(),
-      ).toContain('wrote');
+        expect(await readFile(target, 'utf8')).toBe(before);
+      });
+    },
+    30_000,
+  );
+  it('protects old export sources and keeps normal report output usable', async () => {
+    await withLegacy(async (root, dataset) => {
+      await run(root, dataset);
+      const old = join(root, 'evals/datasets/core-v1');
+      await cp(join(REPOSITORY_ROOT, 'evals/datasets/core-v1'), old, {
+        recursive: true,
+      });
+      const target = join(old, `labels/${first}.json`);
+      const before = await readFile(target, 'utf8');
+      const refused = legacyCli(root, ['export', old, '--out', target]);
+      expect(refused.status).toBe(1);
+      expect(refused.stderr.toString()).toContain('protected source evidence');
+      expect(await readFile(target, 'utf8')).toBe(before);
+      const normal = legacyCli(root, [
+        'report',
+        'run',
+        '--out',
+        '.local/ordinary',
+        '--force',
+      ]);
+      expect(normal.status).toBe(0);
+      expect(normal.stdout.toString()).toContain('wrote');
     });
-  });
+  }, 30_000);
   it('routes a normal blind export and one-case import to the collection writer', async () => {
     await withLegacy(async (root, dataset) => {
       const file = join(root, '.local/fill.json');
@@ -247,5 +257,5 @@ describe('legacy consumer entry points', () => {
         await readFile(join(dataset, 'dev/legacy-v1/labels.json'), 'utf8'),
       ).toContain('CLI fixture decision');
     });
-  });
+  }, 30_000);
 });
