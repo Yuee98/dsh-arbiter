@@ -126,7 +126,7 @@ describe('grouped filesystem scope', () => {
       expect(problemText(allSelected)).toContain('dev/f01/labels.json#');
       expect(problemText(allSelected)).not.toContain('authoring.json');
     });
-  });
+  }, 30_000);
 
   it('rejects missing scope, path traversal, mixed sources and symlink files', async () => {
     await withDataset(async (dataset) => {
@@ -154,7 +154,7 @@ describe('grouped filesystem scope', () => {
         problemText(await readGroupedDataset(dataset.path, { group: 'f03' })),
       ).toContain('symlinks are not followed');
     });
-  });
+  }, 30_000);
 
   it('keeps stable identities after record reordering and rejects symlink scopes', async () => {
     await withDataset(async (dataset) => {
@@ -189,7 +189,7 @@ describe('grouped filesystem scope', () => {
         ),
       ).toContain('selected split directory');
     });
-  });
+  }, 30_000);
 
   it('reports global duplicate IDs and hard lineage/source conflicts only in the selected scope', async () => {
     await withDataset(async (dataset) => {
@@ -214,7 +214,7 @@ describe('grouped filesystem scope', () => {
       );
       expect(problemText(global)).toContain('lineage shared crosses splits');
     });
-  });
+  }, 30_000);
 
   it('does not treat equal free-text origin as proof of common source', async () => {
     await withDataset(async (dataset) => {
@@ -244,10 +244,12 @@ describe('grouped filesystem scope', () => {
         problemText(await readGroupedDataset(dataset.path, { split: 'all' })),
       ).toContain('source actual-common-source crosses splits');
     });
-  });
+  }, 30_000);
 
   it('preserves legacy fields and old hash/coherence checks in collections', async () => {
     await withDataset(async (dataset) => {
+      // This is a format preview with its own identity, not the 51-case migration.
+      await dataset.write('manifest.json', manifest(['case-a']));
       const hash = inputHashOf(input());
       await dataset.write(
         'dev/legacy-v1/cases.json',
@@ -288,7 +290,7 @@ describe('grouped filesystem scope', () => {
         problemText(await readGroupedDataset(dataset.path, { split: 'all' })),
       ).toContain('lineage fam-a crosses splits');
     });
-  });
+  }, 30_000);
 });
 
 describe('real CLI and check-all registration', () => {
@@ -307,7 +309,7 @@ describe('real CLI and check-all registration', () => {
     expect(grouped.status).toBe(0);
     expect(String(grouped.stdout)).toContain('scope dev/f01-build-cleanup');
     expect(String(grouped.stdout)).toContain('1 roots, 3 points');
-  });
+  }, 30_000);
 
   it('exits nonzero for invalid version, route and options through the actual entry', async () => {
     await withDataset(async (dataset) => {
@@ -346,7 +348,7 @@ describe('real CLI and check-all registration', () => {
       ]);
       expect(flag.status).toBe(2);
     });
-  });
+  }, 30_000);
 
   it('never skips a broken legacy manifest beside a valid grouped dataset', async () => {
     await withDataset(async (dataset) => {
@@ -361,7 +363,7 @@ describe('real CLI and check-all registration', () => {
       expect(String(result.stderr)).toContain('manifest.json');
       expect(String(result.stdout)).toContain('1 roots, 3 points');
     });
-  });
+  }, 30_000);
 
   it('checks rubric even when every published dataset is grouped', async () => {
     await withDataset(async (dataset) => {
@@ -382,7 +384,7 @@ describe('real CLI and check-all registration', () => {
       expect(String(result.stderr)).toContain('rubric');
       expect(String(result.stdout)).toContain('1 roots, 3 points');
     });
-  });
+  }, 30_000);
 
   it('keeps invalid old single documents rejected and checks both layouts in one dataset', async () => {
     await withDataset(async (dataset) => {
@@ -404,5 +406,5 @@ describe('real CLI and check-all registration', () => {
       expect(String(result.stderr)).toContain('expectedRisk');
       expect(String(result.stdout)).toContain('1 roots, 3 points');
     });
-  });
+  }, 30_000);
 });

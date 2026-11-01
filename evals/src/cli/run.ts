@@ -1,3 +1,4 @@
+import { assertAnnotationOutput } from '../annotation/output.js';
 /**
  * The evals command line's commands.
  *
@@ -470,6 +471,7 @@ async function exportPack(io: CliIo, command: Command): Promise<number> {
     return 1;
   }
   const path = resolve(io.root, command.out ?? '');
+  assertAnnotationOutput(io.root, command.dataset ?? '', path);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
   io.out(`wrote ${String(document.entries.length)} blank entries to ${path}`);
@@ -517,31 +519,16 @@ async function importPack(io: CliIo, command: Command): Promise<number> {
   if (result.problems.length > 0) return 1;
   for (const caseId of result.pending) io.out(`pending ${caseId}`);
   if (command.write) {
-    await writeLabels(io.root, command.dataset ?? '', result.labels);
-    io.out(`wrote ${String(result.labels.length)} labels`);
+    io.err(
+      'historical single-document annotation writes are read-only; use a grouped legacy batch import',
+    );
+    return 1;
   } else {
     io.out(
       `${String(result.labels.length)} labels are ready; re-run with --write to store them`,
     );
   }
   return 0;
-}
-
-/** Write one label file per decision, named after the case it judges. */
-async function writeLabels(
-  root: string,
-  dataset: string,
-  labels: readonly { readonly caseId: string }[],
-): Promise<void> {
-  const directory = resolve(root, dataset, 'labels');
-  await mkdir(directory, { recursive: true });
-  for (const label of labels) {
-    await writeFile(
-      join(directory, `${label.caseId}.json`),
-      `${JSON.stringify(label, null, 2)}\n`,
-      'utf8',
-    );
-  }
 }
 
 /**

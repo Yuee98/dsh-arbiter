@@ -114,6 +114,10 @@ interface LoadedDataset {
 async function loadDataset(
   io: RunIo,
   datasetPath: string,
+  selection: {
+    readonly split?: RunPlan['split'];
+    readonly caseIds?: readonly string[];
+  } = {},
 ): Promise<
   | { readonly ok: true; readonly dataset: LoadedDataset }
   | { readonly ok: false; readonly problems: readonly string[] }
@@ -137,7 +141,7 @@ async function loadDataset(
       problems: ['evals/rubrics/rubric-v1.json declares no rubricVersion'],
     };
   }
-  const raw = await readDataset(resolve(io.root, datasetPath));
+  const raw = await readDataset(resolve(io.root, datasetPath), selection);
   const inspection = inspectDataset(raw, checkers, {
     contract: REVIEW_CONTRACT_VERSION,
     rubric: rubricVersion,
@@ -324,7 +328,7 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
   // The dataset is checked after the plan's own declarations, because a plan that
   // cannot mean what it says is a problem no dataset can fix. Both refusals name what
   // is wrong instead of reporting a generic failure.
-  const dataset = await loadDataset(io, plan.datasetPath);
+  const dataset = await loadDataset(io, plan.datasetPath, plan);
   if (!dataset.ok) {
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;
@@ -476,7 +480,7 @@ export async function executeRun(
     for (const problem of planIssues) io.err(`problem ${problem}`);
     return 1;
   }
-  const dataset = await loadDataset(io, plan.datasetPath);
+  const dataset = await loadDataset(io, plan.datasetPath, plan);
   if (!dataset.ok) {
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;
@@ -806,7 +810,7 @@ export async function inspectResume(
     for (const problem of problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const dataset = await loadDataset(io, read.plan.datasetPath);
+  const dataset = await loadDataset(io, read.plan.datasetPath, read.plan);
   if (!dataset.ok) {
     for (const problem of dataset.problems) io.err(`problem ${problem}`);
     return 1;

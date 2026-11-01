@@ -122,12 +122,16 @@ async function rubricVersion(root: string): Promise<string> {
 async function inspect(
   io: LoadIo,
   datasetPath: string,
+  selection: {
+    readonly split?: 'dev' | 'calibration' | 'holdout' | 'all';
+    readonly caseIds?: readonly string[];
+  } = {},
 ): Promise<
   | { readonly ok: true; readonly inspection: DatasetInspection }
   | { readonly ok: false; readonly problems: readonly string[] }
 > {
   const checkers = await compileCheckers();
-  const raw = await readDataset(resolve(io.root, datasetPath));
+  const raw = await readDataset(resolve(io.root, datasetPath), selection);
   const inspection = inspectDataset(raw, checkers, {
     contract: REVIEW_CONTRACT_VERSION,
     rubric: await rubricVersion(io.root),
@@ -154,7 +158,11 @@ export async function loadCases(
   io: LoadIo,
   definition: ExperimentDefinition,
 ): Promise<LoadedCases> {
-  const result = await inspect(io, definition.dataset.datasetPath);
+  const result = await inspect(
+    io,
+    definition.dataset.datasetPath,
+    definition.dataset,
+  );
   if (!result.ok) return result;
   const manifestId = result.inspection.manifest?.datasetId ?? '';
   if (manifestId !== definition.dataset.datasetId) {

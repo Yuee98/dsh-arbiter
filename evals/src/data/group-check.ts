@@ -8,13 +8,14 @@ import type {
   WorkflowLabel,
   WorkflowOpinion,
 } from './group-types.js';
-import type { CaseReviews, ReviewLabel } from './types.js';
+import type { CaseReviews, ReviewLabel, DatasetManifest } from './types.js';
 import { checkWorkflow } from './workflow-check.js';
 
 function legacyProblems(
   group: DataGroup,
   checkers: Checkers,
   current: CurrentVersions,
+  authority?: DatasetManifest,
 ): readonly Finding[] {
   const labels = group.labels.filter(
     (entry): entry is { path: string; document: ReviewLabel } =>
@@ -24,16 +25,27 @@ function legacyProblems(
     (entry): entry is { path: string; document: CaseReviews } =>
       'caseId' in entry.document,
   );
-  const versions = labels[0]?.document.versions ?? {
-    ...current,
-    policy: 'unlabelled',
-  };
+  const versions = authority?.versions ??
+    labels[0]?.document.versions ?? {
+      ...current,
+      policy: 'unlabelled',
+    };
   const families = new Map(
     group.cases.map((entry) => [
       entry.document.familyId,
       { familyId: entry.document.familyId, split: group.split },
     ]),
   );
+  const expectedFamilies = authority?.families.filter(
+    (f) => f.split === group.split,
+  ) ?? [...families.values()];
+  const familyIds = new Set(expectedFamilies.map((f) => f.familyId));
+  const expectedCases =
+    authority?.cases.filter((c) => familyIds.has(c.familyId)) ??
+    group.cases.map((entry) => ({
+      caseId: entry.document.caseId,
+      familyId: entry.document.familyId,
+    }));
   const result = inspectDataset(
     {
       manifest: {
@@ -41,11 +53,8 @@ function legacyProblems(
         document: {
           datasetId: 'grouped-legacy',
           versions,
-          families: [...families.values()],
-          cases: group.cases.map((entry) => ({
-            caseId: entry.document.caseId,
-            familyId: entry.document.familyId,
-          })),
+          families: expectedFamilies,
+          cases: expectedCases,
         },
       },
       cases: group.cases,
@@ -59,7 +68,15 @@ function legacyProblems(
   );
   // This is a transient table of contents for existing checks, not a stored manifest
   // or a declaration that a migrated reference has regained any qualification.
-  return result.problems;
+  return result.problems.map((p) =>
+    p.path === 'manifest.json'
+      ? {
+          ...p,
+          path: `${group.split}/${group.group}/cases.json#`,
+          message: `authority: ${p.message}`,
+        }
+      : p,
+  );
 }
 
 function opinionProblems(
@@ -223,6 +240,7 @@ export function checkGroups(
   groups: readonly DataGroup[],
   checkers: Checkers,
   current: CurrentVersions,
+  authority?: DatasetManifest,
 ): {
   readonly problems: readonly Finding[];
   readonly findings: readonly Finding[];
@@ -268,7 +286,7 @@ export function checkGroups(
   };
   for (const group of groups) {
     if (group.contentSet === 'legacy-v1') {
-      problems.push(...legacyProblems(group, checkers, current));
+      problems.push(...legacyProblems(group, checkers, current, authority));
       for (const entry of group.cases) {
         const value = entry.document;
         unique('root', value.caseId, entry.path);
