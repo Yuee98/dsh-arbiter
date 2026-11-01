@@ -7,6 +7,7 @@
 
 import type { ShellParse } from './shell/parse.js';
 import type { NormalizationDetail } from './shell/types.js';
+import type { ReviewPrefix } from './shared/review-events.js';
 
 /**
  * The ask policy of one session class.
@@ -616,6 +617,18 @@ export interface MaterialCompleteness {
   readonly note: string | null;
 }
 
+export type {
+  ReviewAnswerBinding,
+  ReviewEvent,
+  ReviewEventIdentity,
+  ReviewEventSource,
+  ReviewEventSources,
+  ReviewMedia,
+  ReviewPrefix,
+  ReviewResultBody,
+  ReviewSourceStatus,
+} from './shared/review-events.js';
+
 export interface ReviewSnapshot {
   readonly version: 1;
   readonly createdAt: number;
@@ -631,6 +644,8 @@ export interface ReviewSnapshot {
   readonly sessionId: string;
   readonly sessionKind: SessionKind;
   readonly parentSessionId?: string;
+  /** Present on event-based material; absent on previously saved snapshots. */
+  readonly prefix?: ReviewPrefix;
   readonly tool: string;
   readonly cwd: string;
   /**

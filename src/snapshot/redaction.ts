@@ -5,6 +5,7 @@ import type {
   PriorVerdictItem,
   ReviewSnapshot,
 } from '../types.js';
+import { redactPrefix } from './prefix-redaction.js';
 import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 
 const CONTEXTS = new WeakMap<
@@ -144,6 +145,9 @@ export function redactSnapshot<T extends Omit<ReviewSnapshot, 'budget'>>(
   const text = (value: string) => redactor.text(value);
   return {
     ...snapshot,
+    ...(snapshot.prefix === undefined
+      ? {}
+      : { prefix: redactPrefix(snapshot.prefix, redactor) }),
     cwd: text(snapshot.cwd),
     materials: snapshot.materials.map((item) => ({
       ...item,

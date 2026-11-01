@@ -7,17 +7,11 @@
  * material are input facts: they never throw, never change the review chain and
  * never decide the outcome by themselves.
  *
- * The material is assembled from five readers, each owning one question:
- *
- *   - `log.ts`          — what the session log says, read once, split by session.
- *   - `window.ts`       — the current turn's tool history, in order.
- *   - `evidence.ts`     — human authorization and restrictions, across turns.
- *   - `assemble.ts`     — the parent chain and the layer-preserving merge.
- *   - `guidance.ts`     — the two configured guidance sources.
- *
- * `completeness.ts` then reports what they observed, which is the M0 status the
- * decision layer consumes. This module only wires them together and describes
- * the outcome; it never interprets authorization itself.
+ * A bounded source read and the host/workflow adapters feed one native-order
+ * event selector. Guidance and completeness describe the same captured material;
+ * the existing input budget then records exactly what was submitted.
+ * No source classification or protection marker decides authorization.
+
  */
 
 import type {
@@ -28,9 +22,12 @@ import type {
   ReviewSnapshot,
   SessionKind,
 } from './types.js';
-import type { AgentLike, SessionLike, SessionsLike } from './snapshot/types.js';
-import { checkpointEvents } from './snapshot/evidence.js';
-import { assembleEvidence } from './snapshot/assemble.js';
+import type {
+  AgentLike,
+  SessionLike,
+  SessionsLike,
+  SessionEventLike,
+} from './snapshot/types.js';
 import type { CompletenessInput } from './snapshot/completeness.js';
 import {
   buildCompleteness,
@@ -38,9 +35,14 @@ import {
   NO_TRIMS,
 } from './snapshot/completeness.js';
 import { guidanceMaterials } from './snapshot/guidance.js';
-import type { readProjectRules } from './snapshot/guidance.js';
-import type { readSessionLog } from './snapshot/log.js';
-import { currentTurnOf, toolWindow } from './snapshot/window.js';
+import type { ReviewEventSources, ReviewPrefix } from './types.js';
+import type { ProjectRulesResult } from './snapshot/guidance.js';
+import { hostEventSource } from './snapshot/host-events.js';
+import {
+  buildEventPrefix,
+  prefixCompatibility,
+  prefixProtectedGaps,
+} from './snapshot/prefix.js';
 import {
   captureSnapshotSources,
   redactSnapshotSources,
@@ -64,6 +66,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface SnapshotOptions {
+  /** A captured, allowlisted source adapter (workflow evals); host calls omit it. */
+  readonly eventSources?: ReviewEventSources;
+  readonly projectRulesMaterial?: ProjectRulesResult;
   readonly agent: AgentLike;
   readonly sessions?: SessionsLike;
   readonly tool: string;
@@ -169,56 +174,6 @@ export function truncationFeedback(snapshot: ReviewSnapshot): string | null {
   return `Input completeness: ${parts.join('; ')}. Shortening the program or splitting it into smaller calls may allow a complete review.`;
 }
 
-interface HistoryWindow {
-  readonly selectedCalls: readonly ReviewSnapshot['context'][number][];
-  readonly selectedVerdicts: readonly PriorVerdictItem[];
-  readonly truncated: boolean;
-}
-
-/**
- * Select the tool calls and prior verdicts that share one capacity window.
- *
- * They compete for the same slots by recency — a long turn would otherwise push
- * the very denials this call should see out of the request — and the submitted
- * calls read oldest first, because they are the steps this call follows.
- */
-function historyWindow(
-  toolCalls: readonly ReviewSnapshot['context'][number][],
-  priorVerdicts: readonly PriorVerdictItem[],
-  maxItems: number,
-): HistoryWindow {
-  const combined = [
-    ...toolCalls.map((call) => ({ kind: 'tool' as const, ts: call.ts, call })),
-    ...priorVerdicts.map((verdict) => ({
-      kind: 'verdict' as const,
-      ts: verdict.ts,
-      verdict,
-      callId: verdict.callId,
-    })),
-  ]
-    // Newest first, with a deterministic tie-break. Two verdicts settled in the
-    // same millisecond otherwise keep whatever order the source happened to
-    // produce, which would make the submitted history depend on the source
-    // rather than on the decision.
-    .sort((left, right) => {
-      if (left.ts !== right.ts) return right.ts - left.ts;
-      const leftId = 'callId' in left ? left.callId : '';
-      const rightId = 'callId' in right ? right.callId : '';
-      return leftId < rightId ? 1 : leftId > rightId ? -1 : 0;
-    })
-    .slice(0, maxItems);
-  return {
-    // Selection competed on recency; the submitted history reads oldest first.
-    selectedCalls: combined
-      .flatMap((entry) => (entry.kind === 'tool' ? [entry.call] : []))
-      .sort((left, right) => left.ts - right.ts),
-    selectedVerdicts: combined.flatMap((entry) =>
-      entry.kind === 'verdict' ? [entry.verdict] : [],
-    ),
-    truncated: combined.length < toolCalls.length + priorVerdicts.length,
-  };
-}
-
 function sessionKindOf(session: SessionLike): SessionKind {
   const header = session.header ?? {};
   return header.origin === 'subagent' || header.parentSession !== undefined
@@ -229,165 +184,197 @@ function sessionKindOf(session: SessionLike): SessionKind {
 function actionOf(tool: string, args: unknown): ReviewSnapshot['action'] {
   return {
     name: tool,
-    arguments: args,
+    arguments: structuredClone(args),
     ...(isRecord(args) && typeof args['program'] === 'string'
       ? { programText: args['program'] }
       : {}),
   };
 }
 
-/** Everything the completeness report needs to describe this submission. */
-interface MaterialDescriptionOptions {
-  readonly log: ReturnType<typeof readSessionLog>;
-  readonly evidence: Awaited<ReturnType<typeof assembleEvidence>>;
-  readonly history: HistoryStatus;
-  readonly window: ReturnType<typeof toolWindow>;
-  readonly identity: ReturnType<typeof currentTurnOf>;
-  readonly truncated: boolean;
-  readonly parentId: string | undefined;
-  readonly contextConfig: ArbiterConfig['context'];
-  readonly projectRules: Awaited<ReturnType<typeof readProjectRules>>;
-  readonly sessionRecordGap: string | null;
-}
-
-function describeMaterial(
-  options: MaterialDescriptionOptions,
-): Omit<CompletenessInput, 'trimmed'> {
-  const { evidence, log, window } = options;
+function captureEventSources(
+  options: SnapshotOptions,
+  captured: SnapshotSources,
+) {
+  const session = options.agent.session;
+  const parentId = session.header?.parentSession;
+  const log = captured.log;
+  const identity = { turn: captured.turn };
+  const parentLog = captured.parentLog ?? null;
+  const sources: ReviewEventSources = captured.eventSources ?? {
+    local: hostEventSource(log, session.id ?? 'unknown', parentId),
+    parent:
+      parentId === undefined
+        ? null
+        : parentLog === null
+          ? {
+              status: {
+                sessionId: parentId,
+                status: 'unavailable' as const,
+                cutoff: null,
+                fromSeq: null,
+                reason: 'direct parent session is unavailable',
+                access: 'snapshot' as const,
+              },
+              events: [],
+            }
+          : hostEventSource(parentLog, parentId, undefined, true),
+  };
   return {
-    truncatedHumanEvidence: evidence.truncatedHumanEvidence,
-    protectedEvidenceDropped: evidence.merged.protectedDropped,
-    historyTruncated: options.truncated,
-    sessionReadable: log.readable,
-    sessionError: log.error,
-    parentRequired: options.parentId !== undefined,
-    parentReadable: evidence.parentReadable,
-    parentLive: evidence.parentLive,
-    parentError: evidence.parentError,
-    compaction: evidence.compaction,
-    parentCompaction: evidence.parentCompaction,
-    projectRules: {
-      enabled: options.contextConfig.projectRules.enabled,
-      present: options.projectRules.material.present,
-      missing: options.projectRules.missing,
-    },
-    sessionRecordGap: options.sessionRecordGap,
-    historyGap: historyGap(options.history),
-    evidenceCount: evidence.merged.evidence.length,
-    earlierTurnCalls: window.earlierTurnCalls,
-    windowGap: options.identity.gap,
-    hasToolCalls: window.logCallCount > 0,
+    sources,
+    identity,
+    parentCompaction: parentLog?.own.some(isCheckpointEvent) ?? false,
   };
 }
 
-/** The snapshot's non-budget half, before the input budget trims it. */
-interface SnapshotParts {
-  readonly base: Omit<ReviewSnapshot, 'budget'>;
-  readonly material: Omit<CompletenessInput, 'trimmed'>;
+function isCheckpointEvent(event: SessionEventLike): boolean {
+  return (
+    event.type === 'user/message' &&
+    isRecord(event.data) &&
+    isRecord(event.data['source']) &&
+    event.data['source']['kind'] === 'compact-checkpoint'
+  );
 }
 
-/**
- * Assemble every material reader's output into one snapshot.
- *
- * Kept apart from `buildReviewSnapshot` so the budget step has one obvious input:
- * the assembled material and the description of what it could not include.
- */
+function parentPresence(
+  prefix: ReviewPrefix,
+  compacted: boolean,
+): boolean | null {
+  const source = prefix.parent;
+  if (source === null) return null;
+  if (source.events.some((event) => event.kind === 'human')) return true;
+  if (
+    source.status.status !== 'complete' &&
+    source.status.status !== 'known-empty'
+  )
+    return null;
+  return compacted || source.status.compacted === true ? null : false;
+}
+
+function describeEvents(
+  options: SnapshotOptions,
+  prefix: ReviewPrefix,
+  projectRules: ProjectRulesResult,
+  parentCompaction: boolean,
+): Omit<CompletenessInput, 'trimmed'> {
+  const parentSource = prefix.parent;
+  const history = options.historyStatus ?? defaultHistoryStatus();
+  const compatibility = prefixCompatibility(prefix);
+  return {
+    truncatedHumanEvidence: false,
+    sourceObservations: prefix.omissions
+      .filter((entry) => entry.cause === 'read')
+      .map((entry) => ({
+        source:
+          entry.sessionId === prefix.local.status.sessionId
+            ? ('tool-window' as const)
+            : ('parent-human' as const),
+        kind: 'truncated' as const,
+        reason: entry.reason,
+        blocking: false,
+      })),
+    protectedEvidenceDropped: prefixProtectedGaps(prefix),
+    historyTruncated: history.windowTruncated,
+    sessionReadable: prefix.local.status.status !== 'unavailable',
+    sessionError: prefix.local.status.reason,
+    parentRequired: options.agent.session.header?.parentSession !== undefined,
+    parentReadable:
+      parentSource !== null && parentSource.status.status !== 'unavailable',
+    parentLive: parentSource !== null,
+    parentError: parentSource?.status.reason ?? null,
+    compaction: prefix.local.status.compacted === true,
+    parentCompaction:
+      parentCompaction || parentSource?.status.compacted === true,
+    projectRules: {
+      enabled: options.config.context.projectRules.enabled,
+      present: projectRules.material.present,
+      missing: projectRules.missing,
+      unreadable: projectRules.unreadable,
+    },
+    sessionRecordGap: options.sessionRecordGap,
+    historyGap: historyGap(history),
+    evidenceCount: compatibility.evidence.length,
+    evidenceKnownEmpty:
+      (prefix.local.status.status === 'complete' ||
+        prefix.local.status.status === 'known-empty') &&
+      prefix.local.status.compacted !== true,
+    earlierTurnCalls: 0,
+    windowGap: null,
+    hasToolCalls: compatibility.context.length > 0,
+  };
+}
+
+/** Shared source assembly; compatibility arrays derive from this exact prefix. */
 function assembleSnapshot(
   options: SnapshotOptions,
-  sources: SnapshotSources,
+  captured: SnapshotSources,
   redactor: CredentialRedactor,
-): SnapshotParts {
+): {
+  readonly base: Omit<ReviewSnapshot, 'budget'>;
+  readonly material: Omit<CompletenessInput, 'trimmed'>;
+} {
   const session = options.agent.session;
   const parentId = session.header?.parentSession;
-  const contextConfig = options.config.context;
-  const log = sources.log;
-  const evidence = assembleEvidence(log, {
-    session,
-    parentId,
-    sessions: options.sessions,
-    contextConfig,
-    ...(sources.parentLog === undefined
-      ? {}
-      : { parentLog: sources.parentLog }),
-  });
-  const identity = currentTurnOf(log, options.callId, options.turn ?? null);
-  const window = toolWindow(log, {
-    currentCallId: options.callId,
-    announcedTurn: options.turn ?? null,
-    maxItems: contextConfig.historyMaxItems,
-    argumentMaxChars: contextConfig.toolCallArgumentMaxChars,
-  });
-  const history = options.historyStatus ?? defaultHistoryStatus();
-  const historyWindowOf = historyWindow(
-    window.calls,
-    options.priorVerdicts,
-    contextConfig.historyMaxItems,
+  const { sources, identity, parentCompaction } = captureEventSources(
+    options,
+    captured,
   );
-  // The runtime window is already trimmed to `historyMaxItems` before it gets
-  // here, so this pass alone cannot see that older verdicts were dropped. The
-  // history status observed that cut while selecting, and it is the only place
-  // that can still report it.
-  const truncated =
-    historyWindowOf.truncated || history.windowTruncated || window.truncated;
-  const projectRules = sources.project;
+  const prefix = buildEventPrefix(sources, options.callId);
+  const compatibility = prefixCompatibility(prefix);
+  const history = options.historyStatus ?? defaultHistoryStatus();
+  const projectRules = captured.project;
   const guidance = guidanceMaterials(
-    contextConfig.customRules,
+    options.config.context.customRules,
     projectRules,
     redactor,
   );
-  const material = describeMaterial({
-    log,
-    evidence,
-    history,
-    window,
-    identity,
-    truncated,
-    parentId,
-    contextConfig,
+  const parentAuthorizationPresent = parentPresence(prefix, parentCompaction);
+  const truncated = history.windowTruncated || prefix.omissions.length > 0;
+  const material = describeEvents(
+    options,
+    prefix,
     projectRules,
-    sessionRecordGap: options.sessionRecordGap,
-  });
-  const facts: DerivedFacts | null =
-    options.facts === null
-      ? null
-      : {
-          ...options.facts,
-          parentAuthorizationPresent: evidence.parentAuthorizationPresent,
-          historyTruncated: truncated || options.facts.historyTruncated,
-          overlapsDeniedEffect: options.facts.overlapsDeniedEffect,
-        };
+    parentCompaction,
+  );
   const completeness = buildCompleteness({ ...material, trimmed: NO_TRIMS });
   const base: Omit<ReviewSnapshot, 'budget'> = {
     version: 1,
-    createdAt: sources.createdAt,
+    createdAt: captured.createdAt,
     configRevision: options.configRevision,
     callId: options.callId,
     sessionId: session.id ?? 'unknown',
     sessionKind: sessionKindOf(session),
     ...(parentId === undefined ? {} : { parentSessionId: parentId }),
+    prefix,
     tool: options.tool,
     cwd: options.cwd,
     turn: identity.turn,
     action: actionOf(options.tool, options.arguments),
-    facts,
+    facts:
+      options.facts === null
+        ? null
+        : {
+            ...options.facts,
+            parentAuthorizationPresent,
+            historyTruncated: truncated || options.facts.historyTruncated,
+          },
     ...(options.hint === undefined ? {} : { hint: options.hint }),
     projectRules: guidance.projectText,
     customRules: guidance.customRules,
     materials: guidance.materials,
-    evidence: evidence.merged.evidence,
-    evidenceTruncated: evidence.merged.truncated,
-    parentAuthorizationPresent: evidence.parentAuthorizationPresent,
-    context: historyWindowOf.selectedCalls,
-    checkpoints: checkpointEvents(log, contextConfig.checkpointMaxItems),
+    ...compatibility,
+    evidenceTruncated: prefix.omissions.length > 0,
+    parentAuthorizationPresent,
     contextTruncated: truncated,
-    priorVerdicts: historyWindowOf.selectedVerdicts,
+    priorVerdicts: [...options.priorVerdicts].sort(
+      (left, right) =>
+        right.ts - left.ts || right.callId.localeCompare(left.callId),
+    ),
     historyTruncated: truncated,
     historyStatus: history,
     completeness,
     missing: missingLines(completeness),
   };
-  // Budget candidates rebuild diagnostics, so their inputs must share the same
-  // completed knowledge and safe text as the snapshot they will overwrite.
+  // Budget candidates rebuild diagnostics from this same sanitized material.
   redactor.discover(material);
   const safeBase = redactSnapshot(base, redactor);
   return {
@@ -396,7 +383,28 @@ function assembleSnapshot(
   };
 }
 
-/** Capture once; the caller may finalize after resolving its actual credential. */
+function capturedOptions(options: SnapshotOptions): SnapshotOptions {
+  return {
+    ...options,
+    arguments: structuredClone(options.arguments),
+    facts: structuredClone(options.facts),
+    priorVerdicts: structuredClone(options.priorVerdicts),
+    config: structuredClone(options.config),
+    ...(options.historyStatus === undefined
+      ? {}
+      : { historyStatus: structuredClone(options.historyStatus) }),
+    ...(options.eventSources === undefined
+      ? {}
+      : { eventSources: structuredClone(options.eventSources) }),
+    ...(options.projectRulesMaterial === undefined
+      ? {}
+      : {
+          projectRulesMaterial: structuredClone(options.projectRulesMaterial),
+        }),
+  };
+}
+
+/** Capture once; known credentials rebuild from the same frozen source. */
 export async function prepareReviewSnapshot(
   options: SnapshotOptions,
   workflow?: CredentialRedactor,
@@ -404,17 +412,18 @@ export async function prepareReviewSnapshot(
   readonly bundle: BuiltSnapshot;
   readonly rebuild: (known?: readonly string[]) => BuiltSnapshot;
 }> {
-  const sources = await captureSnapshotSources(options);
+  const input = capturedOptions(options);
+  const sources = await captureSnapshotSources(input);
   const context =
-    workflow ?? workflowRedactor(options.agent.session, options.sessions);
+    workflow ?? workflowRedactor(input.agent.session, input.sessions);
   const rebuild = (known: readonly string[] = []): BuiltSnapshot => {
     context.addKnown(known);
     const redactor = context.fork();
-    const cleaned = redactSnapshotSources(sources, options, redactor);
-    const { base, material } = assembleSnapshot(options, cleaned, redactor);
+    const cleaned = redactSnapshotSources(sources, input, redactor);
+    const { base, material } = assembleSnapshot(input, cleaned, redactor);
     const requested = truncateSnapshot(
       base,
-      options.config.context.maxInputTokens,
+      input.config.context.maxInputTokens,
       material,
     );
     bindSnapshotRedactor(requested.snapshot, redactor);

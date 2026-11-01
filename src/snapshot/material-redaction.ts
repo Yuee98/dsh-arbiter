@@ -11,6 +11,14 @@ export function redactCompletenessInput(
     value === null ? null : text(value);
   return {
     ...input,
+    ...(input.sourceObservations === undefined
+      ? {}
+      : {
+          sourceObservations: input.sourceObservations.map((item) => ({
+            ...item,
+            reason: text(item.reason),
+          })),
+        }),
     sessionError: nullable(input.sessionError),
     parentError: nullable(input.parentError),
     projectRules: {

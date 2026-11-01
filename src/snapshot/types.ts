@@ -7,6 +7,8 @@ export interface SessionHeaderLike {
 }
 
 export interface SessionEventLike {
+  /** Only an event-level identity; message IDs are separate correlation metadata. */
+  readonly eventId?: string;
   readonly seq: number;
   readonly type: string;
   readonly time?: number;
@@ -22,7 +24,12 @@ export interface SessionEventLike {
 export interface SessionLike {
   readonly id?: string;
   readonly header?: SessionHeaderLike;
-  snapshotEvents?(): readonly SessionEventLike[];
+  snapshotEvents?(
+    fromSeq?: number,
+    toSeqExclusive?: number,
+  ): readonly SessionEventLike[];
+  /** Next absolute host sequence number, when bounded range reads are supported. */
+  readonly seq?: number;
   /**
    * Only the events this session wrote, excluding its inherited seed.
    *

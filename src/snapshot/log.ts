@@ -20,9 +20,20 @@ import type { SessionEventLike, SessionLike } from './types.js';
 
 /** Initial read plus one supplementary read; a third would be a retry loop. */
 const LOG_READ_ATTEMPTS = 2;
+/** Internal read protection, independent of prompt item settings. */
+export const SOURCE_EVENT_LIMIT = 16_384;
 
 /** How an event's turn was established. */
 export interface SessionLog {
+  readonly coverage?: {
+    readonly cutoff?: { readonly eventId: string; readonly seq: number } | null;
+    readonly protectedOriginalMissing?: string;
+    readonly compacted?: boolean;
+    readonly stopped: boolean;
+    readonly reason: string | null;
+    readonly fromSeq: number | null;
+    readonly access: 'range' | 'snapshot';
+  };
   readonly events: readonly SessionEventLike[];
   /** Events this session wrote itself; an inherited seed is excluded. */
   readonly own: readonly SessionEventLike[];
@@ -34,6 +45,65 @@ export interface SessionLog {
   /** Why the log could not be read, after the bounded retry. */
   readonly error: string | null;
   readonly attempts: number;
+}
+
+interface CapturedRange {
+  readonly events: readonly SessionEventLike[];
+  readonly own: readonly SessionEventLike[];
+  readonly coverage: NonNullable<SessionLog['coverage']>;
+}
+
+function validOffset(value: number | undefined): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0;
+}
+
+function captureRange(session: SessionLike): CapturedRange {
+  const end = session.seq;
+  const inherited = session.inheritedEventCount;
+  if (validOffset(end) && validOffset(inherited) && inherited <= end) {
+    const from = Math.max(inherited, end - SOURCE_EVENT_LIMIT);
+    const observed = session.snapshotEvents?.(from, end) ?? [];
+    const events = observed.filter(
+      (event) => event.seq >= from && event.seq < end,
+    );
+    return {
+      events,
+      own: events,
+      coverage: {
+        stopped: from > inherited,
+        reason:
+          from > inherited
+            ? 'source event read protection stopped before older events'
+            : null,
+        fromSeq: from,
+        access: 'range',
+      },
+    };
+  }
+  return captureSnapshot(session);
+}
+
+function captureSnapshot(session: SessionLike): CapturedRange {
+  const events = session.snapshotEvents?.() ?? [];
+  const boundary = inheritedBoundary(session, events);
+  const own = boundary.own;
+  const uncertain = !boundary.known;
+  return {
+    events: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
+    own: uncertain ? [] : own.slice(-SOURCE_EVENT_LIMIT),
+    coverage: {
+      stopped: uncertain || own.length > SOURCE_EVENT_LIMIT,
+      reason: uncertain
+        ? 'the host did not identify the inherited seed boundary'
+        : own.length > SOURCE_EVENT_LIMIT
+          ? 'source event read protection stopped before older events'
+          : null,
+      fromSeq: uncertain
+        ? null
+        : (own.slice(-SOURCE_EVENT_LIMIT)[0]?.seq ?? null),
+      access: 'snapshot',
+    },
+  };
 }
 
 /** An unreadable log: nothing was observed, and that is not "empty". */
@@ -58,6 +128,8 @@ function isEventLike(value: unknown): value is SessionEventLike {
   return (
     isRecord(value) &&
     typeof value['seq'] === 'number' &&
+    Number.isSafeInteger(value['seq']) &&
+    value['seq'] >= 0 &&
     typeof value['type'] === 'string'
   );
 }
@@ -75,30 +147,44 @@ function eventTurn(event: SessionEventLike): number | null {
  * events, and `inheritedEventCount` is the offset where they start. Neither is
  * required — a plain session object simply has no inherited prefix.
  */
+function ownSnapshot(
+  session: SessionLike,
+  events: readonly SessionEventLike[],
+): readonly SessionEventLike[] | null {
+  if (typeof session.ownEvents !== 'function') return null;
+  try {
+    const own: unknown = session.ownEvents();
+    if (
+      !Array.isArray(own) ||
+      own.length > events.length ||
+      !own.every(isEventLike)
+    )
+      return null;
+    const observed = new Set(events.map((event) => event.seq));
+    if (own.some((event: SessionEventLike) => !observed.has(event.seq)))
+      return null;
+    const ids = new Set(own.map((event: SessionEventLike) => event.seq));
+    return events.filter((event) => ids.has(event.seq));
+  } catch {
+    return null;
+  }
+}
+
 function inheritedBoundary(
   session: SessionLike,
   events: readonly SessionEventLike[],
-): readonly SessionEventLike[] {
-  if (typeof session.ownEvents === 'function') {
-    try {
-      const own: unknown = session.ownEvents();
-      if (
-        Array.isArray(own) &&
-        own.length <= events.length &&
-        own.every(isEventLike)
-      ) {
-        return own;
-      }
-    } catch {
-      // Fall through to the offset; a failing accessor is not a second reader.
-    }
-  }
+): { readonly own: readonly SessionEventLike[]; readonly known: boolean } {
+  const own = ownSnapshot(session, events);
+  if (own !== null) return { own, known: true };
   const offset = session.inheritedEventCount;
-  if (typeof offset === 'number' && Number.isInteger(offset)) {
-    if (offset > 0 && offset < events.length) return events.slice(offset);
-    if (offset === events.length) return [];
-  }
-  return events;
+  if (validOffset(offset) && offset <= events.length)
+    return { own: events.slice(offset), known: true };
+  const mainWithoutBoundary =
+    offset === undefined &&
+    typeof session.ownEvents !== 'function' &&
+    session.header?.parentSession === undefined &&
+    session.header?.origin !== 'subagent';
+  return { own: mainWithoutBoundary ? events : [], known: mainWithoutBoundary };
 }
 
 /**
@@ -166,8 +252,7 @@ export function readSessionLog(
   }
   for (let attempt = 1; attempt <= LOG_READ_ATTEMPTS; attempt += 1) {
     try {
-      const events = session.snapshotEvents();
-      const own = inheritedBoundary(session, events);
+      const { events, own, coverage } = captureRange(session);
       return {
         events,
         own,
@@ -176,6 +261,7 @@ export function readSessionLog(
         readable: true,
         error: null,
         attempts: attempt,
+        coverage,
       };
     } catch (error) {
       if (attempt === LOG_READ_ATTEMPTS) {

@@ -106,6 +106,7 @@ function session(
 ): SessionLike {
   return {
     id,
+    inheritedEventCount: 0,
     header: {
       id,
       ...(parentSession === undefined
@@ -179,7 +180,7 @@ describe('authorization evidence sources', () => {
     // The parent itself is unreadable, so presence is unknown, not false.
     expect(built.snapshot.parentAuthorizationPresent).toBeNull();
     expect(built.snapshot.missing.join(' ')).toContain(
-      'parent session is not live',
+      'parent human evidence is unavailable',
     );
   });
 
@@ -380,7 +381,7 @@ describe('authorization evidence sources', () => {
     expect(built.snapshot.evidence[0]?.text).toBe('from the real parent');
   });
 
-  test('the parent floor keeps parent originals when the child is chatty', async () => {
+  test('the latest parent original survives without the old count floor', async () => {
     const cwd = await workspace();
     const parent = session('parent', [
       human(1, 1, 'delete only /workspace/app/build'),
@@ -404,13 +405,10 @@ describe('authorization evidence sources', () => {
         },
       },
     });
-    expect(built.snapshot.evidence).toHaveLength(5);
-    expect(
-      built.snapshot.evidence.filter(
-        (item) => item.source.kind === 'parent-human',
-      ),
-    ).toHaveLength(1);
-    expect(built.snapshot.evidenceTruncated).toBe(true);
+    expect(built.snapshot.evidence).toHaveLength(13);
+    expect(built.snapshot.prefix?.parent?.events).toHaveLength(1);
+    expect(built.snapshot.prefix?.parent?.events[0]?.protected).toBe(true);
+    expect(built.snapshot.evidenceTruncated).toBe(false);
   });
 });
 
@@ -533,7 +531,7 @@ describe('guidance materials', () => {
 });
 
 describe('truncation as an input fact', () => {
-  test('a long human message is capped and marked', async () => {
+  test('the newest human message keeps its full original before H selection', async () => {
     const cwd = await workspace();
     const text = `${'a'.repeat(4_050)} Do not send anything outside this machine.`;
     const main = session('main', [human(1, 1, text)]);
@@ -543,15 +541,11 @@ describe('truncation as an input fact', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    const item = built.snapshot.evidence[0];
-    expect(item?.truncated).toBe(true);
-    expect(item?.originalLength).toBe(text.length);
-    expect(built.snapshot.evidenceTruncated).toBe(true);
-    expect(built.snapshot.missing.join(' ')).toContain('truncated');
-    // The current material renderer reports the same fact under its own block:
-    // `missing_input` is the field the completeness block carries.
+    expect(built.snapshot.evidence[0]?.text).toBe(text);
+    expect(built.snapshot.evidence[0]?.truncated).toBeUndefined();
+    expect(built.snapshot.evidenceTruncated).toBe(false);
+    expect(built.user).toContain('Do not send anything outside this machine.');
     expect(built.user).toContain('MATERIAL_COMPLETENESS');
-    expect(built.user).toContain('missing_input');
   });
 
   test('a huge run_code program is trimmed last and never throws', async () => {
@@ -815,7 +809,7 @@ describe('budget and configuration edges', () => {
     expect(built.user).not.toContain(program);
   });
 
-  test('zero parent settings mean zero, not "all"', async () => {
+  test('old zero parent counts do not suppress event-source originals', async () => {
     const cwd = await workspace();
     const parent = session('parent', [
       human(1, 1, 'parent one'),
@@ -836,14 +830,11 @@ describe('budget and configuration edges', () => {
         },
       },
     });
-    expect(
-      built.snapshot.evidence.filter(
-        (item) => item.source.kind === 'parent-human',
-      ),
-    ).toHaveLength(0);
+    expect(built.snapshot.prefix?.parent?.events).toHaveLength(2);
+    expect(built.snapshot.prefix?.parent?.events.at(-1)?.protected).toBe(true);
   });
 
-  test('the merged evidence never exceeds evidenceMaxItems', async () => {
+  test('old evidenceMaxItems cannot discard source candidates', async () => {
     const cwd = await workspace();
     const parent = session('parent', [
       ...Array.from({ length: 6 }, (_, index) =>
@@ -872,7 +863,10 @@ describe('budget and configuration edges', () => {
         },
       },
     });
-    expect(built.snapshot.evidence).toHaveLength(1);
+    expect(built.snapshot.evidence).toHaveLength(12);
+    expect(built.snapshot.prefix?.local.events).toHaveLength(6);
+    expect(built.snapshot.prefix?.parent?.events).toHaveLength(6);
+    expect(built.snapshot.completeness.gaps).toEqual([]);
   });
 
   test('an unreadable parent reports unknown, not "no human input"', async () => {
@@ -923,7 +917,7 @@ describe('budget and configuration edges', () => {
     expect(built.snapshot.missing.join(' ')).toContain('compacted');
   });
 
-  test('a short chat agreement keeps the assistant question as context', async () => {
+  test('an adjacent assistant question remains unbound context', async () => {
     const cwd = await workspace();
     const main = session('main', [
       {
@@ -947,11 +941,13 @@ describe('budget and configuration edges', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    const item = built.snapshot.evidence[0];
-    expect(item?.text).toBe('同意');
-    expect(item?.question).toContain('/workspace/app/build');
-    // The assistant text itself is not evidence.
+    expect(built.snapshot.evidence[0]?.text).toBe('同意');
+    expect(built.snapshot.evidence[0]?.question).toBeUndefined();
     expect(built.snapshot.evidence).toHaveLength(1);
+    expect(built.snapshot.prefix?.local.events[0]).toMatchObject({
+      kind: 'assistant',
+      protected: false,
+    });
   });
 
   test('an unrelatable short agreement stays unscoped', async () => {
@@ -1006,7 +1002,7 @@ describe('budget and configuration edges', () => {
 });
 
 describe('reopened review findings', () => {
-  test('parentHumanItems loss is reported as truncated evidence', async () => {
+  test('parentHumanItems does not create an artificial source loss', async () => {
     const cwd = await workspace();
     const parent = session('parent', [
       ...Array.from({ length: 30 }, (_, index) =>
@@ -1021,12 +1017,9 @@ describe('reopened review findings', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    // Far below evidenceMaxItems, yet 25 parent originals were dropped by the
-    // parentHumanItems cap: the reviewer must know the stream is incomplete.
-    expect(built.snapshot.evidence.length).toBeLessThan(
-      DEFAULT_CONFIG.context.evidenceMaxItems,
-    );
-    expect(built.snapshot.evidenceTruncated).toBe(true);
+    expect(built.snapshot.prefix?.parent?.events).toHaveLength(30);
+    expect(built.snapshot.evidence).toHaveLength(31);
+    expect(built.snapshot.evidenceTruncated).toBe(false);
   });
 
   test('a short answer after an intervening statement is not tied to a stale question', async () => {
@@ -1137,7 +1130,7 @@ describe('reopened review findings', () => {
     expect(built.snapshot.evidence[0]?.question).toBeUndefined();
   });
 
-  test('a short answer directly following a question keeps it', async () => {
+  test('a short answer does not create a host question binding', async () => {
     const cwd = await workspace();
     const main = session('main', [
       {
@@ -1161,8 +1154,12 @@ describe('reopened review findings', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    expect(built.snapshot.evidence[0]?.question).toContain(
-      '/workspace/app/build',
+    expect(built.snapshot.evidence[0]?.question).toBeUndefined();
+    expect(
+      built.snapshot.prefix?.local.events.map((event) => event.kind),
+    ).toEqual(['assistant', 'human']);
+    expect(built.snapshot.prefix?.local.events[1]).not.toHaveProperty(
+      'binding',
     );
   });
 
@@ -1310,7 +1307,7 @@ describe('third-round review findings', () => {
     ).toBe(true);
   });
 
-  test('checkpointMaxItems 0 selects no checkpoints', async () => {
+  test('the latest checkpoint candidate ignores legacy count zero', async () => {
     const cwd = await workspace();
     const events = [
       ...Array.from({ length: 3 }, (_, index) => ({
@@ -1334,10 +1331,10 @@ describe('third-round review findings', () => {
         context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 0 },
       },
     });
-    expect(built.snapshot.checkpoints).toHaveLength(0);
+    expect(built.snapshot.checkpoints).toEqual([{ ts: 3, text: 'summary 2' }]);
   });
 
-  test('a configured non-zero checkpoint limit still selects that many', async () => {
+  test('only the latest checkpoint qualifies regardless of old count', async () => {
     const cwd = await workspace();
     const events = [
       ...Array.from({ length: 3 }, (_, index) => ({
@@ -1361,8 +1358,8 @@ describe('third-round review findings', () => {
         context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 2 },
       },
     });
-    expect(built.snapshot.checkpoints).toHaveLength(2);
-    expect(built.snapshot.checkpoints.at(-1)?.text).toBe('summary 2');
+    expect(built.snapshot.checkpoints).toHaveLength(1);
+    expect(built.snapshot.checkpoints[0]?.text).toBe('summary 2');
   });
 
   test('a request that only fits before the estimate is written still reviews', async () => {

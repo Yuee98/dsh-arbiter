@@ -23,12 +23,26 @@
  */
 
 import type {
+  ArbiterConfig,
   DerivedFacts,
   EvidenceItem,
   EvidenceKind,
   EvidenceRole,
   ReviewSnapshot,
 } from '../../../src/types.js';
+import { prepareReviewSnapshot } from '../../../src/snapshot.js';
+import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
+import { boundEventSources } from '../../../src/snapshot/source-guard.js';
+import { parentChain } from '../../../src/host/admission.js';
+import type { ReviewEvent, ReviewEventSource } from '../../../src/types.js';
+import { resultBody } from '../../../src/snapshot/event-content.js';
+import { selectPointMaterial } from '../data/workflow-material.js';
+import {
+  branchOf,
+  eventsOnPath,
+  sessionPrefix,
+} from '../data/workflow-path.js';
+import type { GroupedDataset, WorkflowEvent } from '../data/group-types.js';
 import { PRODUCTION_PACKAGE } from '../../../src/reviewer/package.js';
 import type { ReviewPackage } from '../../../src/reviewer/package.js';
 import { evaluateCall } from '../../../src/rules/match.js';
@@ -41,7 +55,7 @@ import {
 import type { CompletenessInput } from '../../../src/snapshot/completeness.js';
 import {
   guidanceMaterials,
-  readProjectRules,
+  readProjectRulesSource,
 } from '../../../src/snapshot/guidance.js';
 import type { ProjectRulesResult } from '../../../src/snapshot/guidance.js';
 
@@ -174,7 +188,7 @@ export function caseFacts(caseEntry: ReviewCase): DerivedFacts | null {
  * found.
  */
 export async function guidanceLimit(): Promise<number> {
-  const probe = await readProjectRules('/arbiter-evals-probe', {
+  const probe = await readProjectRulesSource('/arbiter-evals-probe', {
     enabled: true,
     files: ['.arbiter-evals-probe-rules'],
   });
@@ -382,6 +396,297 @@ export function caseMaterial(
       // can be bounded for either backend, but a chat cell submits only the chat request:
       // charging it the decision payload's size would refuse a cell the run means to send
       // and let the wrong protocol decide the bound.
+      estimatedInputTokens: request.estimatedInputTokens,
+      maxInputTokens: snapshot.budget.maxInputTokens,
+      truncatedSegments: snapshot.budget.truncatedSegments,
+      completenessStatus: snapshot.completeness.status,
+      blockingGaps: snapshot.completeness.gaps,
+      missing: missingLines(snapshot.completeness),
+      notices: snapshot.completeness.items
+        .filter((item) => !item.blocking)
+        .map((item) => ({
+          source: item.source,
+          kind: item.kind,
+          reason: item.reason,
+        })),
+    },
+  };
+}
+
+/** Only source event fields cross this adapter; authoring and references never do. */
+function workflowEvent(event: WorkflowEvent): ReviewEvent | null {
+  const identity = {
+    eventId: event.eventId,
+    sessionId: event.sessionId,
+    seq: event.seq,
+    turnId: event.turnId,
+    ...(event.time === undefined ? {} : { time: event.time }),
+  };
+  switch (event.kind) {
+    case 'message':
+      if (event.role === 'assistant')
+        return { ...identity, kind: 'assistant', text: event.content };
+      if (event.source === 'human')
+        return {
+          ...identity,
+          kind: 'human',
+          source: 'session-human',
+          text: event.content,
+          ...(event.replyToAskId === undefined
+            ? {}
+            : {
+                binding: {
+                  askId: event.replyToAskId,
+                  status: 'bound' as const,
+                },
+              }),
+        };
+      return event.source === 'parent-relay' &&
+        event.senderSessionId !== undefined
+        ? {
+            ...identity,
+            kind: 'relay',
+            source: 'parent-relay',
+            senderSessionId: event.senderSessionId,
+            text: event.content,
+          }
+        : null;
+    case 'call':
+      return {
+        ...identity,
+        kind: 'call',
+        callId: event.callId,
+        tool: event.tool,
+        arguments: structuredClone(event.arguments),
+        ...(event.cwd === undefined ? {} : { cwd: event.cwd }),
+      };
+    case 'result':
+      return {
+        ...identity,
+        kind: 'result',
+        callId: event.callId,
+        status: event.status,
+        // Preserve original blocks until shared discovery checks their complete syntax.
+        body: resultBody(event.body, { deferMedia: true }),
+      };
+    case 'ask':
+      return {
+        ...identity,
+        kind: 'question',
+        askId: event.askId,
+        text: event.question,
+        ...(event.callId === undefined ? {} : { callId: event.callId }),
+      };
+    case 'answer':
+      return {
+        ...identity,
+        kind: 'human',
+        source: 'session-human',
+        text: event.content,
+        binding: { askId: event.askId, status: 'bound' },
+      };
+    case 'checkpoint':
+      return { ...identity, kind: 'checkpoint', text: event.content };
+    case 'settlement':
+      return {
+        ...identity,
+        kind: 'settlement',
+        callId: event.callId,
+        outcome: event.outcome,
+      };
+  }
+}
+
+function workflowSource(
+  sessionId: string,
+  events: readonly WorkflowEvent[],
+  cutoff: WorkflowEvent | undefined,
+  status: 'complete' | 'partial' | 'unavailable' = 'complete',
+  parentId?: string,
+  compacted = false,
+): ReviewEventSource {
+  return {
+    status: {
+      sessionId,
+      status:
+        status === 'unavailable'
+          ? 'unavailable'
+          : status === 'partial'
+            ? 'stopped'
+            : events.length === 0
+              ? 'known-empty'
+              : 'complete',
+      cutoff:
+        cutoff === undefined
+          ? null
+          : { eventId: cutoff.eventId, seq: cutoff.seq },
+      fromSeq: events[0]?.seq ?? null,
+      reason:
+        status === 'complete' ? null : `workflow source was declared ${status}`,
+      access: 'declared',
+      compacted:
+        compacted || events.some((event) => event.kind === 'checkpoint'),
+    },
+    events: events.flatMap((event) => {
+      const normalized = workflowEvent(event);
+      if (
+        normalized === null ||
+        (normalized.kind === 'relay' && normalized.senderSessionId !== parentId)
+      )
+        return [];
+      if (parentId === undefined && normalized.kind === 'human')
+        return [{ ...normalized, source: 'parent-human' as const }];
+      return [normalized];
+    }),
+  };
+}
+
+/** Real workflow material entry: #118 prefix -> shared production selector/budget. */
+export async function workflowMaterial(
+  dataset: GroupedDataset,
+  rootId: string,
+  pointId: string,
+  protocol: RunProtocol,
+  options: {
+    readonly config: ArbiterConfig;
+    readonly configRevision: string;
+    readonly projectRules?: string | null;
+    readonly pkg?: ReviewPackage;
+    /** Already-resolved values, in memory only; this entry never looks up a credential. */
+    readonly credentialValues?: readonly string[];
+  },
+): Promise<CaseMaterial> {
+  const source = selectPointMaterial(dataset, rootId, pointId);
+  const root = dataset.groups
+    .flatMap((group) => group.workflows)
+    .find((entry) => entry.document.rootId === rootId)?.document;
+  const point = root?.points.find((item) => item.pointId === pointId);
+  if (root === undefined || point === undefined)
+    throw new Error('selected workflow point disappeared');
+  const parentId = source.parent?.sessionId;
+  const guidance = caseGuidance(
+    options.projectRules ?? null,
+    options.config.context.customRules,
+  );
+  const projectRulesMaterial = options.config.context.projectRules.enabled
+    ? guidance.project
+    : await readProjectRulesSource('', options.config.context.projectRules);
+  const declaredCutoff = root.events.find(
+    (event) => event.eventId === point.cutoffEventId,
+  );
+  const pending = point.pending;
+  const pendingEvent =
+    'callEventId' in pending
+      ? root.events.find((event) => event.eventId === pending.callEventId)
+      : undefined;
+  const cutoff =
+    declaredCutoff?.kind === 'call' &&
+    declaredCutoff.callId === source.pending.callId
+      ? source.history.at(-1)
+      : declaredCutoff;
+  const local = workflowSource(
+    source.sessionId,
+    source.history,
+    cutoff,
+    'complete',
+    parentId ?? source.sessionId,
+  );
+  const parent =
+    source.parent === null
+      ? null
+      : workflowSource(
+          source.parent.sessionId,
+          source.parent.events,
+          root.events.find(
+            (event) => event.eventId === point.parentRead?.cutoffEventId,
+          ),
+          source.parent.status,
+          undefined,
+          sessionPrefix(
+            eventsOnPath(root, branchOf(point)),
+            source.parent.sessionId,
+            point.parentRead?.cutoffEventId ?? null,
+          ).some((event) => event.kind === 'checkpoint'),
+        );
+  const eventSources = boundEventSources({ local, parent });
+  // Input identity is canonical source content; process-local credential markers
+  // belong only to the actual request fingerprint. Only this digest is exposed.
+  const inputHash = digestOf({
+    ...eventSources,
+    cwd: source.pending.cwd ?? source.environment?.cwd ?? '',
+    pending: source.pending,
+  });
+  const chain = parentChain(
+    source.sessionId,
+    (id) =>
+      root.sessions.find((session) => session.sessionId === id)
+        ?.parentSessionId,
+  );
+  if (chain.cycle || chain.unresolved !== null)
+    throw new Error('workflow credential ancestry is unavailable');
+  // A point is an isolated historical read: a previously evaluated later point
+  // must not teach it future vocabulary. The shared policy still derives stable
+  // process-local markers from the same workflow scope across views and points.
+  const context = new CredentialRedactor(
+    JSON.stringify([rootId, chain.ids.at(-1)]),
+  );
+  const prepared = await prepareReviewSnapshot(
+    {
+      agent: {
+        session: {
+          id: source.sessionId,
+          header: {
+            ...(parentId === undefined ? {} : { parentSession: parentId }),
+          },
+          snapshotEvents: () => [],
+        },
+      },
+      eventSources,
+      projectRulesMaterial,
+      tool: source.pending.tool,
+      arguments: source.pending.arguments,
+      callId: source.pending.callId,
+      cwd: source.pending.cwd ?? source.environment?.cwd ?? '',
+      config: options.config,
+      configRevision: options.configRevision,
+      turn:
+        pendingEvent?.turnId !== null &&
+        pendingEvent?.turnId !== undefined &&
+        /^\d+$/u.test(pendingEvent.turnId)
+          ? Number(pendingEvent.turnId)
+          : null,
+      facts: evaluateCall({
+        rules: [],
+        tool: source.pending.tool,
+        arguments: source.pending.arguments,
+        identity: parentId === undefined ? 'main' : 'subagent',
+        workspaceRoot: null,
+        cwd: source.pending.cwd ?? source.environment?.cwd ?? '',
+        parentAuthorizationPresent: null,
+        historyTruncated: false,
+        overlapsDeniedEffect: false,
+      }).facts,
+      priorVerdicts: [],
+      sessionRecordGap: null,
+    },
+    context,
+  );
+  const built =
+    (options.credentialValues?.length ?? 0) > 0
+      ? prepared.rebuild(options.credentialValues)
+      : prepared.bundle;
+  const snapshot = built.snapshot;
+  const pkg = options.pkg ?? PRODUCTION_PACKAGE;
+  const request =
+    protocol === 'chat'
+      ? pkg.renderChat(snapshot)
+      : pkg.renderDecision(snapshot);
+  return {
+    snapshot,
+    request,
+    material: {
+      inputHash,
+      promptFingerprint: digestOf({ protocol, request }),
       estimatedInputTokens: request.estimatedInputTokens,
       maxInputTokens: snapshot.budget.maxInputTokens,
       truncatedSegments: snapshot.budget.truncatedSegments,

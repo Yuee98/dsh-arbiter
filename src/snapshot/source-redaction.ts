@@ -1,6 +1,6 @@
 /** Redact log material before the existing evidence/window readers impose caps. */
-import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import { structuredJson } from '../reviewer/credential-literals.js';
+import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import type { SessionLog } from './log.js';
 import type { SessionEventLike } from './types.js';
 import { copySourceBlock } from './content-redaction.js';
@@ -36,7 +36,10 @@ export function sourceContentText(content: unknown): string {
     })
     .join('\n');
 }
-function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
+export function redactSourceContent(
+  content: unknown,
+  redactor: CredentialRedactor,
+): unknown {
   redactor.validate(content);
   if (typeof content === 'string') return redactor.text(content);
   if (!Array.isArray(content)) return redactor.value(content);
@@ -74,7 +77,10 @@ function contentCopy(content: unknown, redactor: CredentialRedactor): unknown {
   }
   return result;
 }
-function discoverContent(content: unknown, redactor: CredentialRedactor): void {
+export function discoverSourceContent(
+  content: unknown,
+  redactor: CredentialRedactor,
+): void {
   redactor.validate(content);
   for (const group of textGroups(content)) redactor.discover(group.join(''));
   if (!Array.isArray(content)) {
@@ -100,14 +106,16 @@ export function discoverLog(
     const data = event.data;
     if (event.type === 'tool/call') redactor.discover(data['arguments']);
     if (data['content'] !== undefined)
-      discoverContent(data['content'], redactor);
+      discoverSourceContent(data['content'], redactor);
     if (record(data['message']))
-      discoverContent(data['message']['content'], redactor);
+      discoverSourceContent(data['message']['content'], redactor);
   }
 }
 export function redactLog(
   log: SessionLog,
   redactor: CredentialRedactor,
+  // Applied after raw discovery by the caller, before payload fields are masked.
+  projectContent?: (event: SessionEventLike, content: unknown) => unknown,
 ): SessionLog {
   const copies = new WeakMap<SessionEventLike, SessionEventLike>();
   const copy = (event: SessionEventLike): SessionEventLike => {
@@ -122,6 +130,11 @@ export function redactLog(
       return event;
     const previous = copies.get(event);
     if (previous !== undefined) return previous;
+    const contentCopy = (content: unknown) =>
+      redactSourceContent(
+        projectContent === undefined ? content : projectContent(event, content),
+        redactor,
+      );
     const result = {
       ...event,
       data: {
@@ -131,13 +144,13 @@ export function redactLog(
           : { arguments: redactor.value(data['arguments']) }),
         ...(data['content'] === undefined
           ? {}
-          : { content: contentCopy(data['content'], redactor) }),
+          : { content: contentCopy(data['content']) }),
         ...(!record(message) || message['content'] === undefined
           ? {}
           : {
               message: {
                 ...message,
-                content: contentCopy(message['content'], redactor),
+                content: contentCopy(message['content']),
               },
             }),
       },
