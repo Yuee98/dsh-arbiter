@@ -210,9 +210,15 @@ export async function finalizeCallReview(
       ? backend.transport.credentialResolution
       : undefined;
   const known =
-    resolution?.ok === true && resolution.value !== undefined
+    resolution?.ok === true &&
+    resolution.value !== undefined &&
+    resolution.value.length > 0
       ? [resolution.value]
       : [];
+  // Chat and failed/missing credential resolution add no material. Keep their
+  // frozen request instead of paying for a second full budget/token pass.
+  if (known.length === 0)
+    return { backend, bundle: preparation.bundle, prepareError: null };
   try {
     return { backend, bundle: preparation.rebuild(known), prepareError: null };
   } catch (error) {

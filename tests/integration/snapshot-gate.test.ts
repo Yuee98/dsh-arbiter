@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { vi } from 'vitest';
+import * as snapshotModule from '../../src/snapshot.js';
 import { NEW_SCALE_TYPESAFE } from '../helpers/decision-captures.js';
 import {
   renderChatUser,
@@ -1042,6 +1043,51 @@ describe('credential preparation at actual production boundaries', () => {
     } finally {
       harness.host.currentAudit()?.close();
       await endpoint.stop();
+    }
+  });
+  test('chat keeps its frozen request without repeating snapshot token estimation', async () => {
+    const session = makeSession('chat-single-snapshot', [
+      human(1, 1, 'inspect local files'),
+    ]);
+    const original = snapshotModule.prepareReviewSnapshot;
+    let preparations = 0;
+    let rebuilds = 0;
+    const prepare = vi
+      .spyOn(snapshotModule, 'prepareReviewSnapshot')
+      .mockImplementation(async (...args) => {
+        const result = await original(...args);
+        preparations += 1;
+        return {
+          ...result,
+          rebuild: (known) => {
+            rebuilds += 1;
+            return result.rebuild(known);
+          },
+        };
+      });
+    const resolve = vi.fn(() =>
+      Promise.resolve({ value: 'unused-chat-credential' }),
+    );
+    const harness = credentialGate(
+      session,
+      'http://127.0.0.1:1/unused',
+      resolve,
+      20_000,
+      'chat',
+    );
+    try {
+      const result = await harness.run(
+        'chat-single-snapshot-call',
+        { command: 'echo local' },
+        new AbortController().signal,
+      );
+      expect(result.kind).toBe('allow');
+      expect(preparations).toBe(1);
+      expect(rebuilds).toBe(0);
+      expect(resolve).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+      harness.host.currentAudit()?.close();
     }
   });
   test.each([
