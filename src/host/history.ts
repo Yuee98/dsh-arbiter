@@ -30,6 +30,7 @@ import {
 } from './history-record.js';
 import {
   ANSWERED,
+  historyEvents,
   anyOverflow,
   readAudit,
   readSession,
@@ -41,9 +42,67 @@ import type { HistoryStatus, PriorVerdictItem } from '../types.js';
 import type { SessionEventLike, SessionLike } from '../snapshot.js';
 import type { HostEnvironment } from './types.js';
 import { recordOf } from '../records.js';
+import { SOURCE_EVENT_LIMIT } from '../snapshot/log.js';
+
+const CACHE_SESSION_ITEMS = 4_096;
+const CACHE_TOTAL_ITEMS = 16_384;
+const CACHE_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export class DecisionHistory {
   private readonly host: HostEnvironment;
+  private readonly incompleteCopies = new Set<string>();
+  private readonly cacheAccounting = new Map<
+    string,
+    { readonly items: readonly PriorVerdictItem[]; readonly bytes: number }
+  >();
+
+  /** Resource limits evict copies, never durable logs or reset knowledge. */
+  private cacheWindow(
+    sessionId: string,
+    candidates: readonly PriorVerdictItem[],
+  ): void {
+    const runtime = this.host.runtime;
+    for (const id of this.cacheAccounting.keys()) {
+      if (!runtime.priorVerdicts.has(id)) this.cacheAccounting.delete(id);
+    }
+    const limited = selectWindow(candidates, CACHE_SESSION_ITEMS);
+    const items = limited.selected;
+    let bytes = Buffer.byteLength(JSON.stringify(items));
+    while (bytes > CACHE_TOTAL_BYTES && items.length > 0) {
+      items.shift();
+      bytes = Buffer.byteLength(JSON.stringify(items));
+    }
+    if (items.length < candidates.length) this.incompleteCopies.add(sessionId);
+    else this.incompleteCopies.delete(sessionId);
+    runtime.priorVerdicts.delete(sessionId);
+    runtime.priorVerdicts.set(sessionId, items);
+    this.cacheAccounting.delete(sessionId);
+    this.cacheAccounting.set(sessionId, { items, bytes });
+    let totalItems = 0;
+    let totalBytes = 0;
+    for (const [id, values] of runtime.priorVerdicts) {
+      let entry = this.cacheAccounting.get(id);
+      if (entry?.items !== values) {
+        entry = {
+          items: values,
+          bytes: Buffer.byteLength(JSON.stringify(values)),
+        };
+        this.cacheAccounting.set(id, entry);
+      }
+      totalItems += values.length;
+      totalBytes += entry.bytes;
+    }
+    for (const [id, values] of runtime.priorVerdicts) {
+      if (totalItems <= CACHE_TOTAL_ITEMS && totalBytes <= CACHE_TOTAL_BYTES)
+        break;
+      totalItems -= values.length;
+      totalBytes -= this.cacheAccounting.get(id)?.bytes ?? 0;
+      runtime.priorVerdicts.delete(id);
+      runtime.historyRecovered.delete(id);
+      this.cacheAccounting.delete(id);
+      this.incompleteCopies.delete(id);
+    }
+  }
   constructor(host: HostEnvironment) {
     this.host = host;
   }
@@ -103,10 +162,10 @@ export class DecisionHistory {
    */
   rememberPrior(sessionId: string, item: PriorVerdictItem): void {
     const { runtime } = this.host;
-    const limit = Math.max(1, runtime.config.context.historyMaxItems);
+    const limit = SOURCE_EVENT_LIMIT;
     const existing = runtime.priorVerdicts.get(sessionId) ?? [];
     const { selected, truncated } = selectWindow([...existing, item], limit);
-    runtime.priorVerdicts.set(sessionId, selected);
+    this.cacheWindow(sessionId, selected);
     // The published status is recomputed, not carried forward. A live verdict
     // cannot make an unreadable source readable, but it does change what the
     // window is: an empty-history claim stops being true the moment memory holds
@@ -239,16 +298,20 @@ export class DecisionHistory {
 
   private selectWindowFor(sessionId: string): PriorVerdictItem[] {
     const { runtime } = this.host;
-    const limit = Math.max(1, runtime.config.context.historyMaxItems);
+    const limit = SOURCE_EVENT_LIMIT;
     const inMemory = runtime.priorVerdicts.get(sessionId) ?? [];
-    if (inMemory.length > 0) {
+    if (inMemory.length > 0 && !this.incompleteCopies.has(sessionId)) {
       const { selected } = selectWindow(inMemory, limit);
       return selected;
     }
     // A session is recovered once per runtime. Re-reading every call would turn
     // an unavailable source into an unbounded retry, and would let a later read
     // re-open a window this runtime already decided.
-    if (runtime.historyRecovered.has(sessionId)) return [];
+    if (
+      runtime.historyRecovered.has(sessionId) &&
+      !this.incompleteCopies.has(sessionId)
+    )
+      return [];
     // The session log is read first because it is also where a reset barrier
     // lives. Checking the in-memory map before this read would miss a barrier
     // written before the restart and resurrect the history it withdrew.
@@ -278,7 +341,7 @@ export class DecisionHistory {
     }
     let events: readonly SessionEventLike[];
     try {
-      events = session.snapshotEvents();
+      events = historyEvents(session).events;
     } catch {
       return false;
     }
@@ -344,7 +407,7 @@ export class DecisionHistory {
    * it cannot delay a settlement and cannot resurrect a verdict a reset withdrew.
    */
   private republishInMemoryStatus(sessionId: string): void {
-    const limit = Math.max(1, this.host.runtime.config.context.historyMaxItems);
+    const limit = SOURCE_EVENT_LIMIT;
     const { selected, truncated } = selectWindow(
       this.host.runtime.priorVerdicts.get(sessionId) ?? [],
       limit,
@@ -363,7 +426,7 @@ export class DecisionHistory {
     // be true of it — a settlement can record a failure without a window having
     // been read since. Deriving through the same reason aggregation keeps this
     // fallback from claiming a completeness the runtime cannot support.
-    const limit = Math.max(1, this.host.runtime.config.context.historyMaxItems);
+    const limit = SOURCE_EVENT_LIMIT;
     const { selected, truncated } = selectWindow(
       this.host.runtime.priorVerdicts.get(sessionId) ?? [],
       limit,
@@ -384,6 +447,8 @@ export class DecisionHistory {
   resetSession(sessionId: string, session?: SessionLike): void {
     const { runtime } = this.host;
     runtime.priorVerdicts.delete(sessionId);
+    this.cacheAccounting.delete(sessionId);
+    this.incompleteCopies.delete(sessionId);
     runtime.historyRecovered.delete(sessionId);
     const at = Date.now();
     runtime.historyReset.set(sessionId, at);
@@ -428,7 +493,9 @@ export class DecisionHistory {
     }
     let events: readonly SessionEventLike[];
     try {
-      events = session.snapshotEvents();
+      const captured = historyEvents(session);
+      if (captured.stopped) return false;
+      events = captured.events;
     } catch {
       return false;
     }
@@ -530,7 +597,7 @@ export class DecisionHistory {
     }
     let events: readonly SessionEventLike[];
     try {
-      events = session.snapshotEvents();
+      events = historyEvents(session).events;
     } catch {
       return [];
     }
@@ -592,10 +659,14 @@ export class DecisionHistory {
     // millisecond as the reset. The audit rows have no event order, so they are
     // bounded conservatively by the barrier instant, and a row exactly on the
     // boundary is flagged as uncertain rather than silently trusted or dropped.
+    const corroborated = new Set(session.items.map((item) => item.callId));
     const fromAudit = (
       items: readonly PriorVerdictItem[],
     ): readonly PriorVerdictItem[] =>
-      barrier === null ? items : items.filter((item) => item.ts >= barrier);
+      (session.barrierUnknown === true
+        ? items.filter((item) => corroborated.has(item.callId))
+        : items
+      ).filter((item) => barrier === null || item.ts >= barrier);
     // The session scan applies the barrier itself when the reset record is in the
     // log. When the reset only exists in this runtime — the durable writer was
     // unavailable — nothing in the log bounds the items, so the same instant is
@@ -640,7 +711,7 @@ export class DecisionHistory {
       [...(runtime.priorVerdicts.get(sessionId) ?? []), ...selected],
       limit,
     );
-    runtime.priorVerdicts.set(sessionId, merged.selected);
+    this.cacheWindow(sessionId, merged.selected);
     runtime.historyRecovered.set(sessionId, Date.now());
     const status = this.recoveryStatus(
       sessionId,

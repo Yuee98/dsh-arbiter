@@ -137,7 +137,9 @@ function compactCompleteness(parts: SubmissionParts, audit: boolean): object {
     ...(audit
       ? {
           note: parts.completeness.note,
-          budget: parts.completeness.budget,
+          ...(parts.completeness.budget === undefined
+            ? {}
+            : { budget: parts.completeness.budget }),
           action_truncated: parts.completeness.action_truncated,
         }
       : {}),

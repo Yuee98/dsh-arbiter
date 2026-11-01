@@ -432,9 +432,17 @@ function prepare(
     return { reason: `target ${cell.targetId} is not in the plan` };
   }
   const material = caseMaterial(caseEntry, cell.protocol, {
-    maxInputTokens: options.plan.context.maxInputTokens,
+    ...options.plan.context,
     pkg,
   });
+  if (
+    material.snapshot.budget.truncatedSegments.includes('OVER_BUDGET') ||
+    material.material.estimatedInputTokens > options.plan.context.maxInputTokens
+  )
+    return {
+      reason:
+        'input_budget_exceeded: required context exceeds context.maxInputTokens',
+    };
   return { caseEntry, target, material };
 }
 

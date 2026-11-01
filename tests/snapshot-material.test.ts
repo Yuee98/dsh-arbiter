@@ -427,7 +427,7 @@ describe('current-turn tool window', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, historyMaxItems: 3 },
+        context: { ...DEFAULT_CONFIG.context },
       },
     });
     expect(built.snapshot.context.map((call) => call.arguments)).toEqual(
@@ -517,7 +517,7 @@ describe('cross-turn authorization', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, evidenceMaxItems: 1 },
+        context: { ...DEFAULT_CONFIG.context },
       },
     });
     expect(built.snapshot.evidence).toHaveLength(7);
@@ -728,7 +728,11 @@ describe('material completeness', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 2_000,
+          maxInputTokens: 2_000,
+        },
       },
     });
     // The action is a trim, not a loss of required material: the omission is
@@ -983,8 +987,6 @@ describe('protected authorization originals survive every cut', () => {
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          evidenceMaxItems: 1,
-          parentEvidenceFloor: 1,
         },
       },
     });
@@ -1057,7 +1059,6 @@ describe('protected authorization originals survive every cut', () => {
           // Tight enough to force evidence trimming, so the trimmer must choose
           // which original to keep rather than dropping by position.
           maxInputTokens: 3_000,
-          evidenceMaxItems: 10,
         },
       },
     });
@@ -1293,7 +1294,11 @@ describe('review threads: question scope and tool-history trim direction', () =>
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 100_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 100_000,
+          maxInputTokens: 100_000,
+        },
       },
     });
     const built = await buildReviewSnapshot({
@@ -1307,8 +1312,9 @@ describe('review threads: question scope and tool-history trim direction', () =>
           // The shared contract is a large fixed preamble (rubric text, source
           // ladder, answer shape): the budget has to leave room above it before
           // any optional segment can be the thing that fails to fit.
+          targetInputTokens:
+            complete.snapshot.budget.estimatedInputTokens - 500,
           maxInputTokens: complete.snapshot.budget.estimatedInputTokens - 500,
-          historyMaxItems: 8,
         },
       },
     });

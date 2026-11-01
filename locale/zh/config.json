@@ -73,6 +73,7 @@
     "ruleToolsEmpty": "工具范围不能是空列表。",
     "ruleToolEmpty": "工具范围中的名称不能为空。",
     "ruleCombineRequired": "规则有多条条件时必须声明条件组合方式（combine：all 或 any）。",
-    "ruleUnknownField": "未知字段「{field}」：该字段不会生效，规则仍按声明的含义执行。"
+    "ruleUnknownField": "未知字段「{field}」：该字段不会生效，规则仍按声明的含义执行。",
+    "relationTargetInputTokens": "常态目标不得超过 context.maxInputTokens。"
   }
 }

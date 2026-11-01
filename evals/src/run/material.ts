@@ -85,7 +85,7 @@ export interface CaseMaterial {
  * A case's rules are supplied text rather than a file, so there is no read that
  * could fail: `missing` is null and `unreadable` is false. The per-source file cap
  * production applies to a read does not apply here either — the case is already the
- * document — but the shared guidance ceiling does, because `guidanceMaterials`
+ * document — the shared token budget selects it after `guidanceMaterials`
  * applies it to whatever it is given. That is the one cap that decides what a
  * submission can carry, so it stays production's.
  */
@@ -101,7 +101,6 @@ function caseGuidance(
         enabled: true,
         present: projectRules !== null && projectRules.length > 0,
         chars: projectRules?.length ?? 0,
-        limit: projectRules?.length ?? 0,
         truncated: false,
       },
       missing: null,
@@ -176,23 +175,6 @@ export function caseFacts(caseEntry: ReviewCase): DerivedFacts | null {
     historyTruncated: false,
     overlapsDeniedEffect: false,
   }).facts;
-}
-
-/**
- * The per-source cap production applies to a rules file.
- *
- * Exposed so the record can state the limit in force rather than restating a
- * number: the cap belongs to production, and a caller that wants to report it
- * should ask rather than copy. A non-existent directory with a non-existent file
- * name is enough, because the result carries the limit whether or not a file was
- * found.
- */
-export async function guidanceLimit(): Promise<number> {
-  const probe = await readProjectRulesSource('/arbiter-evals-probe', {
-    enabled: true,
-    files: ['.arbiter-evals-probe-rules'],
-  });
-  return probe.material.limit;
 }
 
 /**
@@ -298,6 +280,7 @@ export function caseMaterial(
   protocol: RunProtocol,
   options: {
     readonly maxInputTokens: number;
+    readonly targetInputTokens?: number;
     /** The package this cell will send with; production's when omitted. */
     readonly pkg?: ReviewPackage;
   },
@@ -375,6 +358,8 @@ export function caseMaterial(
     base,
     options.maxInputTokens,
     completenessInput,
+    options.targetInputTokens,
+    pkg,
   );
   const snapshot = rendered.snapshot;
   // The package's own renderer, so the fingerprint, the estimate and the request the
@@ -398,6 +383,15 @@ export function caseMaterial(
       // and let the wrong protocol decide the bound.
       estimatedInputTokens: request.estimatedInputTokens,
       maxInputTokens: snapshot.budget.maxInputTokens,
+      ...(snapshot.budget.targetInputTokens === undefined
+        ? {}
+        : { targetInputTokens: snapshot.budget.targetInputTokens }),
+      ...(snapshot.budget.baseInputTokens === undefined
+        ? {}
+        : { baseInputTokens: snapshot.budget.baseInputTokens }),
+      ...(snapshot.budget.targetExceededReason === undefined
+        ? {}
+        : { targetExceededReason: snapshot.budget.targetExceededReason }),
       truncatedSegments: snapshot.budget.truncatedSegments,
       completenessStatus: snapshot.completeness.status,
       blockingGaps: snapshot.completeness.gaps,
@@ -642,6 +636,7 @@ export async function workflowMaterial(
         },
       },
       eventSources,
+      budgetRenderers: options.pkg ?? PRODUCTION_PACKAGE,
       projectRulesMaterial,
       tool: source.pending.tool,
       arguments: source.pending.arguments,
@@ -689,6 +684,15 @@ export async function workflowMaterial(
       promptFingerprint: digestOf({ protocol, request }),
       estimatedInputTokens: request.estimatedInputTokens,
       maxInputTokens: snapshot.budget.maxInputTokens,
+      ...(snapshot.budget.targetInputTokens === undefined
+        ? {}
+        : { targetInputTokens: snapshot.budget.targetInputTokens }),
+      ...(snapshot.budget.baseInputTokens === undefined
+        ? {}
+        : { baseInputTokens: snapshot.budget.baseInputTokens }),
+      ...(snapshot.budget.targetExceededReason === undefined
+        ? {}
+        : { targetExceededReason: snapshot.budget.targetExceededReason }),
       truncatedSegments: snapshot.budget.truncatedSegments,
       completenessStatus: snapshot.completeness.status,
       blockingGaps: snapshot.completeness.gaps,

@@ -205,7 +205,7 @@ export interface CompletenessParts {
   readonly note: string | null;
   readonly blocking_gaps: ReviewSnapshot['completeness']['gaps'];
   readonly missing_input: readonly string[];
-  readonly budget: {
+  readonly budget?: {
     readonly max_input_tokens: number;
     readonly estimated_input_tokens: number;
     readonly truncated_segments: readonly string[];
@@ -219,11 +219,15 @@ export function completenessParts(snapshot: ReviewSnapshot): CompletenessParts {
     note: snapshot.completeness.note,
     blocking_gaps: snapshot.completeness.gaps,
     missing_input: snapshot.missing,
-    budget: {
-      max_input_tokens: snapshot.budget.maxInputTokens,
-      estimated_input_tokens: snapshot.budget.estimatedInputTokens,
-      truncated_segments: snapshot.budget.truncatedSegments,
-    },
+    ...(snapshot.budget.targetInputTokens === undefined
+      ? {
+          budget: {
+            max_input_tokens: snapshot.budget.maxInputTokens,
+            estimated_input_tokens: snapshot.budget.estimatedInputTokens,
+            truncated_segments: snapshot.budget.truncatedSegments,
+          },
+        }
+      : {}),
     action_truncated: snapshot.action.truncated ?? null,
   };
 }

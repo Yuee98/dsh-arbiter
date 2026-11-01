@@ -20,7 +20,9 @@ import {
 } from './history-record.js';
 import type { HostEnvironment } from './types.js';
 import type { HistorySourceState, PriorVerdictItem } from '../types.js';
-import type { SessionEventLike } from '../snapshot.js';
+import type { SessionEventLike, SessionLike } from '../snapshot.js';
+import { readSessionLog } from '../snapshot/log.js';
+import { SOURCE_BYTE_LIMIT, sourceBytes } from '../snapshot/source-guard.js';
 import { recordOf } from '../records.js';
 
 /** The time an explicit reset record carries, or `null` when it has none. */
@@ -79,6 +81,7 @@ interface StoredStage {
 
 /** What one source could contribute to a recovery read. */
 export interface SourceRead {
+  readonly barrierUnknown?: boolean;
   readonly items: readonly PriorVerdictItem[];
   readonly unavailable: string | null;
   /**
@@ -126,6 +129,35 @@ export function unavailableSource(reason: string): SourceRead {
   return { items: [], unavailable: reason };
 }
 
+/** A native range where supported; otherwise bounded processing of the host snapshot. */
+export function historyEvents(session: SessionLike): {
+  readonly events: readonly SessionEventLike[];
+  readonly stopped: boolean;
+  readonly guarded: boolean;
+  readonly reason: string | null;
+} {
+  const log = readSessionLog(session);
+  let from = log.own.length;
+  let bytes = 0;
+  for (let at = log.own.length - 1; at >= 0; at -= 1) {
+    const event = log.own[at];
+    bytes += sourceBytes(event, SOURCE_BYTE_LIMIT - bytes);
+    if (bytes > SOURCE_BYTE_LIMIT) break;
+    from = at;
+  }
+  const stopped = log.coverage?.stopped === true || from > 0 || !log.readable;
+  return {
+    events: log.own.slice(from),
+    guarded: log.readable && (log.coverage?.stopped === true || from > 0),
+    stopped,
+    reason: !log.readable
+      ? log.error
+      : stopped
+        ? 'prior verdict source read protection stopped before older events; older reset coverage is unknown'
+        : null,
+  };
+}
+
 /**
  * Read this session's decision records, and its reset barrier if it has one.
  *
@@ -154,14 +186,8 @@ export function readSession(
   if (typeof session.snapshotEvents !== 'function') {
     return unavailableSource('the session exposes no readable event log');
   }
-  let events: readonly SessionEventLike[];
-  try {
-    events = session.snapshotEvents();
-  } catch (error) {
-    return unavailableSource(
-      error instanceof Error ? error.message : String(error),
-    );
-  }
+  const captured = historyEvents(session);
+  const events = captured.events;
   const scan = scanDecisionRecords(events, limit);
   if (scan.resetAt !== null) {
     // A stored barrier may be older than one this runtime already applied. The
@@ -173,8 +199,10 @@ export function readSession(
     }
   }
   return {
+    barrierUnknown: captured.guarded && scan.resetAt === null,
     items: scan.items,
-    unavailable: null,
+    unavailable:
+      captured.guarded && scan.resetAt !== null ? null : captured.reason,
     overflow: scan.truncated,
     invalid: scan.invalid,
     excluded: scan.bypassed,

@@ -391,6 +391,18 @@
               }
             }
           }
+        },
+        "targetInputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "baseInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "targetExceededReason": {
+          "enum": ["base-input", "hard-degradation"]
         }
       }
     }

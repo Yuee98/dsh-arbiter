@@ -18,11 +18,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ArbiterConfig, SnapshotMaterial } from '../types.js';
 
-const PROJECT_RULES_LIMIT = 2_000;
-const CUSTOM_RULES_LIMIT = 2_000;
-/** The two guidance sources share this combined ceiling. */
-const GUIDANCE_LIMIT = 3_000;
-
 export interface ProjectRulesResult {
   readonly text: string | null;
   readonly material: SnapshotMaterial;
@@ -45,7 +40,6 @@ function absentProjectRules(
       enabled,
       present: false,
       chars,
-      limit: PROJECT_RULES_LIMIT,
       truncated,
       ...(path === undefined ? {} : { path }),
     },
@@ -83,7 +77,6 @@ export async function readProjectRulesSource(
           enabled: true,
           present: false,
           chars: 0,
-          limit: PROJECT_RULES_LIMIT,
           truncated: false,
           path: file,
         },
@@ -91,7 +84,7 @@ export async function readProjectRulesSource(
         unreadable: true,
       };
     }
-    const truncated = text.length > PROJECT_RULES_LIMIT;
+    const truncated = false;
     return {
       text,
       material: {
@@ -99,7 +92,6 @@ export async function readProjectRulesSource(
         enabled: true,
         present: true,
         chars: text.length,
-        limit: PROJECT_RULES_LIMIT,
         truncated,
         path: file,
       },
@@ -120,85 +112,45 @@ export interface GuidanceResult {
   readonly materials: readonly SnapshotMaterial[];
 }
 
-function customRulesMaterial(
-  submittedChars: number,
-  truncated: boolean,
-): SnapshotMaterial {
-  return {
-    id: 'custom-rules',
-    enabled: true,
-    present: submittedChars > 0,
-    chars: submittedChars,
-    limit: CUSTOM_RULES_LIMIT,
-    truncated,
-  };
-}
-
-function projectMaterial(
-  material: SnapshotMaterial,
-  submittedChars: number,
-  truncated: boolean,
-): SnapshotMaterial {
-  return {
-    ...material,
-    present: material.present && submittedChars > 0,
-    chars: submittedChars,
-    truncated: material.truncated || truncated,
-  };
-}
-
-/**
- * Apply the per-source caps and the shared guidance ceiling.
- *
- * CUSTOM_RULES yields first: it is user-global, while PROJECT_RULES is scoped to
- * this workspace and is the more specific instruction for this call.
- */
+/** Guidance remains whole until the shared T/H budget is applied. */
 export function guidanceMaterials(
   customRulesRaw: string,
   project: ProjectRulesResult,
   redactor?: CredentialRedactor,
 ): GuidanceResult {
-  customRulesRaw = redactor?.text(customRulesRaw) ?? customRulesRaw;
-  const customCut = customRulesRaw.length > CUSTOM_RULES_LIMIT;
-  const customRules = customRulesRaw.slice(0, CUSTOM_RULES_LIMIT);
-  const projectSource = project.text;
-  if (projectSource === null) {
-    return {
-      customRules,
-      projectText: null,
-      materials: [
-        project.material,
-        customRulesMaterial(customRules.length, customCut),
-      ],
-    };
-  }
-  const room = Math.max(0, GUIDANCE_LIMIT - customRules.length);
-  const ceilingCut = projectSource.length > room;
-  const projectText = ceilingCut ? projectSource.slice(0, room) : projectSource;
+  const customRules = redactor?.text(customRulesRaw) ?? customRulesRaw;
+  const projectText =
+    project.text === null
+      ? null
+      : (redactor?.text(project.text) ?? project.text);
+  const { limit: _oldLimit, ...material } = project.material;
   return {
     customRules,
-    projectText: projectText.length === 0 ? null : projectText,
+    projectText,
     materials: [
-      projectMaterial(project.material, projectText.length, ceilingCut),
-      customRulesMaterial(customRules.length, customCut),
+      { ...material, chars: projectText?.length ?? 0 },
+      {
+        id: 'custom-rules',
+        enabled: true,
+        present: customRules.length > 0,
+        chars: customRules.length,
+        truncated: false,
+      },
     ],
   };
 }
 
-/** Bound the already-redacted source, never a raw credential fragment. */
+/** Copy after common discovery; the token budget alone selects guidance. */
 export function projectRulesCopy(
   source: ProjectRulesResult,
   redactor?: CredentialRedactor,
 ): ProjectRulesResult {
-  if (source.text === null) return source;
-  const text = redactor?.text(source.text) ?? source.text;
+  const text =
+    source.text === null ? null : (redactor?.text(source.text) ?? source.text);
+  const { limit: _oldLimit, ...material } = source.material;
   return {
     ...source,
-    text: text.slice(0, PROJECT_RULES_LIMIT),
-    material: {
-      ...source.material,
-      chars: Math.min(text.length, PROJECT_RULES_LIMIT),
-      truncated: text.length > PROJECT_RULES_LIMIT,
-    },
+    text,
+    material: { ...material, chars: text?.length ?? 0 },
   };
 }

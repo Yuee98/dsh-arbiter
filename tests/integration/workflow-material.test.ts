@@ -25,6 +25,7 @@ const config = {
   ...DEFAULT_CONFIG,
   context: {
     ...DEFAULT_CONFIG.context,
+    targetInputTokens: 100_000,
     maxInputTokens: 100_000,
     projectRules: { ...DEFAULT_CONFIG.context.projectRules, enabled: false },
   },
@@ -52,7 +53,7 @@ describe('real grouped workflow source -> production material', () => {
       const root={...original,events:original.events.map((event)=>event.eventId==='request'?{...event,content:'password=process-stable-credential; inspect /tmp/output'}:event)};
       const dataset=await loadWorkflow(root,{}, {references:false});
       if(dataset.problems.length) throw new Error('invalid process fixture');
-      const config={...DEFAULT_CONFIG,context:{...DEFAULT_CONFIG.context,maxInputTokens:100000,projectRules:{...DEFAULT_CONFIG.context.projectRules,enabled:false}}};
+      const config={...DEFAULT_CONFIG,context:{...DEFAULT_CONFIG.context,targetInputTokens:100000,maxInputTokens:100000,projectRules:{...DEFAULT_CONFIG.context.projectRules,enabled:false}}};
       const material=await workflowMaterial(dataset,root.rootId,'format-clean','chat',{config,configRevision:'fixture'});
       const changed={...root,events:root.events.map((event)=>event.eventId==='request'?{...event,content:'password=another-process-credential; inspect /tmp/output'}:event)};
       const changedDataset=await loadWorkflow(changed,{}, {references:false});

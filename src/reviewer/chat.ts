@@ -40,10 +40,12 @@ import {
 } from './llm.js';
 import { normalizeUsage } from './usage.js';
 import { CHAT_PROTOCOL } from './contract.js';
-import type { ChatRequest } from './prompt.js';
+import { estimateChatInput, type ChatRequest } from './prompt.js';
 import { readChatAnswer, type ParsedAnswer } from './signals.js';
 
 export interface ChatTransportContext {
+  readonly maxInputTokens?: number;
+  readonly onPresendRefused?: (attemptNumber: number) => void;
   readonly redactor?: CredentialRedactor;
   readonly llm: LlmLike;
   readonly session?: SessionLike;
@@ -294,6 +296,41 @@ function transportFailure(parts: {
   };
 }
 
+function measuredChatRequest(
+  request: ChatRequest,
+  messages: StreamOptionsLike['messages'],
+  redactor: CredentialRedactor,
+): ChatRequest {
+  const retained = retainedChatRequest(request, redactor);
+  const current = {
+    ...retained,
+    estimatedInputTokens: estimateChatInput(retained.system, messages),
+  };
+  bindPreparedReviewRequest(
+    current,
+    redactor,
+    () => ({
+      ...retainedChatRequest(request, redactor),
+      estimatedInputTokens: current.estimatedInputTokens,
+    }),
+    retained,
+    preparedScoreMode(request, redactor, 'chat'),
+  );
+  return current;
+}
+
+function enforceInputLimit(
+  ctx: ChatTransportContext,
+  tokens: number,
+  attempt: number,
+): void {
+  if (ctx.maxInputTokens === undefined || tokens <= ctx.maxInputTokens) return;
+  ctx.onPresendRefused?.(attempt);
+  throw new RangeError(
+    `refusing to send ${String(tokens)} input tokens: above the context hard limit ${String(ctx.maxInputTokens)}`,
+  );
+}
+
 export async function runChatTransport(
   ctx: ChatTransportContext,
   request: ChatRequest,
@@ -323,12 +360,13 @@ export async function runChatTransport(
   const maxAttempts = 1 + ctx.chat.maxRepairRetries;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
-    const current = retainedChatRequest(request, redactor);
     const messages = preparedChatMessages(request, repair, redactor);
+    const current = measuredChatRequest(request, messages, redactor);
     const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
     const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
     const options = streamOptions(route, current, messages, ctx, attemptSignal);
     try {
+      enforceInputLimit(ctx, current.estimatedInputTokens, attempt + 1);
       const collected = await collectChatText(ctx.llm.stream(options));
       const answer = readAnswer(collected.text);
       redactor.discover(

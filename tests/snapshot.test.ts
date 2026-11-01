@@ -399,9 +399,6 @@ describe('authorization evidence sources', () => {
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          evidenceMaxItems: 5,
-          parentHumanItems: 3,
-          parentEvidenceFloor: 1,
         },
       },
     });
@@ -490,7 +487,7 @@ describe('guidance materials', () => {
     );
   });
 
-  test('project rules over the cap are recorded as truncated', async () => {
+  test('project rules above the retired character cap remain whole', async () => {
     const cwd = await workspace({ '.arbiter.md': 'x'.repeat(2_500) });
     const main = session('main', [human(1, 1, 'clean the build')]);
     const built = await buildReviewSnapshot({
@@ -499,11 +496,12 @@ describe('guidance materials', () => {
       cwd,
       config: DEFAULT_CONFIG,
     });
-    expect(built.snapshot.projectRules).toHaveLength(2_000);
+    expect(built.snapshot.projectRules).toHaveLength(2_500);
     const material = built.snapshot.materials.find(
       (entry) => entry.id === 'project-rules',
     );
-    expect(material?.truncated).toBe(true);
+    expect(material?.truncated).toBe(false);
+    expect(material?.limit).toBeUndefined();
     expect(material?.path).toBe('.arbiter.md');
   });
 
@@ -522,7 +520,11 @@ describe('guidance materials', () => {
     const material = built.snapshot.materials.find(
       (entry) => entry.id === 'custom-rules',
     );
-    expect(material).toMatchObject({ present: true, chars: 11, limit: 2_000 });
+    expect(material).toMatchObject({
+      present: true,
+      chars: 11,
+      truncated: false,
+    });
     // User-authored rules travel as labelled user material, never as system text.
     expect(built.system).not.toContain('prefer pnpm');
     expect(built.user).toContain('CUSTOM_RULES');
@@ -560,7 +562,11 @@ describe('truncation as an input fact', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 2_000,
+          maxInputTokens: 2_000,
+        },
       },
     });
     const truncated = built.snapshot.action.truncated;
@@ -591,7 +597,11 @@ describe('truncation as an input fact', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_400 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 2_400,
+          maxInputTokens: 2_400,
+        },
       },
     });
     expect(built.snapshot.budget.truncatedSegments).toContain('EVIDENCE');
@@ -614,7 +624,11 @@ describe('truncation as an input fact', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 2_000,
+          maxInputTokens: 2_000,
+        },
       },
     });
     const feedback = truncationFeedback(built.snapshot);
@@ -770,7 +784,11 @@ describe('budget and configuration edges', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 1_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 1_000,
+          maxInputTokens: 1_000,
+        },
       },
     });
     // The fixed contract alone exceeds 1,000 tokens: the snapshot says so.
@@ -789,7 +807,11 @@ describe('budget and configuration edges', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, maxInputTokens: 2_000 },
+        context: {
+          ...DEFAULT_CONFIG.context,
+          targetInputTokens: 2_000,
+          maxInputTokens: 2_000,
+        },
       },
     });
     // One submitted program body: both copies are the trimmed head, so the
@@ -825,8 +847,6 @@ describe('budget and configuration edges', () => {
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          parentHumanItems: 0,
-          parentEvidenceFloor: 0,
         },
       },
     });
@@ -857,9 +877,6 @@ describe('budget and configuration edges', () => {
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          evidenceMaxItems: 1,
-          parentHumanItems: 5,
-          parentEvidenceFloor: 5,
         },
       },
     });
@@ -980,7 +997,7 @@ describe('budget and configuration edges', () => {
     ]);
   });
 
-  test('the two guidance sources share the 3,000 character ceiling', async () => {
+  test('the two guidance sources have no combined character ceiling', async () => {
     const cwd = await workspace({ '.dsh/arbiter.md': 'p'.repeat(2_000) });
     const main = session('main', [human(1, 1, 'clean the build')]);
     const built = await buildReviewSnapshot({
@@ -993,11 +1010,9 @@ describe('budget and configuration edges', () => {
       },
     });
     const project = built.snapshot.projectRules ?? '';
-    expect(
-      built.snapshot.customRules.length + project.length,
-    ).toBeLessThanOrEqual(3_000);
+    expect(built.snapshot.customRules.length + project.length).toBe(4_000);
     expect(built.snapshot.customRules.length).toBe(2_000);
-    expect(project.length).toBe(1_000);
+    expect(project.length).toBe(2_000);
   });
 });
 
@@ -1190,7 +1205,7 @@ describe('reopened review findings', () => {
     }
   });
 
-  test('the shared ceiling is reflected in the project-rules material', async () => {
+  test('guidance metadata describes whole material without a retired ceiling', async () => {
     const cwd = await workspace({ '.dsh/arbiter.md': 'p'.repeat(2_000) });
     const main = session('main', [human(1, 1, 'clean the build')]);
     const built = await buildReviewSnapshot({
@@ -1206,16 +1221,17 @@ describe('reopened review findings', () => {
       (entry) => entry.id === 'project-rules',
     );
     // chars/truncated describe the submitted text, not the 2,000-char file.
-    expect(material?.chars).toBe(1_000);
-    expect(material?.truncated).toBe(true);
-    expect((built.snapshot.projectRules ?? '').length).toBe(1_000);
+    expect(material?.chars).toBe(2_000);
+    expect(material?.truncated).toBe(false);
+    expect(material?.limit).toBeUndefined();
+    expect((built.snapshot.projectRules ?? '').length).toBe(2_000);
     // Both backends and the audit copy read the same structure, so the metadata
     // cannot drift between the rendered request and the persisted snapshot.
     const request = renderChatRequest(built.snapshot);
     const state = renderDecisionState(request.user);
     for (const text of [request.user, state]) {
-      expect(text).toContain('"chars": 1000');
-      expect(text).toContain('"truncated": true');
+      expect(text).toContain('"chars": 2000');
+      expect(text).toContain('"truncated": false');
     }
     // The reduction is a configuration-material cut, not lost input: it is not
     // reported as a missing authorization source or as an input-budget trim.
@@ -1243,8 +1259,6 @@ describe('reopened review findings', () => {
         ...DEFAULT_CONFIG,
         context: {
           ...DEFAULT_CONFIG.context,
-          historyMaxItems: 400,
-          evidenceMaxItems: 200,
           maxInputTokens: 40_000,
         },
       },
@@ -1328,7 +1342,7 @@ describe('third-round review findings', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 0 },
+        context: { ...DEFAULT_CONFIG.context },
       },
     });
     expect(built.snapshot.checkpoints).toEqual([{ ts: 3, text: 'summary 2' }]);
@@ -1355,7 +1369,7 @@ describe('third-round review findings', () => {
       cwd,
       config: {
         ...DEFAULT_CONFIG,
-        context: { ...DEFAULT_CONFIG.context, checkpointMaxItems: 2 },
+        context: { ...DEFAULT_CONFIG.context },
       },
     });
     expect(built.snapshot.checkpoints).toHaveLength(1);
@@ -1392,7 +1406,11 @@ describe('third-round review findings', () => {
         cwd,
         config: {
           ...DEFAULT_CONFIG,
-          context: { ...DEFAULT_CONFIG.context, maxInputTokens: budget },
+          context: {
+            ...DEFAULT_CONFIG.context,
+            targetInputTokens: budget,
+            maxInputTokens: budget,
+          },
         },
       });
       const segments = built.snapshot.budget.truncatedSegments;

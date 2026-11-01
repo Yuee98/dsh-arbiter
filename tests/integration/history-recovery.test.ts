@@ -257,6 +257,10 @@ interface HostHarness {
     readonly reset: boolean;
     readonly reason: string | null;
   };
+  readonly cacheCopies: () => readonly (readonly [
+    string,
+    readonly PriorVerdictItem[],
+  ])[];
   readonly dispose: () => Promise<void>;
 }
 
@@ -444,6 +448,7 @@ async function harness(options: {
   await settleRecords();
   return {
     ctx,
+    cacheCopies: () => [...applied.runtime.priorVerdicts],
     sessions: options.sessions,
     captured,
     /**
@@ -1043,7 +1048,7 @@ describe('window, ordering and identity', () => {
     }
   });
 
-  test('five distinct denials in a window of two are reported as truncated', async () => {
+  test('retired historyMaxItems does not truncate five distinct denials', async () => {
     const session = makeSession('session-1');
     const base = recent(-50_000);
     // Distinct logical calls, all eligible. The window keeps the newest two and
@@ -1077,9 +1082,15 @@ describe('window, ordering and identity', () => {
     });
     try {
       await probe(host, session);
-      expect(windowOf(host)).toEqual(['deny-4', 'deny-3']);
-      // The three dropped calls are a real cut, not a normal full window.
-      expect(submittedHistoryBlock(host).truncated).toBe(true);
+      expect(windowOf(host)).toEqual([
+        'deny-4',
+        'deny-3',
+        'deny-2',
+        'deny-1',
+        'deny-0',
+      ]);
+      // The old count setting no longer cuts the candidate population.
+      expect(submittedHistoryBlock(host).truncated).toBe(false);
     } finally {
       await host.dispose();
     }
@@ -1129,7 +1140,7 @@ describe('window, ordering and identity', () => {
     }
   });
 
-  test('a window smaller than the population keeps the newest calls in both paths', async () => {
+  test('old count settings preserve the same complete population in live and recovered paths', async () => {
     const session = makeSession('session-1', []);
     const windowConfig = (base: Readonly<Record<string, unknown>>): unknown =>
       denyRuleConfig((inner) => ({
@@ -1147,9 +1158,15 @@ describe('window, ordering and identity', () => {
       }
       await probe(live, session);
       // The probe was allowed by the review, so it is not a prior verdict; the
-      // three slots hold the three newest denials and the older two are cut.
-      expect(windowOf(live)).toEqual(['call-4', 'call-3', 'call-2']);
-      expect(submittedHistoryBlock(live).truncated).toBe(true);
+      // retired three-slot setting no longer cuts the five readable denials.
+      expect(windowOf(live)).toEqual([
+        'call-4',
+        'call-3',
+        'call-2',
+        'call-1',
+        'call-0',
+      ]);
+      expect(submittedHistoryBlock(live).truncated).toBe(false);
     } finally {
       await live.dispose();
     }
@@ -1160,9 +1177,14 @@ describe('window, ordering and identity', () => {
     });
     try {
       await probe(recovered, session);
-      // Recovery applies the same capacity rule to the same population, so the
-      // restart does not widen the window back to the older calls.
-      expect(windowOf(recovered)).toEqual(['call-4', 'call-3', 'call-2']);
+      // Recovery sees the same full population under the same read contract.
+      expect(windowOf(recovered)).toEqual([
+        'call-4',
+        'call-3',
+        'call-2',
+        'call-1',
+        'call-0',
+      ]);
     } finally {
       await recovered.dispose();
     }
@@ -1621,7 +1643,7 @@ describe('gaps, resets and bounded reads', () => {
     }
   });
 
-  test('a capacity increase selects the older candidates it can still read', async () => {
+  test('changing retired capacity leaves older readable candidates available', async () => {
     const session = makeSession('session-1');
     for (let index = 0; index < 4; index += 1) {
       seedDecision(
@@ -1650,12 +1672,11 @@ describe('gaps, resets and bounded reads', () => {
     });
     try {
       await probe(narrow, session);
-      expect(windowOf(narrow)).toEqual(['cap-3', 'cap-2']);
+      expect(windowOf(narrow)).toEqual(['cap-3', 'cap-2', 'cap-1', 'cap-0']);
     } finally {
       await narrow.dispose();
     }
-    // A larger window on a fresh runtime backfills what the sources can still
-    // supply, rather than keeping the previous runtime's narrower selection.
+    // Changing a retired window field leaves the readable population unchanged.
     const wide = await harness({
       sessions: new Map([['session-1', session]]),
       profile: 'wide',
@@ -2469,7 +2490,7 @@ describe('recovery never changes the candidate window or overwrites newer state'
     }
   });
 
-  test('a shrinking capacity window keeps the newest verdicts and says it truncated', async () => {
+  test('retired shrinking capacity does not trim recovered verdicts', async () => {
     const session = makeSession('session-1');
     await seedAudit([
       verdictRecord('c1', recent(0), 'deny'),
@@ -2487,9 +2508,9 @@ describe('recovery never changes the candidate window or overwrites newer state'
     });
     try {
       await probe(host, session);
-      expect(windowOf(host)).toEqual(['c4', 'c3']);
-      // A cut window is a normal budget fact, reported as truncation.
-      expect(submittedHistoryBlock(host).truncated).toBe(true);
+      expect(windowOf(host)).toEqual(['c4', 'c3', 'c2', 'c1']);
+      // No token cut occurred, and the retired count cannot fabricate one.
+      expect(submittedHistoryBlock(host).truncated).toBe(false);
       expect(submittedHistoryBlock(host).missing.join(' ')).not.toContain(
         'incomplete',
       );
@@ -2497,4 +2518,160 @@ describe('recovery never changes the candidate window or overwrites newer state'
       await host.dispose();
     }
   });
+});
+
+describe('candidate cache resources remain independent of prompt settings', () => {
+  function cacheSize(host: HostHarness) {
+    const copies = host.cacheCopies();
+    return {
+      count: copies.reduce((sum, [, items]) => sum + items.length, 0),
+      bytes: copies.reduce(
+        (sum, [, items]) => sum + Buffer.byteLength(JSON.stringify(items)),
+        0,
+      ),
+      sessions: copies.length,
+    };
+  }
+  test('session and total entry eviction refill from the unchanged source', async () => {
+    const sessions = new Map<string, TestSession>();
+    for (let s = 0; s < 5; s += 1) {
+      const id = `resource-${String(s)}`;
+      const session = makeSession(id);
+      for (let i = 0; i < 4200; i += 1)
+        seedDecision(
+          session,
+          {
+            version: 2,
+            callId: `${id}-${String(i)}`,
+            tool: 'bash',
+            fingerprint: 'fixture',
+            trace: ['deny'],
+            result: 'deny',
+            configRevision: 'test',
+            ts: i,
+          },
+          i,
+        );
+      sessions.set(id, session);
+    }
+    const host = await harness({
+      sessions,
+      auditDisabled: true,
+      config: denyRuleConfig((base) => ({
+        ...base,
+        audit: { enabled: false },
+        context: { historyMaxItems: 1 },
+        breaker: { mode: 'off' },
+      })),
+    });
+    try {
+      const first = host.window('resource-0');
+      expect(first).toHaveLength(4200);
+      expect(
+        host.cacheCopies().find(([id]) => id === 'resource-0')?.[1],
+      ).toHaveLength(4096);
+      for (let s = 1; s < 5; s += 1)
+        expect(host.window(`resource-${String(s)}`)).toHaveLength(4200);
+      expect(cacheSize(host).count).toBeLessThanOrEqual(16384);
+      expect(host.cacheCopies().some(([id]) => id === 'resource-0')).toBe(
+        false,
+      );
+      const sourceCount = sessions.get('resource-0')?.snapshotEvents().length;
+      expect(host.window('resource-0')).toEqual(first);
+      expect(sessions.get('resource-0')?.snapshotEvents()).toHaveLength(
+        sourceCount ?? 0,
+      );
+      expect(host.resetStatus('resource-0').coverage).toBe('partial');
+      expect(cacheSize(host).count).toBeLessThanOrEqual(16384);
+    } finally {
+      await host.dispose();
+    }
+  });
+  test('actual serialized byte capacity evicts copies and permits a bounded refill', async () => {
+    const sessions = new Map<string, TestSession>();
+    for (let s = 0; s < 5; s += 1) {
+      const id = `byte-${String(s)}`;
+      const session = makeSession(id);
+      for (let i = 0; i < 200; i += 1)
+        seedDecision(
+          session,
+          {
+            version: 2,
+            callId: `${id}-${String(i)}`,
+            tool: 'bash',
+            fingerprint: 'fixture',
+            trace: ['deny'],
+            result: 'deny',
+            reason: `source ${String(s)} ${'observed '.repeat(8750)}`,
+            configRevision: 'test',
+            ts: i,
+          },
+          i,
+        );
+      sessions.set(id, session);
+    }
+    const host = await harness({
+      sessions,
+      auditDisabled: true,
+      config: denyRuleConfig((base) => ({
+        ...base,
+        audit: { enabled: false },
+        breaker: { mode: 'off' },
+      })),
+    });
+    try {
+      for (let s = 0; s < 5; s += 1)
+        expect(host.window(`byte-${String(s)}`)).toHaveLength(200);
+      const size = cacheSize(host);
+      expect(size.bytes).toBeLessThanOrEqual(64 * 1024 * 1024);
+      expect(size.count).toBeLessThan(1000);
+      expect(host.cacheCopies().some(([id]) => id === 'byte-0')).toBe(false);
+      expect(host.window('byte-0')).toHaveLength(200);
+      expect(cacheSize(host).bytes).toBeLessThanOrEqual(64 * 1024 * 1024);
+    } finally {
+      await host.dispose();
+    }
+  }, 15000);
+});
+
+test('read protection with an unknown old reset does not resurrect older audit rows', async () => {
+  const session = makeSession('session-1');
+  seedDecision(
+    session,
+    {
+      version: 2,
+      callId: 'withdrawn-before-bound',
+      tool: 'bash',
+      fingerprint: 'old',
+      trace: ['deny'],
+      result: 'deny',
+      configRevision: 'old',
+      ts: recent(-1000),
+    },
+    recent(-1000),
+  );
+  session.append('plugin:arbiter/history-reset', {
+    version: 1,
+    at: recent(-500),
+  });
+  for (let index = 0; index < 16400; index += 1)
+    session.append('tool/call', {
+      callId: `traffic-${String(index)}`,
+      name: 'bash',
+      arguments: '{}',
+    });
+  await seedAudit([
+    verdictRecord('withdrawn-before-bound', recent(-1000), 'deny'),
+  ]);
+  const host = await harness({
+    sessions: new Map([['session-1', session]]),
+    config: denyRuleConfig((base) => ({ ...base, rules: [] })),
+  });
+  try {
+    expect(host.window('session-1')).toEqual([]);
+    expect(host.resetStatus('session-1').coverage).toBe('partial');
+    expect(host.resetStatus('session-1').reason).toContain('read protection');
+  } finally {
+    await host.dispose();
+  }
 });

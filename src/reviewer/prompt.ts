@@ -27,6 +27,7 @@
 
 import { estimateTokenCount } from 'tokenx';
 import type { ReviewSnapshot } from '../types.js';
+import type { StreamOptionsLike } from './llm.js';
 import { CHAT_ANSWER_FORMAT, REVIEW_CONTRACT, scaleText } from './contract.js';
 import { renderMaterial } from './material.js';
 import { buildQuestions } from './questions.js';
@@ -66,6 +67,25 @@ export interface DecisionRequest {
   readonly estimatedInputTokens: number;
 }
 
+/** Estimate every actual chat message, including a repair message. */
+export function estimateChatInput(
+  system: string,
+  messages: StreamOptionsLike['messages'],
+): number {
+  return (
+    estimateTokenCount(system) +
+    messages.reduce(
+      (total, message) =>
+        total +
+        message.content.reduce(
+          (sum, part) => sum + estimateTokenCount(part.text),
+          0,
+        ),
+      0,
+    )
+  );
+}
+
 /**
  * The decision contract: the shared text plus what a native endpoint needs said.
  *
@@ -86,6 +106,13 @@ export function renderChatSystem(): string {
   return [REVIEW_CONTRACT, scaleText(), CHAT_ANSWER_FORMAT].join('\n\n');
 }
 
+// These protocol constants have no runtime inputs. Cache only their estimates;
+// requests still carry their own text/question objects, including repair inputs.
+const CHAT_SYSTEM_TOKENS = estimateTokenCount(renderChatSystem());
+const DECISION_QUESTION_TOKENS = estimateTokenCount(
+  JSON.stringify(buildQuestions()),
+);
+
 /** The chat user message: the whole submission, in the one shared order. */
 export function renderChatUser(snapshot: ReviewSnapshot): string {
   return renderMaterial(snapshot);
@@ -103,7 +130,7 @@ export function renderChatRequest(snapshot: ReviewSnapshot): ChatRequest {
   return {
     system,
     user,
-    estimatedInputTokens: estimateTokenCount(system) + estimateTokenCount(user),
+    estimatedInputTokens: CHAT_SYSTEM_TOKENS + estimateTokenCount(user),
   };
 }
 
@@ -120,8 +147,7 @@ export function renderDecisionRequest(material: string): DecisionRequest {
   return {
     state,
     questions,
-    estimatedInputTokens:
-      estimateTokenCount(state) + estimateTokenCount(JSON.stringify(questions)),
+    estimatedInputTokens: estimateTokenCount(state) + DECISION_QUESTION_TOKENS,
   };
 }
 
@@ -221,7 +247,9 @@ export function renderVariantChatRequest(
   return {
     system,
     user,
-    estimatedInputTokens: estimateTokenCount(system) + estimateTokenCount(user),
+    estimatedInputTokens: estimateChatInput(system, [
+      { role: 'user', content: [{ type: 'text', text: user }] },
+    ]),
   };
 }
 
