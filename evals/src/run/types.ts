@@ -147,7 +147,10 @@ export interface RunPlan {
   readonly targets: readonly RunTarget[];
   readonly repeats: number;
   readonly bounds: RunBounds;
-  readonly context: { readonly maxInputTokens: number };
+  readonly context: {
+    readonly maxInputTokens: number;
+    readonly targetInputTokens?: number;
+  };
   readonly fixture: string | null;
   /**
    * The package variant this plan measures, as its own axes.
@@ -235,6 +238,9 @@ export interface CellEntryPoint {
 
 /** What the reviewer was given, and the fingerprints that identify it. */
 export interface CellMaterial {
+  readonly targetInputTokens?: number;
+  readonly baseInputTokens?: number;
+  readonly targetExceededReason?: 'base-input' | 'hard-degradation';
   /** The same canonical digest a label is approved against. */
   readonly inputHash: string;
   /**

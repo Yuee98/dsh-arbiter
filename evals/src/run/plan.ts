@@ -94,6 +94,22 @@ export function planProblems(
     const selected = options.resolvedCases ?? (plan.caseIds ?? []).length;
     if (selected === 0) problems.push('the plan selects no case');
   }
+  const context = plan.context;
+  const target =
+    context.targetInputTokens ?? Math.min(6_000, context.maxInputTokens);
+  if (
+    !Number.isSafeInteger(context.maxInputTokens) ||
+    context.maxInputTokens < 1
+  )
+    problems.push('context.maxInputTokens must be a positive safe integer');
+  if (
+    !Number.isSafeInteger(target) ||
+    target < 1 ||
+    target > context.maxInputTokens
+  )
+    problems.push(
+      'context.targetInputTokens must be a positive safe integer not exceeding context.maxInputTokens',
+    );
   const bounds = plan.bounds;
   if (bounds.concurrency < 1 || bounds.concurrency > MAX_CONCURRENCY) {
     problems.push(

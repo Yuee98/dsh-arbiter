@@ -6,6 +6,12 @@
 
 **接手这个仓库请先读 [docs/handover.md](docs/handover.md)**：代码地图（按「改什么」组织）、一个调用从 gate 到结算的完整链路、测试分层、常见改动步骤、已知缺口与调试入口。
 
+## 输入预算升级（CW-S07）
+
+生产与评测共用 T/H/C 预算：`context.targetInputTokens` 默认 6000，`context.maxInputTokens` 默认 10000，均为正整数且 T≤H。旧配置缺少 T 时取 `min(6000,H)`；显式非法值拒绝保存。输出 `reviewer.chat.maxTokens` 独立。
+
+旧 `evidenceMaxItems`、`parentHumanItems`、`parentEvidenceFloor`、`historyMaxItems`、`checkpointMaxItems` 和 `toolCallArgumentMaxChars` 在本次升级后停用，读取旧文档时忽略，不转成缓存参数。规则和人类原文取消前置字符截断，也不设最近 N 轮窗口；是否送审由共同预算决定。缓存淘汰只丢副本，来源不可用与预算省略分别记录，已有审计继续按原始送审材料解释。具体见[配置与审计](docs/configuration-and-audit.md)。
+
 ## 首版交付状态（2026-10-26）
 
 **首版验收在基准系统上完成，逐项状态与限制如下。** 前置 21 个叶子 issue（#3–#22）全部合并；本轮在固定 head `3141b88` 及其上的验收分支完成正式插件集成验收。下表只列证据能支持的范围：macOS 以外的平台、decision 真实网络、真实 provider 成功路径、本轮真人点击与 PTC 取消均未运行，不能记为通过。

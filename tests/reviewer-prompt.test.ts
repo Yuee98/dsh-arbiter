@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { estimateTokenCount } from 'tokenx';
 
 import {
   AUTHORIZATION_BANDS,
@@ -21,6 +22,7 @@ import {
 } from '../src/reviewer/contract.js';
 import {
   renderChatRequest,
+  renderChatDecisionPair,
   renderChatSystem,
   renderChatUser,
   renderDecisionRequest,
@@ -400,4 +402,49 @@ describe('the decision request', () => {
       stateOnly.length / 100,
     );
   });
+});
+
+describe('exact production request estimates at material boundaries', () => {
+  test.each([
+    '',
+    ' ',
+    '\n',
+    '\n\nraw material',
+    ' leading space',
+    '# actual material',
+    '中文原文\n保留末尾',
+    '🙂 quoted "material"',
+    '[1,2,{"observed":true}]',
+    '́ combining mark',
+  ])('matches the complete serialized decision for %j', (material) => {
+    const request = renderDecisionRequest(material);
+    expect(request.estimatedInputTokens).toBe(
+      estimateTokenCount(request.state) +
+        estimateTokenCount(JSON.stringify(request.questions)),
+    );
+  });
+
+  test.each([false, true])(
+    'the shared pair preserves actual envelopes (new budget %s)',
+    (current) => {
+      const snapshot = {
+        ...SNAPSHOT,
+        budget: {
+          ...SNAPSHOT.budget,
+          ...(current ? { targetInputTokens: 6000 } : {}),
+        },
+      };
+      const pair = renderChatDecisionPair(snapshot);
+      expect(pair.chat).toEqual(renderChatRequest(snapshot));
+      expect(pair.decision).toEqual(renderDecisionRequest(pair.chat.user));
+      expect(pair.chat.estimatedInputTokens).toBe(
+        estimateTokenCount(pair.chat.system) +
+          estimateTokenCount(pair.chat.user),
+      );
+      expect(pair.decision.estimatedInputTokens).toBe(
+        estimateTokenCount(pair.decision.state) +
+          estimateTokenCount(JSON.stringify(pair.decision.questions)),
+      );
+    },
+  );
 });

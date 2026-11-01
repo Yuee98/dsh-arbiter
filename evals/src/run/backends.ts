@@ -31,7 +31,7 @@ import {
   offlineChatBackend,
   offlineDecisionBackend,
 } from '../../../src/reviewer/offline.js';
-import { estimateTokenCount } from 'tokenx';
+import { estimateChatInput } from '../../../src/reviewer/prompt.js';
 
 import type { LlmLike } from '../../../src/reviewer/llm.js';
 
@@ -195,17 +195,7 @@ function boundedStream(parts: {
 }): LlmLike {
   return {
     stream: (options) => {
-      const tokens =
-        estimateTokenCount(options.system) +
-        options.messages.reduce(
-          (sum, message) =>
-            sum +
-            message.content.reduce(
-              (inner, part) => inner + estimateTokenCount(part.text),
-              0,
-            ),
-          0,
-        );
+      const tokens = estimateChatInput(options.system, options.messages);
       parts.ledger.seen += 1;
       if (tokens > parts.maxInputTokens) {
         // Recorded on the ledger *before* throwing, keyed by the attempt number the transport
@@ -397,7 +387,17 @@ export function backendFor(
       built.backend.kind === 'chat'
         ? {
             kind: 'chat',
-            transport: { ...built.backend.transport, signal: context.signal },
+            transport: {
+              ...built.backend.transport,
+              signal: context.signal,
+              onPresendRefused: (attemptNumber) => {
+                context.ledger.refused.add(attemptNumber);
+                context.ledger.seen = Math.max(
+                  context.ledger.seen,
+                  attemptNumber,
+                );
+              },
+            },
           }
         : {
             kind: 'decision',

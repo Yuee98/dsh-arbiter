@@ -68,84 +68,25 @@ function ContextSettings({
         <Field label={t('advanced.maxInput')}>
           <NumberInput
             value={draft.context.maxInputTokens}
-            min={1000}
-            max={200000}
+            min={1}
+            max={Number.MAX_SAFE_INTEGER}
             onChange={(value) => {
               onDraft((next) => {
                 next.context.maxInputTokens = value;
               });
             }}
-          />
-        </Field>
-        <Field label={t('advanced.evidenceMax')}>
-          <NumberInput
-            value={draft.context.evidenceMaxItems}
-            min={1}
-            max={200}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.evidenceMaxItems = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.parentHuman')}>
-          <NumberInput
-            value={draft.context.parentHumanItems}
-            min={0}
-            max={100}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.parentHumanItems = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.parentFloor')}>
-          <NumberInput
-            value={draft.context.parentEvidenceFloor}
-            min={0}
-            max={100}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.parentEvidenceFloor = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.historyMax')}>
-          <NumberInput
-            value={draft.context.historyMaxItems}
-            min={1}
-            max={400}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.historyMaxItems = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.checkpointMax')}>
-          <NumberInput
-            value={draft.context.checkpointMaxItems}
-            min={0}
-            max={20}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.checkpointMaxItems = value;
-              });
-            }}
-          />
-        </Field>
-        <Field label={t('advanced.argumentMax')}>
-          <NumberInput
-            value={draft.context.toolCallArgumentMaxChars}
-            min={20}
-            max={10000}
-            onChange={(value) => {
-              onDraft((next) => {
-                next.context.toolCallArgumentMaxChars = value;
-              });
+            onBlur={() => {
+              const hard = draft.context.maxInputTokens;
+              // Commit once: intermediate digits must not ratchet the hidden T down.
+              if (
+                Number.isSafeInteger(hard) &&
+                hard > 0 &&
+                draft.context.targetInputTokens > hard
+              ) {
+                onDraft((next) => {
+                  next.context.targetInputTokens = hard;
+                });
+              }
             }}
           />
         </Field>

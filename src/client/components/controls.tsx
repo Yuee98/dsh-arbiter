@@ -84,6 +84,7 @@ export function TextInput(props: {
 export function NumberInput(props: {
   readonly value: number;
   readonly onChange: (value: number) => void;
+  readonly onBlur?: () => void;
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
@@ -111,6 +112,7 @@ export function NumberInput(props: {
       }}
       onBlur={() => {
         setEditingText(null);
+        props.onBlur?.();
       }}
       className={cn(inputClassName, props.className)}
     />

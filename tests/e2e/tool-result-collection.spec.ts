@@ -116,7 +116,7 @@ test('collects unreviewed ls and final outputs, contains storage failures, resto
     arbiterRowConfig: {
       format: 'arbiter-config-v3',
       boundary: 'trusted',
-      context: { maxInputTokens: 50_000 },
+      context: { targetInputTokens: 50_000, maxInputTokens: 50_000 },
       rules: [
         {
           id: 'ls-query',
