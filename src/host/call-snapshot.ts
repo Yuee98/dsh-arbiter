@@ -1,3 +1,6 @@
+import { credentialRegistry } from '../reviewer/credential-registry.js';
+import { workflowRedactor } from '../snapshot/workflow.js';
+import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 /**
  * The gate's bridge to the snapshot builder.
  *
@@ -9,7 +12,11 @@
  * function of what it is given.
  */
 
-import { buildReviewSnapshot, type BuiltSnapshot } from '../snapshot.js';
+import {
+  prepareReviewSnapshot,
+  type BuiltSnapshot,
+  type SessionLike,
+} from '../snapshot.js';
 import type { LlmLike } from '../reviewer.js';
 import type { evaluateCall } from '../rules/match.js';
 import type { StageView } from './stage.js';
@@ -34,6 +41,7 @@ export interface SnapshotCall extends CallContext {
 export interface SnapshotBundle {
   readonly bundle: BuiltSnapshot;
   readonly llm: LlmLike;
+  readonly rebuild: (known?: readonly string[]) => BuiltSnapshot;
 }
 
 /**
@@ -56,29 +64,47 @@ export async function buildCallSnapshot(
       ? path.hint
       : undefined;
   const sessionId = call.session.id;
-  const bundle = await buildReviewSnapshot({
-    agent: call.agent,
-    ...(services.sessions === undefined ? {} : { sessions: services.sessions }),
-    // The host's own turn, from `turn/start`: this call's event is written
-    // after the decision, so the window cannot read it from the log.
-    turn:
-      sessionId === undefined
-        ? null
-        : (runtime.currentTurn.get(sessionId) ?? null),
-    tool: call.exec.name,
-    arguments: call.exec.arguments,
-    callId: call.exec.callId,
-    cwd: call.cwd,
-    // The snapshot must describe the configuration the rule evaluation used, so
-    // a change landing mid-build cannot make the submitted request and the
-    // recorded revision disagree.
-    config: call.view.config,
-    facts: call.evaluation.facts,
-    ...(hint === undefined ? {} : { hint }),
-    priorVerdicts: call.prior,
-    historyStatus: call.historyStatus,
-    sessionRecordGap: runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
-    configRevision: call.view.revision,
-  });
-  return { bundle, llm };
+  const prepared = await prepareReviewSnapshot(
+    {
+      agent: call.agent,
+      ...(services.sessions === undefined
+        ? {}
+        : { sessions: services.sessions }),
+      // The host's own turn, from `turn/start`: this call's event is written
+      // after the decision, so the window cannot read it from the log.
+      turn:
+        sessionId === undefined
+          ? null
+          : (runtime.currentTurn.get(sessionId) ?? null),
+      tool: call.exec.name,
+      arguments: call.exec.arguments,
+      callId: call.exec.callId,
+      cwd: call.cwd,
+      // The snapshot must describe the configuration the rule evaluation used, so
+      // a change landing mid-build cannot make the submitted request and the
+      // recorded revision disagree.
+      config: call.view.config,
+      facts: call.evaluation.facts,
+      ...(hint === undefined ? {} : { hint }),
+      priorVerdicts: call.prior,
+      historyStatus: call.historyStatus,
+      sessionRecordGap:
+        runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
+      configRevision: call.view.revision,
+    },
+    callRedactor(host, call.session),
+  );
+  return { ...prepared, llm };
+}
+
+/** Share only in-memory workflow knowledge with the audit connection's domain. */
+export function callRedactor(
+  host: HostEnvironment,
+  session: SessionLike,
+): CredentialRedactor {
+  return workflowRedactor(
+    session,
+    host.services.sessions,
+    credentialRegistry(host, host.currentAudit()?.databasePath),
+  );
 }

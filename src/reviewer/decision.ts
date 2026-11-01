@@ -26,7 +26,7 @@ import {
 } from './envelope.js';
 import { DECISION_PROTOCOL } from './contract.js';
 import type { DecisionRequest } from './prompt.js';
-import { redact } from './redact.js';
+import { CredentialRedactor } from './credential-redactor.js';
 import { readDecisionAnswer, type ParsedAnswer } from './signals.js';
 import { normalizeUsage } from './usage.js';
 
@@ -34,7 +34,13 @@ interface CredentialsLike {
   resolve(ref: string): Promise<{ readonly value: string } | undefined>;
 }
 
+export type CredentialResolution =
+  | { readonly ok: true; readonly value: string | undefined }
+  | { readonly ok: false; readonly error: string };
+
 export interface DecisionTransportContext {
+  readonly credentialResolution?: CredentialResolution;
+  readonly redactor?: CredentialRedactor;
   readonly fetch: typeof fetch;
   readonly credentials: CredentialsLike | undefined;
   /**
@@ -99,6 +105,11 @@ export interface DecisionTransportResult {
 async function decisionCredential(
   ctx: DecisionTransportContext,
 ): Promise<string | undefined> {
+  if (ctx.credentialResolution !== undefined) {
+    if (!ctx.credentialResolution.ok)
+      throw new Error(ctx.credentialResolution.error);
+    return ctx.credentialResolution.value;
+  }
   if (ctx.decision.apiKeyRef.length === 0) return undefined;
   let credential: string | undefined;
   try {
@@ -117,6 +128,23 @@ async function decisionCredential(
     throw new Error(`credential "${ctx.decision.apiKeyRef}" is not configured`);
   }
   return credential;
+}
+
+/** Capture every outcome once, including missing/throwing lookups. Never serialize it. */
+export async function prepareDecisionCredential(
+  ctx: DecisionTransportContext,
+): Promise<CredentialResolution> {
+  try {
+    return { ok: true, value: await decisionCredential(ctx) };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'decision credential could not be resolved',
+    };
+  }
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -205,9 +233,10 @@ function readResponse(options: {
   readonly base: ReturnType<typeof attemptBase>;
   readonly secrets: readonly string[];
   readonly readAnswer: (body: unknown) => ParsedAnswer;
+  readonly redactor: CredentialRedactor;
 }): DecisionTransportResult {
   const { response, base, secrets } = options;
-  const responseText = redact(options.text, secrets);
+  const responseText = options.redactor.text(options.text, true);
   if (!response.ok) {
     let refusal: unknown;
     try {
@@ -219,12 +248,13 @@ function readResponse(options: {
       response.status,
       providerExplanation(refusal),
       secrets,
+      options.redactor,
     );
     return unreadableOutcome({
       base,
       responseText,
       error,
-      rawUsage: reportedUsage(refusal, secrets),
+      rawUsage: reportedUsage(refusal, secrets, options.redactor),
       failureKind: 'provider-refusal',
       secrets,
     });
@@ -244,7 +274,7 @@ function readResponse(options: {
       secrets,
     });
   }
-  const rawUsage = reportedUsage(parsedBody, secrets);
+  const rawUsage = reportedUsage(parsedBody, secrets, options.redactor);
   // A provider that answered with an error is not answering the question, even
   // when it also filled the answer fields.
   if (record(parsedBody) && parsedBody['success'] === false) {
@@ -255,6 +285,7 @@ function readResponse(options: {
         response.status,
         providerExplanation(parsedBody),
         secrets,
+        options.redactor,
       ),
       rawUsage,
       failureKind: 'provider-refusal',
@@ -318,6 +349,13 @@ export async function runDecisionTransport(
       secrets: credential === undefined ? [] : [credential],
     };
   }
+  const redactor = ctx.redactor ?? new CredentialRedactor(`decision:${callId}`);
+  redactor.addKnown(credential === undefined ? [] : [credential]);
+  request = {
+    ...request,
+    state: redactor.text(request.state),
+    questions: redactor.value(request.questions),
+  };
   const body = requestBody(ctx.decision, request);
   const timeout = AbortSignal.timeout(ctx.decision.timeoutMs);
   const signal = AbortSignal.any([ctx.signal, timeout]);
@@ -342,6 +380,7 @@ export async function runDecisionTransport(
       base: { ...base, durationMs: Date.now() - startedAt },
       secrets: credential === undefined ? [] : [credential],
       readAnswer: ctx.readAnswer ?? readDecisionAnswer,
+      redactor,
     });
   } catch (caught) {
     const raw = caught instanceof Error ? caught.message : String(caught);
@@ -349,7 +388,7 @@ export async function runDecisionTransport(
     // the header the request used. This is the one place the credential is known,
     // so the known value is removed here rather than trusting the transport.
     const secrets = credential === undefined ? [] : [credential];
-    const message = redact(raw, secrets);
+    const message = redactor.text(raw, true);
     return {
       attempts: [
         {

@@ -1,3 +1,4 @@
+import { redactCallRecord } from './redaction.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { CallRecord } from './types.js';
 import { json, hash } from './rows.js';
@@ -159,6 +160,7 @@ function insertModelAttempts(db: DatabaseSync, record: CallRecord): void {
   }
 }
 export function writeCallRecord(db: DatabaseSync, record: CallRecord): void {
+  record = redactCallRecord(db, record);
   const now = Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {

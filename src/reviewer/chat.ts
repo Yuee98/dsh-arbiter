@@ -1,3 +1,4 @@
+import { CredentialRedactor } from './credential-redactor.js';
 /**
  * The chat transport: one review's attempts through the host's LLM service.
  *
@@ -37,6 +38,7 @@ import type { ChatRequest } from './prompt.js';
 import { readChatAnswer, type ParsedAnswer } from './signals.js';
 
 export interface ChatTransportContext {
+  readonly redactor?: CredentialRedactor;
   readonly llm: LlmLike;
   readonly session?: SessionLike;
   readonly chat: ChatReviewerConfig;
@@ -220,6 +222,14 @@ export async function runChatTransport(
   request: ChatRequest,
   callId: string,
 ): Promise<ChatTransportResult> {
+  const redactor = ctx.redactor ?? new CredentialRedactor(`chat:${callId}`);
+  redactor.discover(request.system, true);
+  redactor.discover(request.user);
+  request = {
+    ...request,
+    system: redactor.text(request.system, true),
+    user: redactor.text(request.user),
+  };
   let route: ChatRoute;
   try {
     route = chatRoute(ctx.chat, ctx.session);
@@ -233,13 +243,17 @@ export async function runChatTransport(
   const maxAttempts = 1 + ctx.chat.maxRepairRetries;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const startedAt = Date.now();
-    const messages = chatMessages(request.user, repair);
+    const messages = chatMessages(
+      request.user,
+      repair === null ? null : redactor.text(repair, true),
+    );
     const attemptTimeout = AbortSignal.timeout(ctx.chat.timeoutMs);
     const attemptSignal = AbortSignal.any([ctx.signal, attemptTimeout]);
     const options = streamOptions(route, request, messages, ctx, attemptSignal);
     try {
       const collected = await collectChatText(ctx.llm.stream(options));
       const answer = readAnswer(collected.text);
+      redactor.discover([collected.text, collected.usage], true);
       attempts.push(
         attemptRecord({
           callId,

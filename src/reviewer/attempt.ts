@@ -10,7 +10,7 @@
 
 import type { UsageNormalized } from './usage.js';
 import { normalizeUsage } from './usage.js';
-import { redact, redactAuthHeaders, redactValue } from './redact.js';
+import { CredentialRedactor } from './credential-redactor.js';
 
 /** The two backends one review can run on. */
 export type ReviewerBackend = 'chat' | 'decision';
@@ -90,21 +90,32 @@ export function attemptIdOf(callId: string, attempt: number): string {
 export function maskAttempt(
   attempt: ReviewAttempt,
   secrets: readonly string[],
+  context?: CredentialRedactor,
 ): ReviewAttempt {
-  const maskedRaw = redactValue(attempt.rawUsage, secrets);
+  const redactor =
+    context ?? new CredentialRedactor(`review:${attempt.callId}`);
+  redactor.addKnown(secrets);
+  redactor.discover(
+    [
+      attempt.request,
+      attempt.parsed,
+      attempt.responseText,
+      attempt.error,
+      attempt.rawUsage,
+    ],
+    true,
+  );
+  const maskedRaw = redactor.value(attempt.rawUsage);
   return {
     ...attempt,
     failureKind: attempt.failureKind,
-    request: redactValue(attempt.request, secrets),
-    parsed: redactValue(attempt.parsed, secrets),
+    request: redactor.value(attempt.request, true),
+    parsed: redactor.value(attempt.parsed, true),
     responseText:
       attempt.responseText === null
         ? null
-        : redact(redactAuthHeaders(attempt.responseText), secrets),
-    error:
-      attempt.error === null
-        ? null
-        : redact(redactAuthHeaders(attempt.error), secrets),
+        : redactor.text(attempt.responseText, true),
+    error: attempt.error === null ? null : redactor.text(attempt.error, true),
     rawUsage: maskedRaw,
     // Re-normalized from the masked payload rather than masked field by field:
     // the mapping is the production one, so a masked record cannot disagree with

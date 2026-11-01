@@ -79,6 +79,7 @@ export interface AssembleEvidenceOptions {
   readonly parentId: string | undefined;
   readonly sessions: SessionsLike | undefined;
   readonly contextConfig: ArbiterConfig['context'];
+  readonly parentLog?: SessionLog;
 }
 
 /** The direct parent's log and human evidence, when there is a parent. */
@@ -89,14 +90,16 @@ interface ParentEvidence {
   readonly compacted: boolean;
 }
 
-function readParent(parent: SessionLike | undefined): ParentEvidence {
+function readParent(
+  parent: SessionLike | undefined,
+  captured?: SessionLog,
+): ParentEvidence {
   if (parent === undefined) {
     return { live: false, log: null, evidence: [], compacted: false };
   }
-  const log = readSessionLog(
-    parent,
-    `parent session "${parent.id ?? 'unknown'}"`,
-  );
+  const log =
+    captured ??
+    readSessionLog(parent, `parent session "${parent.id ?? 'unknown'}"`);
   return {
     live: true,
     log,
@@ -129,7 +132,7 @@ export function assembleEvidence(
     options.parentId === undefined
       ? undefined
       : options.sessions?.get?.(options.parentId);
-  const parent = readParent(parentLog);
+  const parent = readParent(parentLog, options.parentLog);
   const relay =
     options.parentId === undefined ? [] : relayEvents(log, options.parentId);
   return {

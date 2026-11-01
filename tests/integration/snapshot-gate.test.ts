@@ -1,3 +1,11 @@
+import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { vi } from 'vitest';
+import { NEW_SCALE_TYPESAFE } from '../helpers/decision-captures.js';
+import {
+  renderChatUser,
+  renderDecisionRequest,
+} from '../../src/reviewer/prompt.js';
 /**
  * Gate + reviewer integration for review input.
  *
@@ -873,5 +881,375 @@ describe('the host turn clock', () => {
     // so rather than reusing the closed number.
     expect(after.snapshot.turn).toBeNull();
     expect(after.snapshot.context).toEqual([]);
+  });
+});
+
+/** Actual gate + local HTTP endpoint + production SQLite writer, with synthetic secrets. */
+async function credentialEndpoint() {
+  const received: { body: unknown; authorization: string | undefined }[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      received.push({ body, authorization: request.headers.authorization });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(NEW_SCALE_TYPESAFE));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (address === null || typeof address === 'string')
+    throw new Error('no endpoint port');
+  return {
+    received,
+    url: `http://127.0.0.1:${String(address.port)}/decision`,
+    stop: () =>
+      new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      ),
+  };
+}
+function credentialGate(
+  session: StubSession,
+  url: string,
+  resolve: NonNullable<HostServices['credentials']>['resolve'],
+  maxInputTokens = 20_000,
+  type: 'chat' | 'decision' = 'decision',
+  onEnsure?: () => void,
+) {
+  const llm = reviewerLlm({ risk: 3, authorization: 8 });
+  const stub = stubContext({
+    profileContext: {
+      home: process.env['DSH_HOME'] ?? '',
+      dir: process.cwd(),
+      name: 'credential-profile',
+    },
+    sandboxPolicy: { defaultMode: 'workspace-write' },
+    sessions: {
+      get: (id: string) => (id === session.id ? session : undefined),
+    },
+    llm: llm.llm,
+    credentials: { resolve },
+    approval: {
+      config: { policy: 'ask' },
+      request: () => Promise.resolve('unavailable'),
+    },
+    permissionPresets: { registerAuto: () => () => undefined },
+    workingDirectory: {
+      ensure: () => {
+        onEnsure?.();
+        return Promise.resolve(process.cwd());
+      },
+    },
+  });
+  admitSession(session);
+  const host = apply(stub.ctx, {
+    modes: { main: 'no-ask', subagent: 'no-ask' },
+    reviewer: {
+      type,
+      chat: { provider: 'stub', model: 'stub', maxRepairRetries: 0 },
+      decision: {
+        url,
+        model: 'test-model',
+        apiKeyRef: 'synthetic-reference',
+        timeoutMs: 5_000,
+      },
+    },
+    context: { maxInputTokens },
+  });
+  const run = (
+    callId: string,
+    args: unknown,
+    signal = new AbortController().signal,
+  ) =>
+    stub.gate()(
+      { callId, name: 'bash', arguments: args, signal, agent: { session } },
+      allow,
+    );
+  return { host, run, captured: llm.captured };
+}
+describe('credential preparation at actual production boundaries', () => {
+  test('late-known credential is removed before every cap; exact wire snapshot and real auth survive rotation', async () => {
+    const secret = 'synthetic-known-boundary-original-credential';
+    const endpoint = await credentialEndpoint();
+    const events = [
+      human(
+        1,
+        1,
+        `${'x'.repeat(3990)}${secret}\nOnly send 4 files to support@example.test`,
+      ),
+      { type: 'turn/start', seq: 2, data: { turn: 1 } },
+    ];
+    const session = makeSession('credential-root', events);
+    const resolve = vi.fn(() =>
+      Promise.resolve({
+        value:
+          resolve.mock.calls.length === 1
+            ? secret
+            : 'rotated-should-never-be-resolved',
+      }),
+    );
+    const harness = credentialGate(session, endpoint.url, resolve);
+    const args = {
+      command: `printf '${secret}'`,
+      count: 4,
+      recipient: 'support@example.test',
+      path: '/tmp/key-document',
+    };
+    try {
+      await harness.run('credential-wire', args);
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(endpoint.received).toHaveLength(1);
+      expect(endpoint.received[0]?.authorization).toBe(`Bearer ${secret}`);
+      const wire = endpoint.received[0]?.body;
+      expect(JSON.stringify(wire)).not.toContain(secret);
+      expect(JSON.stringify(wire)).not.toContain('synthetic-known-boundary');
+      expect(JSON.stringify(wire)).toContain('support@example.test');
+      expect(JSON.stringify(wire)).toContain('/tmp/key-document');
+      const stored = await persistedCall('credential-wire');
+      expect(wire).toMatchObject({
+        state: renderDecisionRequest(renderChatUser(stored.snapshot)).state,
+      });
+      expect(stored.snapshot.evidence[0]?.source).toEqual({
+        kind: 'session-human',
+        sessionId: session.id,
+      });
+      expect(stored.snapshot.action.arguments).toMatchObject({
+        count: 4,
+        recipient: 'support@example.test',
+        path: '/tmp/key-document',
+      });
+      expect(args.command).toContain(secret);
+      const db = new DatabaseSync(
+        harness.host.currentAudit()?.databasePath ?? '',
+      );
+      try {
+        for (const table of ['calls', 'stages', 'snapshots', 'model_calls']) {
+          const rows = db.prepare(`SELECT * FROM ${table}`).all();
+          expect(rows.length).toBeGreaterThan(0);
+          expect(JSON.stringify(rows)).not.toContain(secret);
+          expect(JSON.stringify(rows)).not.toContain(
+            'synthetic-known-boundary',
+          );
+        }
+      } finally {
+        db.close();
+      }
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+  test.each([
+    ['M0', 'deny', 'insufficient'],
+    ['OVER_BUDGET', 'deny', 'input_budget_exceeded'],
+    ['breaker', 'deny', 'circuit_open'],
+    ['chat', 'allow', 'review-allow'],
+  ] as const)(
+    '%s does not resolve decision credentials',
+    async (path, expectedKind, expectedCode) => {
+      const session = makeSession(`early-${path}`, [
+        human(1, 1, 'only inspect local files'),
+      ]);
+      let unreadable = false;
+      const target =
+        path === 'M0'
+          ? {
+              ...session,
+              snapshotEvents: (): readonly SessionEventLike[] => {
+                if (unreadable) throw new Error('source unavailable');
+                return session.snapshotEvents();
+              },
+            }
+          : session;
+      const resolve = vi.fn(() =>
+        Promise.resolve({ value: 'unused-synthetic-credential' }),
+      );
+      const harness = credentialGate(
+        target,
+        'http://127.0.0.1:1/unused',
+        resolve,
+        path === 'OVER_BUDGET' ? 1000 : 20_000,
+        path === 'chat' ? 'chat' : 'decision',
+        () => {
+          unreadable = path === 'M0';
+        },
+      );
+      if (path === 'breaker')
+        harness.host.runtime.breakers.set(target.id, {
+          denials: Array.from({ length: 20 }, () => Date.now()),
+        });
+      const controller = new AbortController();
+      try {
+        const result = await harness.run(
+          `early-call-${path}`,
+          { command: 'echo local' },
+          controller.signal,
+        );
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).not.toHaveBeenCalled();
+        expect(result.kind).toBe(expectedKind);
+        const raw: unknown = harness.host
+          .currentAudit()
+          ?.getCall(`early-call-${path}`);
+        expect(JSON.stringify(raw)).not.toContain(
+          'credential could not be resolved',
+        );
+        expect(JSON.stringify(raw)).toContain(expectedCode);
+      } finally {
+        unreadable = false;
+        harness.host.currentAudit()?.close();
+      }
+    },
+  );
+  test.each(['missing', 'throw'] as const)(
+    '%s credential result is reused once and retains review-failure classification',
+    async (kind) => {
+      const resolve = vi.fn(async () => {
+        await Promise.resolve();
+        if (kind === 'throw')
+          throw new Error('never echo synthetic-secret-lookup-error');
+        return undefined;
+      });
+      const session = makeSession(`credential-${kind}`, [
+        human(1, 1, 'inspect files'),
+      ]);
+      const harness = credentialGate(
+        session,
+        'http://127.0.0.1:1/unused',
+        resolve,
+      );
+      try {
+        await harness.run(`credential-${kind}`, { command: 'echo inspect' });
+        await harness.host.currentAudit()?.flush();
+        expect(resolve).toHaveBeenCalledTimes(1);
+        const row: unknown = harness.host
+          .currentAudit()
+          ?.getCall(`credential-${kind}`);
+        expect(JSON.stringify(row)).toContain('error-escalate');
+        expect(JSON.stringify(row)).not.toContain('snapshot_error');
+        expect(JSON.stringify(row)).not.toContain(
+          'synthetic-secret-lookup-error',
+        );
+      } finally {
+        harness.host.currentAudit()?.close();
+      }
+    },
+  );
+  test('cancellation during credential resolution sends and settles nothing', async () => {
+    let release: ((value: { value: string }) => void) | undefined;
+    let signalReady: () => void = () => {
+      throw new Error('resolver signal missing');
+    };
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const resolve = vi.fn(() => {
+      signalReady();
+      return new Promise<{ value: string }>((done) => {
+        release = done;
+      });
+    });
+    const session = makeSession('cancel-credential', [
+      human(1, 1, 'inspect files'),
+    ]);
+    const endpoint = await credentialEndpoint();
+    const harness = credentialGate(session, endpoint.url, resolve);
+    const controller = new AbortController();
+    try {
+      const pending = harness.run(
+        'cancel-in-resolver',
+        { command: 'echo inspect' },
+        controller.signal,
+      );
+      await ready;
+      controller.abort();
+      if (release === undefined) throw new Error('resolver not entered');
+      release({ value: 'cancelled-credential' });
+      expect((await pending).kind).toBe('cancel');
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(endpoint.received).toEqual([]);
+      expect(
+        harness.host.currentAudit()?.getCall('cancel-in-resolver'),
+      ).toBeNull();
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
+  });
+});
+
+describe('concurrent credential review preparation', () => {
+  test('resolutions stay separate and final views use the captured source cutoff', async () => {
+    const first = 'synthetic-parallel-first';
+    const second = 'synthetic-parallel-second';
+    const releases: ((value: { value: string }) => void)[] = [];
+    let signalReady: () => void = () => {
+      throw new Error('missing signal');
+    };
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const resolve = vi.fn(
+      () =>
+        new Promise<{ value: string }>((done) => {
+          releases.push(done);
+          if (releases.length === 2) signalReady();
+        }),
+    );
+    const session = makeSession('parallel-credential-root', [
+      human(1, 1, 'inspect only 4 files'),
+      { type: 'turn/start', seq: 2, data: { turn: 1 } },
+    ]);
+    const endpoint = await credentialEndpoint();
+    const harness = credentialGate(session, endpoint.url, resolve);
+    try {
+      const a = harness.run('parallel-a', {
+        command: 'echo one',
+        token: first,
+      });
+      const b = harness.run('parallel-b', {
+        command: 'echo two',
+        token: second,
+      });
+      await ready;
+      session.events.push(
+        human(3, 3, 'future message after captured source cutoff'),
+      );
+      if (releases[0] === undefined || releases[1] === undefined)
+        throw new Error('missing concurrent resolutions');
+      releases[1]({ value: second });
+      releases[0]({ value: first });
+      await Promise.all([a, b]);
+      await harness.host.currentAudit()?.flush();
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(endpoint.received).toHaveLength(2);
+      expect(
+        new Set(endpoint.received.map((item) => item.authorization)),
+      ).toEqual(new Set([`Bearer ${first}`, `Bearer ${second}`]));
+      const bodies = JSON.stringify(endpoint.received.map((item) => item.body));
+      expect(bodies).not.toContain(first);
+      expect(bodies).not.toContain(second);
+      expect(bodies).not.toContain(
+        'future message after captured source cutoff',
+      );
+      const storedA = await persistedCall('parallel-a');
+      const storedB = await persistedCall('parallel-b');
+      const views = [storedA.snapshot, storedB.snapshot].map(
+        (view) => renderDecisionRequest(renderChatUser(view)).state,
+      );
+      const wireStates = endpoint.received.map((item) =>
+        isRecord(item.body) ? item.body['state'] : undefined,
+      );
+      expect(new Set(wireStates)).toEqual(new Set(views));
+    } finally {
+      harness.host.currentAudit()?.close();
+      await endpoint.stop();
+    }
   });
 });

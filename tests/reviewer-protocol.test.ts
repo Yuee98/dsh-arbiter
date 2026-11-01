@@ -885,10 +885,18 @@ describe('the masking boundary applies to the public review result', () => {
     // Not just the response text: every field of every attempt is masked, which is
     // what makes the record safe for the audit and for evals artifacts.
     expect(JSON.stringify(result)).not.toContain(secret);
-    expect(result.attempts[0]?.rawUsage).toMatchObject({
-      '[redacted]': 7,
-      input_tokens: 100,
-    });
+    const rawUsage = result.attempts[0]?.rawUsage;
+    if (rawUsage === null || typeof rawUsage !== 'object')
+      throw new Error('missing raw usage');
+    expect(Object.entries(rawUsage)).toEqual(
+      expect.arrayContaining([
+        [
+          expect.stringMatching(/^\[redacted:v1:credential:[a-f0-9]{64}\]$/u),
+          7,
+        ],
+        ['input_tokens', 100],
+      ]),
+    );
   });
 
   test('a credential resolved by the transport itself is masked too', async () => {
@@ -1234,7 +1242,7 @@ describe('the score object is exempt while every header still masks', () => {
     const masked = redactAuthHeaders(DECISION_BODY);
     expect(() => JSON.parse(masked) as unknown).not.toThrow();
     expect(masked).toContain('"authorization":{"type":"score"');
-    expect(masked).not.toContain('[redacted]');
+    expect(masked).not.toContain('[redacted');
     // The parsed value is the provider's own, not a reconstruction.
     expect(JSON.parse(masked)).toEqual(JSON.parse(DECISION_BODY));
   });
@@ -1286,14 +1294,16 @@ describe('the score object is exempt while every header still masks', () => {
     // this key is masked as a whole rather than kept intact.
     const nested =
       '{"authorization":{"wrapper":{"type":"score"},"value":"Bearertoken"}}';
-    expect(redactAuthHeaders(nested)).toContain('"authorization":[redacted]');
+    expect(redactAuthHeaders(nested)).toContain(
+      '"authorization":[redacted:v1:',
+    );
     // A different answer type, and an object with no type at all, are not scores:
     // both are masked as a whole at that key instead of being kept intact.
     expect(
       redactAuthHeaders('{"authorization":{"type":"noul","noul":0.5}}'),
-    ).toContain('"authorization":[redacted]');
+    ).toContain('"authorization":[redacted:v1:');
     expect(redactAuthHeaders('{"authorization":{"value":"TOK"}}')).toContain(
-      '"authorization":[redacted]',
+      '"authorization":[redacted:v1:',
     );
   });
 
@@ -1644,5 +1654,97 @@ describe('the score object is exempt while every header still masks', () => {
     // what the detail reader, the reports and offline replay all depend on.
     expect(() => JSON.parse(text) as unknown).not.toThrow();
     expect(text).toContain('"authorization":{"type":"score"');
+  });
+});
+
+describe('shared redaction before each actual chat send', () => {
+  test('direct consumers retain discovered credentials across calls in one workflow', async () => {
+    const secret = 'synthetic-direct-followup-secret';
+    const first = snapshot({
+      sessionId: 'direct-workflow',
+      action: { name: 'bash', arguments: { password: secret } },
+    });
+    await review({
+      snapshot: first,
+      callId: 'direct-one',
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [{ kind: 'text', text: '{"risk":3,"authorization":8}' }],
+      }),
+    });
+    const result = await review({
+      snapshot: snapshot({
+        sessionId: 'direct-workflow',
+        action: { name: 'bash', arguments: { command: `echo ${secret}` } },
+      }),
+      callId: 'direct-two',
+      signal: approve(),
+      backend: offlineChatBackend({
+        scripts: [
+          {
+            kind: 'failure',
+            code: 'ERR',
+            message: `request rejected: ${secret}`,
+          },
+        ],
+      }),
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result.attempts[0]?.request)).toContain(
+      '[redacted:v1:password:',
+    );
+  });
+  test('a parser error cannot echo an input credential into the repair request', async () => {
+    const secret = 'synthetic-repair-secret';
+    const captured: unknown[] = [];
+    let attempt = 0;
+    const result = await review({
+      snapshot: snapshot({
+        action: {
+          name: 'bash',
+          arguments: { password: secret, command: 'echo normal', count: 4 },
+        },
+      }),
+      callId: CALL_ID,
+      signal: approve(),
+      backend: {
+        kind: 'chat',
+        transport: {
+          chat: {
+            ...DEFAULT_CONFIG.reviewer.chat,
+            provider: 'offline',
+            model: 'offline',
+            maxRepairRetries: 1,
+          },
+          signal: approve(),
+          llm: {
+            stream: (options) => {
+              captured.push(options);
+              attempt += 1;
+              const text =
+                attempt === 1
+                  ? JSON.stringify({
+                      risk: 3,
+                      authorization: 8,
+                      [secret]: true,
+                    })
+                  : '{"risk":3,"authorization":8}';
+              return (async function* () {
+                await Promise.resolve();
+                yield { type: 'text-delta', text };
+                yield { type: 'finish', reason: { kind: 'stop' } };
+              })();
+            },
+          },
+        },
+      },
+    });
+    expect(result.outcome.status).toBe('scored');
+    expect(captured).toHaveLength(2);
+    expect(JSON.stringify(captured)).not.toContain(secret);
+    expect(JSON.stringify(captured[1])).toContain(
+      'previous answer was rejected',
+    );
+    expect(JSON.stringify(captured[1])).toContain('[redacted:v1:password:');
   });
 });

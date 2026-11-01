@@ -13,6 +13,7 @@
  * to text the user did not put first.
  */
 
+import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ArbiterConfig, SnapshotMaterial } from '../types.js';
@@ -63,7 +64,7 @@ function isMissingFile(error: unknown): boolean {
 }
 
 /** Read the first *existing* candidate file, in the documented order. */
-export async function readProjectRules(
+export async function readProjectRulesSource(
   cwd: string,
   config: ArbiterConfig['context']['projectRules'],
 ): Promise<ProjectRulesResult> {
@@ -92,12 +93,12 @@ export async function readProjectRules(
     }
     const truncated = text.length > PROJECT_RULES_LIMIT;
     return {
-      text: truncated ? text.slice(0, PROJECT_RULES_LIMIT) : text,
+      text,
       material: {
         id: 'project-rules',
         enabled: true,
         present: true,
-        chars: truncated ? PROJECT_RULES_LIMIT : text.length,
+        chars: text.length,
         limit: PROJECT_RULES_LIMIT,
         truncated,
         path: file,
@@ -155,7 +156,9 @@ function projectMaterial(
 export function guidanceMaterials(
   customRulesRaw: string,
   project: ProjectRulesResult,
+  redactor?: CredentialRedactor,
 ): GuidanceResult {
+  customRulesRaw = redactor?.text(customRulesRaw) ?? customRulesRaw;
   const customCut = customRulesRaw.length > CUSTOM_RULES_LIMIT;
   const customRules = customRulesRaw.slice(0, CUSTOM_RULES_LIMIT);
   const projectSource = project.text;
@@ -180,4 +183,28 @@ export function guidanceMaterials(
       customRulesMaterial(customRules.length, customCut),
     ],
   };
+}
+
+/** Bound the already-redacted source, never a raw credential fragment. */
+export function projectRulesCopy(
+  source: ProjectRulesResult,
+  redactor?: CredentialRedactor,
+): ProjectRulesResult {
+  if (source.text === null) return source;
+  const text = redactor?.text(source.text) ?? source.text;
+  return {
+    ...source,
+    text: text.slice(0, PROJECT_RULES_LIMIT),
+    material: {
+      ...source.material,
+      chars: Math.min(text.length, PROJECT_RULES_LIMIT),
+      truncated: text.length > PROJECT_RULES_LIMIT,
+    },
+  };
+}
+export async function readProjectRules(
+  cwd: string,
+  config: ArbiterConfig['context']['projectRules'],
+): Promise<ProjectRulesResult> {
+  return projectRulesCopy(await readProjectRulesSource(cwd, config));
 }
