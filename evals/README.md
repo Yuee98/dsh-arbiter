@@ -324,7 +324,7 @@ pnpm evals:experiments record <定义.json>      # 写出冻结的 experiments/r
 evals/
   schemas/           发布的 JSON Schema（case／label／reviews／manifest／annotation／rubric）
   rubrics/           rubric 快照与来源文档摘要
-  datasets/          已提交数据集（当前只有 format-example，见其 manifest 说明）
+  datasets/          已提交数据集（format-example、core-v1 历史快照、reviewer-v2 集合）
   experiments/       实验定义、schema 与冻结的 record.json
   src/data/          读取、schema 校验、跨文件一致性、hash、rubric 比对
   src/annotation/    导出、回填、汇总
@@ -369,3 +369,31 @@ tests/evals/         上述行为的测试
 - 报告、离线回放与实验配置分别见「报告」「离线回放」与「候选与消融」；`evals/experiments/` 存放冻结的候选矩阵。
 - 真实模型调用需显式 `pnpm evals run`，且需要窗口一授权的预算；本目录不自动触发。窗口一冻结的 target 与预算见 `evals/experiments/run-plans/` 与[资源决定](../validation/review-quality/resource-decision.md)，其中记录了今天仍阻塞 live 运行的三项能力边界（本地服务空凭据引用、chat 无宿主 LLM 入口、候选轴不在 run plan 内）。
 - 标签审批仍是用户终审；运行器写 records，从不写 `labels/`。
+
+## legacy-v1 历史数据迁移与标注
+
+`evals/datasets/reviewer-v2/<split>/legacy-v1/` 是迁移后唯一可编辑的历史案例源。每个组只有 `cases.json`、`labels.json`、`opinions.json` 三个 `grouped-v1` 集合，记录身份使用原 `caseId`；文件内的顺序不参与身份。迁移保留原案例、标签与模型意见对象，包含输入 hash、版本、理由与裁决人。原始 `core-v1/manifest.json` 保留历史家族／案例映射和版本权威，新目录无需另一份 manifest。
+
+历史总量仍是 51 个案例、16 个家族、204 条模型意见；dev／calibration／holdout 为 13／22／16，gold 为 49。`delete-generated-output-no-permission` 与 `tool-history-claims-approval` 保留 `no-score` 排除。旧 holdout 已参与历史工作，只用于 legacy 回归，不能作为新版独立 holdout。
+
+```sh
+# 从保留的 core-v1 快照重复迁移；已有目标只核对，绝不覆盖修改
+pnpm evals migrate-legacy evals/datasets/reviewer-v2
+pnpm evals migrate-legacy evals/datasets/reviewer-v2 --check
+pnpm evals check evals/datasets/reviewer-v2
+pnpm evals summary evals/datasets/reviewer-v2
+
+# 每批只包含一个 split 的 legacy-v1 组，默认 dev
+pnpm evals export evals/datasets/reviewer-v2 --split dev --out .local/evals/dev.blank.json
+# 人工只填写 pack.entries[].target；可调整 annotatedBy 和条目顺序
+pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev.filled.json
+pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev.filled.json --write
+```
+
+新题本外层为 `batchVersion: legacy-annotation-batch-v1`、随机 `batchId` 与原 v1 形状的 `pack`。导出始终空白，不携带标签、意见或答案摘要。导出同时在本机 `.local/evals/annotation-batches/<batchId>.json` 保存源路径、split、原题本、标签基准及可知的 Git commit／dirty 状态；这份基准不能提供给盲标者，导入必须回到保有基准的工作目录。基准丢失时重新导出，再由标注者核对并转填已有决定，不能伪造基准或直接覆盖新源。
+
+导入按 `caseId` 合并，只写已决定条目，保留 pending 和无关决定。写入持有单组独占锁，重读输入和标签，比较目标决定的导出基准；不同决定已改动时拒写，当前值已等于本次决定时允许幂等重试。缺失的 labels 集合可在有决定时创建。完整集合通过校验后以同目录临时文件与 rename 发布，失败清理本次锁／临时文件。三个 split 使用三个批次，不提供跨组事务；忙锁时先确认原写入进程已结束，再处理遗留锁，不能删除活跃进程的锁。
+
+`core-v1` 单文件数据、历史 `evals/annotation-pack/core-v1.pack.json` 和历史运行／实验记录保留原义，只读消费；旧单文件 `import --write` 会拒绝，历史 v1 题本仍可验证。`export --out` 和 `report --out` 均保护新旧源文件、历史题本和本地批次基准，包括损坏文件与符号链接别名；`--force` 只允许覆盖普通报告。
+
+新运行／实验需显式指定 `datasetId: legacy-v1` 和 `datasetPath: evals/datasets/reviewer-v2`。未提供 caseIds 时按 split 读取；显式 caseIds 优先于 split，保留原有跨 split 选择与顺序语义。报告按冻结案例列表定位实际组，显示集合文件与 record 路径。旧运行仍读取其原 core-v1 路径，不自动改用新标签，也不重写历史计划或结果。
