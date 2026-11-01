@@ -75,6 +75,19 @@ function ContextSettings({
                 next.context.maxInputTokens = value;
               });
             }}
+            onBlur={() => {
+              const hard = draft.context.maxInputTokens;
+              // Commit once: intermediate digits must not ratchet the hidden T down.
+              if (
+                Number.isSafeInteger(hard) &&
+                hard > 0 &&
+                draft.context.targetInputTokens > hard
+              ) {
+                onDraft((next) => {
+                  next.context.targetInputTokens = hard;
+                });
+              }
+            }}
           />
         </Field>
         <div className="arb:col-span-full">
