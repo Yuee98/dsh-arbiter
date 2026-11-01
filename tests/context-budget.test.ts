@@ -376,6 +376,9 @@ describe('one complete request budget for both protocols', () => {
     expect(args).toMatchObject({ program: built.snapshot.action.programText });
     expect(built.snapshot.action.programText).toContain('PROGRAM_HEAD');
     expect(built.snapshot.action.programText).toContain('PROGRAM_TAIL');
+    expect(built.snapshot.action.truncated?.retainedChars).toBe(
+      built.snapshot.action.programText?.length,
+    );
     expect(built.snapshot.action.truncated?.omittedFrom).toBeGreaterThan(0);
     expect(built.snapshot.action.truncated?.omittedTo).toBeLessThan(
       program.length - 1,

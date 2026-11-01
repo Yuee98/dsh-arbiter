@@ -50,7 +50,6 @@ const CACHE_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export class DecisionHistory {
   private readonly host: HostEnvironment;
-  private readonly incompleteCopies = new Set<string>();
   private readonly cacheAccounting = new Map<
     string,
     { readonly items: readonly PriorVerdictItem[]; readonly bytes: number }
@@ -72,8 +71,10 @@ export class DecisionHistory {
       items.shift();
       bytes = Buffer.byteLength(JSON.stringify(items));
     }
-    if (items.length < candidates.length) this.incompleteCopies.add(sessionId);
-    else this.incompleteCopies.delete(sessionId);
+    // Runtime ownership survives plugin reloads. An incomplete copy invalidates
+    // its recovered marker so the next window performs the same bounded refill.
+    if (items.length < candidates.length)
+      runtime.historyRecovered.delete(sessionId);
     runtime.priorVerdicts.delete(sessionId);
     runtime.priorVerdicts.set(sessionId, items);
     this.cacheAccounting.delete(sessionId);
@@ -100,7 +101,6 @@ export class DecisionHistory {
       runtime.priorVerdicts.delete(id);
       runtime.historyRecovered.delete(id);
       this.cacheAccounting.delete(id);
-      this.incompleteCopies.delete(id);
     }
   }
   constructor(host: HostEnvironment) {
@@ -203,7 +203,22 @@ export class DecisionHistory {
     // unavailability is deliberately not inferred here: no read happened, so
     // claiming a source is unreadable would be a guess. The write failure and the
     // boundary ambiguity are facts this runtime established.
-    const reasons = this.windowReasons(sessionId, selected);
+    const cachedRead = (
+      state: HistoryStatus['sources']['session'],
+    ): SourceRead => ({
+      items: [],
+      unavailable: state.unavailable,
+      ...(state.invalid === undefined ? {} : { invalid: state.invalid }),
+    });
+    const reasons =
+      previous === undefined
+        ? this.windowReasons(sessionId, selected)
+        : this.coverageReasons(
+            sessionId,
+            cachedRead(previous.sources.session),
+            cachedRead(previous.sources.audit),
+            selected,
+          );
     // A window with entries is never "known-empty", whatever an earlier read
     // concluded: the entries are the evidence that such a verdict exists.
     const coverage =
@@ -300,18 +315,14 @@ export class DecisionHistory {
     const { runtime } = this.host;
     const limit = SOURCE_EVENT_LIMIT;
     const inMemory = runtime.priorVerdicts.get(sessionId) ?? [];
-    if (inMemory.length > 0 && !this.incompleteCopies.has(sessionId)) {
+    if (inMemory.length > 0 && runtime.historyRecovered.has(sessionId)) {
       const { selected } = selectWindow(inMemory, limit);
       return selected;
     }
     // A session is recovered once per runtime. Re-reading every call would turn
     // an unavailable source into an unbounded retry, and would let a later read
     // re-open a window this runtime already decided.
-    if (
-      runtime.historyRecovered.has(sessionId) &&
-      !this.incompleteCopies.has(sessionId)
-    )
-      return [];
+    if (runtime.historyRecovered.has(sessionId)) return [];
     // The session log is read first because it is also where a reset barrier
     // lives. Checking the in-memory map before this read would miss a barrier
     // written before the restart and resurrect the history it withdrew.
@@ -448,7 +459,6 @@ export class DecisionHistory {
     const { runtime } = this.host;
     runtime.priorVerdicts.delete(sessionId);
     this.cacheAccounting.delete(sessionId);
-    this.incompleteCopies.delete(sessionId);
     runtime.historyRecovered.delete(sessionId);
     const at = Date.now();
     runtime.historyReset.set(sessionId, at);
@@ -711,8 +721,8 @@ export class DecisionHistory {
       [...(runtime.priorVerdicts.get(sessionId) ?? []), ...selected],
       limit,
     );
-    this.cacheWindow(sessionId, merged.selected);
     runtime.historyRecovered.set(sessionId, Date.now());
+    this.cacheWindow(sessionId, merged.selected);
     const status = this.recoveryStatus(
       sessionId,
       session,
@@ -823,6 +833,7 @@ export class DecisionHistory {
     // purpose, and the reset record itself proves nothing was lost. Its post-reset
     // interval is a real, empty interval, so it may report an empty history.
     const resetInterval =
+      selected.length === 0 &&
       this.host.runtime.historyReset.has(sessionId) &&
       this.resetOnlyHistory(sessionId);
     if (

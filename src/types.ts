@@ -411,6 +411,7 @@ export interface SnapshotMaterial {
 /** Pending-action material trimmed to fit the input budget. */
 export interface ActionTruncation {
   readonly originalChars: number;
+  /** Submitted review text length, including its visible omission marker. */
   readonly retainedChars: number;
   /** Field that was trimmed, or `null` when the whole serialized action was cut. */
   readonly field: string | null;
@@ -515,6 +516,8 @@ export type HistoryCoverage =
 
 /** Per-source outcome of one history read, for the detail view and tests. */
 export interface HistorySourceState {
+  /** Known unreadable records remain gaps when the live cache changes. */
+  readonly invalid?: number;
   /** Present when this source answered; the count it contributed afterwards. */
   readonly read: number;
   /** Set to why this source could not answer, or `null` when it did. */

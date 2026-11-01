@@ -2675,3 +2675,70 @@ test('read protection with an unknown old reset does not resurrect older audit r
     await host.dispose();
   }
 });
+
+test('a reused runtime refills a partial cache after the history owner reloads', async () => {
+  const session = makeSession('session-1');
+  for (let index = 0; index < 4200; index += 1)
+    seedDecision(
+      session,
+      {
+        version: 2,
+        callId: `reload-${String(index)}`,
+        tool: 'bash',
+        fingerprint: 'fixture',
+        trace: ['deny'],
+        result: 'deny',
+        configRevision: 'test',
+        ts: index,
+      },
+      index,
+    );
+  const settings = {
+    sessions: new Map([['session-1', session]]),
+    profile: 'cache-reload',
+    auditDisabled: true,
+    config: denyRuleConfig((base) => ({ ...base, audit: { enabled: false } })),
+  };
+  const first = await harness(settings);
+  const expected = first.window('session-1');
+  expect(expected).toHaveLength(4200);
+  expect(first.cacheCopies()[0]?.[1]).toHaveLength(4096);
+  await first.dispose();
+  const reloaded = await harness(settings);
+  try {
+    expect(reloaded.window('session-1')).toEqual(expected);
+  } finally {
+    await reloaded.dispose();
+  }
+});
+
+test.each(['unavailable', 'invalid'] as const)(
+  'live memory retains the known %s source gap without rereading it',
+  async (failure) => {
+    const session = makeSession('session-1');
+    if (failure === 'invalid')
+      session.append('plugin:arbiter/decision', {
+        version: 999,
+        callId: 'unreadable',
+      });
+    const host = await harness({
+      sessions: new Map([['session-1', session]]),
+      auditDisabled: true,
+      config: denyRuleConfig((base) => ({
+        ...base,
+        audit: { enabled: false },
+      })),
+    });
+    try {
+      host.window('session-1');
+      expect(host.resetStatus('session-1').coverage).toBe('partial');
+      await callOnce(host, session, 'live-after-read');
+      expect(host.resetStatus('session-1').coverage).toBe('partial');
+      expect(host.resetStatus('session-1').reason).toContain(
+        failure === 'invalid' ? 'could not be interpreted' : 'audit',
+      );
+    } finally {
+      await host.dispose();
+    }
+  },
+);

@@ -40,7 +40,7 @@ export function scaledAction(
       : { programText: copy }),
     truncated: {
       originalChars: text.length,
-      retainedChars: fragment.retainedChars,
+      retainedChars: copy.length,
       field: field ?? null,
       omittedFrom: fragment.omittedFrom,
       omittedTo: fragment.omittedTo,

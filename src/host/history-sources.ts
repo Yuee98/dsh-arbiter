@@ -117,7 +117,11 @@ export interface SourceRead {
 export const ANSWERED: HistorySourceState = { read: 0, unavailable: null };
 
 export function sourceState(read: SourceRead): HistorySourceState {
-  return { read: read.items.length, unavailable: read.unavailable };
+  return {
+    read: read.items.length,
+    unavailable: read.unavailable,
+    ...((read.invalid ?? 0) > 0 ? { invalid: read.invalid } : {}),
+  };
 }
 
 /** Whether any durable source observed more rows than the window kept. */
