@@ -179,6 +179,21 @@ export function reviewWith(
     const snapshot = redactSnapshot(request.snapshot, redactor);
     bindSnapshotRedactor(snapshot, redactor);
     const { callId, signal } = request;
+    const actual = Math.max(
+      pkg.renderChat(snapshot).estimatedInputTokens,
+      pkg.renderDecision(snapshot).estimatedInputTokens,
+    );
+    if (
+      snapshot.budget.truncatedSegments.includes('OVER_BUDGET') ||
+      actual > snapshot.budget.maxInputTokens
+    ) {
+      return {
+        protocol: request.backend.kind,
+        attempts: [],
+        usage: usageOf([]),
+        outcome: failureOutcome('input_budget_exceeded', NO_PARTIAL),
+      };
+    }
     const transport = await runTransport(
       pkg,
       request,
@@ -270,7 +285,12 @@ async function runTransport(
       pkg.asksProbe ? 'chat-probe' : 'chat',
     );
     const result = await runChatTransport(
-      { ...request.backend.transport, signal, readAnswer: pkg.readChat },
+      {
+        ...request.backend.transport,
+        signal,
+        readAnswer: pkg.readChat,
+        maxInputTokens: snapshot.budget.maxInputTokens,
+      },
       rendered,
       callId,
     );

@@ -281,11 +281,10 @@ describe('configuration', () => {
     expect(parsed.config.rules[0]?.conditions[0]?.target).toBe('tool');
   });
 
-  test('enforces the custom rules character limit', () => {
+  test('accepts long custom rules for the shared token budget', () => {
     const parsed = parseConfig({ context: { customRules: 'x'.repeat(2001) } });
-    expect(
-      parsed.errors.some((error) => error.path === 'context.customRules'),
-    ).toBe(true);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config.context.customRules).toHaveLength(2001);
   });
 
   test('default configuration remains the fallback shape', () => {

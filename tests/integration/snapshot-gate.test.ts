@@ -992,7 +992,7 @@ function credentialGate(
         timeoutMs: 5_000,
       },
     },
-    context: { maxInputTokens },
+    context: { targetInputTokens: maxInputTokens, maxInputTokens },
   });
   const run = (
     callId: string,

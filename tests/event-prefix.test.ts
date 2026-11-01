@@ -14,7 +14,6 @@ import {
   prefixProtectedGaps,
   prefixWithoutHistory,
 } from '../src/snapshot/prefix.js';
-import { trimPrefix } from '../src/snapshot/prefix-budget.js';
 import { resultBody } from '../src/snapshot/event-content.js';
 
 function event(
@@ -91,6 +90,7 @@ const options: Omit<SnapshotOptions, 'agent'> = {
     ...DEFAULT_CONFIG,
     context: {
       ...DEFAULT_CONFIG.context,
+      targetInputTokens: 100_000,
       maxInputTokens: 100_000,
       projectRules: { ...DEFAULT_CONFIG.context.projectRules, enabled: false },
     },
@@ -856,7 +856,11 @@ describe('result facts and whole-prefix snapshot integration', () => {
             : {}),
           config: {
             ...options.config,
-            context: { ...options.config.context, maxInputTokens: limit },
+            context: {
+              ...options.config.context,
+              targetInputTokens: limit,
+              maxInputTokens: limit,
+            },
           },
         });
       const minimal = await build([ask, latest], 100_000);
@@ -895,7 +899,7 @@ describe('result facts and whole-prefix snapshot integration', () => {
       expect(built.user).toContain('Only local?');
     },
   );
-  test('CW123-PR-B03 trimming older answers never leaves a retained answer without its question', () => {
+  test('CW123-PR-B03 trimming older answers never leaves a retained answer without its question', async () => {
     const ask = call(
       0,
       'old-ask',
@@ -909,16 +913,25 @@ describe('result facts and whole-prefix snapshot integration', () => {
         JSON.stringify({ answers: [{ id: 'q', selected: ['build/'] }] }),
         false,
       );
-    let current = prefix([
-      ask,
-      answer(1),
-      answer(2),
-      human(3, 'latest unrelated'),
-    ]);
-    for (let step = 0; step < 6; step += 1) {
-      const next = trimPrefix(current);
-      if (next === null) break;
-      current = next.prefix;
+    const events = [ask, answer(1), answer(2), human(3, 'latest unrelated')];
+    for (const hard of [400, 3200, 4000, 6000, 100000]) {
+      const built = await buildReviewSnapshot({
+        ...options,
+        agent: { session: session(events) },
+        config: {
+          ...options.config,
+          context: {
+            ...options.config.context,
+            targetInputTokens: hard,
+            maxInputTokens: hard,
+          },
+        },
+      });
+      const current = built.snapshot.prefix;
+      if (current === undefined) throw new Error('missing event prefix');
+      expect(
+        hard === 400 ? current.local.events.map((event) => event.seq) : null,
+      ).toEqual(hard === 400 ? [3] : null);
       const retainedIds = new Set(
         current.local.events.map((event) => event.eventId),
       );
@@ -931,7 +944,6 @@ describe('result facts and whole-prefix snapshot integration', () => {
       );
       expect(danglingQuestions).toEqual([]);
     }
-    expect(current.local.events.map((event) => event.seq)).toEqual([3]);
   });
   test('JSON text cannot carry binary media through contiguous text blocks', () => {
     const json = JSON.stringify({
@@ -1078,9 +1090,6 @@ describe('result facts and whole-prefix snapshot integration', () => {
         ...options.config,
         context: {
           ...options.config.context,
-          evidenceMaxItems: 1,
-          historyMaxItems: 1,
-          checkpointMaxItems: 0,
         },
       },
     });
@@ -1130,7 +1139,7 @@ describe('result facts and whole-prefix snapshot integration', () => {
     expect(built.user).not.toContain('parent-tool');
     expect(built.user).not.toContain('SIBLING');
   });
-  test('H bridge preserves latest original and explicit question, or reports OVER_BUDGET', async () => {
+  test('hard budget preserves latest original and explicit question, or reports OVER_BUDGET', async () => {
     const ask = call(
       1,
       'ask',
@@ -1148,7 +1157,11 @@ describe('result facts and whole-prefix snapshot integration', () => {
       agent: { session: session([ask, call(2, 'old'), answer]) },
       config: {
         ...options.config,
-        context: { ...options.config.context, maxInputTokens: 400 },
+        context: {
+          ...options.config.context,
+          targetInputTokens: 400,
+          maxInputTokens: 400,
+        },
       },
     });
     expect(built.snapshot.budget.truncatedSegments).toContain('OVER_BUDGET');

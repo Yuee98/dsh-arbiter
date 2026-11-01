@@ -27,6 +27,7 @@
 
 import { estimateTokenCount } from 'tokenx';
 import type { ReviewSnapshot } from '../types.js';
+import type { StreamOptionsLike } from './llm.js';
 import { CHAT_ANSWER_FORMAT, REVIEW_CONTRACT, scaleText } from './contract.js';
 import { renderMaterial } from './material.js';
 import { buildQuestions } from './questions.js';
@@ -66,6 +67,25 @@ export interface DecisionRequest {
   readonly estimatedInputTokens: number;
 }
 
+/** Estimate every actual chat message, including a repair message. */
+export function estimateChatInput(
+  system: string,
+  messages: StreamOptionsLike['messages'],
+): number {
+  return (
+    estimateTokenCount(system) +
+    messages.reduce(
+      (total, message) =>
+        total +
+        message.content.reduce(
+          (sum, part) => sum + estimateTokenCount(part.text),
+          0,
+        ),
+      0,
+    )
+  );
+}
+
 /**
  * The decision contract: the shared text plus what a native endpoint needs said.
  *
@@ -86,6 +106,15 @@ export function renderChatSystem(): string {
   return [REVIEW_CONTRACT, scaleText(), CHAT_ANSWER_FORMAT].join('\n\n');
 }
 
+// These protocol constants have no runtime inputs. Cache only their estimates;
+// requests still carry their own text/question objects, including repair inputs.
+const CHAT_SYSTEM_TOKENS = estimateTokenCount(renderChatSystem());
+const DECISION_QUESTION_TOKENS = estimateTokenCount(
+  JSON.stringify(buildQuestions()),
+);
+const DECISION_PREFIX = `${decisionContract()}\n\n`;
+const DECISION_PREFIX_TOKENS = estimateTokenCount(DECISION_PREFIX);
+
 /** The chat user message: the whole submission, in the one shared order. */
 export function renderChatUser(snapshot: ReviewSnapshot): string {
   return renderMaterial(snapshot);
@@ -93,7 +122,7 @@ export function renderChatUser(snapshot: ReviewSnapshot): string {
 
 /** The decision state: the same submission, prefixed by the same contract. */
 export function renderDecisionState(material: string): string {
-  return [decisionContract(), material].join('\n\n');
+  return DECISION_PREFIX + material;
 }
 
 /** Render the chat request for one snapshot. */
@@ -103,7 +132,7 @@ export function renderChatRequest(snapshot: ReviewSnapshot): ChatRequest {
   return {
     system,
     user,
-    estimatedInputTokens: estimateTokenCount(system) + estimateTokenCount(user),
+    estimatedInputTokens: CHAT_SYSTEM_TOKENS + estimateTokenCount(user),
   };
 }
 
@@ -115,13 +144,39 @@ export function renderChatRequest(snapshot: ReviewSnapshot): ChatRequest {
  * result is identical to {@link renderChatUser} for the same snapshot.
  */
 export function renderDecisionRequest(material: string): DecisionRequest {
+  return decisionRequest(material, estimateTokenCount(material));
+}
+
+function decisionRequest(
+  material: string,
+  materialTokens: number,
+): DecisionRequest {
   const state = renderDecisionState(material);
   const questions = buildQuestions();
   return {
     state,
     questions,
+    // The fixed double newline ends a tokenx whitespace segment. A non-space
+    // material starts a new segment; leading whitespace takes the full path.
     estimatedInputTokens:
-      estimateTokenCount(state) + estimateTokenCount(JSON.stringify(questions)),
+      (/^\S/u.test(material)
+        ? DECISION_PREFIX_TOKENS + materialTokens
+        : estimateTokenCount(state)) + DECISION_QUESTION_TOKENS,
+  };
+}
+
+/** Render both production protocols without recounting identical material. */
+export function renderChatDecisionPair(snapshot: ReviewSnapshot): {
+  readonly chat: ChatRequest;
+  readonly decision: DecisionRequest;
+} {
+  const chat = renderChatRequest(snapshot);
+  return {
+    chat,
+    decision: decisionRequest(
+      chat.user,
+      chat.estimatedInputTokens - CHAT_SYSTEM_TOKENS,
+    ),
   };
 }
 
@@ -221,7 +276,9 @@ export function renderVariantChatRequest(
   return {
     system,
     user,
-    estimatedInputTokens: estimateTokenCount(system) + estimateTokenCount(user),
+    estimatedInputTokens: estimateChatInput(system, [
+      { role: 'user', content: [{ type: 'text', text: user }] },
+    ]),
   };
 }
 

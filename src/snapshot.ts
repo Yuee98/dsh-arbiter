@@ -52,6 +52,7 @@ import { redactSnapshot, bindSnapshotRedactor } from './snapshot/redaction.js';
 import { workflowRedactor } from './snapshot/workflow.js';
 import type { CredentialRedactor } from './reviewer/credential-redactor.js';
 import { truncateSnapshot } from './snapshot/budget.js';
+import type { BudgetRenderers } from './snapshot/budget-measure.js';
 import { redactCompletenessInput } from './snapshot/material-redaction.js';
 export type {
   SessionEventLike,
@@ -66,6 +67,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface SnapshotOptions {
+  readonly budgetRenderers?: BudgetRenderers;
   /** A captured, allowlisted source adapter (workflow evals); host calls omit it. */
   readonly eventSources?: ReviewEventSources;
   readonly projectRulesMaterial?: ProjectRulesResult;
@@ -390,6 +392,14 @@ function capturedOptions(options: SnapshotOptions): SnapshotOptions {
     facts: structuredClone(options.facts),
     priorVerdicts: structuredClone(options.priorVerdicts),
     config: structuredClone(options.config),
+    ...(options.budgetRenderers === undefined
+      ? {}
+      : {
+          budgetRenderers: {
+            renderChat: options.budgetRenderers.renderChat,
+            renderDecision: options.budgetRenderers.renderDecision,
+          },
+        }),
     ...(options.historyStatus === undefined
       ? {}
       : { historyStatus: structuredClone(options.historyStatus) }),
@@ -425,6 +435,8 @@ export async function prepareReviewSnapshot(
       base,
       input.config.context.maxInputTokens,
       material,
+      input.config.context.targetInputTokens,
+      input.budgetRenderers,
     );
     bindSnapshotRedactor(requested.snapshot, redactor);
     return {

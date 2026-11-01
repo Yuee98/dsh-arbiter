@@ -1,551 +1,330 @@
-/**
- * Input-budget trimming.
- *
- * Optional context is trimmed first and the pending action last: a review is
- * worth more when it can still see what is about to run. Every removal is
- * recorded as an input fact on the snapshot.
- *
- * Two rules keep this module honest:
- *   - every trim step must strictly reduce what is submitted, so the loop
- *     terminates by exhausting material rather than by its guard;
- *   - the budget is checked against both reviewer payloads (chat text and the
- *     decision state plus questions), so a snapshot that fits chat cannot
- *     surprise the decision backend.
- *
- * A trimmed request is still a normal review: truncation never throws, never
- * becomes an error stage and never adds a review chain stage. A request that
- * cannot be assembled within budget no longer pretends to fit — it is reported
- * as `OVER_BUDGET` for the caller to treat as a real preparation failure.
- */
+/** One deterministic T/H/C allocator, shared by production and eval adapters. */
 import { estimateTokenCount } from 'tokenx';
+import type { ReviewSnapshot } from '../types.js';
+import type { CompletenessInput } from './completeness.js';
+import { PRODUCTION_PACKAGE } from '../reviewer/package.js';
 import {
-  renderChatSystem,
-  renderChatUser,
-  renderDecisionRequest,
-} from '../reviewer.js';
-import type {
-  ActionTruncation,
-  EvidenceItem,
-  ReviewSnapshot,
-  SnapshotMaterial,
-} from '../types.js';
-import type { CompletenessInput, MaterialTrims } from './completeness.js';
-import { buildCompleteness, missingLines } from './completeness.js';
-import { trimPrefix } from './prefix-budget.js';
-import { prefixCompatibility } from './prefix.js';
+  contribution,
+  measureSnapshot,
+  type BudgetRenderers,
+} from './budget-measure.js';
+import {
+  addUnit,
+  baseSnapshot,
+  candidateUnits,
+  scaledUnit,
+  unitContent,
+  type BudgetUnit,
+} from './budget-units.js';
+import { describeBudget, type UnitLog } from './budget-diagnostics.js';
+import { scaledAction } from './budget-action.js';
+import { shortenedText } from './budget-text.js';
+import { wholeBatch } from './budget-batch.js';
 
-/** Fields that carry submitted program text in the host's tool schemas. */
-const ACTION_TEXT_FIELDS = ['code', 'program', 'command'] as const;
-
-/** Keep enough of the trimmed action for a review to still see its shape. */
-const MIN_ACTION_CHARS = 32;
-
-interface BudgetState {
-  prefix: ReviewSnapshot['prefix'];
-  evidence: ReviewSnapshot['evidence'];
-  context: ReviewSnapshot['context'];
-  checkpoints: ReviewSnapshot['checkpoints'];
-  prior: ReviewSnapshot['priorVerdicts'];
-  projectRules: ReviewSnapshot['projectRules'];
-  materials: readonly SnapshotMaterial[];
-  facts: ReviewSnapshot['facts'];
-  action: ReviewSnapshot['action'];
-  evidenceTruncated: boolean;
-  contextTruncated: boolean;
-  historyTruncated: boolean;
-  /**
-   * Which `CONTEXT`-family items the trimmer actually removed.
-   *
-   * Both the tool-call window and the compaction summaries are reported under
-   * the documented `CONTEXT` segment, because that is the published name for
-   * this step of the trim order. The completeness report needs the finer fact, so
-   * it is tracked here rather than by inventing a second public segment name.
-   */
-  checkpointsTrimmed: boolean;
-  toolCallsTrimmed: boolean;
-  readonly truncatedSegments: Set<string>;
+interface Allocation {
+  readonly original: ReviewSnapshot;
+  readonly material: Omit<CompletenessInput, 'trimmed'>;
+  readonly units: readonly BudgetUnit[];
+  readonly renderers: BudgetRenderers;
+  readonly target: number;
 }
 
-function prunedProjectRulesMaterial(
-  materials: readonly SnapshotMaterial[],
-): readonly SnapshotMaterial[] {
-  return materials.map((material) =>
-    material.id === 'project-rules'
-      ? { ...material, present: false, chars: 0 }
-      : material,
-  );
-}
-
-/**
- * The trims this state made, in the shape the completeness report consumes.
- *
- * Deriving them from the recorded segments instead of tracking a second flag
- * keeps the two descriptions of "what was cut" from drifting apart.
- */
-function trimsOf(state: BudgetState): MaterialTrims {
-  const segments = state.truncatedSegments;
-  return {
-    action: segments.has('ACTION'),
-    evidence: segments.has('EVIDENCE'),
-    toolArguments: state.toolCallsTrimmed,
-    checkpoints: state.checkpointsTrimmed,
-    priorVerdicts: segments.has('PRIOR_VERDICTS'),
-    projectRules: segments.has('PROJECT_RULES'),
-    derivedFacts: segments.has('DERIVED_FACTS'),
-  };
-}
-
-/**
- * Re-derive completeness for the material actually submitted.
- *
- * The builder's first report describes the material it selected; this second
- * pass adds what the budget then removed. Rebuilding rather than appending keeps
- * one function deciding which cut blocks, so a trimmed human message cannot be
- * reported as harmless simply because the trim happened later.
- */
-function completenessOf(
-  input: Omit<CompletenessInput, 'trimmed'>,
-  state: BudgetState,
-): ReviewSnapshot['completeness'] {
-  return buildCompleteness({ ...input, trimmed: trimsOf(state) });
-}
-
-function candidateSnapshot(
-  base: Omit<ReviewSnapshot, 'budget'>,
-  state: BudgetState,
-  maxInputTokens: number,
-  input: Omit<CompletenessInput, 'trimmed'>,
+function candidate(
+  input: Allocation,
+  current: ReviewSnapshot,
+  log: UnitLog,
 ): ReviewSnapshot {
-  const completeness = completenessOf(input, state);
-  return {
-    ...base,
-    ...(state.prefix === undefined ? {} : { prefix: state.prefix }),
-    action: state.action,
-    materials: state.materials,
-    ...(state.prefix === undefined
-      ? {
-          evidence: state.evidence,
-          context: state.context,
-          checkpoints: state.checkpoints,
-        }
-      : {}),
-    priorVerdicts: state.prior,
-    projectRules: state.projectRules,
-    facts: state.facts,
-    evidenceTruncated: state.evidenceTruncated,
-    contextTruncated: state.contextTruncated,
-    historyTruncated: state.historyTruncated,
-    completeness,
-    missing: missingLines(completeness),
-    budget: {
-      maxInputTokens,
-      estimatedInputTokens: 0,
-      truncatedSegments: [...state.truncatedSegments],
-    },
-  };
+  return describeBudget(
+    input.original,
+    current,
+    input.material,
+    input.units,
+    log,
+  );
 }
 
-function truncationOf(
-  originalChars: number,
-  retainedChars: number,
-  field: string | null,
-): ActionTruncation {
-  return {
-    originalChars,
-    retainedChars,
-    field,
-    omittedFrom: retainedChars,
-    omittedTo: originalChars - 1,
-  };
+function measured(input: Allocation, current: ReviewSnapshot, log: UnitLog) {
+  const snapshot = candidate(input, current, log);
+  return { snapshot, ...measureSnapshot(snapshot, input.renderers) };
 }
 
-function asTextRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? { ...value }
-    : null;
+/** Maximum fitting head/tail copy, including its real omission wrapper. */
+function fitScale<T>(
+  copy: (scale: number) => T,
+  fits: (value: T) => boolean,
+): T | null {
+  const minimal = copy(0);
+  if (!fits(minimal)) return null;
+  let lower = 0;
+  let upper = 1;
+  let best = minimal;
+  for (let step = 0; step < 18; step += 1) {
+    const scale = (lower + upper) / 2;
+    const value = copy(scale);
+    if (fits(value)) {
+      lower = scale;
+      best = value;
+    } else upper = scale;
+  }
+  return best;
 }
 
-/** The text currently submitted for the trimmed field, or the whole payload. */
-function currentActionText(action: ReviewSnapshot['action']): {
-  readonly field: string | null;
-  readonly text: string;
+function chooseUnit(
+  input: Allocation,
+  current: ReviewSnapshot,
+  log: UnitLog,
+  unit: BudgetUnit,
+  cap: number,
+  baseline: ReturnType<typeof measureSnapshot>,
+): {
+  readonly unit: BudgetUnit;
+  readonly tokens: number;
+  readonly truncated: boolean;
 } | null {
-  const chosen = action.truncated?.field ?? null;
-  const value = action.arguments;
-  const record = asTextRecord(value);
-  if (record !== null) {
-    const field =
-      chosen ??
-      ACTION_TEXT_FIELDS.find((name) => {
-        const candidate = record[name];
-        return typeof candidate === 'string' && candidate.length > 0;
-      });
-    if (field !== undefined) {
-      const text = record[field];
-      if (typeof text === 'string') return { field, text };
-    }
-    return { field: null, text: JSON.stringify(record) };
-  }
-  if (typeof value === 'string') return { field: chosen, text: value };
-  if (value === null || value === undefined) return null;
-  return { field: null, text: JSON.stringify(value) };
-}
-
-function currentTextOf(
-  action: ReviewSnapshot['action'],
-  field: string | null,
-): string {
-  const value = action.arguments;
-  const record = asTextRecord(value);
-  if (field !== null && record !== null) {
-    const text = record[field];
-    if (typeof text === 'string') return text;
-  }
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value ?? {});
-}
-
-/**
- * Rewrite the submitted action with a shorter head.
- *
- * `programText` is a second copy of the same program, so it must shrink with
- * `arguments`; otherwise a large program would still travel in full and the
- * recorded truncation range would not describe the submission.
- */
-function shrinkAction(
-  action: ReviewSnapshot['action'],
-  field: string | null,
-  originalChars: number,
-  keep: number,
-): ReviewSnapshot['action'] {
-  const head = currentTextOf(action, field).slice(0, keep);
-  const record = asTextRecord(action.arguments);
-  const next =
-    field !== null && record !== null ? { ...record, [field]: head } : head;
-  const isProgram = field === 'code' || field === 'program';
-  return {
-    ...action,
-    arguments: next,
-    ...(isProgram || action.programText !== undefined
-      ? { programText: head }
-      : {}),
-    truncated: truncationOf(originalChars, keep, field),
+  const costs = new Map<string, number>();
+  const costOf = (value: BudgetUnit): number => {
+    const content = JSON.stringify(unitContent(value));
+    const known = costs.get(content);
+    if (known !== undefined) return known;
+    const canonical = estimateTokenCount(content);
+    // Canonical cost is already a lower bound; impossible copies need no render.
+    const tokens =
+      unit.capped && canonical > cap
+        ? canonical
+        : Math.max(
+            canonical,
+            contribution(
+              current,
+              addUnit(current, value),
+              input.renderers,
+              baseline,
+            ),
+          );
+    costs.set(content, tokens);
+    return tokens;
   };
-}
-
-/**
- * Trim the action only after every optional segment is gone. Repeated halving
- * keeps it inside the budget instead of stopping at a single cut.
- */
-function trimAction(state: BudgetState): boolean {
-  const current = currentActionText(state.action);
-  if (current === null) return false;
-  const originalChars =
-    state.action.truncated?.originalChars ?? current.text.length;
-  if (originalChars <= MIN_ACTION_CHARS) return false;
-  const keep = Math.floor(current.text.length / 2);
-  if (keep < Math.min(MIN_ACTION_CHARS, originalChars)) return false;
-  state.action = shrinkAction(state.action, current.field, originalChars, keep);
-  state.truncatedSegments.add('ACTION');
-  return true;
-}
-
-/**
- * The two authorization originals the budget must not discard.
- *
- * The same pair `mergeEvidence` reserves: this session's newest human statement
- * and the newest direct-parent original. They are identified here rather than by
- * source kind, because an *older* parent message is not protected and must stay
- * eligible for trimming.
- */
-function protectedEvidence(
-  evidence: readonly EvidenceItem[],
-): Set<EvidenceItem> {
-  const protectedItems = new Set<EvidenceItem>();
-  const newestSession = evidence.find(
-    (item) => item.source.kind === 'session-human',
-  );
-  if (newestSession !== undefined) protectedItems.add(newestSession);
-  const newestParent = evidence.find(
-    (item) => item.source.kind === 'parent-human',
-  );
-  if (newestParent !== undefined) protectedItems.add(newestParent);
-  return protectedItems;
-}
-
-/**
- * Trim one evidence item, keeping the protected originals.
- *
- * The budget drops by position and the evidence array is ordered by time, so the
- * last item is not necessarily the least important: a parent message is often
- * newer than the session restriction it conflicts with. Trimming by position
- * alone could discard the withdrawal and keep the approval it reverses, which
- * AC3 says must not be delayed by trimming.
- *
- * When only protected originals remain, nothing further can be trimmed: cutting
- * one would remove required material, so the loop stops here and the request is
- * reported as still over budget rather than as a misleadingly complete subset.
- */
-function trimEvidence(state: BudgetState): boolean {
-  if (state.evidence.length <= 1) return false;
-  const protectedItems = protectedEvidence(state.evidence);
-  const index = state.evidence.findLastIndex(
-    (item) => !protectedItems.has(item),
-  );
-  if (index < 0) return false;
-  state.evidence = state.evidence.filter((_item, at) => at !== index);
-  state.evidenceTruncated = true;
-  state.truncatedSegments.add('EVIDENCE');
-  return true;
-}
-
-/**
- * Trim one tool call, dropping the **oldest** step.
- *
- * `state.context` is in submitted order — oldest first — because that is how the
- * history reads: it is the sequence of steps the pending action follows. So the
- * oldest call is the *first* element, not the last. Cutting the last element
- * would discard the step immediately preceding the pending action — the newest
- * operation and often the recorded failure that explains it — and keep the
- * earliest, least relevant part of the window.
- */
-function trimContext(state: BudgetState): boolean {
-  if (state.context.length === 0) return false;
-  state.context = state.context.slice(1);
-  state.contextTruncated = true;
-  state.toolCallsTrimmed = true;
-  state.truncatedSegments.add('CONTEXT');
-  return true;
-}
-
-function trimCheckpoints(state: BudgetState): boolean {
-  if (state.checkpoints.length === 0) return false;
-  state.checkpoints = state.checkpoints.slice(0, -1);
-  state.contextTruncated = true;
-  state.checkpointsTrimmed = true;
-  state.truncatedSegments.add('CONTEXT');
-  return true;
-}
-
-/**
- * Remove one segment in the documented budget priority order. Each branch
- * either shrinks the submission or clears a field, so a later call cannot
- * re-enter the same branch with unchanged material.
- */
-function trimEventPrefix(state: BudgetState): boolean {
-  if (state.prefix !== undefined) {
-    const trimmed = trimPrefix(state.prefix);
-    if (trimmed !== null) {
-      state.prefix = trimmed.prefix;
-      state.contextTruncated = true;
-      state.evidenceTruncated ||= trimmed.evidence;
-      state.checkpointsTrimmed ||= trimmed.checkpoint;
-      state.toolCallsTrimmed ||= trimmed.tools;
-      if (trimmed.evidence) state.truncatedSegments.add('EVIDENCE');
-      if (trimmed.tools || trimmed.checkpoint)
-        state.truncatedSegments.add('CONTEXT');
-      return true;
-    }
-  }
-  return false;
-}
-
-function truncateNext(state: BudgetState): boolean {
-  if (state.prefix === undefined) {
-    if (trimContext(state) || trimCheckpoints(state)) return true;
-  } else if (trimEventPrefix(state)) return true;
-  if (state.prior.length > 0) {
-    state.prior = state.prior.slice(0, -1);
-    state.historyTruncated = true;
-    state.truncatedSegments.add('PRIOR_VERDICTS');
-    return true;
-  }
-  // Evidence is a branch, not a stop condition: when only protected originals
-  // remain there is nothing here left to trim, and the later branches (guidance,
-  // facts, the action) must still get their turn. Returning `false` would end the
-  // whole loop and report a request as unfittable while removable material
-  // remained.
-  if (state.prefix === undefined && trimEvidence(state)) return true;
-  if (state.projectRules !== null) {
-    state.projectRules = null;
-    state.materials = prunedProjectRulesMaterial(state.materials);
-    state.truncatedSegments.add('PROJECT_RULES');
-    return true;
-  }
-  if (state.facts !== null) {
-    const facts = state.facts;
-    const emptied = {
-      ...facts,
-      observed: {
-        writes: [],
-        networkCommands: [],
-        credentialPaths: [],
-        pipelineExec: [],
-        substitutions: facts.observed.substitutions,
-        subshells: facts.observed.subshells,
+  const fits = (value: BudgetUnit): boolean => {
+    const tokens = costOf(value);
+    if (unit.capped && tokens > cap) return false;
+    const nextLog = [
+      ...log,
+      {
+        id: unit.id,
+        cap: unit.capped ? cap : null,
+        tokens,
+        truncated: value !== unit,
       },
-      completeness:
-        facts.completeness === 'complete' ? 'partial' : facts.completeness,
-      truncated: true,
-    };
-    // A second pass must be able to make progress: drop the block entirely
-    // rather than re-reporting an already-trimmed object.
-    state.facts = facts.truncated === true ? null : emptied;
-    state.truncatedSegments.add('DERIVED_FACTS');
-    return true;
+    ];
+    return (
+      measured(input, addUnit(current, value), nextLog).tokens <= input.target
+    );
+  };
+  if (fits(unit)) return { unit, tokens: costOf(unit), truncated: false };
+  if (!unit.capped) return null;
+  // All results yield before arguments; every channel still shares this call's C.
+  const withArguments = fitScale((scale) => scaledUnit(unit, scale, 1), fits);
+  const selected =
+    withArguments ??
+    fitScale((scale) => scaledUnit(unit, scale, 1, true), fits) ??
+    fitScale((scale) => scaledUnit(unit, 0, scale), fits) ??
+    fitScale((scale) => scaledUnit(unit, 0, scale, true), fits);
+  return selected === null
+    ? null
+    : {
+        unit: selected,
+        tokens: costOf(selected),
+        truncated: true,
+      };
+}
+
+function fillOrdinary(
+  input: Allocation,
+  base: ReviewSnapshot,
+): ReturnType<typeof measured> {
+  let current = base;
+  let log: UnitLog[number][] = [];
+  let batchSize = 64;
+  let state = measured(input, current, log);
+  const baseline = measureSnapshot(base, input.renderers);
+  let tokens = state.tokens;
+  for (let index = 0; index < input.units.length; index += 1) {
+    const batch = wholeBatch({
+      base,
+      current,
+      units: input.units.slice(index, index + batchSize),
+      log,
+      target: input.target,
+      tokens,
+      renderers: input.renderers,
+      baseline,
+      finalize: (value, entries) => candidate(input, value, entries),
+    });
+    if (batch !== null) {
+      current = batch.snapshot;
+      log = [...batch.log];
+      tokens = batch.tokens;
+      state = { snapshot: batch.snapshot, ...batch.measurement };
+      index += Math.min(batchSize, input.units.length - index) - 1;
+      batchSize *= 2;
+      continue;
+    }
+    batchSize = 64;
+    const unit = input.units[index];
+    if (unit === undefined) break;
+    const remaining = input.target - tokens;
+    if (remaining <= 0) break;
+    const cap = Math.min(remaining, Math.floor(input.target / 10));
+    if (unit.capped && cap === 0) continue;
+    if (
+      unit.capped &&
+      Math.min(
+        estimateTokenCount(JSON.stringify(unitContent(unit))),
+        estimateTokenCount(JSON.stringify(unitContent(scaledUnit(unit, 0, 0)))),
+        estimateTokenCount(
+          JSON.stringify(unitContent(scaledUnit(unit, 0, 0, true))),
+        ),
+      ) > cap
+    )
+      continue;
+    if (
+      !unit.capped &&
+      estimateTokenCount(JSON.stringify(unitContent(unit))) > remaining
+    )
+      continue;
+    const selected = chooseUnit(input, state.snapshot, log, unit, cap, state);
+    if (selected === null) continue;
+    current = addUnit(current, selected.unit);
+    log.push({
+      id: unit.id,
+      cap: unit.capped ? cap : null,
+      tokens: selected.tokens,
+      truncated: selected.truncated,
+    });
+    state = measured(input, current, log);
+    tokens = state.tokens;
   }
-  return trimAction(state);
+  return state;
 }
 
-interface RenderedRequest {
-  readonly snapshot: ReviewSnapshot;
-  readonly system: string;
-  readonly user: string;
-}
-
-/**
- * Estimated tokens of each payload actually sent to a reviewer backend.
- *
- * Both payloads are rendered by the reviewer's own request renderers, so the
- * budget is measured against exactly what will be submitted. Re-deriving either
- * envelope here would let the estimate drift from the request as soon as the
- * renderer changes.
- */
-function estimatePayloads(
-  chatSystemTokens: number,
-  chatUser: string,
-): { readonly chat: number; readonly decision: number } {
+function guidanceCopy(
+  snapshot: ReviewSnapshot,
+  id: 'project-rules' | 'custom-rules',
+  scale: number,
+): ReviewSnapshot {
+  const text =
+    id === 'project-rules' ? snapshot.projectRules : snapshot.customRules;
+  if (text === null || text.length === 0) return snapshot;
+  const copy =
+    scale === 0 ? '' : shortenedText(text, Math.floor(text.length * scale));
   return {
-    chat: chatSystemTokens + estimateTokenCount(chatUser),
-    decision: renderDecisionRequest(chatUser).estimatedInputTokens,
+    ...snapshot,
+    ...(id === 'project-rules'
+      ? { projectRules: copy.length === 0 ? null : copy }
+      : { customRules: copy }),
+    materials: snapshot.materials.map((material) =>
+      material.id === id
+        ? {
+            ...material,
+            present: copy.length > 0,
+            chars: copy.length,
+            truncated: true,
+          }
+        : material,
+    ),
   };
 }
 
-/**
- * Render the final request from the exact snapshot that gets persisted.
- *
- * The budget block itself carries the estimate, so the number is written back
- * and the payloads re-rendered until stable. Otherwise the stored snapshot and
- * the model's copy would disagree on `estimated_input_tokens`.
- */
-function renderedSnapshot(candidate: ReviewSnapshot): RenderedRequest {
-  let snapshot = candidate;
-  const system = renderChatSystem();
-  // The system contract does not depend on budget writeback within this call.
-  const systemTokens = estimateTokenCount(system);
-  let user = renderChatUser(snapshot);
-  let payloads = estimatePayloads(systemTokens, user);
-  for (let round = 0; round < 5; round += 1) {
-    const estimated = Math.max(payloads.chat, payloads.decision);
-    const over = estimated > candidate.budget.maxInputTokens;
-    const withBudget: ReviewSnapshot = {
-      ...candidate,
-      budget: {
-        ...candidate.budget,
-        estimatedInputTokens: estimated,
-        truncatedSegments: [
-          ...new Set([
-            ...candidate.budget.truncatedSegments,
-            ...(over ? ['OVER_BUDGET'] : []),
-          ]),
-        ],
-      },
-    };
-    const nextUser = renderChatUser(withBudget);
-    const nextPayloads = estimatePayloads(systemTokens, nextUser);
-    const stable =
-      Math.max(nextPayloads.chat, nextPayloads.decision) === estimated;
-    snapshot = withBudget;
-    user = nextUser;
-    payloads = nextPayloads;
-    if (stable) break;
+function hardDegrade(input: Allocation, base: ReviewSnapshot): ReviewSnapshot {
+  let current = base;
+  const fits = (value: ReviewSnapshot) =>
+    measured(input, value, []).tokens <= base.budget.maxInputTokens;
+  for (const id of ['custom-rules', 'project-rules'] as const) {
+    const fit = fitScale((scale) => guidanceCopy(current, id, scale), fits);
+    if (fit !== null) return candidate(input, fit, []);
+    current = guidanceCopy(current, id, 0);
+    if (fits(current)) return candidate(input, current, []);
   }
-  return { snapshot, system, user };
+  for (const whole of [false, true]) {
+    const fit = fitScale(
+      (scale) => ({
+        ...current,
+        action: scaledAction(current.action, scale, whole),
+      }),
+      fits,
+    );
+    if (fit !== null) return candidate(input, fit, []);
+  }
+  let minimum = current;
+  let minimumTokens = measured(input, minimum, []).tokens;
+  for (const whole of [false, true]) {
+    const value = {
+      ...current,
+      action: scaledAction(current.action, 0, whole),
+    };
+    const tokens = measured(input, value, []).tokens;
+    if (tokens < minimumTokens) {
+      minimum = value;
+      minimumTokens = tokens;
+    }
+  }
+  return candidate(input, minimum, []);
 }
 
-/**
- * Render the stabilized candidate used to decide whether this state fits.
- *
- * The budget block itself contains the estimate, so writing the number back
- * changes the rendered size. Comparing the provisional render (which carries
- * `estimatedInputTokens: 0`) can report a fit that the final text does not have;
- * that would turn a satisfiable request into a false preparation failure. This
- * measures exactly what `renderedSnapshot` would submit.
- */
-function renderCandidate(
-  base: Omit<ReviewSnapshot, 'budget'>,
-  state: BudgetState,
-  maxInputTokens: number,
-  material: Omit<CompletenessInput, 'trimmed'>,
-): RenderedRequest {
-  return renderedSnapshot(
-    candidateSnapshot(base, state, maxInputTokens, material),
-  );
-}
-
-/** Preserve the measured final state; legacy projections usually change no wire text. */
-function finishSnapshot(rendered: RenderedRequest): RenderedRequest {
-  if (rendered.snapshot.prefix === undefined) return rendered;
-  const snapshot = {
-    ...rendered.snapshot,
-    ...prefixCompatibility(rendered.snapshot.prefix),
-  };
-  // Exact text equality, rather than an assumed renderer dependency, keeps the
-  // existing estimate valid. A future renderer using these fields is remeasured.
-  return renderChatUser(snapshot) === rendered.user
-    ? { ...rendered, snapshot }
-    : renderedSnapshot(snapshot);
-}
-
-/**
- * Trim one request to fit the input budget, then describe what was trimmed.
- *
- * `material` is the builder's own description of the material it selected. It is
- * re-evaluated here for every trimming state, so the persisted completeness and
- * `missing[]` describe the submission rather than the selection it started from.
- */
 export function truncateSnapshot(
   base: Omit<ReviewSnapshot, 'budget'>,
   maxInputTokens: number,
   material: Omit<CompletenessInput, 'trimmed'>,
-): RenderedRequest {
-  const state: BudgetState = {
-    prefix: base.prefix,
-    evidence: [...base.evidence],
-    context: [...base.context],
-    checkpoints: [...base.checkpoints],
-    prior: [...base.priorVerdicts],
-    projectRules: base.projectRules,
-    materials: base.materials,
-    facts: base.facts,
-    action: base.action,
-    evidenceTruncated: base.evidenceTruncated,
-    contextTruncated: base.contextTruncated,
-    historyTruncated: base.historyTruncated,
-    checkpointsTrimmed: false,
-    toolCallsTrimmed: false,
-    truncatedSegments: new Set(),
+  targetInputTokens = Math.min(6_000, maxInputTokens),
+  renderers: BudgetRenderers = PRODUCTION_PACKAGE,
+) {
+  const original: ReviewSnapshot = {
+    ...base,
+    budget: {
+      targetInputTokens,
+      maxInputTokens,
+      estimatedInputTokens: 0,
+      truncatedSegments: [],
+    },
   };
-  // The loop is bounded by removable material, not by a fixed iteration count:
-  // legal configurations can hold far more than 500 candidate items, and a
-  // premature stop would report a fit that was never reached. Each successful
-  // trim removes exactly one item or shrinks the action, so the total work is
-  // O(items + action halvings).
-  const maxSteps =
-    (base.prefix?.local.events.length ?? 0) +
-    (base.prefix?.parent?.events.length ?? 0) +
-    base.evidence.length +
-    base.context.length +
-    base.checkpoints.length +
-    base.priorVerdicts.length +
-    4 +
-    // Enough halvings for the action to reach its minimum floor.
-    64;
-  for (let step = 0; step < maxSteps; step += 1) {
-    const rendered = renderCandidate(base, state, maxInputTokens, material);
-    if (rendered.snapshot.budget.estimatedInputTokens <= maxInputTokens)
-      return finishSnapshot(rendered);
-    if (!truncateNext(state)) return finishSnapshot(rendered);
-  }
-  return finishSnapshot(renderCandidate(base, state, maxInputTokens, material));
+  const input: Allocation = {
+    original,
+    material,
+    units: candidateUnits(original),
+    renderers,
+    target: targetInputTokens,
+  };
+  const required = measured(input, baseSnapshot(original), []);
+  const overHard = required.tokens > maxInputTokens;
+  const ordinary = overHard
+    ? null
+    : required.tokens > targetInputTokens
+      ? required
+      : fillOrdinary(input, required.snapshot);
+  const selected = ordinary?.snapshot ?? hardDegrade(input, required.snapshot);
+  const final =
+    renderers === PRODUCTION_PACKAGE && ordinary !== null
+      ? ordinary
+      : measureSnapshot(selected, renderers);
+  const snapshot: ReviewSnapshot = {
+    ...selected,
+    budget: {
+      ...selected.budget,
+      baseInputTokens: required.tokens,
+      estimatedInputTokens: final.tokens,
+      ...(overHard
+        ? { targetExceededReason: 'hard-degradation' as const }
+        : required.tokens > targetInputTokens
+          ? { targetExceededReason: 'base-input' as const }
+          : {}),
+      truncatedSegments: [
+        ...selected.budget.truncatedSegments,
+        ...(final.tokens > maxInputTokens ? ['OVER_BUDGET'] : []),
+      ],
+    },
+  };
+  const request =
+    renderers === PRODUCTION_PACKAGE
+      ? final.chat
+      : renderers.renderChat(snapshot);
+  return { snapshot, system: request.system, user: request.user };
 }

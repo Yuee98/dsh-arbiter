@@ -329,7 +329,7 @@ function historyItems(input: CompletenessInput): MaterialGapItem[] {
       item(
         'tool-window',
         'truncated',
-        'tool call arguments were shortened to the per-call character limit; the call identity and order are intact',
+        'historical tool or assistant material was shortened or omitted by the input budget; retained events preserve identity and order',
         TRUNCATION_BLOCKS,
       ),
     );
@@ -355,7 +355,7 @@ function actionItems(input: CompletenessInput): MaterialGapItem[] {
       item(
         'project-rules',
         'truncated',
-        'PROJECT_RULES was omitted by the input budget; no project guidance was submitted',
+        'PROJECT_RULES was reduced by the input budget; the submitted guidance is incomplete',
         false,
       ),
     );

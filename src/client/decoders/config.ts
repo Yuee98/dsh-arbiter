@@ -124,13 +124,10 @@ function context(value: unknown): ContextConfig {
   const source = object(value);
   const projectRules = field(source, 'projectRules', object);
   return {
+    targetInputTokens:
+      field(source, 'targetInputTokens', optional(number)) ??
+      Math.min(6_000, field(source, 'maxInputTokens', number)),
     maxInputTokens: field(source, 'maxInputTokens', number),
-    evidenceMaxItems: field(source, 'evidenceMaxItems', number),
-    parentHumanItems: field(source, 'parentHumanItems', number),
-    parentEvidenceFloor: field(source, 'parentEvidenceFloor', number),
-    historyMaxItems: field(source, 'historyMaxItems', number),
-    checkpointMaxItems: field(source, 'checkpointMaxItems', number),
-    toolCallArgumentMaxChars: field(source, 'toolCallArgumentMaxChars', number),
     customRules: field(source, 'customRules', text),
     projectRules: {
       enabled: field(projectRules, 'enabled', boolean),

@@ -1665,7 +1665,18 @@ describe('corrections from review', () => {
       // The stored estimate is the renderer's figure for the chat request itself: smaller
       // than the decision payload the cell never built, and above the snapshot's figure,
       // which is the shared truncation budget rather than a submitted size.
-      expect(record?.material?.estimatedInputTokens).toBe(2_736);
+      const entry = cases.find(
+        (item) => item.caseId === 'read-named-source-file',
+      );
+      if (entry === undefined) throw new Error('fixture case missing');
+      const { caseMaterial } = await import('../../evals/src/run/material.js');
+      const expected = caseMaterial(entry, 'chat', plan.context);
+      expect(record?.material?.estimatedInputTokens).toBe(
+        expected.material.estimatedInputTokens,
+      );
+      expect(expected.material.estimatedInputTokens).toBeLessThanOrEqual(
+        plan.bounds.maxInputTokens,
+      );
     });
   });
 

@@ -72,41 +72,10 @@ function parseProjectFiles(
   return values.filter((file): file is string => typeof file === 'string');
 }
 
-function parentLimits(
-  contextValue: Record<string, unknown>,
-  errors: ConfigError[],
-): Pick<ContextConfig, 'parentHumanItems' | 'parentEvidenceFloor'> {
-  const parentHumanItems = asInteger(
-    contextValue['parentHumanItems'],
-    5,
-    0,
-    100,
-    'context.parentHumanItems',
-    errors,
-  );
-  const parentEvidenceFloor = asInteger(
-    contextValue['parentEvidenceFloor'],
-    1,
-    0,
-    100,
-    'context.parentEvidenceFloor',
-    errors,
-  );
-  if (parentEvidenceFloor > parentHumanItems) {
-    errors.push({
-      path: 'context.parentEvidenceFloor',
-      message: 'must not exceed context.parentHumanItems',
-      code: 'relation.parentEvidenceFloor',
-    });
-  }
-  return { parentHumanItems, parentEvidenceFloor };
-}
-
 export function parseContext(
   raw: Record<string, unknown>,
   errors: ConfigError[],
 ): ContextConfig {
-  // An explicitly supplied non-object parent is an error; absence keeps defaults.
   const contextRaw = raw['context'];
   if (contextRaw !== undefined && !isRecord(contextRaw)) {
     errors.push({
@@ -115,71 +84,39 @@ export function parseContext(
       code: 'type.object',
     });
   }
-  const contextValue = isRecord(contextRaw) ? contextRaw : {};
-  const customRules = asString(
-    contextValue['customRules'],
-    '',
-    'context.customRules',
+  const value = isRecord(contextRaw) ? contextRaw : {};
+  const maxInputTokens = asInteger(
+    value['maxInputTokens'],
+    10_000,
+    1,
+    Number.MAX_SAFE_INTEGER,
+    'context.maxInputTokens',
     errors,
   );
-  if (customRules.length > 2_000) {
+  const targetInputTokens = asInteger(
+    value['targetInputTokens'],
+    Math.min(6_000, maxInputTokens),
+    1,
+    Number.MAX_SAFE_INTEGER,
+    'context.targetInputTokens',
+    errors,
+  );
+  if (targetInputTokens > maxInputTokens) {
     errors.push({
-      path: 'context.customRules',
-      message: 'must be at most 2000 characters',
-      code: 'length.customRules',
-      params: { max: 2_000 },
+      path: 'context.targetInputTokens',
+      message: 'must not exceed context.maxInputTokens',
+      code: 'relation.targetInputTokens',
     });
   }
-  const { parentHumanItems, parentEvidenceFloor } = parentLimits(
-    contextValue,
-    errors,
-  );
-  const context: ContextConfig = {
-    maxInputTokens: asInteger(
-      contextValue['maxInputTokens'],
-      10_000,
-      1_000,
-      200_000,
-      'context.maxInputTokens',
+  return {
+    targetInputTokens,
+    maxInputTokens,
+    customRules: asString(
+      value['customRules'],
+      '',
+      'context.customRules',
       errors,
     ),
-    evidenceMaxItems: asInteger(
-      contextValue['evidenceMaxItems'],
-      20,
-      1,
-      200,
-      'context.evidenceMaxItems',
-      errors,
-    ),
-    parentHumanItems,
-    parentEvidenceFloor,
-    historyMaxItems: asInteger(
-      contextValue['historyMaxItems'],
-      40,
-      1,
-      400,
-      'context.historyMaxItems',
-      errors,
-    ),
-    checkpointMaxItems: asInteger(
-      contextValue['checkpointMaxItems'],
-      3,
-      0,
-      20,
-      'context.checkpointMaxItems',
-      errors,
-    ),
-    toolCallArgumentMaxChars: asInteger(
-      contextValue['toolCallArgumentMaxChars'],
-      200,
-      20,
-      10_000,
-      'context.toolCallArgumentMaxChars',
-      errors,
-    ),
-    customRules,
-    projectRules: parseProjectRules(contextValue, errors),
+    projectRules: parseProjectRules(value, errors),
   };
-
-  return context;
 }

@@ -187,13 +187,8 @@ export interface PolicyConfig {
 }
 
 export interface ContextConfig {
+  readonly targetInputTokens: number;
   readonly maxInputTokens: number;
-  readonly evidenceMaxItems: number;
-  readonly parentHumanItems: number;
-  readonly parentEvidenceFloor: number;
-  readonly historyMaxItems: number;
-  readonly checkpointMaxItems: number;
-  readonly toolCallArgumentMaxChars: number;
   readonly customRules: string;
   readonly projectRules: {
     readonly enabled: boolean;
@@ -407,7 +402,7 @@ export interface SnapshotMaterial {
   readonly enabled: boolean;
   readonly present: boolean;
   readonly chars: number;
-  readonly limit: number;
+  readonly limit?: number;
   readonly truncated: boolean;
   /** Candidate file that supplied the text, or the first candidate tried. */
   readonly path?: string;
@@ -416,6 +411,7 @@ export interface SnapshotMaterial {
 /** Pending-action material trimmed to fit the input budget. */
 export interface ActionTruncation {
   readonly originalChars: number;
+  /** Submitted review text length, including its visible omission marker. */
   readonly retainedChars: number;
   /** Field that was trimmed, or `null` when the whole serialized action was cut. */
   readonly field: string | null;
@@ -520,6 +516,8 @@ export type HistoryCoverage =
 
 /** Per-source outcome of one history read, for the detail view and tests. */
 export interface HistorySourceState {
+  /** Known unreadable records remain gaps when the live cache changes. */
+  readonly invalid?: number;
   /** Present when this source answered; the count it contributed afterwards. */
   readonly read: number;
   /** Set to why this source could not answer, or `null` when it did. */
@@ -681,6 +679,16 @@ export interface ReviewSnapshot {
   readonly completeness: MaterialCompleteness;
   readonly missing: readonly string[];
   readonly budget: {
+    /** Optional on old v1 snapshots; diagnostics never enter the reviewer. */
+    readonly targetInputTokens?: number;
+    readonly baseInputTokens?: number;
+    readonly targetExceededReason?: 'base-input' | 'hard-degradation';
+    readonly units?: readonly {
+      readonly id: string;
+      readonly cap: number | null;
+      readonly tokens: number;
+      readonly truncated: boolean;
+    }[];
     readonly maxInputTokens: number;
     readonly estimatedInputTokens: number;
     readonly truncatedSegments: readonly string[];
