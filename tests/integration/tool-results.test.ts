@@ -210,6 +210,69 @@ describe('post-execution result persistence', () => {
     });
   });
 
+  test.each(['data:', ' DATA:', 'da\nta:', 'data:\t'])(
+    'PR-B02: omits inline media bytes in a %s reference before SQLite persistence',
+    (scheme) => {
+      const store = fixture.open();
+      const payload = Buffer.from('INLINE-MEDIA-DO-NOT-PERSIST-8123').toString(
+        'base64',
+      );
+      const reference = `${scheme}image/png;base64,${payload}`;
+      const observation = resultObservation({
+        contentState: 'unsupported',
+        parts: [
+          {
+            kind: 'media',
+            channel: 'image',
+            mediaType: 'image/png',
+            source: reference,
+            reference,
+          },
+        ],
+      });
+      const original = structuredClone(observation);
+      expect(store.saveToolResult(observation).state).toBe('saved');
+      const result = store.getToolResult('session', 'query');
+      expect(resultMetadata(result).parts[0]).toMatchObject({
+        kind: 'media',
+        mediaType: 'image/png',
+        source: null,
+        reference: null,
+        bytes: 0,
+      });
+      expect(resultMetadata(result).contentState).toBe('unsupported');
+      expect(result.fragments).toEqual([]);
+      expect(observation).toEqual(original);
+      for (const file of readdirSync(fixture.root).filter((file) =>
+        statSync(join(fixture.root, file)).isFile(),
+      ))
+        expect(
+          readFileSync(join(fixture.root, file)).includes(Buffer.from(payload)),
+        ).toBe(false);
+    },
+  );
+
+  test('PR-B02: does not apply media reference filtering to ordinary text or business JSON', () => {
+    const store = fixture.open();
+    const example = 'data:text/plain,documented-example';
+    store.saveToolResult(
+      resultObservation({
+        parts: [
+          { kind: 'text', channel: 'stdout', text: example },
+          {
+            kind: 'json',
+            channel: 'structured',
+            value: { documentedExample: example },
+          },
+        ],
+      }),
+    );
+    const result = store.getToolResult('session', 'query');
+    expect(result.fragments[0]?.text).toBe(
+      example + JSON.stringify({ documentedExample: example }),
+    );
+  });
+
   test('discovers credentials across channels before persistence and leaves execution inputs intact', () => {
     const store = fixture.open();
     const secret = 'result-credential-sentinel';

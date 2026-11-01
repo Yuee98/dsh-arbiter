@@ -1,10 +1,12 @@
 import type * as NodeFs from 'node:fs';
 import type { PathLike } from 'node:fs';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { AuditStore, type ToolResultReceipt } from '../../src/audit.js';
+import { writeCallRecord } from '../../src/audit/writer.js';
 import {
   resultCall,
   resultFile,
@@ -53,6 +55,138 @@ function save(
 const DAY = 86_400_000;
 
 describe('unified SQLite and tool body retention', () => {
+  test('PR-B01: bounded work remains pending while multiple evictable groups remain', () => {
+    const store = fixture.open();
+    const now = Date.now();
+    expect(
+      store.saveToolResult(
+        resultObservation({ callId: 'newest', observedAt: now }),
+      ).state,
+    ).toBe('saved');
+    const db = new DatabaseSync(fixture.path);
+    const clone =
+      db.prepare(`INSERT INTO tool_results(session_id, call_id, result_id, ts, storage, metadata, body)
+      SELECT session_id, ?, ?, ?, storage, metadata, body FROM tool_results WHERE call_id = 'newest'`);
+    db.exec('BEGIN IMMEDIATE');
+    for (let index = 1; index <= 1301; index += 1)
+      clone.run(`older-${String(index)}`, randomUUID(), now - index);
+    db.exec('COMMIT');
+    const first = store.runRetention(now, 30, 1);
+    expect(first.irreducible).toBe(false);
+    expect(first).toMatchObject({ capacityPending: true });
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM tool_results').get(),
+    ).toMatchObject({ count: 22 });
+    const next = store.runRetention(now, 30, 1);
+    expect(next.irreducible).toBe(true);
+    expect(next).not.toHaveProperty('capacityPending');
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM tool_results').get(),
+    ).toMatchObject({ count: 1 });
+    expect(store.getToolResult('session', 'newest').state).toBe('found');
+    db.close();
+  }, 30_000);
+
+  test('PR-B03: a replacement cannot commit between capacity selection and deletion of that old candidate', async () => {
+    const store = fixture.open();
+    const now = Date.now();
+    for (const [index, id] of ['A', 'B', 'C'].entries())
+      store.enqueue(
+        resultCall({ callId: id, ts: now - 30_000 + index * 10_000 }),
+      );
+    await store.flush();
+    const candidate: unknown = Reflect.get(store, 'db');
+    if (!(candidate instanceof DatabaseSync))
+      throw new Error('missing fixture database');
+    const other = new DatabaseSync(fixture.path);
+    let attempted = false;
+    const interleaving = { deferred: false };
+    const replacement = resultCall({
+      callId: 'A',
+      ts: now + 10_000,
+      reason: 'newer committed observation',
+    });
+    const prepare = candidate.prepare.bind(candidate);
+    const spy = vi.spyOn(candidate, 'prepare').mockImplementation((sql) => {
+      const statement = prepare(sql);
+      if (sql.includes('ORDER BY ts') && !attempted) {
+        const all = statement.all.bind(statement);
+        vi.spyOn(statement, 'all').mockImplementation((...args) => {
+          const rows = all(...args);
+          if (!attempted) {
+            attempted = true;
+            try {
+              writeCallRecord(other, replacement);
+            } catch (error) {
+              if (
+                !(error instanceof Error) ||
+                !/locked|busy/iu.test(error.message)
+              )
+                throw error;
+              interleaving.deferred = true;
+            }
+          }
+          return rows;
+        });
+      }
+      return statement;
+    });
+    try {
+      store.runRetention(now, 30, 1);
+      if (interleaving.deferred) writeCallRecord(other, replacement);
+    } finally {
+      spy.mockRestore();
+      other.close();
+    }
+    expect(attempted).toBe(true);
+    expect(store.getCall('A')).toMatchObject({
+      ts: now + 10_000,
+      reason: 'newer committed observation',
+    });
+  });
+
+  test('PR-B03: a writer appending reclaimable WAL after checkpoint does not evict valid groups for those bytes', async () => {
+    const store = fixture.open();
+    for (const id of ['A', 'B', 'C']) store.enqueue(resultCall({ callId: id }));
+    await store.flush();
+    const candidate: unknown = Reflect.get(store, 'db');
+    if (!(candidate instanceof DatabaseSync))
+      throw new Error('missing fixture database');
+    candidate.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    const target = store.databaseBytes;
+    const other = new DatabaseSync(fixture.path);
+    let appended = false;
+    const prepare = candidate.prepare.bind(candidate);
+    const spy = vi.spyOn(candidate, 'prepare').mockImplementation((sql) => {
+      const statement = prepare(sql);
+      if (sql.includes('wal_checkpoint') && !appended) {
+        const get = statement.get.bind(statement);
+        vi.spyOn(statement, 'get').mockImplementation((...args) => {
+          const row = get(...args);
+          if (!appended) {
+            appended = true;
+            other
+              .prepare(
+                "UPDATE calls SET reason = 'changed' WHERE call_id = 'A'",
+              )
+              .run();
+          }
+          return row;
+        });
+      }
+      return statement;
+    });
+    let deleted: number;
+    try {
+      deleted = store.runRetention(Date.now(), 30, target).deleted;
+    } finally {
+      spy.mockRestore();
+      other.close();
+    }
+    expect(appended).toBe(true);
+    expect(deleted).toBe(0);
+    expect(store.listCalls({}).total).toBe(3);
+  });
   test('a failed result retains the actually observed call age anchor', () => {
     const store = fixture.open();
     const now = Date.now();

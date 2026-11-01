@@ -4,11 +4,11 @@ import {
   clearToolResults,
   expireToolResults,
   retentionGroupCount,
-  oldestRetentionGroups,
-  deleteRetentionGroup,
+  evictOldestRetentionGroup,
 } from './tool-result-retention.js';
 import { toolResultFileBytes } from './tool-result-files.js';
 import { recoverToolResults } from './tool-results.js';
+import { auditWalBytes } from './footprint.js';
 export function clearCalls(db: DatabaseSync): number {
   const count = rowNumber(
     asRow(db.prepare('SELECT COUNT(*) AS count FROM calls').get())['count'],
@@ -93,6 +93,7 @@ export interface RetentionOutcome {
   /** Total bytes the target applies to, including the WAL and SHM sidecars. */
   readonly bytes: number;
   readonly cleanupPending?: boolean;
+  readonly capacityPending?: boolean;
 }
 
 /**
@@ -139,34 +140,50 @@ export function runRetention(
   let checkpointed = checkpoint(db);
   const total = (): number =>
     occupiedBytes(db) + auxiliaryBytes() + toolResultFileBytes(bodyPath);
+  // WAL appended by another writer after checkpoint is still reclaimable. It
+  // must not drive deletion when the locked logical database/files already fit.
+  const overBudget = (): boolean =>
+    occupiedBytes(db) +
+      toolResultFileBytes(bodyPath) +
+      Math.max(0, auxiliaryBytes() - auditWalBytes(bodyPath)) >
+    retentionBytes;
   for (
-    let guard = 0;
-    guard < 40 && !cleanupPending && checkpointed && total() > retentionBytes;
-    guard += 1
+    let work = 0;
+    work < 40 * 32 &&
+    !cleanupPending &&
+    checkpointed &&
+    total() > retentionBytes;
+    work += 1
   ) {
-    const remaining = retentionGroupCount(db);
-    if (remaining <= 1) break;
-    const groups = oldestRetentionGroups(db, Math.min(32, remaining - 1));
-    for (const group of groups) {
-      if (total() <= retentionBytes) break;
-      deleted += deleteRetentionGroup(db, group.sessionId, group.callId);
-      cleanupPending = !recoverToolResults(db, bodyPath).ok;
-      reclaimShared(db, cutoff);
-      checkpointed = checkpoint(db);
-      // Reclaim failure cannot justify sacrificing another unrelated record.
-      if (cleanupPending || !checkpointed) break;
-    }
+    const step = evictOldestRetentionGroup(db, overBudget);
+    if (!step.evicted) break;
+    deleted += step.deleted;
+    cleanupPending = !recoverToolResults(db, bodyPath).ok;
+    reclaimShared(db, cutoff);
+    checkpointed = checkpoint(db);
   }
   reclaimShared(db, cutoff);
   if (deleted > 0 || total() > retentionBytes) compact(db);
-  checkpoint(db);
+  checkpointed = checkpoint(db);
   const bytes = total();
   return {
     deleted,
-    irreducible: !cleanupPending && checkpointed && bytes > retentionBytes,
+    ...capacityState(
+      retentionGroupCount(db),
+      !cleanupPending && checkpointed && bytes > retentionBytes,
+    ),
     bytes,
     ...(cleanupPending ? { cleanupPending: true } : {}),
   };
+}
+function capacityState(
+  remaining: number,
+  exceeded: boolean,
+): Pick<RetentionOutcome, 'irreducible' | 'capacityPending'> {
+  if (!exceeded) return { irreducible: false };
+  return remaining <= 1
+    ? { irreducible: true }
+    : { irreducible: false, capacityPending: true };
 }
 function expireRecords(db: DatabaseSync, cutoff: number): number {
   db.exec('BEGIN IMMEDIATE');

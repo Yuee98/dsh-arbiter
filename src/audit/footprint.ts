@@ -15,6 +15,9 @@ function fileBytes(paths: readonly string[]): number {
 export function auditSidecarBytes(path: string): number {
   return fileBytes([`${path}-wal`, `${path}-shm`]);
 }
+export function auditWalBytes(path: string): number {
+  return fileBytes([`${path}-wal`]);
+}
 export function auditTotalBytes(path: string, onFailure: () => void): number {
   let bytes = fileBytes([path]) + auditSidecarBytes(path);
   try {

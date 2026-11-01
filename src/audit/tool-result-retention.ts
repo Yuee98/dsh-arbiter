@@ -33,7 +33,7 @@ export function retentionGroupCount(db: DatabaseSync): number {
     ],
   );
 }
-export function oldestRetentionGroups(
+function oldestRetentionGroups(
   db: DatabaseSync,
   limit: number,
 ): readonly { readonly sessionId: string; readonly callId: string }[] {
@@ -50,27 +50,40 @@ export function oldestRetentionGroups(
       };
     });
 }
-export function deleteRetentionGroup(
+function deleteGroupRows(
   db: DatabaseSync,
   sessionId: string,
   callId: string,
 ): number {
+  db.prepare(
+    `INSERT OR IGNORE INTO tool_result_garbage(file_ref)
+    SELECT file_ref FROM tool_results WHERE session_id = ? AND call_id = ? AND file_ref IS NOT NULL`,
+  ).run(sessionId, callId);
+  db.prepare(
+    'DELETE FROM tool_results WHERE session_id = ? AND call_id = ?',
+  ).run(sessionId, callId);
+  return rowChanges(
+    db
+      .prepare('DELETE FROM calls WHERE session_id = ? AND call_id = ?')
+      .run(sessionId, callId),
+  );
+}
+/** Recheck the whole eviction decision under the same lock as its SQL deletion. */
+export function evictOldestRetentionGroup(
+  db: DatabaseSync,
+  overBudget: () => boolean,
+): { readonly evicted: boolean; readonly deleted: number } {
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare(
-      `INSERT OR IGNORE INTO tool_result_garbage(file_ref)
-      SELECT file_ref FROM tool_results WHERE session_id = ? AND call_id = ? AND file_ref IS NOT NULL`,
-    ).run(sessionId, callId);
-    db.prepare(
-      'DELETE FROM tool_results WHERE session_id = ? AND call_id = ?',
-    ).run(sessionId, callId);
-    const deleted = rowChanges(
-      db
-        .prepare('DELETE FROM calls WHERE session_id = ? AND call_id = ?')
-        .run(sessionId, callId),
-    );
+    if (retentionGroupCount(db) <= 1 || !overBudget()) {
+      db.exec('COMMIT');
+      return { evicted: false, deleted: 0 };
+    }
+    const group = oldestRetentionGroups(db, 1)[0];
+    if (group === undefined) throw new Error('retention-candidate-unavailable');
+    const deleted = deleteGroupRows(db, group.sessionId, group.callId);
     db.exec('COMMIT');
-    return deleted;
+    return { evicted: true, deleted };
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;

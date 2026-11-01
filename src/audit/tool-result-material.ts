@@ -56,6 +56,17 @@ function safeTexts(
   }
   return texts;
 }
+function mediaReference(
+  reference: string | undefined,
+  redactor: CredentialRedactor,
+): string | null {
+  if (reference === undefined) return null;
+  // URL parsing ignores ASCII tabs/newlines, including inside a data: scheme.
+  const inline = /^[\p{Cc}\s]*d[\t\r\n]*a[\t\r\n]*t[\t\r\n]*a[\t\r\n]*:/iu.test(
+    reference,
+  );
+  return inline ? null : redactor.text(reference);
+}
 export function prepareToolResult(
   db: DatabaseSync,
   observation: ToolResultObservation,
@@ -77,15 +88,18 @@ export function prepareToolResult(
     offset += bytes;
     return {
       channel: redactor.text(part.channel),
-      source: part.source === undefined ? null : redactor.text(part.source),
+      source:
+        part.kind === 'media'
+          ? mediaReference(part.source, redactor)
+          : part.source === undefined
+            ? null
+            : redactor.text(part.source),
       kind: part.kind,
       start,
       bytes,
       mediaType: part.kind === 'media' ? redactor.text(part.mediaType) : null,
       reference:
-        part.kind === 'media' && part.reference !== undefined
-          ? redactor.text(part.reference)
-          : null,
+        part.kind === 'media' ? mediaReference(part.reference, redactor) : null,
     };
   });
   const metadata: ToolResultMetadata = {

@@ -79,6 +79,8 @@ export interface AuditRetentionOutcome {
   readonly irreducible: boolean;
   readonly bytes: number;
   readonly cleanupPending?: boolean;
+  /** More evictable groups remain after the bounded cleanup pass. */
+  readonly capacityPending?: boolean;
 }
 export class AuditStore {
   /**
@@ -129,9 +131,7 @@ export class AuditStore {
       () => this.open,
       () => this.config.enabled,
       () => this.retention.days,
-      (error) => {
-        this.markDegraded(error);
-      },
+      this.markDegraded.bind(this),
     );
     mkdirSync(dirname(path), { recursive: true });
     // The version is read from the file header before any connection exists, so
