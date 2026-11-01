@@ -123,20 +123,22 @@ ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
 | 熔断 | `breaker.mode`（preset/custom/off）、`preset`（strict/balanced/lenient）、`consecutiveDenials`／`windowDenials`／`windowSize` | 枚举、预设阈值约束；与审批模式的 `ask`／`no-ask` 无关，两者正交 |
 | 审查预算 | `reviewBudget`（默认 null = 不限，仅提示不阻断） | 正整数或 null |
 | 后端成本标记 | `costTier`（free/paid，用于成本估算显示） | 枚举 |
-| 授权证据流 | `evidence.maxItems`（20）/ `evidence.parentHumanItems`（5）/ `evidence.parentEvidenceFloor`（1） | 正整数、floor ≤ parentHumanItems |
-| 总输入预算 | `maxInputTokens`（10000） | 正整数 |
-| 历史与裁决预算 | `history.maxItems`（40） | 正整数 |
+| 授权证据流 | 原始人类与绑定问题按来源／截止点选择；最新本会话及直接父会话原文保位 | 不设旧 20／5 条数或最近 N 轮门槛，保护原文不套 C |
+| 输入预算 | `context.targetInputTokens`（T=6000）／`context.maxInputTokens`（H=10000） | 正安全整数，T≤H；缺 T 取 min(6000,H)，显式非法值拒绝 |
+| 普通材料 | 历史调用、较早人类、先前裁决、assistant／hint／checkpoint 竞争 T 的剩余空间 | 一次历史调用的参数、全部结果及包装共享 C=min(剩余,floor(0.1T))；无工具池或少量调用放宽 |
 | 审计保留（高级设置） | 保留天数与容量目标；已确认默认 30 天 / 1 GiB，字段名待定 | 正数；实例级清理策略，与运行时历史窗口分开 |
-| 用户审查指引 | `customRules`（自由文本，2000 字符上限；可包含持续授权） | 长度；按已确认来源优先级解释，不直接改写代码策略 |
+| 用户审查指引 | `context.customRules`（自由文本；可包含持续授权） | 取消 2000／合计 3000 字符前置上限，由 T/H 处理；按已确认来源优先级解释，不直接改写代码策略 |
 | 项目审查指引 | `projectRules.enabled`（已确认默认 true）/ `projectRules.files`（`.dsh/arbiter.md`, `.arbiter.md`） | 布尔、相对路径；用户负责内容，每次新快照取得当前文本，已发出的快照不变，不逐次认可 |
-| checkpoint 上限 | `context.checkpointMaxItems`（3） | 正整数 |
-| tool call 参数上限 | `context.toolCallArgumentMaxChars`（200） | 正整数 |
+| checkpoint | 最新可读一条候选，低优先级 | 受 C 与普通剩余预算约束 |
+| 读取与缓存保护 | 内部事件／字节读取保护；缓存单会话 4096 条、总体 16384 条／64 MiB | 独立于 T/H，淘汰副本后可有界补读，不删除源日志；全量快照宿主只能提供有界后处理 |
 | 探针 | **无探针**：生产包 `asksProbe: false`，请求里没有 `recoverability` 一问 | 不可配置；旧 `probeMode`（`assist`／`override`）报 `policy.retired` |
 | 判定策略 | `policy.version` 只有 `arbiter-policy-v3`；档位、N0 与矩阵由 `REVIEW_CONTRACT_VERSION` 命名 | **没有可调阈值**；旧 `tauAuth`／`tauRisk`／`tauCritical`／`tauLow`、两个风险上限、`allowBulkEgress` 及 `normal`／`progress` 策略块一律报 `policy.retired`，不迁移 |
 | chat 后端 | temperature（0）/ maxTokens（10000）/ maxRepairRetries（1）/ timeoutMs（20000） | 范围；`maxTokens` 默认值从 400 提高，因为 400 时模型把预算耗在思考上、返回不了 JSON |
 | 执行边界 | `boundary`：trusted / guarded；首次默认 guarded | 用户在本配置页选择并保存应用；决定已启用会话放行后的沙箱，不启用未接管会话。保存后对当前已启用会话立即生效（先写记录再改旋钮），未启用会话不被改写 |
 | 审批模式 | 主会话 `ask`（默认）或 `no-ask`，用户可选；子任务固定 `no-ask`，不接受 `ask` | 主会话由用户在本设置页选择，不提供单个子任务覆盖。两者共用同一份判定矩阵；子任务无审批通道，`modes.subagent: ask` 报 `modes.subagent-fixed` |
 | 凭据 | 显示"已设置/未设置/来源"，可写入 | 见 [机密](configuration-and-audit.md#design-8-2) |
+
+**CW-S07 升级**：旧 `context.evidenceMaxItems`、`parentHumanItems`、`parentEvidenceFloor`、`historyMaxItems`、`checkpointMaxItems`、`toolCallArgumentMaxChars` 不再进入规范配置或控制候选提取，也不映射为读取／缓存容量。基础输入 B≤T 时补普通材料；T<B≤H 时仅基础；B>H 时全局规则先让位、项目规则随后、动作最后裁剪，保护原文不动，降级不回填。头尾片段和必要缺口说明计入完整包装；repair 的新增消息也在实际发送前核验 H，超限不会外发。T/H、基础长度和超目标原因保留在运行记录，旧 v1 快照／运行记录继续可读，不回写历史请求或增加版本／hash 体系。
 
 **配置生效约定**：以校验并成功应用为生效点。已有结果继续推进，不因后端或输入协议变更丢弃、重审；旧响应按原请求协议解释。已弹出的人工审批保持等待，尚未作出的后续判定使用新配置；已经结算或开始执行的调用不追溯。保存失败或应用失败时不能显示“已生效”。不额外增加每次执行前检查模式的产品步骤，具体在途边界见[配置生效与在途请求](approval-modes.md#configuration-activation)。
 
