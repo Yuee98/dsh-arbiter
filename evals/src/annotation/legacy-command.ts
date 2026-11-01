@@ -1,6 +1,6 @@
 /** Grouped legacy CLI registration, keeping case consumers and historical reads separate. */
 import { resolve } from 'node:path';
-import { isLegacyCollection } from '../data/legacy-read.js';
+import { isLegacyCollection } from '../data/dataset-layout.js';
 import { migrateLegacy } from '../data/legacy-migrate.js';
 import { exportLegacyBatch, importLegacyBatch } from './legacy-batch.js';
 interface Io {

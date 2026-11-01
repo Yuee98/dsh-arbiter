@@ -199,6 +199,14 @@ function manifestCoverage(
         message: `case ${caseId} is not declared in manifest.json`,
       });
     }
+    const declaredCase = manifest.cases.find(
+      (entry) => entry.caseId === caseId,
+    );
+    if (declaredCase !== undefined && declaredCase.familyId !== familyId)
+      problems.push({
+        path: entry.path,
+        message: `case ${caseId} declares family ${familyId}, but authority assigns ${declaredCase.familyId}`,
+      });
     const family = families.get(familyId);
     if (family === undefined) {
       problems.push({

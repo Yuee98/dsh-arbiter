@@ -1,6 +1,4 @@
 /** Adapt legacy collections for existing case consumers without changing historical reads. */
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
 import { readGroupFiles } from './group-files.js';
 import { legacyMetadata } from './legacy-metadata.js';
 import type { RawDataset } from './read.js';
@@ -8,22 +6,6 @@ import type { Split } from './types.js';
 export interface DatasetSelection {
   readonly split?: Split | 'all';
   readonly caseIds?: readonly string[];
-}
-export async function isLegacyCollection(dataset: string): Promise<boolean> {
-  for (const split of ['dev', 'calibration', 'holdout']) {
-    try {
-      if ((await lstat(join(dataset, split, 'legacy-v1'))).isDirectory())
-        return true;
-    } catch (error) {
-      if (!(
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ))
-        throw error;
-    }
-  }
-  return false;
 }
 export async function readLegacyDataset(
   dataset: string,

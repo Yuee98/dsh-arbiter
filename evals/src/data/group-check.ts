@@ -25,24 +25,27 @@ function legacyProblems(
     (entry): entry is { path: string; document: CaseReviews } =>
       'caseId' in entry.document,
   );
-  const canonical =
-    authority !== undefined &&
-    group.cases.length > 0 &&
-    group.cases.every((e) =>
-      authority.cases.some((c) => c.caseId === e.document.caseId),
-    );
-  const versions = (canonical
-    ? authority.versions
-    : labels[0]?.document.versions) ?? {
-    ...current,
-    policy: 'unlabelled',
-  };
+  const versions = authority?.versions ??
+    labels[0]?.document.versions ?? {
+      ...current,
+      policy: 'unlabelled',
+    };
   const families = new Map(
     group.cases.map((entry) => [
       entry.document.familyId,
       { familyId: entry.document.familyId, split: group.split },
     ]),
   );
+  const expectedFamilies = authority?.families.filter(
+    (f) => f.split === group.split,
+  ) ?? [...families.values()];
+  const familyIds = new Set(expectedFamilies.map((f) => f.familyId));
+  const expectedCases =
+    authority?.cases.filter((c) => familyIds.has(c.familyId)) ??
+    group.cases.map((entry) => ({
+      caseId: entry.document.caseId,
+      familyId: entry.document.familyId,
+    }));
   const result = inspectDataset(
     {
       manifest: {
@@ -50,11 +53,8 @@ function legacyProblems(
         document: {
           datasetId: 'grouped-legacy',
           versions,
-          families: [...families.values()],
-          cases: group.cases.map((entry) => ({
-            caseId: entry.document.caseId,
-            familyId: entry.document.familyId,
-          })),
+          families: expectedFamilies,
+          cases: expectedCases,
         },
       },
       cases: group.cases,
@@ -68,7 +68,15 @@ function legacyProblems(
   );
   // This is a transient table of contents for existing checks, not a stored manifest
   // or a declaration that a migrated reference has regained any qualification.
-  return result.problems;
+  return result.problems.map((p) =>
+    p.path === 'manifest.json'
+      ? {
+          ...p,
+          path: `${group.split}/${group.group}/cases.json#`,
+          message: `authority: ${p.message}`,
+        }
+      : p,
+  );
 }
 
 function opinionProblems(

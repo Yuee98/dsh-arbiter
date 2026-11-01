@@ -11,8 +11,8 @@
  * the typed value — asserting it here would make every later check advisory.
  */
 
-import { access } from 'node:fs/promises';
-import { isLegacyCollection, readLegacyDataset } from './legacy-read.js';
+import { isLegacyCollection } from './dataset-layout.js';
+import { readLegacyDataset } from './legacy-read.js';
 import type { DatasetSelection } from './legacy-read.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -138,15 +138,7 @@ export async function readDataset(
   dataset: string,
   selection: DatasetSelection = {},
 ): Promise<RawDataset> {
-  let hasManifest = false;
-  try {
-    await access(join(dataset, 'manifest.json'));
-    hasManifest = true;
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
-      throw error;
-  }
-  if (!hasManifest && (await isLegacyCollection(dataset)))
+  if (await isLegacyCollection(dataset))
     return readLegacyDataset(dataset, selection);
   const problems: ReadProblem[] = [];
   let manifest: Sourced | null = null;

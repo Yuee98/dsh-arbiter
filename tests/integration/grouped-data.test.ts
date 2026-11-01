@@ -248,6 +248,8 @@ describe('grouped filesystem scope', () => {
 
   it('preserves legacy fields and old hash/coherence checks in collections', async () => {
     await withDataset(async (dataset) => {
+      // This is a format preview with its own identity, not the 51-case migration.
+      await dataset.write('manifest.json', manifest(['case-a']));
       const hash = inputHashOf(input());
       await dataset.write(
         'dev/legacy-v1/cases.json',
