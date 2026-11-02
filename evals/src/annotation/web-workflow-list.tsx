@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { WebPointSummary } from './web-types.js';
-import { copy, statusLabels } from './web-copy.js';
+import { copy, statusLabels, referenceLabels } from './web-copy.js';
 
 export function WorkflowList({
   points,
@@ -22,19 +22,26 @@ export function WorkflowList({
     (point) =>
       filter === 'all' ||
       (filter === 'pending' &&
-        !['confirmed', 'disputed', 'needs-review', 'undecidable'].includes(
-          point.status,
+        ['none', 'stale', 'unresolved', 'preparation-failed'].includes(
+          point.referenceStatus,
         )) ||
       (filter === 'sampled' && point.sampled) ||
       (filter === 'disagreements' && disagreements.has(point.token)) ||
-      point.status === filter,
+      point.referenceStatus === filter ||
+      (filter === 'draft' && point.status === 'draft'),
   );
   return (
     <nav aria-label={copy.workflows}>
       <h2>{copy.workflows}</h2>
       <p>
+        {copy.formalProgress}:{' '}
+        {points.filter((point) => point.referenceStatus === 'confirmed').length}{' '}
+        / {points.length} {copy.progress}
+      </p>
+      <p>
+        {copy.localProgress}:{' '}
         {points.filter((point) => point.status === 'confirmed').length} /{' '}
-        {points.length} {copy.progress}
+        {points.length}
       </p>
       <label>
         {copy.filter}
@@ -47,6 +54,8 @@ export function WorkflowList({
           <option value="all">{copy.all}</option>
           <option value="pending">{copy.pending}</option>
           <option value="confirmed">{copy.reviewed}</option>
+          <option value="draft">{statusLabels.draft}</option>
+          <option value="undecidable">{referenceLabels.undecidable}</option>
           <option value="needs-review">{copy.needsReview}</option>
           <option value="disputed">{copy.disputed}</option>
           <option value="sampled">{copy.sampled}</option>
@@ -67,7 +76,8 @@ export function WorkflowList({
               }}
             >
               {copy.workflow} {point.workflow} / {copy.point} {point.position} ·{' '}
-              {statusLabels[point.status]}
+              {copy.localProgress}: {statusLabels[point.status]} /{' '}
+              {copy.formalProgress}: {referenceLabels[point.referenceStatus]}
             </button>
           </li>
         ))}

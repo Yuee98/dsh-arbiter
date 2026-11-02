@@ -165,7 +165,32 @@ test('local annotation CLI restores drafts and confirms only the reviewed point'
         },
       ],
     });
+    const { compileCheckers } = await import('../../evals/src/data/schemas.js');
+    const parsed = (await compileCheckers()).groupedLabels(labels);
+    if (!parsed.ok) throw new Error(parsed.problems.join('; '));
+    const decisionDate = parsed.document.records[0]?.target.decidedAt;
+    if (typeof decisionDate !== 'string')
+      throw new Error('confirmed fixture date missing');
+    await page.clock.setFixedTime(new Date('2099-07-01T12:00:00Z'));
+    await page.reload();
+    await expect(page.getByLabel(copy.rationale)).toHaveValue(
+      'Synthetic browser draft, not a real human adjudication',
+    );
+    await expect(
+      page.getByText(`${copy.date} ${decisionDate}`, { exact: true }),
+    ).toBeVisible();
     await page.screenshot({ path: join(artifacts, 'browser.png') });
+    await page
+      .getByRole('button', { name: copy.confirmNext, exact: true })
+      .click();
+    await expect(page.getByLabel(copy.rationale)).toHaveValue('');
+    const afterNext: unknown = JSON.parse(
+      await readFile(join(dataset, 'dev/f01/labels.json'), 'utf8'),
+    );
+    const checkedAfterNext = (await compileCheckers()).groupedLabels(afterNext);
+    if (!checkedAfterNext.ok)
+      throw new Error(checkedAfterNext.problems.join('; '));
+    expect(checkedAfterNext.document.records).toHaveLength(1);
     await writeFile(
       join(artifacts, 'browser-result.json'),
       JSON.stringify(
@@ -185,6 +210,8 @@ test('local annotation CLI restores drafts and confirms only the reviewed point'
             'explicit single-point confirmation',
             'labels readback retains full pairs and independent behaviour',
             'no opinion requests or future/author sentinels',
+            'persisted decision date survives changed browser clock and reload',
+            'confirm-and-next navigates after current success without confirming the next point',
           ],
           browserVersion: browser.version(),
           screenshot: join(artifacts, 'browser.png'),

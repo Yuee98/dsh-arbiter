@@ -2,6 +2,7 @@ import type {
   WebBootstrap,
   WebForm,
   WebOpinion,
+  WebOpinionReport,
   WebPoint,
   WebPointSummary,
   WebTransport,
@@ -15,6 +16,8 @@ function form(value: unknown): value is WebForm {
   return (
     record(value) &&
     typeof value['pairs'] === 'string' &&
+    (value['noScores'] === undefined ||
+      typeof value['noScores'] === 'boolean') &&
     typeof value['rationale'] === 'string' &&
     typeof value['evidence'] === 'string' &&
     typeof value['author'] === 'string' &&
@@ -39,6 +42,16 @@ function summary(value: unknown): value is WebPointSummary {
     typeof value['position'] === 'number' &&
     typeof value['sampled'] === 'boolean' &&
     [
+      'none',
+      'stale',
+      'confirmed',
+      'disputed',
+      'undecidable',
+      'needs-review',
+      'unresolved',
+      'preparation-failed',
+    ].includes(String(value['referenceStatus'])) &&
+    [
       'unopened',
       'draft',
       'confirmed',
@@ -55,6 +68,9 @@ function point(value: unknown): value is WebPoint {
     summary(value) &&
     typeof value['revision'] === 'number' &&
     typeof value['publicationPending'] === 'boolean' &&
+    (value['decisionDate'] === null ||
+      typeof value['decisionDate'] === 'string') &&
+    (value['viewToken'] === null || typeof value['viewToken'] === 'string') &&
     form(value['form']) &&
     typeof value['hasPredecessor'] === 'boolean' &&
     typeof value['exposed'] === 'boolean' &&
@@ -83,7 +99,7 @@ function bootstrap(value: unknown): value is WebBootstrap {
     bands(value['authorization'])
   );
 }
-function opinions(value: unknown): value is readonly WebOpinion[] {
+function opinionList(value: unknown): value is readonly WebOpinion[] {
   return (
     Array.isArray(value) &&
     value.every(
@@ -106,6 +122,26 @@ function opinions(value: unknown): value is readonly WebOpinion[] {
           'review-failure',
         ].includes(String(item['behaviour'])),
     )
+  );
+}
+function opinions(value: unknown): value is WebOpinionReport {
+  if (
+    !record(value) ||
+    typeof value['viewToken'] !== 'string' ||
+    !opinionList(value['opinions']) ||
+    !record(value['consensus'])
+  )
+    return false;
+  const consensus = value['consensus'];
+  return (
+    ['n', 'k', 'valid', 'missing', 'failed'].every(
+      (key) => typeof consensus[key] === 'number',
+    ) &&
+    Array.isArray(consensus['reasons']) &&
+    consensus['reasons'].every(
+      (reason: unknown) => typeof reason === 'string',
+    ) &&
+    (consensus['draft'] === null || opinionList([consensus['draft']]))
   );
 }
 export function webTransport(token: string): WebTransport {
@@ -140,6 +176,9 @@ export function webTransport(token: string): WebTransport {
   return {
     bootstrap: () => request('/api/bootstrap', bootstrap),
     point: (token) => request('/api/point', point, { token }),
+    reload: (token) => request('/api/reload', point, { token }),
+    settle: (token, revision) =>
+      request('/api/settle', point, { token, revision }),
     save: (value) => request('/api/save', point, value),
     confirm: (value) => request('/api/confirm', point, value),
     opinions: (token) => request('/api/opinions', opinions, { token }),

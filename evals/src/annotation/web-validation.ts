@@ -6,6 +6,7 @@ export const webFormSchema = {
   additionalProperties: false,
   required: ['pairs', 'behaviour', 'rationale', 'evidence', 'author', 'state'],
   properties: {
+    noScores: { type: 'boolean' },
     pairs: { type: 'string', maxLength: 8000 },
     behaviour: {
       enum: [

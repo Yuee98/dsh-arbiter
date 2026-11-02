@@ -9,6 +9,17 @@ import { independentAnswer } from '../../evals/src/annotation/workflow-validatio
 import { materialLines } from '../../evals/src/annotation/web-material.js';
 import { EMPTY_FORM } from '../../evals/src/annotation/web-types.js';
 describe('annotation web form contracts', () => {
+  test('change matching retains duplicate occurrences and order without disclosing deleted text', () => {
+    const repeated = materialLines('same\nsame');
+    expect(
+      changedMaterial('same\nsame', 'same').map((index) => repeated[index]),
+    ).toEqual(['same']);
+    const reordered = materialLines('B\nA');
+    expect(
+      changedMaterial('B\nA', 'A\nB').map((index) => reordered[index]),
+    ).toContain('A');
+    expect(changedMaterial('A\nB', 'A\nB')).toEqual([]);
+  });
   test('retains full pairs and independent behaviour, never their Cartesian product or a score matrix verdict', () => {
     const answer = independentAnswer(
       formAnswer({ ...EMPTY_FORM, pairs: '3,10\n4,9', behaviour: 'deny' }),

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WebForm, WebPoint, WebTransport } from './web-types.js';
 import { copy } from './web-copy.js';
 import { WebRequestError } from './web-errors.js';
+import { sameWebForm } from './web-form.js';
 
 export function useAnnotationEditor(
   transport: WebTransport,
   changed: (point: WebPoint) => void,
 ) {
   const [point, setPoint] = useState<WebPoint | null>(null);
+  const [newerDraft, setNewerDraft] = useState<WebPoint | null>(null);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
@@ -25,11 +27,26 @@ export function useAnnotationEditor(
     },
     [changed],
   );
-  const failure = useCallback((value: unknown) => {
-    failed.current = true;
-    setError(value instanceof Error ? value.message : copy.error);
-    setMessage(copy.unsaved);
-  }, []);
+  const failure = useCallback(
+    (value: unknown) => {
+      failed.current = true;
+      if (
+        value instanceof Error &&
+        value.message === copy.conflict &&
+        current.current !== null
+      )
+        accept({
+          ...current.current,
+          request: null,
+          preparation: 'preparation-failed',
+          viewToken: null,
+          error: 'CONFLICT_REVIEW_REQUIRED',
+        });
+      setError(value instanceof Error ? value.message : copy.error);
+      setMessage(copy.unsaved);
+    },
+    [accept],
+  );
   const save = useCallback(async () => {
     const operation = queue.current.then(async () => {
       const value = current.current;
@@ -79,6 +96,7 @@ export function useAnnotationEditor(
         const loaded = await transport.point(token);
         dirty.current = false;
         blocked.current = loaded.publicationPending;
+        setNewerDraft(null);
         accept(loaded);
         setError('');
         setMessage(
@@ -99,7 +117,7 @@ export function useAnnotationEditor(
   const edit = useCallback(
     (form: WebForm, sampled?: boolean) => {
       const value = current.current;
-      if (value === null) return;
+      if (value === null || blocked.current) return;
       generation.current += 1;
       dirty.current = true;
       failed.current = false;
@@ -112,7 +130,7 @@ export function useAnnotationEditor(
     try {
       if (!blocked.current) await flush();
       const value = current.current;
-      if (value === null || value.preparation !== 'ready') return;
+      if (value === null || value.preparation !== 'ready') return false;
       setBusy(true);
       try {
         const saved = await transport.confirm({
@@ -126,13 +144,16 @@ export function useAnnotationEditor(
         accept(saved);
         setMessage(copy.confirmed);
         setError('');
+        return true;
       } catch (error) {
         blocked.current =
           error instanceof WebRequestError ? error.pending : true;
         failure(error);
+        return false;
       }
     } catch (error) {
       failure(error);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -142,6 +163,32 @@ export function useAnnotationEditor(
     if (value === null) return;
     setBusy(true);
     try {
+      const latest = await transport.reload(value.token);
+      if (
+        latest.preparation !== 'ready' ||
+        latest.viewToken !== value.viewToken
+      )
+        accept({
+          ...value,
+          request: latest.request,
+          preparation: latest.preparation,
+          viewToken: latest.viewToken,
+          error: latest.error,
+          referenceStatus: latest.referenceStatus,
+        });
+      if (
+        latest.revision !== value.revision ||
+        !sameWebForm(latest.form, value.form) ||
+        latest.sampled !== value.sampled ||
+        latest.publicationPending
+      ) {
+        setNewerDraft(latest);
+        failed.current = true;
+        setError(
+          latest.publicationPending ? copy.pendingRebase : copy.conflict,
+        );
+        return;
+      }
       const rebased = await transport.rebase(value.token, value.revision);
       accept({ ...rebased, form: value.form, sampled: value.sampled });
       blocked.current = false;
@@ -154,6 +201,74 @@ export function useAnnotationEditor(
       setBusy(false);
     }
   }, [accept, failure, transport]);
+  const settle = useCallback(async () => {
+    const value = current.current;
+    if (value === null) return;
+    setBusy(true);
+    try {
+      const saved = await transport.settle(value.token, value.revision);
+      dirty.current = false;
+      blocked.current = false;
+      failed.current = false;
+      setNewerDraft(null);
+      accept(saved);
+      setError('');
+      setMessage(saved.status === 'draft' ? copy.settledDraft : copy.confirmed);
+    } catch (error) {
+      failure(error);
+    } finally {
+      setBusy(false);
+    }
+  }, [accept, failure, transport]);
+  const resolveDraft = useCallback(
+    async (keepLocal: boolean) => {
+      const value = current.current;
+      if (value === null || newerDraft === null) return;
+      if (newerDraft.token !== value.token) {
+        setNewerDraft(null);
+        failure(new Error(copy.conflict));
+        return;
+      }
+      setBusy(true);
+      try {
+        if (keepLocal) {
+          if (newerDraft.publicationPending)
+            throw new Error(copy.pendingRebase);
+          const rebased = await transport.rebase(
+            value.token,
+            newerDraft.revision,
+          );
+          blocked.current = false;
+          dirty.current = true;
+          failed.current = false;
+          accept({ ...rebased, form: value.form, sampled: value.sampled });
+          setMessage(copy.unsaved);
+        } else {
+          const fresh = await transport.reload(value.token);
+          if (
+            fresh.revision !== newerDraft.revision ||
+            !sameWebForm(fresh.form, newerDraft.form) ||
+            fresh.publicationPending !== newerDraft.publicationPending
+          ) {
+            setNewerDraft(fresh);
+            throw new Error(copy.conflict);
+          }
+          dirty.current = false;
+          blocked.current = fresh.publicationPending;
+          failed.current = false;
+          accept(fresh);
+          setMessage(fresh.publicationPending ? copy.unknown : '');
+        }
+        setNewerDraft(null);
+        setError('');
+      } catch (error) {
+        failure(error);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accept, failure, newerDraft, transport],
+  );
   useEffect(() => {
     if (!dirty.current || busy || blocked.current || failed.current) return;
     const timer = setTimeout(() => {
@@ -173,6 +288,9 @@ export function useAnnotationEditor(
     };
   }, []);
   return {
+    newerDraft,
+    resolveDraft,
+    settle,
     point,
     busy,
     message,

@@ -22,8 +22,10 @@ const { workflowState, workflowRecords } =
   await import('../../evals/src/annotation/workflow-store.js');
 const { withWorkflowAnnotation, returns } =
   await import('../evals/helpers/workflow-annotation.js');
-const { importWorkflowOpinions } =
+const { importWorkflowOpinions, importWorkflowHuman } =
   await import('../../evals/src/annotation/workflow-service.js');
+const { readWorkflowBatch } =
+  await import('../../evals/src/annotation/workflow-batch-read.js');
 afterAll(async () => {
   await fs.rm(isolatedHome, { recursive: true, force: true });
 });
@@ -39,6 +41,181 @@ describe(
   'annotation publication and recovery against real files',
   { timeout: 30_000 },
   () => {
+    test('a real human CAS race after durable intent can be explicitly settled without changing the competing label', async () => {
+      await withDataset(async (f) => {
+        await f.write('data/dev/f01/workflows.json', collectionOf(workflow()));
+        const scope = {
+          root: f.path,
+          dataset: join(f.path, 'data'),
+          split: 'dev' as const,
+          group: 'f01',
+          mode: 'blind' as const,
+          context: DEFAULT_ANNOTATION_CONTEXT,
+        };
+        const workspace = await AnnotationWorkspace.open(scope);
+        const token = (await workspace.bootstrap()).points[0]?.token;
+        if (token === undefined) throw new Error('fixture');
+        const opened = await workspace.point(token);
+        const file = (await fs.readdir(workspace.directory)).find((name) =>
+          /^[a-f0-9-]{36}\.json$/u.test(name),
+        );
+        const baseline = join(workspace.directory, file ?? 'missing'),
+          batch = await readWorkflowBatch(baseline),
+          external = join(f.path, 'external-batch.json');
+        await fs.writeFile(external, await fs.readFile(baseline));
+        const actual = await vi.importActual<typeof fs>('node:fs/promises');
+        let injected = false;
+        vi.mocked(fs.rename).mockImplementation(async (from, to) => {
+          await actual.rename(from, to);
+          if (String(to) === workspace.path && !injected) {
+            injected = true;
+            await importWorkflowHuman({
+              dataset: scope.dataset,
+              baseline: external,
+              write: true,
+              fill: {
+                batchId: batch.batchId,
+                decisions: [
+                  {
+                    questionId: token,
+                    state: 'confirmed',
+                    target: {
+                      status: 'approved',
+                      allowed: { risk: [3], authorization: [10] },
+                      allowedPairs: [[3, 10]],
+                      behaviourReference: 'deny',
+                      rationale: 'Concurrent other human decision',
+                      decidedBy: 'synthetic-other',
+                      decidedAt: '2026-11-02',
+                    },
+                  },
+                ],
+              },
+            });
+          }
+        });
+        try {
+          await expect(
+            workspace.confirm({
+              token,
+              revision: opened.revision,
+              form,
+              sampled: false,
+            }),
+          ).rejects.toMatchObject({ published: null });
+        } finally {
+          vi.mocked(fs.rename).mockImplementation(actual.rename);
+        }
+        const pending = await workspace.point(token),
+          before = await fs.readFile(
+            join(scope.dataset, 'dev/f01/labels.json'),
+            'utf8',
+          );
+        expect(pending.publicationPending).toBe(true);
+        await expect(workspace.rebase(token, pending.revision)).rejects.toThrow(
+          /confirmation pending/u,
+        );
+        const settled = await workspace.settle(token, pending.revision);
+        expect(settled).toMatchObject({
+          status: 'draft',
+          publicationPending: false,
+          form,
+        });
+        expect(
+          await fs.readFile(join(scope.dataset, 'dev/f01/labels.json'), 'utf8'),
+        ).toBe(before);
+        const reviewed = await workspace.rebase(token, settled.revision);
+        expect(
+          (
+            await workspace.confirm({
+              token,
+              revision: reviewed.revision,
+              form,
+              sampled: false,
+            })
+          ).status,
+        ).toBe('confirmed');
+      });
+    });
+    test('published intent settlement finishes the private checkpoint without rewriting labels', async () => {
+      await withDataset(async (f) => {
+        await f.write('data/dev/f01/workflows.json', collectionOf(workflow()));
+        const dataset = join(f.path, 'data'),
+          workspace = await AnnotationWorkspace.open({
+            root: f.path,
+            dataset,
+            split: 'dev',
+            group: 'f01',
+            mode: 'blind',
+            context: DEFAULT_ANNOTATION_CONTEXT,
+          });
+        const token = (await workspace.bootstrap()).points[0]?.token;
+        if (token === undefined) throw new Error('fixture');
+        const point = await workspace.point(token),
+          actual = await vi.importActual<typeof fs>('node:fs/promises');
+        vi.mocked(fs.rename)
+          .mockImplementationOnce(actual.rename)
+          .mockImplementationOnce(actual.rename)
+          .mockRejectedValueOnce(new Error('checkpoint failure'));
+        await expect(
+          workspace.confirm({
+            token,
+            revision: point.revision,
+            form,
+            sampled: false,
+          }),
+        ).rejects.toMatchObject({ published: true });
+        const before = await fs.readFile(
+          join(dataset, 'dev/f01/labels.json'),
+          'utf8',
+        );
+        const settled = await workspace.settle(token, point.revision);
+        expect(settled).toMatchObject({
+          status: 'confirmed',
+          publicationPending: false,
+          decisionDate: new Date().toISOString().slice(0, 10),
+        });
+        expect(
+          await fs.readFile(join(dataset, 'dev/f01/labels.json'), 'utf8'),
+        ).toBe(before);
+      });
+    });
+    test('an unreadable current label leaves intent untouched rather than guessing a settlement', async () => {
+      await withDataset(async (f) => {
+        await f.write('data/dev/f01/workflows.json', collectionOf(workflow()));
+        const dataset = join(f.path, 'data'),
+          workspace = await AnnotationWorkspace.open({
+            root: f.path,
+            dataset,
+            split: 'dev',
+            group: 'f01',
+            mode: 'blind',
+            context: DEFAULT_ANNOTATION_CONTEXT,
+          });
+        const token = (await workspace.bootstrap()).points[0]?.token;
+        if (token === undefined) throw new Error('fixture');
+        const point = await workspace.point(token),
+          actual = await vi.importActual<typeof fs>('node:fs/promises');
+        vi.mocked(fs.rename)
+          .mockImplementationOnce(actual.rename)
+          .mockImplementationOnce(actual.rename)
+          .mockRejectedValueOnce(new Error('checkpoint failure'));
+        await expect(
+          workspace.confirm({
+            token,
+            revision: point.revision,
+            form,
+            sampled: false,
+          }),
+        ).rejects.toMatchObject({ published: true });
+        const before = await fs.readFile(workspace.path, 'utf8');
+        await fs.writeFile(join(dataset, 'dev/f01/labels.json'), '{invalid');
+        await expect(
+          workspace.settle(token, point.revision),
+        ).rejects.toMatchObject({ published: null });
+        expect(await fs.readFile(workspace.path, 'utf8')).toBe(before);
+      });
+    });
     test('blind writes preserve an existing human label with valid opinion links without opening the opinion file', async () => {
       await withWorkflowAnnotation(async (f) => {
         await importWorkflowOpinions({
@@ -172,6 +349,13 @@ describe(
           const restarted = await AnnotationWorkspace.open(scope);
           const pending = await restarted.point(token);
           expect(pending.publicationPending).toBe(true);
+          expect(pending.decisionDate).toBe(
+            new Date().toISOString().slice(0, 10),
+          );
+          await expect(
+            restarted.rebase(token, pending.revision),
+          ).rejects.toThrow(/confirmation pending/u);
+          expect((await restarted.point(token)).publicationPending).toBe(true);
           expect(pending.form).toEqual(form);
           const done = await restarted.confirm({
             token,
@@ -280,7 +464,9 @@ describe(
         const point = await workspace.point(token);
         expect(point.form.pairs).toBe('');
         const opinions = await workspace.opinions(token);
-        expect(opinions.filter((value) => value.complete)).toHaveLength(3);
+        expect(
+          opinions.opinions.filter((value) => value.complete),
+        ).toHaveLength(3);
         expect((await workspace.point(token)).exposed).toBe(true);
         expect(JSON.stringify(opinions)).not.toMatch(
           /retryKey|responseHash|promptFingerprint/u,

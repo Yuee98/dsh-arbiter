@@ -106,14 +106,22 @@ export async function startAnnotationServer(
         result = await workspace.bootstrap();
       else if (
         request.method === 'POST' &&
-        ['/api/point', '/api/opinions', '/api/rebase'].includes(path)
+        [
+          '/api/point',
+          '/api/reload',
+          '/api/opinions',
+          '/api/rebase',
+          '/api/settle',
+        ].includes(path)
       ) {
         const value = checked<{ token: string; revision?: number }>(
           {
             type: 'object',
             additionalProperties: false,
             required:
-              path === '/api/rebase' ? ['token', 'revision'] : ['token'],
+              path === '/api/rebase' || path === '/api/settle'
+                ? ['token', 'revision']
+                : ['token'],
             properties: {
               token: { type: 'string', pattern: '^[a-f0-9-]{36}$' },
               revision: { type: 'integer', minimum: 0 },
@@ -122,11 +130,13 @@ export async function startAnnotationServer(
           await jsonBody(request),
         );
         result =
-          path === '/api/point'
-            ? await workspace.point(value.token)
+          path === '/api/point' || path === '/api/reload'
+            ? await workspace.point(value.token, path === '/api/reload')
             : path === '/api/opinions'
               ? await workspace.opinions(value.token)
-              : await workspace.rebase(value.token, value.revision ?? -1);
+              : path === '/api/settle'
+                ? await workspace.settle(value.token, value.revision ?? -1)
+                : await workspace.rebase(value.token, value.revision ?? -1);
       } else if (
         request.method === 'POST' &&
         ['/api/save', '/api/confirm'].includes(path)

@@ -6,7 +6,6 @@ import {
   AUTHORIZATION_BANDS,
 } from '../../../src/review-contract/index.js';
 import { canonicalJson, digestOf } from '../data/hash.js';
-import { sameAnnotationView } from '../data/annotation-binding.js';
 import type { AnnotationContext } from '../data/annotation-types.js';
 import type { Split } from '../data/types.js';
 import type { WorkflowBatch } from './workflow-types.js';
@@ -14,9 +13,13 @@ import type {
   WebPoint,
   WebBootstrap,
   WebMutation,
-  WebOpinion,
+  WebOpinionReport,
+  WebPointSummary,
 } from './web-types.js';
 import { EMPTY_FORM } from './web-types.js';
+import { humanReferenceStatus } from './web-reference-status.js';
+import { opinionReport } from './web-opinion-report.js';
+import { settleHumanIntent } from './web-settlement.js';
 import { workflowSource, buildAnnotationView } from './workflow-view.js';
 import { workflowState, workflowRecords } from './workflow-store.js';
 import { readWorkflowBatch } from './workflow-batch-read.js';
@@ -244,14 +247,8 @@ export class AnnotationWorkspace {
     return {
       mode: this.scope.mode,
       current: state.current,
-      points: state.points.map(
-        ({ token, workflow, position, status, sampled }) => ({
-          token,
-          workflow,
-          position,
-          status,
-          sampled,
-        }),
+      points: await Promise.all(
+        state.points.map((point) => this.summary(point)),
       ),
       risk: RISK_BANDS,
       authorization: AUTHORIZATION_BANDS,
@@ -259,15 +256,13 @@ export class AnnotationWorkspace {
   }
   private async projection(point: DraftPoint): Promise<WebPoint> {
     const base = {
-      token: point.token,
-      workflow: point.workflow,
-      position: point.position,
-      status: point.status,
-      sampled: point.sampled,
+      ...(await this.summary(point)),
       revision: point.revision,
-      publicationPending: point.intent !== null,
       form: point.form,
       exposed: point.exposed,
+      publicationPending: point.intent !== null,
+      decisionDate: point.intent?.decisions[0]?.target.decidedAt ?? null,
+      viewToken: point.batchId === null ? null : digestOf(point.batchId),
     };
     if (point.batchId === null)
       return {
@@ -279,6 +274,13 @@ export class AnnotationWorkspace {
         changedLines: [],
       };
     const batch = await this.batch(point);
+    const ownDecision = batch.labels.find(
+      (label) =>
+        label.referenceId === batch.points[0]?.humanReferenceId &&
+        label.batchId === batch.batchId &&
+        label.source === 'human',
+    );
+    base.decisionDate ??= ownDecision?.target.decidedAt ?? null;
     const current = batch.points[0];
     if (current === undefined) throw new Error('missing point baseline');
     try {
@@ -289,6 +291,7 @@ export class AnnotationWorkspace {
         preparation: 'preparation-failed',
         request: null,
         error: 'MATERIAL_CHANGED_REVIEW_REQUIRED',
+        viewToken: null,
         status: 'preparation-failed',
         hasPredecessor: false,
         changedLines: [],
@@ -332,9 +335,9 @@ export class AnnotationWorkspace {
           : changedMaterial(current.request, previous),
     };
   }
-  async point(token: string): Promise<WebPoint> {
+  async point(token: string, refresh = false): Promise<WebPoint> {
     return withDraftClaim(this.directory, async () => {
-      const state = await this.load(),
+      const state = await this.load(refresh),
         point = this.find(state, token);
       if (point.batchId === null) {
         try {
@@ -363,10 +366,14 @@ export class AnnotationWorkspace {
   }
   async rebase(token: string, revision: number): Promise<WebPoint> {
     return withDraftClaim(this.directory, async () => {
-      const state = await this.load(true),
+      const state = await this.load(),
         point = this.find(state, token);
-      if (revision > point.revision)
+      if (revision !== point.revision)
         throw new Error('conflict: draft changed externally');
+      if (point.intent !== null)
+        throw new Error(
+          'confirmation pending: settle the saved confirmation before rebasing',
+        );
       const batch = await createHumanBatch(
         this.scope.dataset,
         this.scope.split,
@@ -410,14 +417,19 @@ export class AnnotationWorkspace {
         throw new Error('conflict: draft changed externally');
       const batch = await this.batch(point);
       await checkHumanView(batch);
+      if (value.form.noScores === true && value.form.pairs.trim() !== '')
+        throw new Error('explicit no-score decision cannot retain score pairs');
       const answer = independentAnswer(formAnswer(value.form));
       if (value.form.author.trim() === '' || answer.rationale.trim() === '')
         throw new Error('author and rationale are required');
       if (
         value.form.state === 'confirmed' &&
-        (answer.pairs === null ||
-          answer.behaviourReference === null ||
-          !validEvidence(answer.evidence, batch.points[0]?.request, true))
+        (answer.behaviourReference === null ||
+          (answer.pairs === null && value.form.noScores !== true) ||
+          (value.form.noScores !== true &&
+            !validEvidence(answer.evidence, batch.points[0]?.request, true)) ||
+          (answer.evidence.length > 0 &&
+            !validEvidence(answer.evidence, batch.points[0]?.request, true)))
       )
         throw new Error(
           'confirmation requires complete pairs, independent behaviour and exact visible evidence',
@@ -428,6 +440,7 @@ export class AnnotationWorkspace {
       )
         throw new Error('confirmation pending: retry the original form');
       if (point.intent === null) {
+        await checkHumanDraftBaseline(batch);
         point.form = value.form;
         point.sampled = value.sampled;
         point.intent = {
@@ -445,6 +458,12 @@ export class AnnotationWorkspace {
             },
           ],
         };
+        await importWorkflowHuman({
+          dataset: this.scope.dataset,
+          baseline: this.batchPath(point),
+          fill: point.intent,
+          write: false,
+        });
         await this.persist(state);
       }
       // The durable intent makes retries use the same date/target after any partial write.
@@ -496,7 +515,7 @@ export class AnnotationWorkspace {
       return this.projection(point);
     });
   }
-  async opinions(token: string): Promise<readonly WebOpinion[]> {
+  async opinions(token: string): Promise<WebOpinionReport> {
     if (this.scope.mode !== 'assisted')
       throw new Error('blind mode does not load model opinions');
     return withDraftClaim(this.directory, async () => {
@@ -509,31 +528,62 @@ export class AnnotationWorkspace {
       const records = workflowRecords(
         await workflowState(this.scope.dataset, this.scope.split, point.group),
       );
-      const binding = batch.points[0]?.binding;
-      return records.opinions
-        .filter(
-          (opinion) =>
-            opinion.pointId === point.pointId &&
-            opinion.rootId === point.rootId &&
-            opinion.viewId === point.viewId &&
-            opinion.annotation !== undefined &&
-            binding !== undefined &&
-            binding !== null &&
-            sameAnnotationView(opinion.annotation.binding, binding),
-        )
-        .map((opinion) => ({
-          id: opinion.opinion.reviewId,
-          model: `${opinion.opinion.model.provider}/${opinion.opinion.model.id}`,
-          rawResponse: opinion.annotation?.rawResponse ?? null,
-          rationale: opinion.rationale,
-          evidence: opinion.evidence.map((e) => e.ref).join('\n'),
-          pairs:
-            opinion.annotation?.pairs
-              ?.map((pair) => pair.join(','))
-              .join('\n') ?? '',
-          behaviour: opinion.independentBehaviour ?? '',
-          complete: opinion.annotation?.complete ?? false,
-        }));
+      return opinionReport(batch, records.opinions);
     });
+  }
+  async settle(token: string, revision: number): Promise<WebPoint> {
+    return withDraftClaim(this.directory, async () => {
+      const state = await this.load(),
+        point = this.find(state, token);
+      if (point.revision !== revision)
+        throw new Error('conflict: draft changed externally');
+      if (point.intent === null) throw new Error('no pending confirmation');
+      const batch = await this.batch(point);
+      const result = await settleHumanIntent(
+        this.batchPath(point),
+        batch,
+        point.intent,
+      ).catch(() => {
+        throw new AnnotationWriteError(null);
+      });
+      if (!result.checkpointed) throw new AnnotationWriteError(true);
+      point.intent = null;
+      point.status = result.published ? result.state : 'draft';
+      point.revision += 1;
+      try {
+        await this.persist(state);
+      } catch {
+        throw new AnnotationWriteError(result.published);
+      }
+      return this.projection(point);
+    });
+  }
+  private async summary(point: DraftPoint): Promise<WebPointSummary> {
+    const source = await workflowSource(
+      this.scope.dataset,
+      this.scope.split,
+      point.group,
+    );
+    const records = workflowRecords(
+      await workflowState(
+        this.scope.dataset,
+        this.scope.split,
+        point.group,
+        true,
+      ),
+    );
+    return {
+      token: point.token,
+      workflow: point.workflow,
+      position: point.position,
+      status: point.status,
+      sampled: point.sampled,
+      referenceStatus: await humanReferenceStatus(
+        source,
+        records.labels,
+        point,
+        this.scope.context,
+      ),
+    };
   }
 }

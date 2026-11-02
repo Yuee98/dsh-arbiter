@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import type { AnnotationContext } from '../data/annotation-types.js';
 import { sameAnnotationView } from '../data/annotation-binding.js';
 import { canonicalJson } from '../data/hash.js';
-import { compileCheckers } from '../data/schemas.js';
 import type { WorkflowLabel, WorkflowOpinion } from '../data/group-types.js';
 import type { Split } from '../data/types.js';
 import { currentReference, freezeReferences } from './reference.js';
@@ -25,14 +24,10 @@ import {
   buildAnnotationView,
   workflowSource,
 } from './workflow-view.js';
-import { checked, idSchema, returnedBatch } from './workflow-validation.js';
-import type {
-  AnnotationPoint,
-  HumanBatch,
-  WorkflowBatch,
-} from './workflow-types.js';
+import { returnedBatch } from './workflow-validation.js';
+import type { AnnotationPoint, WorkflowBatch } from './workflow-types.js';
 import { annotationOrigin } from './workflow-origin.js';
-import { responseRedactor } from './workflow-response-redaction.js';
+import { humanBatchFill, humanDecisionLabel } from './workflow-human-label.js';
 
 async function validBatch(
   dataset: string,
@@ -61,7 +56,7 @@ async function validBatch(
   }
   return batch;
 }
-async function checkpoint(
+export async function checkpointWorkflowBatch(
   path: string,
   before: WorkflowBatch,
   labels: readonly WorkflowLabel[],
@@ -231,7 +226,12 @@ export async function importWorkflowOpinions(options: {
     },
   );
   if (options.write)
-    await checkpoint(options.baseline, batch, result.labels, result.opinions);
+    await checkpointWorkflowBatch(
+      options.baseline,
+      batch,
+      result.labels,
+      result.opinions,
+    );
   return result;
 }
 export async function importWorkflowHuman(options: {
@@ -241,38 +241,7 @@ export async function importWorkflowHuman(options: {
   readonly write: boolean;
 }) {
   const baseline = await readWorkflowBatch(options.baseline);
-  const fill = checked<HumanBatch>(
-    {
-      type: 'object',
-      additionalProperties: false,
-      required: ['batchId', 'decisions'],
-      properties: {
-        batchId: idSchema,
-        decisions: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['questionId', 'state', 'target'],
-            properties: {
-              questionId: idSchema,
-              state: {
-                enum: [
-                  'draft',
-                  'confirmed',
-                  'disputed',
-                  'undecidable',
-                  'needs-review',
-                ],
-              },
-              target: { type: 'object' },
-            },
-          },
-        },
-      },
-    },
-    options.fill,
-  );
+  const fill = await humanBatchFill(options.fill);
   const questions = new Set(
     fill.decisions.map((decision) => decision.questionId),
   );
@@ -284,25 +253,6 @@ export async function importWorkflowHuman(options: {
   );
   if (fill.batchId !== baseline.batchId)
     throw new Error('human fill belongs to another batch');
-  const checkers = await compileCheckers();
-  for (const decision of fill.decisions) {
-    const checked = checkers.labelTarget(decision.target);
-    if (!checked.ok) throw new Error(checked.problems.join('; '));
-    if (
-      decision.state !== 'draft' &&
-      (decision.target.decidedBy.trim() === '' ||
-        decision.target.rationale.trim() === '' ||
-        decision.target.decidedAt === null)
-    )
-      throw new Error(
-        'explicit human decisions require an author, date and rationale',
-      );
-  }
-  if (
-    new Set(fill.decisions.map((value) => value.questionId)).size !==
-    fill.decisions.length
-  )
-    throw new Error('duplicate human decision');
   const result = await changeWorkflowGroup(
     options.dataset,
     batch.split,
@@ -311,62 +261,9 @@ export async function importWorkflowHuman(options: {
     async (state) => {
       await validBatch(options.dataset, options.baseline, undefined, questions);
       const now = workflowRecords(state);
-      const replacements = fill.decisions.map((decision) => {
-        const point = batch.points.find(
-          (point) => point.questionId === decision.questionId,
-        );
-        if (point?.binding === undefined || point.binding === null)
-          throw new Error('unknown/unprepared human question');
-        if (
-          decision.state === 'confirmed' &&
-          (decision.target.status !== 'approved' ||
-            decision.target.decidedBy.trim() === '' ||
-            decision.target.decidedAt === null)
-        )
-          throw new Error(
-            'human confirmation requires explicit approved target, author and date',
-          );
-        const confirmed = decision.state === 'confirmed';
-        const redactor = responseRedactor(
-          `human:${batch.batchId}`,
-          point.request,
-        );
-        const target = {
-          ...decision.target,
-          rationale: redactor.text(decision.target.rationale),
-          decidedBy: redactor.text(decision.target.decidedBy),
-          ...(decision.target.evidence === undefined
-            ? {}
-            : {
-                evidence: decision.target.evidence.map((evidence) => ({
-                  ...evidence,
-                  ref: redactor.text(evidence.ref),
-                  ...(evidence.note === undefined
-                    ? {}
-                    : { note: redactor.text(evidence.note) }),
-                })),
-              }),
-        };
-        const referenceId =
-          decision.state === 'draft'
-            ? `${point.humanReferenceId}-draft`
-            : point.humanReferenceId;
-        const label: WorkflowLabel = {
-          referenceId,
-          rootId: point.rootId,
-          pointId: point.pointId,
-          viewId: point.viewId,
-          batchId: batch.batchId,
-          source: 'human',
-          humanConfirmed: confirmed,
-          scoringEligible: confirmed,
-          versions: point.binding.versions,
-          supportingOpinionIds: [],
-          target: confirmed ? target : { ...target, status: 'pending' },
-          annotation: { binding: point.binding, humanState: decision.state },
-        };
-        return label;
-      });
+      const replacements = fill.decisions.map((decision) =>
+        humanDecisionLabel(batch, decision),
+      );
       const ids = new Set(replacements.map((value) => value.referenceId));
       const labels = [
         ...now.labels.filter((value) => !ids.has(value.referenceId)),
@@ -386,7 +283,12 @@ export async function importWorkflowHuman(options: {
     batch.purpose === 'human',
   );
   if (options.write)
-    await checkpoint(options.baseline, batch, result.labels, result.opinions);
+    await checkpointWorkflowBatch(
+      options.baseline,
+      batch,
+      result.labels,
+      result.opinions,
+    );
   return result;
 }
 export async function workflowReferences(options: {

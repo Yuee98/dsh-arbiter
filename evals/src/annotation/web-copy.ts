@@ -1,4 +1,24 @@
 export const copy = {
+  noScores: '明确保存无分数行为参考（不是漏填 R/A）',
+  noDecisionDate: '尚无可显示的决定日期',
+  settleConfirm: '核对当前标签并结算这次确认',
+  settleHelp:
+    '只核对当前标签，不删除或改写正式标签；匹配则完成恢复，不匹配则保留输入为草稿并要求重新复核。',
+  settledDraft:
+    '当前标签不匹配这份确认意图；输入已保留为草稿，请重新打开材料并复核。',
+  confirmNext: '确认并下一条',
+  retryConfirm: '恢复这次确认',
+  localProgress: '本地工作区状态',
+  formalProgress: '当前适用人工参考',
+  newerDraft: '较新草稿（当前输入仍保留在表单中）',
+  adoptNewer: '采用较新草稿',
+  keepMine: '已对照较新草稿，保留当前输入重新复核',
+  pendingRebase: '有未结算确认意图；先采用并恢复这次确认，不能直接重新绑定。',
+  consensus: '共享模型暂定共识（不是人工确认）',
+  consensusSelect: '选入共识草稿（仍需人工确认）',
+  consensusUnavailable: '当前未达可采用共识',
+  consensusCounts: 'K/N、有效、缺答、失败',
+  hideOpinions: '收起模型意见与共识',
   title: '工作流标注',
   blind: '独立盲标 · 不加载模型意见或候选成绩',
   assisted: '辅助审阅 · 可主动查看模型意见',
@@ -49,11 +69,21 @@ export const copy = {
   risk: '风险 R',
   authorization: '授权 A',
   shortcuts: '快捷键：Ctrl/Cmd+S 保存草稿；Ctrl/Cmd+Enter 确认；Alt+左右切换。',
-  date: '确认日期（UTC）',
+  date: '本批决定日期（UTC）',
   progress: '个点已确认',
   workflow: '工作流',
   point: '点',
   incomplete: '模型回复不完整',
+};
+export const referenceLabels = {
+  none: '无人工参考',
+  stale: '人工参考待复核',
+  confirmed: '已确认',
+  disputed: '争议',
+  undecidable: '暂不判定',
+  'needs-review': '需复核',
+  unresolved: '未解决',
+  'preparation-failed': '材料准备失败',
 };
 export const stateLabels = {
   confirmed: '确认',

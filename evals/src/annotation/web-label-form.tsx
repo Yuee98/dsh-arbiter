@@ -3,19 +3,30 @@ import { copy, stateLabels } from './web-copy.js';
 
 export function LabelForm({
   form,
+  date,
   sampled,
   disabled,
   onChange,
   onSample,
   onConfirm,
+  onConfirmNext,
 }: {
   readonly form: WebForm;
+  readonly date: string | null;
   readonly sampled: boolean;
   readonly disabled: boolean;
   readonly onChange: (form: WebForm) => void;
   readonly onSample: (sampled: boolean) => void;
   readonly onConfirm: () => void;
+  readonly onConfirmNext: () => void;
 }) {
+  const invalid =
+    form.author.trim() === '' ||
+    form.rationale.trim() === '' ||
+    (form.state === 'confirmed' &&
+      (form.behaviour === '' ||
+        (form.noScores !== true &&
+          (form.pairs.trim() === '' || form.evidence.trim() === ''))));
   return (
     <form
       onSubmit={(event) => {
@@ -24,9 +35,24 @@ export function LabelForm({
       }}
     >
       <fieldset disabled={disabled}>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={form.noScores === true}
+            onChange={(event) => {
+              onChange({
+                ...form,
+                noScores: event.target.checked,
+                pairs: event.target.checked ? '' : form.pairs,
+              });
+            }}
+          />
+          {copy.noScores}
+        </label>
         <label>
           {copy.pairs}
           <textarea
+            disabled={form.noScores === true}
             value={form.pairs}
             onChange={(event) => {
               onChange({ ...form, pairs: event.target.value });
@@ -124,20 +150,13 @@ export function LabelForm({
           {copy.sampled}
         </label>
         <p>
-          {copy.date} {new Date().toISOString().slice(0, 10)}
+          {copy.date} {date ?? copy.noDecisionDate}
         </p>
-        <button
-          type="submit"
-          disabled={
-            form.author.trim() === '' ||
-            form.rationale.trim() === '' ||
-            (form.state === 'confirmed' &&
-              (form.pairs.trim() === '' ||
-                form.behaviour === '' ||
-                form.evidence.trim() === ''))
-          }
-        >
+        <button type="submit" disabled={invalid}>
           {copy.confirm}
+        </button>
+        <button type="button" disabled={invalid} onClick={onConfirmNext}>
+          {copy.confirmNext}
         </button>
       </fieldset>
     </form>

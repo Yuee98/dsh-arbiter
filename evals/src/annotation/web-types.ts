@@ -2,6 +2,7 @@ import type { HumanState } from '../data/annotation-types.js';
 import type { BehaviourReference } from '../data/types.js';
 
 export interface WebForm {
+  readonly noScores?: boolean;
   readonly pairs: string;
   readonly behaviour: BehaviourReference | '';
   readonly rationale: string;
@@ -18,6 +19,15 @@ export const EMPTY_FORM: WebForm = {
   state: 'confirmed',
 };
 export interface WebPointSummary {
+  readonly referenceStatus:
+    | 'none'
+    | 'stale'
+    | 'confirmed'
+    | 'disputed'
+    | 'undecidable'
+    | 'needs-review'
+    | 'unresolved'
+    | 'preparation-failed';
   readonly token: string;
   readonly workflow: number;
   readonly position: number;
@@ -25,6 +35,8 @@ export interface WebPointSummary {
   readonly sampled: boolean;
 }
 export interface WebPoint extends WebPointSummary {
+  readonly decisionDate: string | null;
+  readonly viewToken: string | null;
   readonly publicationPending: boolean;
   readonly revision: number;
   readonly form: WebForm;
@@ -58,6 +70,19 @@ export interface WebBootstrap {
     readonly criterion: string;
   }[];
 }
+export interface WebOpinionReport {
+  readonly viewToken: string;
+  readonly opinions: readonly WebOpinion[];
+  readonly consensus: {
+    readonly n: number;
+    readonly k: number;
+    readonly valid: number;
+    readonly missing: number;
+    readonly failed: number;
+    readonly reasons: readonly string[];
+    readonly draft: WebOpinion | null;
+  };
+}
 export interface WebMutation {
   readonly token: string;
   readonly revision: number;
@@ -67,8 +92,10 @@ export interface WebMutation {
 export interface WebTransport {
   bootstrap(): Promise<WebBootstrap>;
   point(token: string): Promise<WebPoint>;
+  reload(token: string): Promise<WebPoint>;
+  settle(token: string, revision: number): Promise<WebPoint>;
   save(value: WebMutation): Promise<WebPoint>;
   confirm(value: WebMutation): Promise<WebPoint>;
-  opinions(token: string): Promise<readonly WebOpinion[]>;
+  opinions(token: string): Promise<WebOpinionReport>;
   rebase(token: string, revision: number): Promise<WebPoint>;
 }
