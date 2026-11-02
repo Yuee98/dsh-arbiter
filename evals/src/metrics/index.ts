@@ -30,7 +30,12 @@ import type { CellView, DifferenceRow } from './types.js';
 import { emptyGoldNote, labelCoverageOf } from './labels.js';
 import { observeRun } from './observe.js';
 import type { Observation, ObservationRead } from './observe.js';
-import { isProjection, settlementSection } from './settlement.js';
+import { settlementSection } from './settlement.js';
+import { qualitySection } from './quality.js';
+import { sourceOf } from './source.js';
+import { publicWorkflowExecution } from './workflow-publication.js';
+import { trajectorySection } from './trajectories.js';
+import { relationSection } from './relations.js';
 import { stabilitySection } from './stability.js';
 import { usageSection } from './usage.js';
 import { cellViewsOf, differencesOf } from './evidence.js';
@@ -57,6 +62,17 @@ function runIdentityOf(
 ): RunIdentity {
   const index = artifact.index;
   return {
+    ...(index.workflowExecution === undefined
+      ? {}
+      : {
+          workflowExecution: publicWorkflowExecution(
+            index.workflowExecution,
+            index.runId,
+          ),
+        }),
+    ...(artifact.plan.candidate === undefined
+      ? {}
+      : { candidate: artifact.plan.candidate }),
     runId: index.runId,
     status: index.status,
     createdAt: index.createdAt,
@@ -201,7 +217,12 @@ function checksOf(parts: {
     },
     {
       name: 'records-read',
-      ok: parts.recordCount > 0 || artifact.index.cells.length === 0,
+      ok:
+        parts.recordCount > 0 ||
+        (missing === 0 &&
+          artifact.index.cells.every((cell) =>
+            RECORDLESS_STATUSES.has(cell.status),
+          )),
       detail: `索引计划 ${String(artifact.index.cells.length)} 个格子，读取到 ${String(parts.recordCount)} 条记录。`,
     },
   ];
@@ -219,7 +240,7 @@ function diagnosticsOf(parts: {
   readonly observation: Observation;
 }): DiagnosticsSection {
   const labels = labelCoverageOf({
-    cells: parts.cells,
+    cells: parts.cells.filter((cell) => sourceOf(cell).kind === 'legacy'),
     dataset: parts.observation.dataset,
     executionDigest: parts.observation.artifact.index.dataset.digest,
   });
@@ -260,7 +281,7 @@ function notesOf(parts: {
   ).length;
   if (noRecord > 0) {
     notes.push(
-      `${String(noRecord)} 个格子在派发前就已决定（不支持、预算耗尽或未开始），不计入任何比较分母。`,
+      `${String(noRecord)} 个格子在派发前就已决定（不支持、预算耗尽或未开始），不进入有效判定比较；全计划覆盖和适用负担分母仍保留。`,
     );
   }
   const technical = parts.cells.filter(
@@ -286,12 +307,9 @@ function notesOf(parts: {
       `${String(cases.length)} 个案例在数据集中的家族、split 或来源已与运行记录不同（${cases.join('、')}）；分组以运行记录为准，差异在此列出。`,
     );
   }
-  const projection = isProjection(parts.cells);
-  if (projection) {
-    notes.push(
-      '没有格子经过宿主链，因此第三层是按共享结算规则推演的结果，不是宿主实际观察到的行为。',
-    );
-  }
+  notes.push(
+    '第三层按共享结算规则推演；宿主链入口标记不证明发生过宿主批准、执行或实际续行。',
+  );
   return notes;
 }
 
@@ -338,15 +356,31 @@ export function buildReport(parts: {
     cells,
     mode: parts.settings.mode,
     channel: parts.settings.channel,
-    projection: isProjection(cells),
+    projection: true,
   });
   return {
+    quality: qualitySection(cells, parts.settings),
+    trajectories: trajectorySection(
+      cells,
+      parts.observation.workflowSources ?? [],
+    ),
+    relations: relationSection(cells, parts.observation.workflowSources ?? []),
     formatVersion: REPORT_FORMAT_VERSION,
     run: runIdentityOf(
       parts.observation.artifact,
       parts.observation.artifact.records,
     ),
     setup: {
+      referenceSnapshots: (parts.observation.referenceSnapshots ?? []).map(
+        (snapshot) => ({
+          sourceCommit: snapshot.sourceCommit,
+          sourceDirty: snapshot.sourceDirty,
+          createdAt: snapshot.createdAt,
+          split: snapshot.scope.split,
+          group: snapshot.scope.group,
+          protocol: snapshot.context.protocol,
+        }),
+      ),
       mode: parts.settings.mode,
       channel: parts.settings.channel,
       labels: parts.observation.dataset.status,
@@ -397,6 +431,7 @@ export async function reportForRun(parts: {
     directory: parts.directory,
     root: parts.settings.root,
     dataset: parts.settings.dataset,
+    references: parts.settings.references ?? [],
   });
   if (!read.ok) return { ok: false, problems: read.problems };
   return {

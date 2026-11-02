@@ -116,11 +116,11 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 
 | 层             | 内容                                                  | 分母                               |
 | -------------- | ----------------------------------------------------- | ---------------------------------- |
-| 一：自动行为   | 误放／误拒／不必要人工／升级而非拒绝／一致            | 有判定且案例有金标标签的格子       |
+| 一：自动行为   | 误放／误拒／不必要人工／升级而非拒绝／一致            | 有判定且有适用行为参考的格子       |
 | 二：R/A 诊断   | 评分误差、相邻档、合法配对命中、单调性、分布形态      | 裁决者把该字段钉成唯一值的案例     |
 | 三：模式与结算 | allow／deny／询问人工／归一拒绝，以及询问人工是否必要 | 全部格子，但技术故障的结算单独一行 |
 
-**技术失败不属于任何一层。** 超时、取消、传输失败与审查失败都是「没有对本次调用作出陈述」，因此不进比较分母、不算拒绝，只在覆盖表里单独计数。记录缺失（索引声称跑过却没有记录）与派发前已决定（不支持／预算耗尽／未开始）也各占一行。
+**技术失败不进入有效判定比较。** 超时、取消、传输失败与审查失败不当作语义拒绝；完整计划覆盖与适用端到端负担仍保留这些点，并区分规则结算推演与未知后果。记录缺失（索引声称跑过却没有记录）与派发前已决定（不支持／预算耗尽／未开始）也各占一行。
 
 ### 分母与未知
 
@@ -142,6 +142,30 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 - 适配器估算的 input token 与 provider 报告分开两栏，不加在一起。
 - 费用是状态：`cost.amount` 恒为 `null`，报告**不输出费用合计**。
 - 超时／取消时未报告的预留 attempt 单列，不编造 token 数。
+
+### 多来源参考与条件分母（#129）
+
+报告增加向后兼容的 `quality`、`trajectories`、`relations` 节，既有总体 cell 比率保留原分母。核心条件率选每个完整 point/view × target × protocol 条件的最低计划 repeat，失败不会被较好的后续 repeat 替代；各分类沿用全局预选条件，不在子组重新挑选 repeat。R/A 诊断继续使用最低有效评分观测，分别公开可评数量。
+
+- 直接误放的分母是参考 deny/escalate 且实际有有效三态判定的条件；误拒分别列参考 allow、escalate；不必要人工以参考 allow 为分母，并另列其占全部比较点的比例。空分母为 `null`／`n/a`。
+- 人工、人工继承、模型暂定与 unresolved 分开；模型参考保留 pending／humanConfirmed=false。混合总览不是人工金标准确率，不授予 #137 尚待确认的正式用途。
+- 无分数不等于无行为或工程参考。独立行为与当前矩阵冲突时保留并列诊断 finding；非法配对、A1 混合禁止及真实绑定失效仍拒绝。部分字段只进入自身可评诊断，完整配对另计。
+- 参考 allow 的全计划分母包含 unsupported；同时给支持的 allow 数量。全计划 cell（含每个 repeat）与最低计划 repeat 条件分别复用同一负担算法。已知规则推演负担与派发阻断给出下界，缺记录、未开始及未知后果另列，不补成成功或 deny。host-chain 入口标签不证明发生过实际批准或执行；缺少真实续行证据时显示 not-observed。
+- root、lineage、point、view、repeat 与 attempt 分别计数；legacy 历史案例单列。固定轨迹列完整可评、部分范围、不完整与首次观察到偏离。受控关系按唯一参考字段比较方向／不变性及违例幅度，tie 单列；缺失或多值为不可评，natural 关系只描述变化。
+
+可显式读取 #127 已有的冻结参考文件，多个 split/group/context 使用多个参数：
+
+```sh
+pnpm evals report <运行目录> --references <workflow-references-v1.json> --out <报告前缀>
+```
+
+报告读取固定快照，不在候选比较中自动改用新 opinions，也不读取私有 annotation batch 的 retryKey。快照的 split/group/protocol、完整 root/point/view 与有效 binding 必须匹配；未覆盖、未核实或漂移保持 unresolved。annotation 的规范化视图指纹与运行实际请求指纹用途不同，不能直接比较两个 hash 或仅按 pointId 放行。
+
+正式 workflow 工件通过身份感知的 `readRun` 读取；完整 root/lineage/point/view 来自冻结计划，不把兼容 case key 当成历史案例。报告复用 `loadWorkflowSources`／`sourceMaterial` 离线恢复源与实际候选材料，先核对所选源 digest、保存的完整配置与 revision、运行及记录版本、原始材料／预算和初次请求，再用共享 annotation binding helper 比较实际视图。跨进程凭据签名变化只在保留请求能证明种类与同异关系时接受，无法核实则 unresolved；恢复材料不调用 reviewer 或 transport。Git revision、dirty 与未知原因保留记录原值，不把未知写成已复现。身份不符的工件拒绝读取；未提供源、源损坏或材料漂移时仍保留所有冻结计划身份和运行状态。M0 的结果匹配与实际派发分开计数，insufficient-material 不证明未请求模型。
+
+即使 `--force`，报告也不能覆盖运行证据、数据集 split 下的集合源或显式参考快照；数据不可读时同样保护，符号链接按实际目标检查。JSON、MD 与静态 HTML 使用同一报告对象；扩展 HTML 浏览由 #132 交付。
+
+合法的全 unsupported 或全派发前阻断运行可以没有 record，报告仍成功生成；这不表示模型质量通过。索引确有派发状态却缺少 record 时，自检继续失败。完整有效配置只用于本地材料适用性核验；共享报告输出经现有凭据脱敏处理、并省略全部配置自由文本的公开视图，保留必要 token 参数、项目规则启用状态、配置 revision 与原运行 `index.json#/workflowExecution/config` 证据入口。未知文本和未核实的配置字段不原样复制，脱敏识别失败也不回落到原始内容；原运行工件保持不变。
 
 ## 离线回放
 

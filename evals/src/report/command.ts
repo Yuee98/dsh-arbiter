@@ -41,6 +41,7 @@ export interface ReportIo {
 
 /** What `report` was asked for. */
 export interface ReportCommand {
+  readonly references?: readonly string[];
   /** The run directory, relative to the repository root. */
   readonly directory: string;
   /** The output prefix without an extension, or null to write inside the run directory. */
@@ -59,11 +60,13 @@ export const REPORT_USAGE = [
   'report commands (offline; a report is rebuilt from a saved run, never by calling a model):',
   '  report <run-dir> [--out PREFIX] [--dataset DIR] [--mode ask|no-ask]',
   '                   [--channel available|unavailable] [--force]',
+  '                   [--references SNAPSHOT.json] (repeat for separate scopes)',
   '                                         write PREFIX.json, PREFIX.md and PREFIX.html',
 ].join('\n');
 
 /** The flags `report` accepts, and no others. */
 interface ReportFlags {
+  references: string[];
   output: string | null;
   dataset: string | null;
   mode: string;
@@ -74,6 +77,7 @@ interface ReportFlags {
 /** Read `report`'s flags; an unknown one is refused rather than ignored. */
 function readReportFlags(rest: readonly string[]): ReportFlags | string {
   const flags: ReportFlags = {
+    references: [],
     output: null,
     dataset: null,
     mode: 'ask',
@@ -89,6 +93,7 @@ function readReportFlags(rest: readonly string[]): ReportFlags | string {
     if (
       flag !== '--out' &&
       flag !== '--dataset' &&
+      flag !== '--references' &&
       flag !== '--mode' &&
       flag !== '--channel'
     ) {
@@ -97,7 +102,8 @@ function readReportFlags(rest: readonly string[]): ReportFlags | string {
     const value = rest[index + 1];
     if (value === undefined) return `${flag} needs a value\n\n${REPORT_USAGE}`;
     index += 1;
-    if (flag === '--out') flags.output = value;
+    if (flag === '--references') flags.references.push(value);
+    else if (flag === '--out') flags.output = value;
     else if (flag === '--dataset') flags.dataset = value;
     else if (flag === '--mode') flags.mode = value;
     else flags.channel = value;
@@ -123,6 +129,9 @@ export function parseReportCommand(
   if (typeof parsed === 'string') return parsed;
   return {
     directory,
+    ...(parsed.references.length === 0
+      ? {}
+      : { references: parsed.references }),
     output: parsed.output,
     dataset: parsed.dataset,
     mode: parsed.mode,
@@ -160,6 +169,10 @@ function protectedEvidenceOf(parts: {
   };
 }): readonly EvidencePath[] {
   const evidence: EvidencePath[] = [
+    ...(parts.settings.references ?? []).map((path): EvidencePath => ({
+      path: resolve(parts.root, path),
+      kind: 'file',
+    })),
     { path: join(parts.directory, RUN_FILES.plan), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.index), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
@@ -176,12 +189,22 @@ function protectedEvidenceOf(parts: {
     parts.settings.dataset,
     parts.observation.artifact,
   );
+  const recorded = resolve(
+    parts.root,
+    parts.observation.artifact.index.plan.datasetPath,
+  );
+  evidence.push(...datasetEvidence(parts.root, recorded));
+  for (const split of ['dev', 'calibration', 'holdout'])
+    evidence.push({ path: join(recorded, split), kind: 'directory' });
   if (base === null)
     return [
       ...evidence,
       ...datasetEvidence(parts.root, 'evals/datasets/reviewer-v2'),
     ];
   const absolute = base.startsWith('/') ? base : resolve(parts.root, base);
+  // Protect source groups even when their JSON is damaged and cannot be joined.
+  for (const split of ['dev', 'calibration', 'holdout'])
+    evidence.push({ path: join(absolute, split), kind: 'directory' });
   // The manifest is protected as a file and the three document directories as directories: a
   // report written over `manifest.json` would replace the dataset's own table of contents,
   // which every later check depends on.
@@ -217,6 +240,7 @@ function settingsOf(
     // A named dataset wins; otherwise the run's own recorded path is read, which is what
     // makes a rebuild reproducible without the caller having to know the path.
     dataset: datasetSourceOf(command.dataset),
+    references: command.references ?? [],
   };
 }
 
@@ -250,6 +274,7 @@ export async function reportRun(
     directory,
     root: io.root,
     dataset: settings.dataset,
+    references: settings.references ?? [],
   });
   if (!read.ok) {
     for (const problem of read.problems) io.err(`problem ${problem}`);

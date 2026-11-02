@@ -32,6 +32,7 @@ import type {
 import type { BehaviourClass } from '../metrics/types.js';
 import { humanCostOf } from '../metrics/settlement.js';
 import { fraction, num, pct, rateText } from './format.js';
+import { qualitySection } from './sections-quality.js';
 
 /** Escape one value for HTML text or an attribute. */
 function escape(value: string): string {
@@ -122,10 +123,14 @@ function header(report: EvaluationReport): string {
   const warnings: string[] = [];
   if (report.setup.settlementProjection) {
     warnings.push(
-      '第三层是按共享 settle() 规则推演的结果，不是宿主实际观察到的行为：本次运行没有格子经过宿主链。',
+      '第三层按共享 settle() 规则推演。入口标签本身不证明发生过宿主批准、执行或实际续行。',
     );
   }
-  if (report.diagnostics.labels.gold === 0) {
+  if (
+    report.behaviour.overall.referenceKnown === 0 &&
+    report.diagnostics.risk.comparable === 0 &&
+    report.diagnostics.authorization.comparable === 0
+  ) {
     warnings.push(
       '当前没有可计入金标的人类参考，因此第一层的比较分母和第二层都为 0，显示为 n/a。这是等待用户裁决的正常状态，不是 0% 通过率。',
     );
@@ -259,7 +264,7 @@ function behaviourCounts(counts: BehaviourCounts): string {
   const entries: (readonly [string, string])[] = [
     ['格子', String(counts.cells)],
     ['已判定', String(counts.judged)],
-    ['有金标参考', String(counts.referenceKnown)],
+    ['有适用行为参考', String(counts.referenceKnown)],
     ['参与比较的分母', String(counts.compared)],
     ...CLASS_LABELS.map((entry): readonly [string, string] => [
       entry.label,
@@ -334,7 +339,7 @@ function behaviour(report: EvaluationReport): string {
   return [
     h(2, '第一层：主要自动行为指标'),
     p(
-      '分母只包含「引擎给出了对本次调用的判定」且「案例有可计入金标的参考」的格子。技术失败、缺记录与派发前已决定的格子都在分母之外，各自单列：把技术失败算成拒绝，会让一个坏掉的传输读起来像一个谨慎的审查者。',
+      '分母只包含「引擎给出了对本次调用的判定」且「有适用行为参考」的格子。技术失败、缺记录与派发前状态另列，并保留在全计划覆盖与适用负担分母中。',
     ),
     behaviourCounts(report.behaviour.overall),
     h(2, '分组（第一层）'),
@@ -445,8 +450,11 @@ function diagnostics(report: EvaluationReport): string {
     p(
       '这一层只解释第一层的判定，不参与判定。两个字段分别测量、从不合并成一个「评分质量」数字：偏差方向决定修复方式，单一数字会把方向抹掉。只有裁决者把某个字段钉为唯一值的案例才进入该字段的分母。',
     ),
-    gold === 0
-      ? `<div class="note">${escape('当前没有金标标签，因此本层所有比值都没有分母，显示为 n/a。这是等待用户裁决的正常状态，不是 0% 通过率。')}</div>`
+    gold === 0 &&
+    section.risk.comparable === 0 &&
+    section.authorization.comparable === 0 &&
+    pairsStats.labeled === 0
+      ? `<div class="note">${escape('当前没有金标标签或其他适用评分参考，参考评分误差与配对比值没有分母；实际输出分布仍按观测展示。')}</div>`
       : '',
     labels(section.labels),
     fieldTable(section.risk, section.authorization),
@@ -1089,6 +1097,9 @@ export function renderHtml(report: EvaluationReport): string {
     header(report),
     identity(report),
     coverage(report),
+    report.quality === undefined
+      ? ''
+      : `<section>${h(2, '核心分母与多来源参考')}<pre>${escape(qualitySection(report))}</pre></section>`,
     behaviour(report),
     diagnostics(report),
     settlement(report),

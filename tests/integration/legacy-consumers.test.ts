@@ -128,7 +128,7 @@ describe('legacy consumer entry points', () => {
       expect(dev.stdout.toString()).toContain('13');
     });
   }, 30_000);
-  it('keeps incoherent approved collection labels out of report comparisons', async () => {
+  it('retains adverse independent behaviour while still excluding structurally invalid collection labels', async () => {
     await withLegacy(async (root, dataset) => {
       await run(root, dataset);
       const path = join(dataset, 'dev/legacy-v1/labels.json');
@@ -153,9 +153,9 @@ describe('legacy consumer entry points', () => {
         '--out',
         '.local/invalid',
       ]);
-      expect(report.status).toBe(1);
-      expect(report.stdout.toString()).toContain('labels gold 0');
-      expect(report.stdout.toString()).toContain('compared of 1');
+      expect(report.status).toBe(0);
+      expect(report.stdout.toString()).toContain('labels gold 1');
+      expect(report.stdout.toString()).toContain('behaviour 1 compared of 1');
       const observation = await observeRun({
         root,
         directory: join(root, 'run'),
@@ -163,10 +163,50 @@ describe('legacy consumer entry points', () => {
       });
       if (!observation.ok) throw new Error(observation.problems.join('; '));
       expect(observation.observation.dataset.contestedCases.has(first)).toBe(
+        false,
+      );
+      expect(observation.observation.dataset.findings.join('; ')).toContain(
+        'behaviour reference',
+      );
+      await writeFile(
+        path,
+        JSON.stringify({
+          ...parsed.document,
+          records: parsed.document.records.map((entry) =>
+            'caseId' in entry && entry.caseId === first
+              ? {
+                  ...entry,
+                  target: {
+                    ...entry.target,
+                    allowed: { risk: [1], authorization: [10] },
+                    allowedPairs: [[2, 10]],
+                    behaviourReference: 'allow',
+                  },
+                }
+              : entry,
+          ),
+        }),
+      );
+      const invalid = legacyCli(root, [
+        'report',
+        'run',
+        '--out',
+        '.local/structural',
+      ]);
+      expect(invalid.status).toBe(1);
+      expect(invalid.stdout.toString()).toContain('labels gold 0');
+      expect(invalid.stdout.toString()).toContain('behaviour 0 compared of 1');
+      const structural = await observeRun({
+        root,
+        directory: join(root, 'run'),
+        dataset: { kind: 'path', path: dataset },
+      });
+      if (!structural.ok) throw new Error(structural.problems.join('; '));
+      expect(structural.observation.dataset.contestedCases.has(first)).toBe(
         true,
       );
-      expect(observation.observation.dataset.problems.join('; ')).toContain(
-        'behaviour reference',
+      expect(structural.observation.dataset.problems.join('; ')).toContain(
+        'outside the allowed sets',
       );
     });
   }, 30_000);

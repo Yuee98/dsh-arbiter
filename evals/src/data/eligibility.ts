@@ -171,8 +171,7 @@ export function exclusionReasons(
     reasons.push('version-drift');
   }
   if (label.target.status !== 'approved') reasons.push('not-approved');
-  else if (isIndeterminate(label) || unreachedBehaviour(label))
-    reasons.push('indeterminate');
+  else if (isIndeterminate(label)) reasons.push('indeterminate');
   else if (hasUnscoredField(label)) reasons.push('no-score');
   return reasons;
 }
