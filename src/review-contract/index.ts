@@ -8,6 +8,8 @@
  */
 
 export const REVIEW_CONTRACT_VERSION = 'review-contract-v1';
+export type { MatrixPolicy } from './matrix-policy.js';
+export { matrixPolicy } from './matrix-policy.js';
 
 export type { AuthorizationInput, AuthorizationLevel } from './prohibition.js';
 export { authorizationLevel, isProhibited } from './prohibition.js';

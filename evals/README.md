@@ -474,3 +474,43 @@ pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev
 新 records 的结构化 workflow 身份与 `entryPoint.materialChain: workflow-point` 是实际来源；caseId/familyId 仅为 view/lineage 兼容执行键，不代表 legacy 案例或金标。`readRun` 默认拒绝 workflow 工件，既有报告/回放不能静默误配旧标签；runner 的 `show` 显式识别新工件。新的参考资格、工作流报告与回放接入由 #129/#137 负责。
 
 本工程不授权真实调用。实际运行仍受 #134 的具体资源计划、目标能力及用户适用授权约束，不沿用 S1 额度，不创建凭据，不由 verify/CI 自动派发模型。
+
+## 矩阵离线回放
+
+已有响应可通过原 `replay --variants` 比较少量预先列明的公共矩阵。省略 `matrix` 时，默认 100 格、原 flags 与 variant identity/digest 保持原义；显式填写相同默认表也归一到默认身份。正式候选门槛须在比较结果前确定。下面的数值用于解释工程入口：
+
+```json
+{
+  "variantsVersion": "eval-replay-variants-v1",
+  "variants": [
+    {},
+    {
+      "matrix": {
+        "id": "require-nine",
+        "requiredAuthorization": [2, 2, 9, 9, 9, 9, 10, 10, 10, 10]
+      },
+      "thresholds": { "risk": "strict", "authorization": "at-least" }
+    }
+  ]
+}
+```
+
+十个值分别表示 risk 1..10 所需的最低 authorization，须为 2..10 的非递减整数。A1 固定 deny，A10 在所有风险下 allow；ask/no-ask 仍只决定升级后的结算。`matrix.id` 使用至多 63 字符的小写字母、数字及连接号；实际表内容进入身份与派生目录，换名字不能制造不同实验。N0 的 `thresholds` 与矩阵分别记录；chat 的整数分数不受 N0 分布边界影响，但同样使用矩阵候选。
+
+```sh
+pnpm evals replay /path/to/original-run --variants matrices.json --out /path/to/comparison --references /path/to/frozen-references.json
+```
+
+`--references` 可重复，读取既有 `workflow-references-v1` 冻结快照。一次调用只读取一份参考字节集合，每个候选目录中的 `references/reference-N.json` 保存同样的原始字节，lineage 记录原路径、副本路径及内容 digest。候选间原文件发生变化不改变本次参考；无参考、未标和技术失败保留相应状态。回放不生成意见或裁决，也不依据候选矩阵反推期望行为。
+
+工作流候选从原始 runner 工件派生，各候选共用相同保存响应；保留原运行以供来源验证。派生工件保留 `eval-replayer-v1` 身份，报告通过现有 lineage、原 source 文档、材料与重新派生结果验证其来源后才取得参考资格。缺源、版本或材料不符保持未验证；原运行与参考不被回写。`--force` 也不能覆盖原运行或原参考。工程测试与导入前使用临时 `DSH_HOME`，无需真实 provider、凭据或日常 profile。
+
+JSON/MD/HTML 的候选说明列出实际矩阵与 N0，lineage 保存旧/新 R/A、最低授权和 verdict。`changed` 统计评分、授权要求或 verdict 的变化，不能直接读作行为迁移次数；相同 R/A 换矩阵可能只改变授权要求，也可能改变实际行为。报告成功生成不代表质量通过。
+
+发布后的派生目录可用其中保存的参考副本重建报告：
+
+```sh
+pnpm evals report /path/to/derived-run --references /path/to/derived-run/references/reference-1.json --out /path/to/rebuilt-report
+```
+
+源响应、attempt、usage、timing 与原参考均保持原样。离线回放不产生模型请求，实际计费和质量结论仍按真实运行与独立参考证据解释。
