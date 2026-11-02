@@ -187,6 +187,11 @@ describe(
             ...actual.artifact.index,
             workflowExecution: {
               ...execution,
+              codeGit: { ...execution.codeGit, root: `/tmp/${secret}` },
+              sourceGit: {
+                ...execution.sourceGit,
+                reason: `source path includes ${secret}`,
+              },
               config: {
                 ...execution.config,
                 unrecognizedPrivateField: 'UNVERIFIED_PRIVATE_CONFIG',

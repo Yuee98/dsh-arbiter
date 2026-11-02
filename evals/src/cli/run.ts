@@ -639,13 +639,32 @@ async function runCommand(io: CliIo, command: RunCommandLine): Promise<number> {
         signal: io.signal ?? new AbortController().signal,
       });
     case 'run':
-      return executeRun(runIo, {
-        planPath: command.plan ?? '',
-        directory: command.dir,
-        resume: command.resume,
-        dryRun: command.dryRun,
-        signal: io.signal ?? new AbortController().signal,
-      });
+      return executeRun(
+        {
+          ...runIo,
+          ...(command.report === undefined
+            ? {}
+            : {
+                completed: (directory: string) =>
+                  reportRun(io, {
+                    ...command.report,
+                    directory,
+                    output: command.report?.output ?? null,
+                    dataset: command.report?.dataset ?? null,
+                    mode: command.report?.mode ?? 'ask',
+                    channel: command.report?.channel ?? 'available',
+                    force: command.report?.force ?? false,
+                  }),
+              }),
+        },
+        {
+          planPath: command.plan ?? '',
+          directory: command.dir,
+          resume: command.resume,
+          dryRun: command.dryRun,
+          signal: io.signal ?? new AbortController().signal,
+        },
+      );
     case 'resume':
       return inspectResume(runIo, {
         planPath: command.plan ?? '',

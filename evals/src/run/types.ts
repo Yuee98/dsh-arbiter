@@ -3,6 +3,7 @@ import type {
   WorkflowResource,
   WorkflowIdentity,
   WorkflowExecution,
+  GitObservation,
 } from './workflow-types.js';
 /**
  * The run artifact's TypeScript shape.
@@ -470,6 +471,8 @@ export type RunStatus =
 
 /** The run's mutable document. */
 export interface RunIndex {
+  /** Initial tested code for legacy runs; absent in historical artifacts. */
+  readonly provenance?: { readonly codeGit: GitObservation };
   readonly workflowExecution?: WorkflowExecution;
   readonly documentVersion: typeof RUN_INDEX_VERSION;
   readonly runId: string;

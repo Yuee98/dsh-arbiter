@@ -31,6 +31,7 @@ import type { ReportSettings } from '../metrics/types.js';
 import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
 import type { EvidencePath } from './write.js';
+import { publishReport } from './publication.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -253,7 +254,7 @@ function settingsOf(
  * evidence is complete without labels, and an empty `labels/` is the state this
  * repository is actually in.
  */
-export async function reportRun(
+async function generateReport(
   io: ReportIo,
   command: ReportCommand,
 ): Promise<number> {
@@ -280,8 +281,15 @@ export async function reportRun(
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const report = buildReport({ observation: read.observation, settings });
+  const report = publishReport({
+    report: buildReport({ observation: read.observation, settings }),
+    observation: read.observation,
+    directory,
+    settings,
+  });
   const written = await writeReport({
+    credentialEvidence:
+      read.observation.artifact.index.workflowExecution?.config,
     prefix,
     report,
     force: command.force,
@@ -319,5 +327,20 @@ export async function reportRun(
   io.out(`wrote ${prefix}.json`);
   io.out(`wrote ${prefix}.md`);
   io.out(`wrote ${prefix}.html`);
+  io.out('report generation complete; quality acceptance not-assessed');
   return report.checks.every((check) => check.ok) ? 0 : 1;
+}
+
+export async function reportRun(
+  io: ReportIo,
+  command: ReportCommand,
+): Promise<number> {
+  try {
+    return await generateReport(io, command);
+  } catch {
+    io.err(
+      'problem report generation failed; the output package is incomplete; original run evidence was retained',
+    );
+    return 1;
+  }
 }

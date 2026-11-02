@@ -1,0 +1,159 @@
+/** One bounded credential vocabulary; only text is projected, never numeric metrics. */
+import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
+
+// These fields are closed protocol values, not quoted user text. Their spelling
+// cannot become a credential occurrence merely because a rationale quotes it.
+const CLOSED_FIELDS = new Set([
+  'formatVersion',
+  'source',
+  'status',
+  'kind',
+  'protocol',
+  'protocols',
+  'transport',
+  'classification',
+  'settlement',
+  'word',
+  'verdict',
+  'reference',
+  'basis',
+  'mode',
+  'channel',
+  'labels',
+  'conditionSelection',
+  'generation',
+  'archiveCommit',
+  'evidenceAccess',
+  'axis',
+  'standing',
+  'branch',
+  'split',
+]);
+const CLOSED_COUNTERS = new Set([
+  'cellsBySource',
+  'unitsBySource',
+  'statuses',
+  'failureKinds',
+]);
+const IDENTITIES = new Set([
+  'cellId',
+  'caseId',
+  'rootId',
+  'pointId',
+  'viewId',
+  'lineageId',
+  'targetId',
+  'group',
+  'key',
+]);
+
+function closedGroupKey(value: object, name: string): boolean {
+  const axis: unknown = Reflect.get(value, 'axis');
+  return (
+    name === 'key' &&
+    typeof axis === 'string' &&
+    axis !== 'business' &&
+    axis !== 'target'
+  );
+}
+
+function strings(
+  value: unknown,
+  visit: (key: string, text: string) => void,
+  key = '',
+): void {
+  if (typeof value === 'string') visit(key, value);
+  else if (Array.isArray(value))
+    for (const entry of value) strings(entry, visit, key);
+  else if (value !== null && typeof value === 'object')
+    for (const [name, entry] of Object.entries(value)) {
+      visit('', name);
+      strings(entry, visit, closedGroupKey(value, name) ? 'axis' : name);
+    }
+}
+
+export function publicReport<
+  T extends { readonly run: { readonly runId: string } },
+>(report: T, credentialEvidence?: unknown): T {
+  const redactor = new CredentialRedactor(
+    `report-publication:${report.run.runId}`,
+  );
+  let unavailable = false;
+  const fields = new Map<string, string>();
+  try {
+    if (credentialEvidence !== undefined) redactor.value(credentialEvidence);
+    strings(report, (key, text) => {
+      if (CLOSED_FIELDS.has(key)) return;
+      const identity = JSON.stringify([key, text]);
+      if (fields.has(identity)) return;
+      const cleaned = redactor.value({ [key]: text });
+      const value: unknown =
+        cleaned !== null && typeof cleaned === 'object'
+          ? Object.values(cleaned)[0]
+          : null;
+      fields.set(
+        identity,
+        typeof value === 'string' && value === text ? text : '[redacted]',
+      );
+    });
+  } catch {
+    unavailable = true;
+  }
+  const identities = new Map<string, string>();
+  const text = (key: string, value: string): string => {
+    if (CLOSED_FIELDS.has(key)) return value;
+    if (unavailable) return '[unavailable]';
+    try {
+      return fields.get(JSON.stringify([key, value])) === '[redacted]' ||
+        redactor.text(value) !== value
+        ? '[redacted]'
+        : value;
+    } catch {
+      return '[unavailable]';
+    }
+  };
+  const project = (value: unknown, parent = ''): void => {
+    if (value === null || typeof value !== 'object') return;
+    const entries = Object.entries(value);
+    const names = entries.map(([name]) =>
+      Array.isArray(value) || CLOSED_COUNTERS.has(parent)
+        ? name
+        : text('', name),
+    );
+    if (new Set(names).size !== entries.length)
+      throw new Error(
+        'public report text keys collide after redaction; publication refused',
+      );
+    if (names.some((name, index) => name !== entries[index]?.[0]))
+      for (const [name] of entries) Reflect.deleteProperty(value, name);
+    for (const [index, [name, entry]] of entries.entries()) {
+      const target = names[index];
+      if (target === undefined) throw new Error('missing public field');
+      const field = Array.isArray(value) ? parent : name;
+      const cleaned: unknown =
+        typeof entry === 'string'
+          ? closedGroupKey(value, name)
+            ? entry
+            : text(field, entry)
+          : entry;
+      if (
+        typeof entry === 'string' &&
+        cleaned !== entry &&
+        IDENTITIES.has(field)
+      ) {
+        const identity = JSON.stringify([field, cleaned]);
+        const previous = identities.get(identity);
+        if (previous !== undefined && previous !== entry)
+          throw new Error(
+            'public identifiers collide after redaction; publication refused',
+          );
+        identities.set(identity, entry);
+      }
+      project(cleaned, field);
+      Reflect.set(value, target, cleaned);
+    }
+  };
+  const result = structuredClone(report);
+  project(result);
+  return result;
+}

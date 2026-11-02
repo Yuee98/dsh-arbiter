@@ -1,6 +1,10 @@
 import { sourceKeys } from './workflow-types.js';
 import { workflowSourceDigest, resolveWorkflowPlan } from './source.js';
-import { workflowExecutionOf, executionProblems } from './provenance.js';
+import {
+  workflowExecutionOf,
+  executionProblems,
+  legacyRunProvenance,
+} from './provenance.js';
 import {
   withResourceClaim,
   requireUnoccupiedResource,
@@ -142,7 +146,7 @@ async function createRunUnlocked(
   const grid = cellGrid(options.plan);
   const index: RunIndex = {
     ...(options.plan.workflow === undefined
-      ? {}
+      ? { provenance: await legacyRunProvenance() }
       : {
           workflowExecution: await workflowExecutionOf(
             options.plan,
@@ -403,6 +407,8 @@ export interface ResumeOutcome {
  * exactly what keeps a continuation from double-counting.
  */
 export interface ResumeOptions {
+  /** Called under the claim after preflight, immediately before entering dispatch. */
+  readonly onExecutionStarted?: () => void;
   readonly directory: string;
   readonly existing: ExistingRun;
   readonly cases: readonly RunSource[];
@@ -505,6 +511,24 @@ async function resumeRunUnlocked(
         `refusing to continue a run under different versions — ${drift.join('; ')}`,
       );
     }
+    const recorded = options.existing.index.provenance?.codeGit;
+    if (
+      options.existing.index.workflowExecution === undefined &&
+      recorded !== undefined
+    ) {
+      const current = (await legacyRunProvenance()).codeGit;
+      if (
+        (recorded.revision !== null &&
+          current.revision !== null &&
+          recorded.revision !== current.revision) ||
+        (recorded.dirty !== null &&
+          current.dirty !== null &&
+          recorded.dirty !== current.dirty)
+      )
+        throw new Error(
+          'refusing to continue a legacy run whose tested Git provenance moved',
+        );
+    }
     // An abandoned request may still be outstanding: the runner stopped waiting, but the
     // provider may be working and billing. Starting new requests beside it would put more
     // calls in flight than the plan's concurrency allows, and no budget arithmetic can make
@@ -533,6 +557,7 @@ async function resumeRunUnlocked(
       : async (): Promise<void> => {};
   let outcome: DispatchOutcome;
   try {
+    options.onExecutionStarted?.();
     outcome = await dispatch({
       ...(lease === undefined ? {} : { resourceLease: lease }),
       runId: options.existing.index.runId,
