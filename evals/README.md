@@ -163,6 +163,8 @@ pnpm evals report <运行目录> --references <workflow-references-v1.json> --ou
 
 即使 `--force`，报告也不能覆盖运行证据、数据集 split 下的集合源或显式参考快照；数据不可读时同样保护，符号链接按实际目标检查。JSON、MD 与静态 HTML 使用同一报告对象；扩展 HTML 浏览由 #132 交付。
 
+合法的全 unsupported 或全派发前阻断运行可以没有 record，报告仍成功生成；这不表示模型质量通过。索引确有派发状态却缺少 record 时，自检继续失败。完整有效配置只用于本地材料适用性核验；共享报告输出经现有凭据脱敏处理、并省略全部配置自由文本的公开视图，保留必要 token 参数、项目规则启用状态、配置 revision 与原运行 `index.json#/workflowExecution/config` 证据入口。未知文本和未核实的配置字段不原样复制，脱敏识别失败也不回落到原始内容；原运行工件保持不变。
+
 ## 离线回放
 
 ```sh
