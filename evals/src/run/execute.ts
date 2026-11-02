@@ -1,3 +1,7 @@
+import { hasResourceClaim } from './resource.js';
+import type { ResourceLease } from './resource.js';
+import { isWorkflowSource } from './source.js';
+import { digestOf } from '../data/hash.js';
 /**
  * Running one cell: one review, through the production service.
  *
@@ -30,7 +34,7 @@ import type { ReviewPackage } from '../../../src/reviewer/package.js';
 import { aggregateUsage } from '../../../src/reviewer/usage.js';
 
 import { inputHashOf } from '../data/eligibility.js';
-import type { ReviewCase } from '../data/types.js';
+import type { RunSource } from './source.js';
 
 import { backendFor, presendLedger } from './backends.js';
 import type { BackendContext } from './backends.js';
@@ -67,8 +71,10 @@ const ENTRY_POINT = {
 
 /** What one cell needs in order to run. */
 export interface CellDeps {
+  readonly resourceLease?: ResourceLease;
+  readonly reservedAttempts?: number;
   readonly runId: string;
-  readonly caseEntry: ReviewCase;
+  readonly caseEntry: RunSource;
   readonly target: RunTarget;
   readonly protocol: RunProtocol;
   readonly repeat: number;
@@ -206,7 +212,10 @@ function costOf(status: CellStatus): CellCost {
       };
 }
 
-function caseOf(caseEntry: ReviewCase): CellRecord['case'] {
+function caseOf(
+  caseEntry: RunSource,
+  material?: CaseMaterial,
+): CellRecord['case'] {
   return {
     caseId: caseEntry.caseId,
     familyId: caseEntry.familyId,
@@ -214,7 +223,9 @@ function caseOf(caseEntry: ReviewCase): CellRecord['case'] {
     provenanceSource: caseEntry.provenance.source,
     // The same digest a label is approved against, so a record and a label can be
     // compared without re-reading the case.
-    inputHash: inputHashOf(caseEntry.input),
+    inputHash: isWorkflowSource(caseEntry)
+      ? (material?.material.inputHash ?? digestOf(caseEntry.workflow))
+      : inputHashOf(caseEntry.input),
   };
 }
 
@@ -313,6 +324,8 @@ export async function runCell(parts: {
   readonly deps: CellDeps;
 }): Promise<{ readonly record: CellRecord }> {
   const { deps } = parts;
+  if (isWorkflowSource(deps.caseEntry) && !hasResourceClaim(deps.resourceLease))
+    throw new Error('workflow reviewer requires a held resource claim');
   const startedAt = deps.now();
   const cancelled = (): boolean => deps.signal.aborted && !deps.timedOut();
   // One ledger per cell: the guard records what it refused, keyed by attempt number.
@@ -366,6 +379,15 @@ export async function runCell(parts: {
         stopReason: error instanceof Error ? error.message : String(error),
         outcome: null,
         attempts: [],
+        ...(isWorkflowSource(deps.caseEntry)
+          ? {
+              abandonment: {
+                reservedAttempts: deps.reservedAttempts ?? 1,
+                reason:
+                  'reviewer entered but did not report attempts; send state is unknown',
+              },
+            }
+          : {}),
       }),
     };
   }
@@ -424,9 +446,19 @@ function recordOf(parts: {
     runId: deps.runId,
     cellId: parts.cellId,
     createdAt: new Date(deps.now()).toISOString(),
-    case: caseOf(deps.caseEntry),
+    case: caseOf(deps.caseEntry, parts.material),
+    ...(isWorkflowSource(deps.caseEntry)
+      ? { workflow: deps.caseEntry.workflow }
+      : {}),
     execution: executionOf(deps.repeat, deps.transport),
-    entryPoint: ENTRY_POINT,
+    entryPoint: isWorkflowSource(deps.caseEntry)
+      ? {
+          ...ENTRY_POINT,
+          materialChain: 'workflow-point',
+          detail:
+            'workflow projection through the production reviewer service; no host session-log collector or approval channel exercised',
+        }
+      : ENTRY_POINT,
     abandonment: parts.abandonment ?? null,
     target: targetRecordOf(
       deps.target,
@@ -514,7 +546,7 @@ export function timedOutRecord(parts: {
 export function unsupportedRecord(parts: {
   readonly runId: string;
   readonly cellId: string;
-  readonly caseEntry: ReviewCase;
+  readonly caseEntry: RunSource;
   readonly target: RunTarget;
   readonly protocol: RunProtocol;
   readonly repeat: number;
@@ -529,8 +561,17 @@ export function unsupportedRecord(parts: {
     cellId: parts.cellId,
     createdAt: parts.createdAt,
     case: caseOf(parts.caseEntry),
+    ...(isWorkflowSource(parts.caseEntry)
+      ? { workflow: parts.caseEntry.workflow }
+      : {}),
     execution: executionOf(parts.repeat, parts.transport),
-    entryPoint: ENTRY_POINT,
+    entryPoint: isWorkflowSource(parts.caseEntry)
+      ? {
+          ...ENTRY_POINT,
+          materialChain: 'workflow-point',
+          detail: 'workflow primary view; not a host execution',
+        }
+      : ENTRY_POINT,
     abandonment: null,
     target: targetRecordOf(parts.target, parts.protocol, [], 'unknown'),
     material: null,

@@ -17,13 +17,21 @@
  * option.
  */
 
-import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { ReviewOutcome } from '../../../src/review-contract/types.js';
 import type { UsageAggregate } from '../../../src/reviewer/usage.js';
 
-import { digestOf } from '../data/hash.js';
+import { digestOf, canonicalJson } from '../data/hash.js';
 import type { RunCheckers } from './schemas.js';
 import type {
   CellRecord,
@@ -35,6 +43,7 @@ import type {
   RunVersions,
 } from './types.js';
 import { RUN_ARTIFACT_VERSION, RUN_PLAN_VERSION } from './types.js';
+import { cellGrid } from './grid.js';
 
 export type {
   CellRecord,
@@ -344,6 +353,7 @@ export type ArtifactRead =
 export async function readRun(
   directory: string,
   checkers: RunCheckers,
+  options: { readonly allowWorkflow?: boolean } = {},
 ): Promise<ArtifactRead> {
   const problems: ArtifactProblem[] = [];
   const planRaw = await readJson(join(directory, RUN_FILES.plan));
@@ -374,6 +384,83 @@ export async function readRun(
   ) {
     return { ok: false, problems };
   }
+  const workflow = planChecked.document.workflow;
+  if (workflow !== undefined) {
+    if (
+      indexChecked.document.planHash !== planDigest(planChecked.document) ||
+      canonicalJson(indexChecked.document.plan) !==
+        canonicalJson(planChecked.document)
+    ) {
+      problems.push({
+        path: RUN_FILES.index,
+        message: 'workflow frozen plan does not match its index',
+      });
+    }
+    const expectedCount =
+      workflow.points.length *
+      planChecked.document.targets.length *
+      planChecked.document.protocols.length *
+      planChecked.document.repeats;
+    if (
+      !Number.isSafeInteger(expectedCount) ||
+      indexChecked.document.cells.length !== expectedCount
+    ) {
+      problems.push({
+        path: RUN_FILES.index,
+        message:
+          'workflow index does not contain the complete frozen cell population',
+      });
+    } else {
+      const grid = cellGrid(planChecked.document);
+      for (const [position, cell] of indexChecked.document.cells.entries()) {
+        const expected = grid.cells[position];
+        if (
+          expected === undefined ||
+          cell.cellId !== expected.cellId ||
+          cell.caseId !== expected.caseId ||
+          cell.targetId !== expected.targetId ||
+          cell.protocol !== expected.protocol ||
+          cell.repeat !== expected.repeat ||
+          cell.record !== recordPathOf(expected.cellId)
+        ) {
+          problems.push({
+            path: RUN_FILES.index,
+            message:
+              'workflow index cell does not match its frozen identity or record path',
+          });
+          break;
+        }
+      }
+    }
+    // Refuse bad paths before reading any record named by the index.
+    if (problems.length > 0) return { ok: false, problems };
+    const expectedFiles = new Set(
+      indexChecked.document.cells.map((cell) => `${cell.cellId}.json`),
+    );
+    try {
+      const files = await readdir(join(directory, RUN_FILES.records));
+      if (
+        files.some((file) => file.endsWith('.json') && !expectedFiles.has(file))
+      )
+        problems.push({
+          path: RUN_FILES.records,
+          message:
+            'workflow contains unindexed records; consumption is unknown',
+        });
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ))
+        problems.push({
+          path: RUN_FILES.records,
+          message:
+            'workflow records cannot be enumerated; consumption is unknown',
+        });
+    }
+    if (problems.length > 0) return { ok: false, problems };
+  }
   const records: CellRecord[] = [];
   const missing: CellState[] = [];
   for (const cell of indexChecked.document.cells) {
@@ -393,7 +480,42 @@ export async function readRun(
       });
       continue;
     }
+    if (workflow !== undefined) {
+      const record = checked.document;
+      const point = workflow.points.find(
+        (entry) => entry.viewId === cell.caseId,
+      );
+      if (
+        record.runId !== indexChecked.document.runId ||
+        record.cellId !== cell.cellId ||
+        record.case.caseId !== cell.caseId ||
+        record.target.targetId !== cell.targetId ||
+        record.target.protocol !== cell.protocol ||
+        record.execution.repeat !== cell.repeat ||
+        point === undefined ||
+        canonicalJson(record.workflow) !== canonicalJson(point) ||
+        record.case.familyId !== point.lineageId ||
+        record.entryPoint.materialChain !== 'workflow-point'
+      ) {
+        problems.push({
+          path: cell.record,
+          message:
+            'workflow record identity does not match the frozen selection',
+        });
+      }
+    }
     records.push(checked.document);
+  }
+  if (
+    !options.allowWorkflow &&
+    (planChecked.document.workflow !== undefined ||
+      records.some((record) => record.workflow !== undefined))
+  ) {
+    problems.push({
+      path: RUN_FILES.plan,
+      message:
+        'workflow artifacts require an identity-aware consumer; legacy metrics/replay cannot interpret their compatibility keys',
+    });
   }
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -427,4 +549,26 @@ export async function readFixture(
 /** The usage one cell reported, or null when it reported none. */
 export function usageOf(record: CellRecord): UsageAggregate | null {
   return record.usage;
+}
+
+/**
+ * What one record spent against the run's budget.
+ *
+ * A settled cell reports its attempts, so that is the figure. An abandoned cell reports
+ * nothing — the transport never returned — and guessing one attempt would under-count a
+ * call that could have sent its whole reservation. So the reservation is what gets
+ * charged, for both timeout and cancellation: what the run knows is that it may have spent
+ * that much, and a budget that assumes less is not a bound.
+ */
+export function attemptsOfCell(record: CellRecord): number {
+  // Only requests that were sent count. A pre-send refusal is kept in the record as
+  // evidence, but charging it would make the persisted index disagree with the budget the
+  // scheduler enforced — and a continuation reading it would start from an inflated count.
+  const sent = record.attempts.filter(
+    (attempt) => attempt.sent !== false,
+  ).length;
+  if (sent > 0) return sent;
+  // An abandoned cell reports nothing it can prove; its reservation is the only figure that
+  // does not under-count.
+  return record.abandonment?.reservedAttempts ?? 0;
 }
