@@ -1,5 +1,7 @@
 # evals：审查质量数据契约与标注工具
 
+`workflows-v1` 的独立题本、模型原文回传、动态共识与人工优先参考使用独立的 `workflow-*` 命令，见[工作流标注说明](../docs/workflow-annotation.md)。旧 `export/import` 继续按下文处理 legacy 数据。
+
 本目录是同一 repo 内的**逻辑独立子项目**：沿用根的 Node／TypeScript／pnpm 工具链，但生产代码不依赖它，发布包也不包含它。它负责三件事：定义案例／标签／模型意见／manifest 的 JSON 契约，校验这些文档彼此一致，以及把材料导出成可独立标注的空白包、再把填好的结果回填成仓库内的标签。
 
 设计依据是[评测系统方案](../docs/milestones/review-quality-and-evals.md) 3.1／3.2 与[评分量表](../docs/milestones/review-quality-rubrics.md)。评分语义本身**不在这里定义**：`src/review-contract/` 是唯一来源，`evals` 直接调用它。
