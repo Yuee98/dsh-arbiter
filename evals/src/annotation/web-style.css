@@ -1,0 +1,157 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #23313c;
+  background: #f3f5f7;
+  line-height: 1.55;
+}
+body {
+  margin: 0;
+}
+header {
+  padding: 1rem 1.5rem;
+  background: #133a49;
+  color: white;
+}
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+header p {
+  margin: 0.3rem 0;
+}
+.annotation-layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 18%) minmax(24rem, 1fr) minmax(
+      20rem,
+      30%
+    );
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+nav,
+section.material,
+section.decision {
+  background: white;
+  padding: 1rem;
+  border: 1px solid #d9e0e6;
+  border-radius: 0.5rem;
+  min-width: 0;
+}
+nav {
+  position: sticky;
+  top: 1rem;
+  max-height: 85vh;
+  overflow: auto;
+}
+nav ol {
+  list-style: none;
+  padding: 0;
+}
+nav button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.5rem;
+}
+h2 {
+  font-size: 1.15rem;
+  margin-top: 0;
+}
+label {
+  display: block;
+  margin: 0.7rem 0;
+}
+textarea,
+select,
+input:not([type='checkbox']) {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  font: inherit;
+  margin-top: 0.25rem;
+  border: 1px solid #8c9ca8;
+  border-radius: 0.25rem;
+  padding: 0.4rem;
+}
+textarea {
+  min-height: 5rem;
+}
+button {
+  font: inherit;
+  border: 1px solid #6d8996;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.3rem;
+  background: #edf4f6;
+  color: #123f51;
+  cursor: pointer;
+}
+button:hover {
+  background: #dfedf2;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button[aria-current] {
+  background: #133a49;
+  color: white;
+}
+:focus-visible {
+  outline: 3px solid #e7ac35;
+  outline-offset: 2px;
+}
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    0.85rem/1.55 ui-monospace,
+    monospace;
+}
+.changed {
+  background: #e3f5e4;
+}
+details {
+  margin: 0.8rem 0;
+}
+summary {
+  cursor: pointer;
+}
+.actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+[role='alert'] {
+  color: #923220;
+  background: #fff0e8;
+  padding: 0.6rem;
+}
+.checkbox {
+  display: flex;
+  gap: 0.5rem;
+}
+@media (max-width: 1100px) {
+  .annotation-layout {
+    grid-template-columns: 12rem minmax(0, 1fr);
+  }
+  .decision {
+    grid-column: 2;
+  }
+}
+@media (max-width: 650px) {
+  .annotation-layout {
+    display: block;
+  }
+  nav {
+    position: static;
+    max-height: 15rem;
+  }
+  section {
+    margin-top: 1rem;
+  }
+}

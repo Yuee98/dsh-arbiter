@@ -21,6 +21,7 @@ const { runCli } = await import('./cli/run.js');
 const { runGroupedCli } = await import('./data/group-command.js');
 const { runWorkflowAnnotationCli } =
   await import('./annotation/workflow-command.js');
+const { runAnnotationWebCli } = await import('./annotation/web-command.js');
 
 const argv = process.argv.slice(2);
 const askedForHelp =
@@ -52,6 +53,7 @@ const io = {
   signal: lifetime.signal,
 };
 process.exitCode =
+  (await runAnnotationWebCli(argv, io)) ??
   (await runWorkflowAnnotationCli(argv, io)) ??
   (await runGroupedCli(argv, io, runCli)) ??
   (await runCli(argv, io));

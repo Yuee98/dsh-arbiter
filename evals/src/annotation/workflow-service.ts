@@ -38,6 +38,7 @@ async function validBatch(
   dataset: string,
   path: string,
   context?: AnnotationContext,
+  questions?: ReadonlySet<string>,
 ): Promise<WorkflowBatch> {
   const batch = await readWorkflowBatch(path);
   const effectiveContext = annotationContext(context ?? batch.context);
@@ -45,6 +46,7 @@ async function validBatch(
     throw new Error('batch belongs to another dataset');
   const source = await workflowSource(dataset, batch.split, batch.group);
   for (const point of batch.points) {
+    if (questions !== undefined && !questions.has(point.questionId)) continue;
     if (point.binding === null) continue;
     const actual = await buildAnnotationView(
       source,
@@ -147,6 +149,8 @@ export async function importWorkflowOpinions(options: {
     options.baseline,
     options.context,
   );
+  if (batch.purpose === 'human')
+    throw new Error('human-only batch cannot import model opinions');
   const returned = returnedBatch(options.returned);
   if (returned.batchId !== batch.batchId)
     throw new Error('returned answers belong to another batch');
@@ -236,7 +240,7 @@ export async function importWorkflowHuman(options: {
   readonly fill: unknown;
   readonly write: boolean;
 }) {
-  const batch = await validBatch(options.dataset, options.baseline);
+  const baseline = await readWorkflowBatch(options.baseline);
   const fill = checked<HumanBatch>(
     {
       type: 'object',
@@ -269,7 +273,16 @@ export async function importWorkflowHuman(options: {
     },
     options.fill,
   );
-  if (fill.batchId !== batch.batchId)
+  const questions = new Set(
+    fill.decisions.map((decision) => decision.questionId),
+  );
+  const batch = await validBatch(
+    options.dataset,
+    options.baseline,
+    undefined,
+    questions,
+  );
+  if (fill.batchId !== baseline.batchId)
     throw new Error('human fill belongs to another batch');
   const checkers = await compileCheckers();
   for (const decision of fill.decisions) {
@@ -296,7 +309,7 @@ export async function importWorkflowHuman(options: {
     batch.group,
     options.write,
     async (state) => {
-      await validBatch(options.dataset, options.baseline);
+      await validBatch(options.dataset, options.baseline, undefined, questions);
       const now = workflowRecords(state);
       const replacements = fill.decisions.map((decision) => {
         const point = batch.points.find(
@@ -370,6 +383,7 @@ export async function importWorkflowHuman(options: {
         },
       };
     },
+    batch.purpose === 'human',
   );
   if (options.write)
     await checkpoint(options.baseline, batch, result.labels, result.opinions);
