@@ -1,0 +1,66 @@
+{
+  "planVersion": "eval-run-plan-v1",
+  "datasetId": "reviewer-v2",
+  "datasetPath": "/private/tmp/dsh-arbiter-cw-135/evals/datasets/reviewer-v2",
+  "transport": "live",
+  "protocols": ["decision"],
+  "targets": [
+    {
+      "targetId": "clef-local",
+      "provider": "clef-local",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef",
+        "apiKeyRef": "",
+        "timeoutMs": 60000,
+        "costTier": "free"
+      },
+      "credentialRef": ""
+    }
+  ],
+  "context": {
+    "targetInputTokens": 6000,
+    "maxInputTokens": 10000
+  },
+  "fixture": null,
+  "split": "dev",
+  "caseIds": [
+    "cw135-001-p01",
+    "cw135-001-p02",
+    "cw135-001-p03",
+    "cw135-001-p04",
+    "cw135-001-p05",
+    "cw135-007-p01",
+    "cw135-007-p02",
+    "cw135-007-p03",
+    "cw135-007-p04",
+    "cw135-007-p05",
+    "cw135-013-p01",
+    "cw135-013-p02",
+    "cw135-013-p03",
+    "cw135-013-p04",
+    "cw135-013-p05",
+    "cw135-017-p01",
+    "cw135-017-p02",
+    "cw135-017-p03",
+    "cw135-017-p04",
+    "cw135-017-p05"
+  ],
+  "repeats": 1,
+  "bounds": {
+    "concurrency": 1,
+    "timeoutMs": 60000,
+    "maxAttempts": 20,
+    "maxInputTokens": 10000
+  },
+  "notes": [
+    "未授权，不得真实运行；不沿用 S1 额度。",
+    "W06 首4根阶段来源 feat/cw-135@4cfc13a1bdac29176c6170273c20782c6813f6fa，尚未合入 main。",
+    "当前 runner CLI 尚不支持 workflows-v1 point/view，本文件是现有格式资源候选；必须先完成 #176 接线，不能当已可派发。",
+    "costTier free 继承旧配置路由值；实际费用未知，非零费用承诺。",
+    "累计估计输入预算 200000 tokens；当前协议无法承诺输出及总计费 token 硬上限，授权前需明确可接受范围或更换具备该能力的目标。"
+  ]
+}
