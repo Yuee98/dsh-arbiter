@@ -204,12 +204,17 @@ describe('complete populations and conditional quality', () => {
       status: 'timeout',
       reference: m0,
     });
-    if (abandoned.record === null) throw new Error('missing timeout fixture');
+    if (abandoned.record === null || abandoned.record.material === null)
+      throw new Error('missing timeout fixture');
     const cells = [
       {
         ...abandoned,
         record: {
           ...abandoned.record,
+          material: {
+            ...abandoned.record.material,
+            completenessStatus: 'insufficient' as const,
+          },
           attempts: [],
           abandonment: {
             reservedAttempts: 1,
@@ -243,6 +248,10 @@ describe('complete populations and conditional quality', () => {
       matched: 1,
     });
     expect(section.cells).toMatchObject({ technical: 2, falseDeny: 0 });
+    expect(section.technicalAvailability).toMatchObject({
+      numerator: 1,
+      denominator: 4,
+    });
     expect(section.pairs.labeled).toBe(0);
     expect(
       qualitySection(

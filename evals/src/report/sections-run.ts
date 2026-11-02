@@ -29,6 +29,27 @@ export function identitySection(report: EvaluationReport): string {
     row(['协议', run.protocols.join('、')]),
     row(['重复次数', String(run.repeats)]),
     row(['入口链', run.entryPoints.join('、') || '（无记录）']),
+    ...(run.workflowExecution === undefined
+      ? []
+      : [
+          row([
+            'workflow config revision',
+            run.workflowExecution.configRevision,
+          ]),
+          row([
+            'workflow effective config',
+            JSON.stringify(run.workflowExecution.config),
+          ]),
+          row([
+            'workflow code Git',
+            JSON.stringify(run.workflowExecution.codeGit),
+          ]),
+          row([
+            'workflow source Git',
+            JSON.stringify(run.workflowExecution.sourceGit),
+          ]),
+          row(['candidate', JSON.stringify(run.candidate ?? null)]),
+        ]),
     '',
     heading(3, '版本'),
     '',
@@ -65,7 +86,7 @@ export function identitySection(report: EvaluationReport): string {
     row([
       '第三层口径',
       report.setup.settlementProjection
-        ? '推演（无宿主链单元格）'
+        ? '按共享规则推演（无实际结算证据）'
         : '宿主实际结算',
     ]),
     '',

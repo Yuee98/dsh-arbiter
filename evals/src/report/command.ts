@@ -189,6 +189,13 @@ function protectedEvidenceOf(parts: {
     parts.settings.dataset,
     parts.observation.artifact,
   );
+  const recorded = resolve(
+    parts.root,
+    parts.observation.artifact.index.plan.datasetPath,
+  );
+  evidence.push(...datasetEvidence(parts.root, recorded));
+  for (const split of ['dev', 'calibration', 'holdout'])
+    evidence.push({ path: join(recorded, split), kind: 'directory' });
   if (base === null)
     return [
       ...evidence,

@@ -61,6 +61,12 @@ function runIdentityOf(
 ): RunIdentity {
   const index = artifact.index;
   return {
+    ...(index.workflowExecution === undefined
+      ? {}
+      : { workflowExecution: index.workflowExecution }),
+    ...(artifact.plan.candidate === undefined
+      ? {}
+      : { candidate: artifact.plan.candidate }),
     runId: index.runId,
     status: index.status,
     createdAt: index.createdAt,

@@ -44,6 +44,8 @@ export interface QualityPopulation {
   readonly conditions: BehaviourCounts;
   readonly conditional: ConditionalQuality;
   readonly burden: BurdenSummary;
+  /** Full planned cells, including every repeat; burden uses lowest-repeat conditions. */
+  readonly cellBurden: BurdenSummary;
   readonly risk: FieldErrorStats;
   readonly authorization: FieldErrorStats;
   readonly pairs: PairStats;

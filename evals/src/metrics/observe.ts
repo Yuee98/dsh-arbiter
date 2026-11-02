@@ -45,6 +45,9 @@ import type { DatasetSource } from './types.js';
 import type { WorkflowMetricSource } from './workflow-metrics-types.js';
 import { readReferenceSnapshot } from './reference-snapshot.js';
 import type { ReferenceSnapshot } from './reference-snapshot.js';
+import { observeWorkflow } from './workflow-observe.js';
+import type { WorkflowCellObservation } from './workflow-observe.js';
+import type { WorkflowObservation } from './workflow-observe.js';
 
 /** One case's static identity, from the dataset rather than from the run. */
 export interface CaseFacts {
@@ -94,6 +97,7 @@ export interface DatasetFacts {
 
 /** What one run directory and its dataset amounted to. */
 export interface Observation {
+  readonly workflowCells?: ReadonlyMap<string, WorkflowCellObservation>;
   readonly referenceSnapshots?: readonly ReferenceSnapshot[];
   readonly workflowSources?: readonly WorkflowMetricSource[];
   readonly artifact: RunArtifact;
@@ -456,7 +460,9 @@ export async function observeRun(parts: {
   readonly dataset: DatasetSource;
 }): Promise<ObservationRead> {
   const checkers = await compileRunCheckers();
-  const read = await readRun(parts.directory, checkers);
+  const read = await readRun(parts.directory, checkers, {
+    allowWorkflow: true,
+  });
   if (!read.ok) {
     return {
       ok: false,
@@ -466,6 +472,17 @@ export async function observeRun(parts: {
     };
   }
   const artifact = read.artifact;
+  if (
+    artifact.plan.workflow === undefined &&
+    artifact.records.some((record) => record.workflow !== undefined)
+  ) {
+    return {
+      ok: false,
+      problems: [
+        'workflow records require their frozen workflow plan; compatibility keys cannot be read as legacy cases',
+      ],
+    };
+  }
   const referenceSnapshots: ReferenceSnapshot[] = [];
   for (const path of parts.references ?? []) {
     try {
@@ -491,13 +508,44 @@ export async function observeRun(parts: {
   const caseIds = [
     ...new Set(artifact.index.cells.map((cell) => cell.caseId)),
   ].sort();
-  const dataset = await readDatasetFacts(
-    parts.root,
-    datasetPathOf(parts.dataset, artifact),
-    caseIds,
-    artifact.index.plan.split,
-  );
+  let workflow: WorkflowObservation | null = null;
+  try {
+    if (artifact.plan.workflow !== undefined)
+      workflow = await observeWorkflow({
+        artifact,
+        root: parts.root,
+        datasetPath: datasetPathOf(parts.dataset, artifact),
+        snapshots: referenceSnapshots,
+      });
+  } catch (error) {
+    return {
+      ok: false,
+      problems: [
+        `workflow report: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    };
+  }
+  const dataset =
+    workflow === null
+      ? await readDatasetFacts(
+          parts.root,
+          datasetPathOf(parts.dataset, artifact),
+          caseIds,
+          artifact.index.plan.split,
+        )
+      : {
+          ...emptyDataset(
+            workflow.problems.length === 0 ? 'absent' : 'unreadable',
+            workflow.problems,
+          ),
+          status:
+            workflow.problems.length === 0
+              ? ('joined' as const)
+              : ('unreadable' as const),
+          datasetId: artifact.index.dataset.datasetId,
+        };
   const problems: string[] = [];
+  if (workflow !== null) problems.push(...workflow.problems);
   if (strays.length > 0) {
     problems.push(
       `${String(strays.length)} record(s) name a cell the index does not plan: ${strays.join(', ')}`,
@@ -508,6 +556,9 @@ export async function observeRun(parts: {
   return {
     ok: true,
     observation: {
+      ...(workflow === null
+        ? {}
+        : { workflowCells: workflow.cells, workflowSources: workflow.sources }),
       referenceSnapshots,
       artifact,
       dataset,

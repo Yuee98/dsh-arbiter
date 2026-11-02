@@ -128,7 +128,9 @@ function populationOf(
       cell.indexStatus !== 'unsupported' &&
       !(
         cell.record?.material?.completenessStatus === 'insufficient' &&
-        cell.record.attempts.length === 0
+        cell.record.attempts.length === 0 &&
+        cell.record.abandonment === null &&
+        cell.engineWord === 'insufficient-material'
       ),
   );
   const expectedM0 = conditions.filter(
@@ -151,6 +153,7 @@ function populationOf(
     conditions: countsOf(conditions),
     conditional: conditionalQuality(conditions),
     burden: burdenOf(conditions, settings),
+    cellBurden: burdenOf(cells, settings),
     risk: fieldErrorStats(cells, 'risk'),
     authorization: fieldErrorStats(cells, 'authorization'),
     pairs: pairStats(cells),

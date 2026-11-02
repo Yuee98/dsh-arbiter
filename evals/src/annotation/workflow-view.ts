@@ -3,19 +3,16 @@ import { DEFAULT_CONFIG, configHash } from '../../../src/config.js';
 import { PRODUCTION_PACKAGE } from '../../../src/reviewer/package.js';
 import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
-import { CREDENTIAL_MARKER_SOURCE } from '../../../src/reviewer/credential-markers.js';
 import { workflowMaterial } from '../run/material.js';
 import { readGroupedDataset } from '../data/group-read.js';
-import { canonicalJson, digestOf } from '../data/hash.js';
+import { canonicalJson } from '../data/hash.js';
 import { legacyMetadata } from '../data/legacy-metadata.js';
-import type {
-  AnnotationBinding,
-  AnnotationContext,
-} from '../data/annotation-types.js';
+import type { AnnotationContext } from '../data/annotation-types.js';
 import type { GroupedDataset } from '../data/group-types.js';
 import type { Split } from '../data/types.js';
 import { checked, contextSchema } from './workflow-validation.js';
 import { regularWorkflowDirectory } from './workflow-store.js';
+import { annotationBindingOf } from './workflow-binding.js';
 
 export const DEFAULT_ANNOTATION_CONTEXT: AnnotationContext = {
   protocol: 'chat',
@@ -58,33 +55,6 @@ export async function workflowSource(
     );
   return loaded;
 }
-/** Preserve kind and equality relationships, while ignoring process-random signatures. */
-function stableRequest(request: unknown): {
-  text: string;
-  credentials: boolean;
-} {
-  const seen = new Map<string, number>();
-  const wire =
-    request !== null && typeof request === 'object'
-      ? Object.fromEntries(
-          Object.entries(request).filter(
-            ([key]) => key !== 'estimatedInputTokens',
-          ),
-        )
-      : request;
-  const text = canonicalJson(wire).replace(
-    new RegExp(CREDENTIAL_MARKER_SOURCE, 'gu'),
-    (marker) => {
-      let index = seen.get(marker);
-      if (index === undefined) {
-        index = seen.size;
-        seen.set(marker, index);
-      }
-      return marker.replace(/[a-f0-9]{64}/u, String(index));
-    },
-  );
-  return { text, credentials: seen.size > 0 };
-}
 export async function buildAnnotationView(
   dataset: GroupedDataset,
   rootId: string,
@@ -123,26 +93,17 @@ export async function buildAnnotationView(
     throw new Error(
       'OVER_BUDGET: actual production input cannot be dispatched',
     );
-  // A configuration revision is provenance, not a new scoring fact. Render the
-  // already selected snapshot once more with neutral provenance for comparison;
-  // the delivered request retains the actual config revision and budget result.
-  const comparable = { ...material.snapshot, configRevision: 'annotation' };
-  const stable = stableRequest(
-    context.protocol === 'chat'
-      ? PRODUCTION_PACKAGE.renderChat(comparable)
-      : PRODUCTION_PACKAGE.renderDecision(comparable),
-  );
   const versions = (await legacyMetadata()).versions;
-  const binding: AnnotationBinding = {
-    inputHash: material.material.inputHash,
-    promptFingerprint: digestOf(stable.text),
-    credentials: stable.credentials,
+  const binding = annotationBindingOf({
+    material,
+    protocol: context.protocol,
+    pkg: PRODUCTION_PACKAGE,
     versions: {
       contract: REVIEW_CONTRACT_VERSION,
       rubric: versions.rubric,
       policy: DEFAULT_CONFIG.policy.version,
     },
-  };
+  });
   return { request: material.request, binding };
 }
 export function materialStrings(value: unknown): readonly string[] {

@@ -470,13 +470,28 @@ export function cellFactsOf(parts: {
  * selection, no target declaration and no repeat index to compare against.
  */
 export function cellFactsOfRun(observation: Observation): readonly CellFacts[] {
-  return observation.artifact.index.cells.map((state) =>
-    cellFactsOf({
+  return observation.artifact.index.cells.map((state) => {
+    const cell = cellFactsOf({
       state,
       record: observation.records.get(state.cellId) ?? null,
       dataset: observation.dataset,
-    }),
-  );
+    });
+    const workflow = observation.workflowCells?.get(state.cellId);
+    if (workflow === undefined) return cell;
+    const reference = workflow.reference;
+    return {
+      ...cell,
+      source: workflow.source,
+      caseFacts: workflow.caseFacts,
+      evaluationReference: reference,
+      label: null,
+      labelStatus: 'not-applicable' as const,
+      labelReasons: [],
+      reference: reference.behaviourEligible
+        ? (reference.target?.behaviourReference ?? null)
+        : null,
+    };
+  });
 }
 
 /**

@@ -1,10 +1,12 @@
-/** Actual legacy runner/report IO; workflow runner integration remains a separate #176 gate. */
-import { readFile, symlink } from 'node:fs/promises';
+/** Actual legacy runner/report IO and source-protection boundaries. */
+import { readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { reportRun } from '../../evals/src/report/command.js';
 import { buildReport, defaultSettings } from '../../evals/src/metrics/index.js';
 import { observeRun } from '../../evals/src/metrics/observe.js';
+import { readRun } from '../../evals/src/run/artifact.js';
+import { compileRunCheckers } from '../../evals/src/run/schemas.js';
 import { inputHashOf } from '../../evals/src/data/eligibility.js';
 import { workflowReferences } from '../../evals/src/annotation/workflow-service.js';
 import { DEFAULT_ANNOTATION_CONTEXT } from '../../evals/src/annotation/workflow-view.js';
@@ -83,6 +85,51 @@ async function runReport(
 }
 
 describe('report denominator and evidence IO', () => {
+  it('refuses workflow-shaped records under a legacy frozen plan', async () => {
+    await withArea(async (created) => {
+      const { directory, dataset } = await syntheticRun(created);
+      const actual = await readRun(directory, await compileRunCheckers());
+      if (!actual.ok) throw new Error('missing actual legacy run');
+      const record = actual.artifact.records[0];
+      if (record === undefined) throw new Error('missing actual record');
+      await writeFile(
+        join(directory, 'records', `${record.cellId}.json`),
+        JSON.stringify({
+          ...record,
+          workflow: {
+            group: 'f01',
+            rootId: 'root',
+            lineageId: 'lineage',
+            pointId: 'point',
+            viewId: 'case-a',
+          },
+        }),
+      );
+      const observation = await observeRun({
+        directory,
+        root: created.path,
+        dataset: { kind: 'path', path: dataset },
+      });
+      expect(observation.ok).toBe(false);
+      if (observation.ok) throw new Error('expected source boundary rejection');
+      expect(observation.problems.join(';')).toContain('frozen workflow plan');
+    });
+  });
+  it('protects recorded source even when an alternate unreadable dataset is explicitly selected', async () => {
+    await withArea(async (created) => {
+      const { directory, dataset } = await syntheticRun(created);
+      const source = join(dataset, 'dev/f01/workflows.json');
+      await created.write('dataset/dev/f01/workflows.json', {
+        syntheticEvidence: 'recorded source',
+      });
+      const original = await readFile(source, 'utf8');
+      const alternate = await created.dir('other-dataset');
+      expect(
+        await runReport(created, directory, alternate, source.slice(0, -5)),
+      ).toBe(1);
+      expect(await readFile(source, 'utf8')).toBe(original);
+    });
+  });
   it('rebuilds JSON/MD/HTML deterministically through the real offline report command', async () => {
     await withArea(async (created) => {
       const { directory, dataset } = await syntheticRun(created);

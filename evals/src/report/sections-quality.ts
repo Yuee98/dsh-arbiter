@@ -125,6 +125,35 @@ export function qualitySection(report: EvaluationReport): string {
     '',
     '结算按规则推演，派发阻断来自记录；此处下界不是完整宿主实测负担率。unsupported、缺记录、未开始及未知后果均不冒充 deny。实际续行为 not-observed。',
     '',
+    row([
+      '统计单位',
+      '计划 allow',
+      '支持的 allow',
+      '派发前阻断',
+      'unsupported',
+      '未知后果',
+      '负担下界',
+    ]),
+    separator(7),
+    ...(
+      [
+        ['全部计划 cell（含 repeats）', overall.cellBurden],
+        ['最低计划 repeat 条件', burden],
+      ] as const
+    ).map(([unit, summary]) => {
+      return row([
+        unit,
+        String(summary.plannedAllow),
+        String(summary.supportedAllow),
+        String(summary.preDispatchBlocked),
+        String(summary.unsupported),
+        String(summary.unknown),
+        fraction(summary.knownBurdenLowerBound),
+      ]);
+    }),
+    '',
+    '以下详细推演分布使用最低计划 repeat 条件：',
+    '',
     row(['指标', '数量或比例']),
     separator(2),
     row(['全部计划 allow', String(burden.plannedAllow)]),

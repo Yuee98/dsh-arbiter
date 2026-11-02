@@ -45,7 +45,7 @@ function detailOf(cell: CellFacts, classification: BehaviourClass): string {
     return `该格子在派发前就已决定为 ${cell.indexStatus}，从未发出请求。`;
   }
   if (classification === 'uncompared') {
-    return `引擎给出 ${observed}，但该案例没有可计入金标的参考。`;
+    return `引擎给出 ${observed}，但该案例没有适用的行为参考。`;
   }
   return `引擎给出 ${observed}，参考要求 ${expected}。`;
 }
