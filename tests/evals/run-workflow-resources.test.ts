@@ -127,8 +127,12 @@ describe('one workflow resource scope cannot regain allowance', () => {
       expect(read.artifact.records).toHaveLength(1);
       expect(read.artifact.records[0]?.attempts).toEqual([]);
       expect(read.artifact.records[0]?.abandonment?.reservedAttempts).toBe(1);
+      expect(read.artifact.records[0]?.status).toBe('failed');
+      expect(read.artifact.records[0]?.stopReason).toContain(
+        'service lost the attempt result',
+      );
       expect(read.artifact.index.spent.attempts).toBe(1);
-      expect(read.artifact.index.status).toBe('in-flight-timeout');
+      expect(read.artifact.index.status).toBe('failed');
       expect(await area.cli(['run', area.planPath, '--resume'])).toBe(1);
       expect(observedAttempts).toBe(1);
       expect(area.log.join('\n')).toContain('outstanding');
