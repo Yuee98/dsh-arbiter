@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -51,7 +52,7 @@ export async function startAnnotationServer(
     throw new Error('invalid port');
   const workspace = await AnnotationWorkspace.open(scope);
   const bundle = await build({
-    entryPoints: [new URL('./web-client.ts', import.meta.url).pathname],
+    entryPoints: [fileURLToPath(new URL('./web-client.ts', import.meta.url))],
     bundle: true,
     write: false,
     platform: 'browser',

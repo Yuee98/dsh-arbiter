@@ -2,21 +2,48 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  cp,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 
-test('local annotation CLI restores drafts and confirms only the reviewed point', async ({
+test('local annotation CLI from an escaped checkout restores drafts and confirms only the reviewed point', async ({
   page,
   browser,
 }) => {
-  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const repository = fileURLToPath(new URL('../../', import.meta.url));
   const temporary = await mkdtemp(
     join(tmpdir(), 'arbiter-annotation-browser-'),
   );
   process.env['DSH_HOME'] = join(temporary, 'dsh-home');
+  const root = join(temporary, 'checkout copy #100% \u4e2d\u6587');
+  await mkdir(root);
+  for (const relative of [
+    'src',
+    'evals/src',
+    'evals/schemas',
+    'evals/rubrics',
+    'evals/datasets/core-v1/manifest.json',
+    'package.json',
+    'tsconfig.json',
+  ])
+    await cp(join(repository, relative), join(root, relative), {
+      recursive: true,
+    });
+  await symlink(
+    join(repository, 'node_modules'),
+    join(root, 'node_modules'),
+    'junction',
+  );
   const { collectionOf, workflow } =
     await import('../evals/fixtures/workflow.js');
   const { copy } = await import('../../evals/src/annotation/web-copy.js');
@@ -44,7 +71,7 @@ test('local annotation CLI restores drafts and confirms only the reviewed point'
     '.local/evals/workflow-annotation',
     `web-${identity}`,
   );
-  const artifacts = join(root, '.local/cw-128');
+  const artifacts = join(repository, '.local/cw-128/path-browser');
   await mkdir(artifacts, { recursive: true });
   async function launch(): Promise<{ child: ChildProcess; url: string }> {
     const child = spawn(
@@ -202,7 +229,7 @@ test('local annotation CLI restores drafts and confirms only the reviewed point'
             'node evals/src/cli.ts annotate <temporary-dataset> --group f01 --reviewer synthetic-browser',
           ],
           steps: [
-            'real CLI + esbuild bundle',
+            'real CLI + esbuild bundle from checkout containing spaces, hash, percent and Unicode',
             'edit and autosave',
             'refresh restores draft',
             'SIGTERM closes server',

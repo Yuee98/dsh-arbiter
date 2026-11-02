@@ -16,6 +16,7 @@
  */
 
 import './cli/register.ts';
+import { fileURLToPath } from 'node:url';
 
 const { runCli } = await import('./cli/run.js');
 const { runGroupedCli } = await import('./data/group-command.js');
@@ -47,7 +48,7 @@ process.on('SIGINT', onInterrupt);
 process.on('SIGTERM', onInterrupt);
 
 const io = {
-  root: new URL('../../', import.meta.url).pathname,
+  root: fileURLToPath(new URL('../../', import.meta.url)),
   out: (line: string) => process.stdout.write(`${line}\n`),
   err: (line: string) => process.stderr.write(`${line}\n`),
   signal: lifetime.signal,
