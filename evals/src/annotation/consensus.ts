@@ -3,6 +3,7 @@ import type { WorkflowOpinion } from '../data/group-types.js';
 import { knownModelIdentity } from '../data/annotation-model.js';
 import type { BehaviourReference, ScorePair } from '../data/types.js';
 import type { ModelIdentity } from '../data/types.js';
+import { validEvidence } from './workflow-evidence.js';
 
 export interface Consensus {
   readonly n: number;
@@ -33,7 +34,21 @@ export interface Consensus {
 }
 export function modelConsensus(
   opinions: readonly WorkflowOpinion[],
+  request?: unknown,
 ): Consensus {
+  const complete = (value: WorkflowOpinion): boolean =>
+    value.annotation?.complete === true &&
+    value.annotation.rawResponse !== null &&
+    value.annotation.pairs !== null &&
+    value.annotation.problems.length === 0 &&
+    value.independentBehaviour !== null &&
+    (value.rationale?.trim().length ?? 0) > 0 &&
+    value.evidence.every((item) => item.kind === 'material-quote') &&
+    validEvidence(
+      value.evidence.map((item) => item.ref),
+      request,
+      true,
+    );
   const identities = new Map<string, string>();
   const root = (key: string): string => {
     const parent = identities.get(key);
@@ -76,7 +91,7 @@ export function modelConsensus(
             (b.annotation?.recordedOrder ?? 0) ||
           a.opinion.reviewId.localeCompare(b.opinion.reviewId),
       )
-      .find((value) => value.annotation?.complete === true),
+      .find(complete),
   );
   const votes = selected.filter((value) => value !== undefined);
   const counts = new Map<string, WorkflowOpinion[]>();
@@ -140,7 +155,7 @@ export function modelConsensus(
     ).length,
     failed: [...groups.values()].filter(
       (group) =>
-        !group.some((value) => value.annotation?.complete) &&
+        !group.some(complete) &&
         group.some((value) => value.outcome === 'failed'),
     ).length,
     attempts: opinions.filter((value) => !value.annotation?.registration)

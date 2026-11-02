@@ -172,7 +172,8 @@ export function independentQuestion(
       pairs: '一个或多个完整 [risk,authorization] 配对，或 null',
       behaviourReference:
         'allow | deny | escalate | insufficient-material | review-failure | null',
-      evidence: '当前 productionRequest 中可逐字定位的原文引用数组',
+      evidence:
+        '当前 productionRequest 案例材料中可逐字定位的非空白原文引用；固定评分契约、协议问题、章节标题和材料说明不构成事实证据',
       conflicts: '已识别的关键对象/许可来源/证据冲突；没有则空数组',
     },
   };

@@ -30,6 +30,7 @@ export function currentReference(
   opinions: readonly WorkflowOpinion[],
   modelReferenceId: string,
   batchId: string,
+  request?: unknown,
 ): CurrentReference {
   const belongs = (value: WorkflowLabel | WorkflowOpinion) =>
     value.rootId === identity.rootId &&
@@ -41,6 +42,7 @@ export function currentReference(
   const relevant = labels.filter(belongs);
   const consensus = modelConsensus(
     opinions.filter((value) => belongs(value) && applicable(value)),
+    request,
   );
   const human = relevant.filter(
     (value) =>

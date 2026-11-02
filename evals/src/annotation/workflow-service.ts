@@ -100,6 +100,7 @@ function unresolvedLabel(
     opinions,
     point.modelReferenceId,
     batch.batchId,
+    point.request,
   );
   // Machine cache always stays separate, including when a human decision is effective.
   const model = current.reference;
@@ -420,6 +421,7 @@ export async function workflowReferences(options: {
             records.opinions,
             modelId,
             'current-reference',
+            view.request,
           ),
           error: null,
           request: view.request,

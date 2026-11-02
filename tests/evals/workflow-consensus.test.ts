@@ -28,6 +28,22 @@ function vote(
   };
 }
 describe('independent model reference arithmetic and precedence', () => {
+  test.each([
+    { rationale: '' },
+    { rationale: ' \n ' },
+    { evidence: [] },
+    { evidence: [{ kind: 'material-quote' as const, ref: ' ' }] },
+  ])(
+    'complete metadata cannot replace basic answer/evidence completeness %j',
+    (patch) => {
+      const result = modelConsensus(
+        [0, 1, 2].map((index) => vote(index, [3, 10], patch)),
+      );
+      expect(result.n).toBe(3);
+      expect(result.valid).toBe(0);
+      expect(result.pair).toBeNull();
+    },
+  );
   test('same-batch duplicate known identities are refused and cross-batch keys cannot add votes', () => {
     const known = opinion(0).opinion.model;
     const values = [0, 1, 2].map((index) => ({

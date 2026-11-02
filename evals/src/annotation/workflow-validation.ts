@@ -58,7 +58,7 @@ export const answerSchema = {
       ],
     },
     rationale: { type: 'string' },
-    evidence: { type: 'array', items: textSchema },
+    evidence: { type: 'array', items: { ...textSchema, pattern: '\\S' } },
     conflicts: { type: 'array', items: textSchema },
   },
 };

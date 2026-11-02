@@ -9,7 +9,7 @@ import type {
   WorkflowBatch,
 } from './workflow-types.js';
 import { independentAnswer } from './workflow-validation.js';
-import { materialStrings } from './workflow-view.js';
+import { validEvidence } from './workflow-evidence.js';
 import { responseRedactor } from './workflow-response-redaction.js';
 
 export function responseOpinion(
@@ -45,15 +45,9 @@ export function responseOpinion(
       problems.push(error instanceof Error ? error.message : String(error));
     }
   }
-  const strings = materialStrings(point.request);
   if (answer !== null) {
     if (answer.rationale.trim() === '') problems.push('missing rationale');
-    if (
-      answer.evidence.length === 0 ||
-      answer.evidence.some(
-        (quote) => !strings.some((text) => text.includes(quote)),
-      )
-    )
+    if (!validEvidence(answer.evidence, point.request))
       problems.push('evidence is absent or not reachable in the actual view');
   }
   const complete =
