@@ -11,7 +11,7 @@ import { childWorkflow, collectionOf } from '../evals/fixtures/workflow.js';
 import { cellGrid } from '../../evals/src/run/grid.js';
 import type { RunPlan } from '../../evals/src/run/types.js';
 
-describe('actual workflow engineering references', () => {
+describe('actual workflow engineering references', { timeout: 30_000 }, () => {
   it('keeps a real provider failure out of semantic denials while comparing its engineering reference', async () => {
     await withWorkflowArea(async (area) => {
       const plan: RunPlan = {

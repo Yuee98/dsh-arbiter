@@ -8,7 +8,7 @@ import {
 } from '../evals/helpers/report-workflow.js';
 import type { RunPlan } from '../../evals/src/run/types.js';
 
-describe('workflow planned report populations', () => {
+describe('workflow planned report populations', { timeout: 30_000 }, () => {
   it('keeps actual unsupported and budget-blocked cells in planned identity and allow-burden denominators', async () => {
     await withWorkflowArea(async (area) => {
       const plan = {

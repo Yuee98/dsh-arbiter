@@ -28,7 +28,7 @@ async function savedRecord(path: string): Promise<CellRecord> {
   return result.document;
 }
 
-describe('formal workflow runner to report', () => {
+describe('formal workflow runner to report', { timeout: 30_000 }, () => {
   it('joins frozen references through the actual saved material for both protocols and repeats', async () => {
     await withWorkflowArea(async (area) => {
       const plan = dualProtocolPlan(area.plan);

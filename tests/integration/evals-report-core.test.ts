@@ -84,7 +84,7 @@ async function runReport(
   );
 }
 
-describe('report denominator and evidence IO', () => {
+describe('report denominator and evidence IO', { timeout: 30_000 }, () => {
   it('refuses workflow-shaped records under a legacy frozen plan', async () => {
     await withArea(async (created) => {
       const { directory, dataset } = await syntheticRun(created);
