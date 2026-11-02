@@ -89,7 +89,7 @@ export interface Derivation {
 export function replayRunIdOf(sourceRunId: string, variantId: string): string {
   const suffix = `-replay-${variantId}`;
   const room = 63 - suffix.length;
-  if (room < 1) return `replay-${variantId.slice(-8)}`;
+  if (room < 1) return `replay-${variantId.slice(-32)}`;
   const trimmed =
     sourceRunId.length > room ? sourceRunId.slice(0, room) : sourceRunId;
   return `${trimmed}${suffix}`;
@@ -349,7 +349,7 @@ export function deriveRun(parts: {
         thresholds: parts.variant.thresholds,
         settlement: parts.variant.settlement,
         description: parts.variant.description,
-        matrix: 'shared',
+        matrix: parts.variant.matrix ?? 'shared',
         contract: parts.runningContract,
         variantsDocument: parts.variantsDocument,
       },

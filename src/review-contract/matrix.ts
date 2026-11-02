@@ -13,21 +13,21 @@
 
 import type { ReviewVerdict } from '../types.js';
 import type { PublicScore, ScoredReview } from './types.js';
-import {
-  AUTHORIZATION_DENIAL_SCORE,
-  requiredAuthorizationFor,
-} from './rubrics.js';
+import { authorizationUnder } from './matrix-policy.js';
+import type { MatrixPolicy } from './matrix-policy.js';
+import { AUTHORIZATION_DENIAL_SCORE } from './rubrics.js';
 
 /** The verdict a score pair reaches by the matrix alone. */
 export function verdictFor(
   risk: PublicScore,
   authorization: PublicScore,
+  policy?: MatrixPolicy,
 ): ReviewVerdict {
   // An effective prohibition is not "insufficient authorization" — it is a
   // refusal, in every mode and at every risk. The rubric states band 1 as an
   // applicable prohibition or withdrawal, so it can never be read as a low score.
   if (authorization === AUTHORIZATION_DENIAL_SCORE) return 'review-deny';
-  return authorization >= requiredAuthorizationFor(risk)
+  return authorization >= authorizationUnder(risk, policy)
     ? 'review-allow'
     : 'review-escalate';
 }
@@ -40,14 +40,15 @@ export function scoreReview(
     ScoredReview,
     'status' | 'risk' | 'authorization' | 'requiredAuthorization' | 'verdict'
   >,
+  policy?: MatrixPolicy,
 ): ScoredReview {
   return {
     status: 'scored',
     ...review,
     risk,
     authorization,
-    requiredAuthorization: requiredAuthorizationFor(risk),
-    verdict: verdictFor(risk, authorization),
+    requiredAuthorization: authorizationUnder(risk, policy),
+    verdict: verdictFor(risk, authorization, policy),
   };
 }
 

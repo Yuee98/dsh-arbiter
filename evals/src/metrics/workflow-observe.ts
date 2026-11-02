@@ -26,6 +26,8 @@ import type { CellFacts } from './cell.js';
 import type { ReferenceSnapshot } from './reference-snapshot.js';
 import { frozenReferenceFor } from './reference-snapshot.js';
 import { workflowMaterialProblems } from './workflow-proof.js';
+import { verifiedReplayOrigin } from '../replay/origin.js';
+import { REPLAY_IMPLEMENTATION_VERSION } from '../replay/types.js';
 import type { WorkflowMetricSource } from './workflow-metrics-types.js';
 
 export interface WorkflowCellObservation {
@@ -38,12 +40,17 @@ export interface WorkflowObservation {
   readonly sources: readonly WorkflowMetricSource[];
   readonly problems: readonly string[];
 }
-function versionProblems(artifact: RunArtifact): readonly string[] {
+function versionProblems(
+  artifact: RunArtifact,
+  verifiedReplay: boolean,
+): readonly string[] {
   const expected = {
     contract: REVIEW_CONTRACT_VERSION,
     prompt: REVIEW_PROMPT_VERSION,
     usageMapping: USAGE_MAPPING_VERSION,
-    implementation: RUNNER_IMPLEMENTATION_VERSION,
+    implementation: verifiedReplay
+      ? REPLAY_IMPLEMENTATION_VERSION
+      : RUNNER_IMPLEMENTATION_VERSION,
     artifact: RUN_ARTIFACT_VERSION,
     plan: artifact.plan.planVersion,
   };
@@ -61,6 +68,7 @@ function versionProblems(artifact: RunArtifact): readonly string[] {
   );
 }
 export async function observeWorkflow(parts: {
+  readonly directory: string;
   readonly artifact: RunArtifact;
   readonly root: string;
   readonly datasetPath: string | null;
@@ -70,7 +78,14 @@ export async function observeWorkflow(parts: {
     plan = artifact.plan;
   const config = effectiveWorkflowConfig(plan),
     recorded = artifact.index.workflowExecution;
-  const problems = [...versionProblems(artifact)];
+  const replay =
+    artifact.index.versions.implementation === REPLAY_IMPLEMENTATION_VERSION &&
+    (await verifiedReplayOrigin({
+      directory: parts.directory,
+      root: parts.root,
+      artifact,
+    }));
+  const problems = [...versionProblems(artifact, replay)];
   if (
     recorded === undefined ||
     canonicalJson(recorded.config) !== canonicalJson(config) ||
