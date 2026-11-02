@@ -28,13 +28,41 @@ const CLOSED_FIELDS = new Set([
   'standing',
   'branch',
   'split',
+  'labelStatus',
+  'caseFactsSource',
+  'outcomeStatus',
+  'challengeClass',
+  'origin',
+  'provenance',
+  'costStatus',
+  'indexStatus',
+  'recordStatus',
+  'field',
+  'outcome',
+  'behaviour',
+  'behaviourReference',
+  'actual',
+  'evidence',
+  'actualContinuation',
+  'redaction',
+  'configEvidence',
+  'cacheRead',
+  'cacheWrite',
+  'reasoning',
+  'name',
 ]);
-const CLOSED_COUNTERS = new Set([
-  'cellsBySource',
-  'unitsBySource',
-  'statuses',
-  'failureKinds',
+// Report objects and fixed counter maps own their field names. Only this
+// schema-declared dictionary uses free-text reasons as keys.
+const DYNAMIC_KEYS = new Set(['excludedByReason']);
+const CLOSED_GROUP_AXES = new Set([
+  'content-set',
+  'reference-source',
+  'split',
+  'protocol',
+  'challenge',
+  'provenance',
 ]);
+const CANDIDATE_AXES = new Set(['prompt', 'structure', 'history', 'scale']);
 const IDENTITIES = new Set([
   'cellId',
   'caseId',
@@ -50,11 +78,12 @@ const IDENTITIES = new Set([
 function closedGroupKey(value: object, name: string): boolean {
   const axis: unknown = Reflect.get(value, 'axis');
   return (
-    name === 'key' &&
-    typeof axis === 'string' &&
-    axis !== 'business' &&
-    axis !== 'target'
+    name === 'key' && typeof axis === 'string' && CLOSED_GROUP_AXES.has(axis)
   );
+}
+
+function closedCandidateAxis(value: object, name: string): boolean {
+  return Reflect.has(value, 'candidateId') && CANDIDATE_AXES.has(name);
 }
 
 function strings(
@@ -67,8 +96,14 @@ function strings(
     for (const entry of value) strings(entry, visit, key);
   else if (value !== null && typeof value === 'object')
     for (const [name, entry] of Object.entries(value)) {
-      visit('', name);
-      strings(entry, visit, closedGroupKey(value, name) ? 'axis' : name);
+      if (DYNAMIC_KEYS.has(key)) visit('', name);
+      strings(
+        entry,
+        visit,
+        closedGroupKey(value, name) || closedCandidateAxis(value, name)
+          ? 'axis'
+          : name,
+      );
     }
 }
 
@@ -99,10 +134,13 @@ export function publicReport<
   } catch {
     unavailable = true;
   }
+  if (unavailable)
+    throw new Error(
+      'public report credential recognition unavailable; publication refused',
+    );
   const identities = new Map<string, string>();
   const text = (key: string, value: string): string => {
     if (CLOSED_FIELDS.has(key)) return value;
-    if (unavailable) return '[unavailable]';
     try {
       return fields.get(JSON.stringify([key, value])) === '[redacted]' ||
         redactor.text(value) !== value
@@ -116,9 +154,7 @@ export function publicReport<
     if (value === null || typeof value !== 'object') return;
     const entries = Object.entries(value);
     const names = entries.map(([name]) =>
-      Array.isArray(value) || CLOSED_COUNTERS.has(parent)
-        ? name
-        : text('', name),
+      !Array.isArray(value) && DYNAMIC_KEYS.has(parent) ? text('', name) : name,
     );
     if (new Set(names).size !== entries.length)
       throw new Error(
@@ -132,7 +168,7 @@ export function publicReport<
       const field = Array.isArray(value) ? parent : name;
       const cleaned: unknown =
         typeof entry === 'string'
-          ? closedGroupKey(value, name)
+          ? closedGroupKey(value, name) || closedCandidateAxis(value, name)
             ? entry
             : text(field, entry)
           : entry;

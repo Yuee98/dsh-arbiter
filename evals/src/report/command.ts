@@ -150,9 +150,9 @@ export function isReportCommand(name: string): boolean {
  * The evidence this report reads, and may therefore never overwrite.
  *
  * The run directory's own documents are protected by name and its records directory by
- * prefix, because a record is addressed by cell id and a report must not be able to land on
- * one by choosing a clever prefix. The dataset's three document directories are protected
- * the same way. What is deliberately *not* protected is the run directory itself: a report
+ * prefix, plus every actual index-declared record location accepted by the reader.
+ * Legacy v1 records need not use the conventional records directory. The dataset's three
+ * document directories are protected the same way. What is deliberately *not* protected is the run directory itself: a report
  * written beside the run's index is the normal, documented destination.
  *
  * A dataset the report did not actually join is not protected, because writing a report into
@@ -165,7 +165,10 @@ function protectedEvidenceOf(parts: {
   readonly observation: {
     readonly dataset: { readonly status: string };
     readonly artifact: {
-      readonly index: { readonly plan: { readonly datasetPath: string } };
+      readonly index: {
+        readonly plan: { readonly datasetPath: string };
+        readonly cells: readonly { readonly record: string }[];
+      };
     };
   };
 }): readonly EvidencePath[] {
@@ -178,6 +181,10 @@ function protectedEvidenceOf(parts: {
     { path: join(parts.directory, RUN_FILES.index), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
+    ...parts.observation.artifact.index.cells.map((cell): EvidencePath => ({
+      path: join(parts.directory, cell.record),
+      kind: 'file',
+    })),
   ];
   // The dataset's location is resolved the same way the read resolved it, whichever source
   // named it — and whether or not it was readable. A damaged dataset is exactly when

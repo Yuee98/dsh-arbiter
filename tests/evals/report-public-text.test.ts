@@ -27,7 +27,7 @@ test('redacted dynamic keys cannot silently merge distinct categories', () => {
   const report = {
     run: { runId: 'fixture' },
     notes: [`Authorization: Bearer ${secret}`],
-    counts: { [secret]: 1, [`Authorization: Bearer ${secret}`]: 2 },
+    excludedByReason: { [secret]: 1, [`Authorization: Bearer ${secret}`]: 2 },
   };
   expect(() => publicReport(report)).toThrow('collide');
 });
@@ -36,7 +36,7 @@ test('actual credential recognition resource exhaustion fails closed', () => {
     run: { runId: 'fixture' },
     notes: ['x'.repeat(16 * 1024 * 1024 + 1)],
   };
-  expect(() => publicReport(report)).toThrow('collide');
+  expect(() => publicReport(report)).toThrow('recognition unavailable');
 });
 
 test('quoted credentials cannot rewrite closed source/status values or their denominators', () => {
@@ -79,4 +79,68 @@ test('redacted identities cannot silently merge two different report groups', ()
     ],
   };
   expect(() => publicReport(report)).toThrow('identifiers collide');
+});
+
+test('credential text cannot rename fixed schema keys or rewrite qualification categories', () => {
+  const report = {
+    run: { runId: 'fixture' },
+    source: 'human',
+    notes: [
+      'notes',
+      'runId',
+      'source',
+      'gold',
+      'record',
+      'reviewed',
+      'ordinary',
+      'original',
+      'not-computed',
+    ].map((value) => `Authorization: Bearer ${value}`),
+    examples: [
+      {
+        labelStatus: 'gold',
+        caseFactsSource: 'record',
+        outcomeStatus: 'reviewed',
+        challengeClass: 'ordinary',
+        origin: 'original',
+        costStatus: 'not-computed',
+        rationale: 'gold',
+      },
+    ],
+    diagnostics: { labels: { gold: 1, excludedByReason: { gold: 1 } } },
+  };
+  const result = publicReport(report);
+  expect(Object.keys(result)).toEqual(Object.keys(report));
+  expect(Object.keys(result.run)).toEqual(['runId']);
+  expect(result.run.runId).toBe('fixture');
+  expect(result.source).toBe('human');
+  expect(result.examples[0]).toEqual({
+    ...report.examples[0],
+    rationale: '[redacted]',
+  });
+  expect(result.notes).toEqual(Array.from({ length: 9 }, () => '[redacted]'));
+  expect(result.diagnostics.labels.gold).toBe(1);
+  expect(result.diagnostics.labels.excludedByReason).toEqual({
+    '[redacted]': 1,
+  });
+});
+
+test('free family keys and dynamic reason keys remain sanitized when schema keys are preserved', () => {
+  const report = {
+    run: { runId: 'fixture' },
+    notes: [
+      'Authorization: Bearer synthetic_family_131',
+      'Authorization: Bearer notes',
+    ],
+    byGroup: [
+      { axis: 'family', key: 'synthetic_family_131', counts: { cells: 1 } },
+    ],
+    excludedByReason: { notes: 1 },
+  };
+  const result = publicReport(report);
+  expect(result.byGroup).toEqual([
+    { axis: 'family', key: '[redacted]', counts: { cells: 1 } },
+  ]);
+  expect(result.excludedByReason).toEqual({ '[redacted]': 1 });
+  expect(result.notes).toEqual(['[redacted]', '[redacted]']);
 });

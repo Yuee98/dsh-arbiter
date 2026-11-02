@@ -174,7 +174,7 @@ describe(
         expect(oldReport).toHaveProperty('publication.testedCode.dirty', null);
         const saved = historical.cells[0];
         if (saved === undefined) throw new Error('missing actual record state');
-        const relativeRecord = 'records/renamed.json';
+        const relativeRecord = 'summary.json';
         await rename(
           join(directory, saved.record),
           join(directory, relativeRecord),
@@ -216,6 +216,34 @@ describe(
           'utf8',
         );
         expect(detail).toContain(join(directory, relativeRecord));
+        const indexBeforeRefusal = await readFile(
+          join(directory, 'index.json'),
+          'utf8',
+        );
+        expect(
+          await runCli(
+            [
+              'report',
+              directory,
+              '--out',
+              join(directory, 'summary'),
+              '--force',
+            ],
+            io,
+          ),
+        ).toBe(1);
+        for (const extension of ['md', 'html']) {
+          await expect(
+            readFile(join(directory, `summary.${extension}`)),
+          ).rejects.toMatchObject({ code: 'ENOENT' });
+        }
+        await expect(
+          readdir(join(directory, 'summary.details')),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await readFile(join(directory, 'index.json'), 'utf8')).toBe(
+          indexBeforeRefusal,
+        );
+
         expect(await readFile(join(directory, relativeRecord), 'utf8')).toBe(
           recordsBefore,
         );
