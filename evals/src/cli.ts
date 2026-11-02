@@ -19,6 +19,8 @@ import './cli/register.ts';
 
 const { runCli } = await import('./cli/run.js');
 const { runGroupedCli } = await import('./data/group-command.js');
+const { runWorkflowAnnotationCli } =
+  await import('./annotation/workflow-command.js');
 
 const argv = process.argv.slice(2);
 const askedForHelp =
@@ -50,6 +52,8 @@ const io = {
   signal: lifetime.signal,
 };
 process.exitCode =
-  (await runGroupedCli(argv, io, runCli)) ?? (await runCli(argv, io));
+  (await runWorkflowAnnotationCli(argv, io)) ??
+  (await runGroupedCli(argv, io, runCli)) ??
+  (await runCli(argv, io));
 // Help is a successful request for information, not a misuse of the command.
 if (askedForHelp) process.exitCode = 0;
