@@ -389,7 +389,7 @@ checkpoint 为低优先级摘要来源，新投影默认最多考虑最新一条
 
 关键本地结果用独立临时样本核实：目录/配置查询、删除可生成目录后人工素材仍保留、构建格式不兼容的实际失败与修复成功、演示邮箱/地址脱敏及本地附件副本、A/B 制品实际 SHA-256、文档移动及发布策略文件保留。它们不把合成轨迹升级为真实用户日志。工单上传、发布、健康、路由和审批结算是明确构造的服务事件，未访问外部服务、真实上传或部署。`settlement` 只描述固定源轨迹中的结算，不是新评测的模型回答或人类评分；当前 schema 不表达完整 reviewer 技术失败审计链，本批不声称验证该能力。
 
-主视图调用已合并的 `workflowMaterial`，经生产共享准备、选择、脱敏、T/H/C 预算与两协议 renderer 生成。默认使用 `DEFAULT_CONFIG`（T=6,000、H=10,000、普通单次调用整体 C 上界 600），配置修订取现有 `stableHash(DEFAULT_CONFIG)`，不新增内容身份体系。制作与逐点诊断只加载 `dev/workflows-v1` 且 `references:false`；`pnpm check:evals` 另执行全局结构、ID 与 lineage 检查。
+主视图调用已合并的 `workflowMaterial`，经生产共享准备、选择、脱敏、T/H/C 预算与两协议 renderer 生成。默认使用 `DEFAULT_CONFIG`（T=6,000、H=10,000、普通单次调用整体 C 上界 600），配置修订取现有 `configHash(DEFAULT_CONFIG)`，不新增内容身份体系。制作与逐点诊断只加载 `dev/workflows-v1` 且 `references:false`；`pnpm check:evals` 另执行全局结构、ID 与 lineage 检查。
 
 离线重建示例（在仓库根目录运行；只生成材料，不执行轨迹中的工具或调用模型）：
 
@@ -399,12 +399,12 @@ DSH_HOME="$cw135_home" node --import ./evals/src/cli/register.ts --input-type=mo
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readGroupedDataset } from './evals/src/data/group-read.ts';
 import { workflowMaterial } from './evals/src/run/material.ts';
-import { DEFAULT_CONFIG, stableHash } from './src/config.ts';
+import { DEFAULT_CONFIG, configHash } from './src/config.ts';
 const dataset = await readGroupedDataset('evals/datasets/reviewer-v2', {
   split: 'dev', contentSet: 'workflows-v1', references: false,
 });
 if (dataset.problems.length) throw new Error(JSON.stringify(dataset.problems));
-const configRevision = stableHash(DEFAULT_CONFIG);
+const configRevision = configHash(DEFAULT_CONFIG);
 const views = [];
 for (const group of dataset.groups) {
   for (const { document: root } of group.workflows) {
@@ -435,3 +435,5 @@ rm -rf "$cw135_home"
 供试标继续核对的材料问题：F07 后期接近 T，较早历史和长报告会竞争预算，必须按实际视图判断；原文中未取得的技术审计阶段链不能由摘要补成事实。项目规则文件未提供时，默认构建器产生 `known-empty` 非阻断说明，不能把它误报为读取失败或硬阻断。若后续意见发现其他材料缺失，应回交本源任务修正并重新生成受影响视图，现阶段不补造分数、共识或人工确认。
 
 本阶段在独立临时 `DSH_HOME` 下通过 `pnpm check:evals` 和完整 `pnpm verify`（2,050 项 unit、638 项 integration、366 项 UI，以及构建消费者/现行回归检查）。首次受限沙箱中的验证因 `127.0.0.1` 监听 `EPERM` 未完成；允许本机监听后全量重跑通过，未将该环境失败记为通过。未修改宿主加载、UI 接线或生命周期，本数据阶段未额外运行 DSH E2E。
+
+2026-11-02 配置修订标识更正：旧阶段 head `4cfc13a1bdac29176c6170273c20782c6813f6fa` 的脚本和本节示例误将配置对象直接传给只接受字符串的 `stableHash`，所得 `811c9dc5` 只是初始常值，不能证明配置身份。现改用生产配置入口 `configHash(DEFAULT_CONFIG)`，当前默认配置得到 `ed0fff70`；旧 head、源数据及当时完整配置/请求证据保留。按原配置重新生成的 40 份实际请求均因修订字段改变而变化，prompt fingerprint 也全部变化；排除该字段后，两协议请求内容、选材、预算和 source input hash 均与旧阶段一致，总估算仍为 chat 87,309、decision 89,129 tokens。此处仍使用项目规则启用但未提供规则文件的默认配置，不与关闭项目规则的其他运行混称相同配置或同一请求，也不改写既有资源提案或生成标注意见。
