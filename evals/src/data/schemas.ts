@@ -129,15 +129,23 @@ async function schemaNames(directory: string): Promise<readonly string[]> {
     .sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Compile every schema in one directory.
- *
- * `common.schema.json` is a definition file with no document of its own, so it is
- * registered but never handed out as a checker.
- */
-export async function compileCheckers(
-  directory = SCHEMA_DIRECTORY,
-): Promise<Checkers> {
+let publishedCheckers: Promise<Checkers> | undefined;
+
+/** Compile published schemas once; explicit authoring directories remain fresh. */
+export function compileCheckers(directory?: string): Promise<Checkers> {
+  // Explicit directories are editable authoring inputs and must stay fresh.
+  if (directory !== undefined) return compileDirectory(directory);
+  publishedCheckers ??= compileDirectory(SCHEMA_DIRECTORY).catch(
+    (error: unknown) => {
+      publishedCheckers = undefined;
+      throw error;
+    },
+  );
+  return publishedCheckers;
+}
+
+/** Register common definitions and compile every document schema. */
+async function compileDirectory(directory: string): Promise<Checkers> {
   const ajv = new Ajv({ allErrors: true, strict: true });
   for (const name of await schemaNames(directory)) {
     const document: unknown = JSON.parse(
