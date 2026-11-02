@@ -1,3 +1,6 @@
+import { isWorkflowSource, sourceMaterial } from './source.js';
+import { beginResourceDispatch, resourceAttemptLimit } from './resource.js';
+import type { ResourceLease } from './resource.js';
 /**
  * The bounded scheduler: concurrency, budget, cancellation and timeouts.
  *
@@ -33,7 +36,7 @@
  * record.
  */
 
-import type { ReviewCase } from '../data/types.js';
+import type { RunSource } from './source.js';
 
 import type { ReviewPackage } from '../../../src/reviewer/package.js';
 
@@ -65,10 +68,11 @@ export interface DispatchResult {
 
 /** What the scheduler needs from the caller. */
 export interface DispatchOptions {
+  readonly resourceLease?: ResourceLease;
   readonly runId: string;
   readonly plan: RunPlan;
   readonly cells: readonly PlannedCell[];
-  readonly cases: ReadonlyMap<string, ReviewCase>;
+  readonly cases: ReadonlyMap<string, RunSource>;
   readonly fixture: Readonly<Record<string, FixtureCell>>;
   readonly versions: RunVersions;
   readonly llm: CellDeps['llm'];
@@ -160,7 +164,7 @@ class Budget {
   constructor(plan: RunPlan, alreadySpent: number) {
     this.remainingAttempts = Math.max(
       0,
-      plan.bounds.maxAttempts - alreadySpent,
+      resourceAttemptLimit(plan) - alreadySpent,
     );
     this.maxInputTokens = plan.bounds.maxInputTokens;
   }
@@ -207,8 +211,12 @@ class Budget {
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchOutcome> {
+  const spent =
+    options.plan.workflow === undefined
+      ? (options.alreadySpentAttempts ?? 0)
+      : beginResourceDispatch(options.plan, options.resourceLease);
   const now = options.now ?? (() => Date.now());
-  const budget = new Budget(options.plan, options.alreadySpentAttempts ?? 0);
+  const budget = new Budget(options.plan, spent);
   const pkg = candidateOf(options.plan).pkg;
   const results: DispatchResult[] = [];
   const state = {
@@ -229,7 +237,12 @@ export async function dispatch(
 
   const settle = async (result: DispatchResult): Promise<void> => {
     results.push(result);
-    await options.onSettled?.(result);
+    try {
+      await options.onSettled?.(result);
+    } catch (error) {
+      if (options.plan.workflow !== undefined) state.stopped = 'cancelled';
+      throw error;
+    }
   };
 
   /** Take the next unclaimed cell, or null when the grid is walked. */
@@ -255,111 +268,141 @@ export async function dispatch(
     }
   };
 
+  // Async material preparation must not let a later, faster cell take the last allowance.
+  let admission = Promise.resolve();
+  const enterAdmission = async (): Promise<() => void> => {
+    const previous = admission;
+    let unlock = (): void => {};
+    admission = new Promise<void>((done) => {
+      unlock = done;
+    });
+    await previous;
+    return unlock;
+  };
+
+  const stoppedAfterPreparation = (): boolean =>
+    options.signal.aborted || state.stopped !== null;
+
   /** One worker: take a cell, decide whether it may run, run it, settle it. */
   const worker = async (): Promise<void> => {
     for (;;) {
-      if (state.stopped !== null) return;
-      if (options.signal.aborted) {
-        state.stopped = 'cancelled';
-        return;
-      }
-      const cell = claim();
-      if (cell === null) return;
-      if (!cell.supported) {
-        // The plan itself pairs this model with no such protocol. No request is
-        // built and no attempt is reserved: an unsupported cell costs nothing.
-        await settle({
-          cellId: cell.cellId,
-          record: null,
-          status: 'unsupported',
-          attempts: 0,
-          stopReason: cell.unsupportedReason,
+      const unlock = await enterAdmission();
+      let released = false;
+      try {
+        if (state.stopped !== null) return;
+        if (options.signal.aborted) {
+          state.stopped = 'cancelled';
+          return;
+        }
+        const cell = claim();
+        if (cell === null) return;
+        if (!cell.supported) {
+          // The plan itself pairs this model with no such protocol. No request is
+          // built and no attempt is reserved: an unsupported cell costs nothing.
+          await settle({
+            cellId: cell.cellId,
+            record: null,
+            status: 'unsupported',
+            attempts: 0,
+            stopReason: cell.unsupportedReason,
+          });
+          continue;
+        }
+        const prepared = await prepare(cell, options, pkg);
+        if ('reason' in prepared) {
+          // Nothing was sent, so there is no record and no attempt. Calling this `failed`
+          // would put it in the population of dispatched failures whose evidence a reader
+          // expects to find, which is not what happened.
+          await settle({
+            cellId: cell.cellId,
+            record: null,
+            status: 'unresolvable',
+            attempts: 0,
+            stopReason: prepared.reason,
+          });
+          continue;
+        }
+        const { caseEntry, target, material } = prepared;
+        const fixtureCell = options.fixture[cell.cellId];
+        const ceiling = attemptCeilingOf(target, cell.protocol, {
+          // An offline cell cannot make more attempts than its own script can answer, so
+          // reserving the transport's ceiling would strand budget it could never spend.
+          ...(options.plan.transport !== 'offline'
+            ? {}
+            : {
+                scripted:
+                  (cell.protocol === 'chat'
+                    ? (fixtureCell?.chat?.length ?? 0)
+                    : (fixtureCell?.decision?.length ?? 0)) || 1,
+              }),
         });
-        continue;
-      }
-      const prepared = prepare(cell, options, pkg);
-      if ('reason' in prepared) {
-        // Nothing was sent, so there is no record and no attempt. Calling this `failed`
-        // would put it in the population of dispatched failures whose evidence a reader
-        // expects to find, which is not what happened.
-        await settle({
-          cellId: cell.cellId,
-          record: null,
-          status: 'unresolvable',
-          attempts: 0,
-          stopReason: prepared.reason,
+        const reserved = budget.reserve({
+          ceiling,
+          // Admission charges the request that will be sent first. A repair is measured
+          // separately, against the rejection it actually carries, because production's
+          // correction message embeds the parser's text and that text has no fixed size.
+          estimatedInputTokens: material.material.estimatedInputTokens,
+          inputCap: options.plan.bounds.maxInputTokens,
         });
-        continue;
-      }
-      const { caseEntry, target, material } = prepared;
-      const fixtureCell = options.fixture[cell.cellId];
-      const ceiling = attemptCeilingOf(target, cell.protocol, {
-        // An offline cell cannot make more attempts than its own script can answer, so
-        // reserving the transport's ceiling would strand budget it could never spend.
-        ...(options.plan.transport !== 'offline'
-          ? {}
-          : {
-              scripted:
-                (cell.protocol === 'chat'
-                  ? (fixtureCell?.chat?.length ?? 0)
-                  : (fixtureCell?.decision?.length ?? 0)) || 1,
-            }),
-      });
-      const reserved = budget.reserve({
-        ceiling,
-        // Admission charges the request that will be sent first. A repair is measured
-        // separately, against the rejection it actually carries, because production's
-        // correction message embeds the parser's text and that text has no fixed size.
-        estimatedInputTokens: material.material.estimatedInputTokens,
-        inputCap: options.plan.bounds.maxInputTokens,
-      });
-      if (!reserved.ok && reservationMayFree(state, options)) {
-        // The shortfall can be a *held* reservation rather than a spent one, so wait for a
-        // worker to settle and try the same cell again. The cell is put back rather than
-        // abandoned, because failing to fit now says nothing about the balance later.
-        state.cursor -= 1;
-        await settlementSignal();
-        continue;
-      }
-      if (!reserved.ok) {
-        // The budget, not this cell, is what ran out: stopping dispatch is the
-        // honest outcome, and every remaining cell is recorded as not-run.
-        state.stopped = 'budget-exhausted';
-        await settle({
-          cellId: cell.cellId,
-          record: null,
-          status: 'budget-exhausted',
-          attempts: 0,
-          stopReason: reserved.reason,
+        if (!reserved.ok && reservationMayFree(state, options)) {
+          // The shortfall can be a *held* reservation rather than a spent one, so wait for a
+          // worker to settle and try the same cell again. The cell is put back rather than
+          // abandoned, because failing to fit now says nothing about the balance later.
+          state.cursor -= 1;
+          await settlementSignal();
+          continue;
+        }
+        if (!reserved.ok) {
+          // The budget, not this cell, is what ran out: stopping dispatch is the
+          // honest outcome, and every remaining cell is recorded as not-run.
+          state.stopped = 'budget-exhausted';
+          await settle({
+            cellId: cell.cellId,
+            record: null,
+            status: 'budget-exhausted',
+            attempts: 0,
+            stopReason: reserved.reason,
+          });
+          await abandonRest('the run stopped after its budget was exhausted');
+          return;
+        }
+        if (stoppedAfterPreparation()) {
+          state.stopped ??= 'cancelled';
+          state.cursor -= 1;
+          return;
+        }
+        state.inFlight += 1;
+        unlock();
+        released = true;
+        if (options.resourceLease !== undefined)
+          options.resourceLease.started = true;
+        const { result: settledCell, abandoned } = await runUnderTimeout({
+          cell,
+          caseEntry,
+          target,
+          material,
+          options,
+          now,
+          pkg,
+          reservedAttempts: ceiling,
         });
-        await abandonRest('the run stopped after its budget was exhausted');
-        return;
-      }
-      state.inFlight += 1;
-      const { result: settledCell, abandoned } = await runUnderTimeout({
-        cell,
-        caseEntry,
-        target,
-        material,
-        options,
-        now,
-        pkg,
-        reservedAttempts: ceiling,
-      });
-      state.inFlight -= 1;
-      if (abandoned) {
-        // The stop is published *before* the await, not after it. A worker that stopped
-        // only once its record had been persisted would leave a window in which a peer
-        // worker claims and starts another cell while the abandoned request is still
-        // outstanding — the exact overrun this branch exists to prevent.
-        state.stopped = 'in-flight-timeout';
-        // The abandoned call may have sent more attempts than its record could report, so
-        // its whole reservation stays consumed rather than being returned.
+        state.inFlight -= 1;
+        if (abandoned) {
+          // The stop is published *before* the await, not after it. A worker that stopped
+          // only once its record had been persisted would leave a window in which a peer
+          // worker claims and starts another cell while the abandoned request is still
+          // outstanding — the exact overrun this branch exists to prevent.
+          state.stopped = 'in-flight-timeout';
+          // The abandoned call may have sent more attempts than its record could report, so
+          // its whole reservation stays consumed rather than being returned.
+          await settle(charged(settledCell, ceiling));
+          return;
+        }
+        budget.release({ reserved: ceiling, used: settledCell.attempts });
         await settle(charged(settledCell, ceiling));
-        return;
+      } finally {
+        if (!released) unlock();
       }
-      budget.release({ reserved: ceiling, used: settledCell.attempts });
-      await settle(charged(settledCell, ceiling));
     }
   };
 
@@ -398,7 +441,7 @@ export async function dispatch(
 
 /** What one cell needs before it can be dispatched. */
 interface Prepared {
-  readonly caseEntry: ReviewCase;
+  readonly caseEntry: RunSource;
   readonly target: RunPlan['targets'][number];
   readonly material: ReturnType<typeof caseMaterial>;
 }
@@ -414,11 +457,11 @@ interface Prepared {
  * the request this cell will actually send. A candidate that renders differently therefore
  * reports its own size, and the input bound stays a bound on what went out.
  */
-function prepare(
+async function prepare(
   cell: PlannedCell,
   options: DispatchOptions,
   pkg: ReviewPackage,
-): Prepared | { readonly reason: string } {
+): Promise<Prepared | { readonly reason: string }> {
   const caseEntry = options.cases.get(cell.caseId);
   if (caseEntry === undefined) {
     return {
@@ -433,10 +476,14 @@ function prepare(
   }
   let material: Prepared['material'];
   try {
-    material = caseMaterial(caseEntry, cell.protocol, {
-      ...options.plan.context,
-      pkg,
-    });
+    if (isWorkflowSource(caseEntry) !== (options.plan.workflow !== undefined))
+      throw new Error('source kind does not match plan');
+    material = isWorkflowSource(caseEntry)
+      ? await sourceMaterial(caseEntry, cell.protocol, options.plan)
+      : caseMaterial(caseEntry, cell.protocol, {
+          ...options.plan.context,
+          pkg,
+        });
   } catch {
     return {
       reason:
@@ -468,7 +515,7 @@ function prepare(
  */
 async function runUnderTimeout(parts: {
   readonly cell: PlannedCell;
-  readonly caseEntry: ReviewCase;
+  readonly caseEntry: RunSource;
   readonly target: RunPlan['targets'][number];
   readonly material: Prepared['material'];
   readonly options: DispatchOptions;
@@ -481,6 +528,9 @@ async function runUnderTimeout(parts: {
   const timeout = AbortSignal.timeout(parts.options.plan.bounds.timeoutMs);
   const composed = AbortSignal.any([parts.options.signal, timeout]);
   const deps = {
+    ...(parts.options.resourceLease === undefined
+      ? {}
+      : { resourceLease: parts.options.resourceLease }),
     runId: parts.options.runId,
     caseEntry: parts.caseEntry,
     target: parts.target,
@@ -496,6 +546,7 @@ async function runUnderTimeout(parts: {
     now: parts.now,
     maxInputTokens: parts.options.plan.bounds.maxInputTokens,
     pkg: parts.pkg,
+    reservedAttempts: parts.reservedAttempts,
   } as const;
   const startedAt = parts.now();
   const call = runCell({
@@ -549,18 +600,21 @@ async function runUnderTimeout(parts: {
       abandoned: true,
     };
   }
-  return {
-    result: {
+  const result = charged(
+    {
       cellId: parts.cell.cellId,
       record: bounded.settled.record,
       status: bounded.settled.record.status,
-      // Only the requests that were sent consume the budget. A pre-send refusal is a real
-      // outcome but no request, so its allowance goes back to the run — otherwise a refused
-      // repair would cost a cell that could still have run.
       attempts: bounded.settled.record.attempts.filter(wasSent).length,
       stopReason: bounded.settled.record.stopReason,
     },
-    abandoned: false,
+    parts.reservedAttempts,
+  );
+  return {
+    result,
+    abandoned:
+      result.record?.abandonment !== null &&
+      result.record?.abandonment !== undefined,
   };
 }
 

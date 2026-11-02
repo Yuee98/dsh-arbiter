@@ -40,7 +40,7 @@
       "$ref": "https://dsh-arbiter.dev/schemas/evals/run-common.schema.json#/definitions/instant"
     },
     "case": {
-      "description": "The case this cell reviewed, identified by content rather than by position. The input hash is the same canonical digest a label is approved against, so a record and a label can be compared without re-reading the case.",
+      "description": "The case this cell reviewed, identified by content rather than by position. The input hash is the same canonical digest a label is approved against, so a record and a label can be compared without re-reading the case. For a marked workflow record these are compatibility execution/view and lineage addresses, never legacy reference identities.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -101,7 +101,7 @@
         },
         "materialChain": {
           "type": "string",
-          "enum": ["case-input", "session-log"]
+          "enum": ["case-input", "session-log", "workflow-point"]
         },
         "detail": {
           "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
@@ -298,6 +298,28 @@
           "description": "Why the cell was abandoned, in the artifact's own words.",
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "rootId", "pointId", "viewId", "lineageId"],
+      "properties": {
+        "group": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "rootId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "pointId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "viewId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+        },
+        "lineageId": {
+          "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
         }
       }
     }

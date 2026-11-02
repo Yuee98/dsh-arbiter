@@ -56,7 +56,6 @@
         },
         {
           "type": "object",
-          "required": ["caseIds"],
           "properties": {
             "caseIds": {
               "type": "array",
@@ -66,7 +65,45 @@
                 "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
               }
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": ["workflow"],
+                "type": "object",
+                "properties": {
+                  "workflow": {}
+                }
+              },
+              "then": {
+                "properties": {
+                  "workflow": {
+                    "properties": {
+                      "points": {
+                        "items": {
+                          "required": ["lineageId"],
+                          "type": "object",
+                          "properties": {
+                            "lineageId": {}
+                          }
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "else": {
+                "required": ["caseIds"],
+                "type": "object",
+                "properties": {
+                  "caseIds": {}
+                }
+              }
+            }
+          ]
         }
       ]
     },
@@ -207,6 +244,58 @@
           "type": "null"
         }
       ]
+    },
+    "workflowExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config", "configRevision", "codeGit", "sourceGit"],
+      "properties": {
+        "config": {
+          "type": "object"
+        },
+        "configRevision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codeGit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root", "revision", "dirty", "reason"],
+          "properties": {
+            "root": {
+              "type": ["string", "null"]
+            },
+            "revision": {
+              "type": ["string", "null"]
+            },
+            "dirty": {
+              "type": ["boolean", "null"]
+            },
+            "reason": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "sourceGit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root", "revision", "dirty", "reason"],
+          "properties": {
+            "root": {
+              "type": ["string", "null"]
+            },
+            "revision": {
+              "type": ["string", "null"]
+            },
+            "dirty": {
+              "type": ["boolean", "null"]
+            },
+            "reason": {
+              "type": ["string", "null"]
+            }
+          }
+        }
+      }
     }
   },
   "definitions": {
@@ -276,5 +365,28 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "plan": {
+            "required": ["workflow"],
+            "type": "object",
+            "properties": {
+              "workflow": {}
+            }
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "required": ["workflowExecution"],
+        "type": "object",
+        "properties": {
+          "workflowExecution": {}
+        }
+      }
+    }
+  ]
 }
