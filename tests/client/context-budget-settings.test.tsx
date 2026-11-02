@@ -72,110 +72,172 @@ function configBoundary(target: number | undefined, hard = 10000) {
       });
     }),
   );
-  return { requests };
+  return { requests, current: () => parseConfig(config).config.context };
+}
+
+const TARGET = '常态输入目标 T（估算 tokens）';
+const HARD = '输入硬上限 H（估算 tokens）';
+
+async function openBudget(target?: number, hard = 10000) {
+  const boundary = configBoundary(target, hard);
+  const { user } = renderClient(<ArbiterPage />);
+  await user.click(await screen.findByRole('button', { name: '策略与高级' }));
+  return { boundary, user };
 }
 
 test.each([
-  { target: 6000, hard: 10000, edited: '5000', expected: 5000 },
-  { target: 8000, hard: 10000, edited: '7500', expected: 7500 },
-  { target: undefined, hard: 4000, edited: '2000', expected: 2000 },
-  { target: 6000, hard: 10000, edited: '1', expected: 1 },
-  { target: 6000, hard: 10000, edited: '6000', expected: 6000 },
-  { target: 3000, hard: 10000, edited: '5000', expected: 3000 },
-  { target: 6000, hard: 10000, edited: '20000', expected: 6000 },
-])(
-  'the existing H editor saves and reloads a valid pair for T=$target H=$edited',
-  async ({ target, hard, edited, expected }) => {
-    const boundary = configBoundary(target, hard);
-    const { user } = renderClient(<ArbiterPage />);
-    await user.click(await screen.findByRole('button', { name: '策略与高级' }));
-    const input = screen.getByRole('spinbutton', { name: '最大输入 tokens' });
-    await user.clear(input);
-    await user.type(input, edited);
-    // A real click commits the focused editor and submits through page.tsx.
+  { target: 6000, hard: 10000 },
+  { target: 2500, hard: 7000 },
+  { target: undefined, hard: 4000 },
+])('reads explicit and legacy T=$target H=$hard', async ({ target, hard }) => {
+  await openBudget(target, hard);
+  expect(screen.getByRole('spinbutton', { name: TARGET })).toHaveValue(
+    target ?? Math.min(6000, hard),
+  );
+  expect(screen.getByRole('spinbutton', { name: HARD })).toHaveValue(hard);
+});
+
+test.each(['target-first', 'hard-first'])(
+  'saves and reloads explicit T/H in %s edit order',
+  async (order) => {
+    const { boundary, user } = await openBudget();
+    const target = screen.getByRole('spinbutton', { name: TARGET });
+    const hard = screen.getByRole('spinbutton', { name: HARD });
+    for (const input of order === 'target-first'
+      ? [target, hard]
+      : [hard, target]) {
+      await user.clear(input);
+      await user.type(input, '4000');
+    }
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
-    await waitFor(() => {
-      expect(boundary.requests).toHaveLength(1);
-    });
+    expect(await screen.findByText('已保存并生效。')).toBeVisible();
     expect(boundary.requests[0]).toMatchObject({
       kind: 'save',
       body: {
-        config: {
-          context: {
-            targetInputTokens: expected,
-            maxInputTokens: Number(edited),
-          },
-        },
+        config: { context: { targetInputTokens: 4000, maxInputTokens: 4000 } },
       },
       errors: [],
     });
-    expect(await screen.findByText('已保存并生效。')).toBeVisible();
-    expect(
-      screen.getByRole('spinbutton', { name: '最大输入 tokens' }),
-    ).toHaveValue(Number(edited));
+    await user.click(screen.getByRole('button', { name: '重新读取' }));
+    await waitFor(() => {
+      expect(screen.getByRole('spinbutton', { name: TARGET })).toHaveValue(
+        4000,
+      );
+    });
+    expect(screen.getByRole('spinbutton', { name: HARD })).toHaveValue(4000);
   },
 );
 
-test('validation and save use the final typed H, and a later increase preserves the saved target', async () => {
-  const boundary = configBoundary(6000);
-  const { user } = renderClient(<ArbiterPage />);
-  await user.click(await screen.findByRole('button', { name: '策略与高级' }));
-  const input = screen.getByRole('spinbutton', { name: '最大输入 tokens' });
-  await user.clear(input);
-  await user.type(input, '5000');
-  await user.click(screen.getByRole('button', { name: '校验草稿' }));
-  await waitFor(() => {
-    expect(boundary.requests).toHaveLength(1);
-  });
-  expect(boundary.requests[0]).toMatchObject({
-    kind: 'validate',
-    body: {
-      config: { context: { targetInputTokens: 5000, maxInputTokens: 5000 } },
-    },
-    errors: [],
-  });
-  await user.click(screen.getByRole('button', { name: '保存并应用' }));
-  expect(await screen.findByText('已保存并生效。')).toBeVisible();
-  await user.clear(input);
-  await user.type(input, '8000');
-  await user.click(screen.getByRole('button', { name: '保存并应用' }));
-  await waitFor(() => {
-    expect(boundary.requests).toHaveLength(3);
-  });
-  expect(boundary.requests[2]).toMatchObject({
-    kind: 'save',
-    body: {
-      config: { context: { targetInputTokens: 5000, maxInputTokens: 8000 } },
-    },
-    errors: [],
-  });
-});
-
-test.each(['0', '-2', '1.5', '9007199254740992'])(
-  'invalid H=%s still reaches production validation and keeps the target intact',
-  async (edited) => {
-    const boundary = configBoundary(6000);
-    const { user } = renderClient(<ArbiterPage />);
-    await user.click(await screen.findByRole('button', { name: '策略与高级' }));
-    const input = screen.getByRole('spinbutton', { name: '最大输入 tokens' });
+test.each([TARGET, HARD])(
+  'rejects illegal values in %s and recovers',
+  async (label) => {
+    const { boundary, user } = await openBudget();
+    const input = screen.getByRole('spinbutton', { name: label });
+    const key = label === TARGET ? 'targetInputTokens' : 'maxInputTokens';
+    for (const edited of ['', '0', '-2', '1.5', '9007199254740992']) {
+      await user.clear(input);
+      if (edited !== '') await user.type(input, edited);
+      await user.click(screen.getByRole('button', { name: '校验草稿' }));
+      await waitFor(() => {
+        expect(boundary.requests.at(-1)).toMatchObject({
+          kind: 'validate',
+          body: { config: { context: { [key]: Number(edited) } } },
+        });
+        expect(boundary.requests.at(-1)?.errors).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: `context.${key}` }),
+          ]),
+        );
+      });
+      await user.click(screen.getByRole('button', { name: '保存并应用' }));
+      expect(
+        await screen.findByTestId('arbiter-save-status'),
+      ).toHaveTextContent('保存或应用失败；当前生效配置未改变。');
+      expect(boundary.current()).toMatchObject({
+        targetInputTokens: 6000,
+        maxInputTokens: 10000,
+      });
+    }
     await user.clear(input);
-    await user.type(input, edited);
+    await user.type(input, label === TARGET ? '5000' : '8000');
     await user.click(screen.getByRole('button', { name: '保存并应用' }));
-    await waitFor(() => {
-      expect(boundary.requests).toHaveLength(1);
+    expect(await screen.findByText('已保存并生效。')).toBeVisible();
+    expect(boundary.current()[key]).toBe(label === TARGET ? 5000 : 8000);
+  },
+);
+
+test('explicit T above H survives unrelated blur and fails validate/save without expanding H', async () => {
+  const { boundary, user } = await openBudget(5000, 5000);
+  const target = screen.getByRole('spinbutton', { name: TARGET });
+  const hard = screen.getByRole('spinbutton', { name: HARD });
+  await user.clear(target);
+  await user.type(target, '6000');
+  await user.click(hard);
+  await user.click(screen.getByRole('button', { name: '校验草稿' }));
+  expect(target).toHaveValue(6000);
+  expect(hard).toHaveValue(5000);
+  expect(
+    await screen.findByText(/常态目标不得超过 context.maxInputTokens/u),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: '保存并应用' }));
+  expect(await screen.findByTestId('arbiter-save-status')).toHaveTextContent(
+    '保存或应用失败',
+  );
+  expect(boundary.current()).toMatchObject({
+    targetInputTokens: 5000,
+    maxInputTokens: 5000,
+  });
+  expect(boundary.requests).toHaveLength(2);
+  for (const request of boundary.requests) {
+    expect(request.body).toMatchObject({
+      config: { context: { targetInputTokens: 6000, maxInputTokens: 5000 } },
     });
-    expect(boundary.requests[0]?.body).toMatchObject({
-      config: {
-        context: { targetInputTokens: 6000, maxInputTokens: Number(edited) },
-      },
-    });
-    expect(boundary.requests[0]?.errors).toEqual(
+    expect(request.errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: 'context.maxInputTokens' }),
+        expect.objectContaining({ code: 'relation.targetInputTokens' }),
       ]),
     );
-    expect(await screen.findByTestId('arbiter-save-status')).toHaveTextContent(
-      '保存或应用失败；当前生效配置未改变。',
-    );
+  }
+});
+
+test.each([
+  {
+    locale: 'zh',
+    tab: '策略与高级',
+    target: TARGET,
+    hard: HARD,
+    validate: '校验草稿',
+    save: '保存并应用',
+    error: '常态目标不得超过 context.maxInputTokens。',
+    help: /与 Reviewer 的输出额度 maxTokens 分开/u,
   },
-);
+  {
+    locale: 'en',
+    tab: 'Policy and advanced',
+    target: 'Normal input target T (estimated tokens)',
+    hard: 'Hard input limit H (estimated tokens)',
+    validate: 'Validate draft',
+    save: 'Save and apply',
+    error: 'The normal target must not exceed context.maxInputTokens.',
+    help: /separately from the Reviewer output allowance maxTokens/u,
+  },
+])('provides $locale budget guidance and localized errors', async (copy) => {
+  configBoundary(6000);
+  const { user } = renderClient(<ArbiterPage />, { locale: copy.locale });
+  await user.click(await screen.findByRole('button', { name: copy.tab }));
+  expect(screen.getByText(copy.help)).toBeVisible();
+  expect(screen.getByText(/20\/5\/40/u)).toBeVisible();
+  expect(screen.queryByText(/2000/u)).not.toBeInTheDocument();
+  const hard = screen.getByRole('spinbutton', { name: copy.hard });
+  await user.clear(hard);
+  await user.type(hard, '5000');
+  await user.click(screen.getByRole('button', { name: copy.validate }));
+  expect(await screen.findByText(new RegExp(copy.error, 'u'))).toBeVisible();
+  await user.click(screen.getByRole('button', { name: copy.save }));
+  expect(await screen.findByTestId('arbiter-save-status')).toHaveTextContent(
+    copy.locale === 'en' ? 'Saving or applying failed' : '保存或应用失败',
+  );
+  expect(screen.getByRole('spinbutton', { name: copy.target })).toHaveValue(
+    6000,
+  );
+});

@@ -3,7 +3,7 @@
   "policyFixed": "The bands, the N0 normalization and the decision matrix are part of the shared review contract and expose no tunable thresholds; the mode is chosen on the status page.",
   "policyModesNote": "Both modes (ask / no-ask) use the same matrix; there is no extra risk cap, backend-specific gate or probability threshold.",
   "contextTitle": "Context and input budget",
-  "maxInput": "Maximum input tokens",
+  "maxInput": "Hard input limit H (estimated tokens)",
   "evidenceMax": "Authorization evidence entries",
   "parentHuman": "Parent session human statements",
   "parentFloor": "Parent evidence floor",
@@ -13,7 +13,7 @@
   "projectFiles": "Project rule files",
   "projectEnabled": "Read project rules",
   "enabled": "Enabled",
-  "customRules": "CUSTOM_RULES (global review guidance, at most 2000 characters)",
+  "customRules": "CUSTOM_RULES (global review guidance)",
   "auditTitle": "Audit and circuit breaker",
   "retentionDays": "Retention days",
   "retentionBytes": "Size target (bytes)",
@@ -37,5 +37,7 @@
   "retentionPreset100MB": "100 MB",
   "retentionPreset500MB": "500 MB",
   "retentionPreset1GB": "1 GB",
-  "retentionFormatted": "Approx. {formatted}"
+  "retentionFormatted": "Approx. {formatted}",
+  "targetInput": "Normal input target T (estimated tokens)",
+  "inputBudgetHelp": "T is the normal target for ordinary material; H caps the complete review input. Both must be positive safe integers with T ≤ H. Input tokens are estimated locally, separately from the Reviewer output allowance maxTokens. This build retires the old 20/5/40 item limits. Existing explicit H is preserved; missing T uses min(6000, H)."
 }

@@ -1,0 +1,6 @@
+{
+  "name": "arbiter-e2e-budget-reviewer",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts"
+}
