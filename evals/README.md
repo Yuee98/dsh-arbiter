@@ -1,5 +1,7 @@
 # evals：审查质量数据契约与标注工具
 
+本地人工标注网页：`pnpm evals annotate <dataset> [--split dev] [--group f01] [--mode blind|assisted]`。默认盲标；本地草稿自动保存，逐点显式确认才写标签，意见需主动展开。启动、冲突恢复、快捷键与真实浏览器验证见[网页说明](../docs/workflow-annotation-web.md)。
+
 `workflows-v1` 的独立题本、模型原文回传、动态共识与人工优先参考使用独立的 `workflow-*` 命令，见[工作流标注说明](../docs/workflow-annotation.md)。旧 `export/import` 继续按下文处理 legacy 数据。
 
 本目录是同一 repo 内的**逻辑独立子项目**：沿用根的 Node／TypeScript／pnpm 工具链，但生产代码不依赖它，发布包也不包含它。它负责三件事：定义案例／标签／模型意见／manifest 的 JSON 契约，校验这些文档彼此一致，以及把材料导出成可独立标注的空白包、再把填好的结果回填成仓库内的标签。
