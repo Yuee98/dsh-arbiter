@@ -40,6 +40,7 @@ async function validBatch(
   context?: AnnotationContext,
 ): Promise<WorkflowBatch> {
   const batch = await readWorkflowBatch(path);
+  const effectiveContext = annotationContext(context ?? batch.context);
   if (resolve(dataset) !== batch.dataset)
     throw new Error('batch belongs to another dataset');
   const source = await workflowSource(dataset, batch.split, batch.group);
@@ -49,7 +50,7 @@ async function validBatch(
       source,
       point.rootId,
       point.pointId,
-      context ?? batch.context,
+      effectiveContext,
     );
     if (!sameAnnotationView(point.binding, actual.binding))
       throw new Error(

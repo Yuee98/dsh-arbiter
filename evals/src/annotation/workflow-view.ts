@@ -89,8 +89,9 @@ export async function buildAnnotationView(
   dataset: GroupedDataset,
   rootId: string,
   pointId: string,
-  context: AnnotationContext,
+  suppliedContext: AnnotationContext,
 ) {
+  const context = annotationContext(suppliedContext);
   const config = {
     ...DEFAULT_CONFIG,
     context: {

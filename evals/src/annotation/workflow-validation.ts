@@ -170,8 +170,16 @@ export function contextSchema(): object {
     ],
     properties: {
       protocol: { enum: ['chat', 'decision'] },
-      targetInputTokens: { type: 'integer', minimum: 1 },
-      maxInputTokens: { type: 'integer', minimum: 1 },
+      targetInputTokens: {
+        type: 'integer',
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      },
+      maxInputTokens: {
+        type: 'integer',
+        minimum: 1,
+        maximum: Number.MAX_SAFE_INTEGER,
+      },
       customRules: { type: 'string' },
       projectRules: { type: ['string', 'null'] },
     },

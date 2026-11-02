@@ -1043,11 +1043,13 @@
                 },
                 "targetInputTokens": {
                   "type": "integer",
-                  "minimum": 1
+                  "minimum": 1,
+                  "maximum": 9007199254740991
                 },
                 "maxInputTokens": {
                   "type": "integer",
-                  "minimum": 1
+                  "minimum": 1,
+                  "maximum": 9007199254740991
                 },
                 "customRules": {
                   "type": "string"
