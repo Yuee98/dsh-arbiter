@@ -74,7 +74,7 @@ async function checkpoint(
     await writeFile(
       temporary,
       JSON.stringify({ ...before, labels, opinions }, null, 2) + '\n',
-      { flag: 'wx' },
+      { flag: 'wx', mode: 0o600 },
     );
     await rename(temporary, path);
   } finally {

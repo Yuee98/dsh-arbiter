@@ -1,5 +1,5 @@
 /** Export succeeds only after every model is durably registered, including missing replies. */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { CredentialRedactor } from '../../../src/reviewer/credential-redactor.js';
@@ -112,6 +112,7 @@ export async function exportWorkflowBatch(options: {
     group: options.group,
     createdAt: new Date().toISOString().slice(0, 10),
     ...(await annotationOrigin(options.root)),
+    retryKey: randomBytes(32).toString('hex'),
     context,
     models,
     points,
@@ -148,6 +149,7 @@ export async function exportWorkflowBatch(options: {
   await mkdir(dirname(baseline), { recursive: true });
   await writeFile(baseline, JSON.stringify(batch, null, 2) + '\n', {
     flag: 'wx',
+    mode: 0o600,
   });
   try {
     await changeWorkflowGroup(

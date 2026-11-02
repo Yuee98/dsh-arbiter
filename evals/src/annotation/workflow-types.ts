@@ -36,6 +36,8 @@ export interface WorkflowBatch {
   readonly createdAt: string;
   readonly sourceCommit: string | null;
   readonly sourceDirty: boolean | null;
+  /** Private local batch material; never part of a model question or grouped record. */
+  readonly retryKey?: string;
   readonly context: AnnotationContext;
   readonly models: readonly RegisteredModel[];
   readonly points: readonly AnnotationPoint[];

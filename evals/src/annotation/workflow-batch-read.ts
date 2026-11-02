@@ -51,6 +51,7 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
         createdAt: { type: 'string' },
         sourceCommit: { type: ['string', 'null'] },
         sourceDirty: { type: ['boolean', 'null'] },
+        retryKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         context: { type: 'object' },
         models: { type: 'array' },
         labels: { type: 'array' },

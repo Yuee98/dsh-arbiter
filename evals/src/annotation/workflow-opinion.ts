@@ -1,5 +1,6 @@
 /** Preserve every returned attempt; validation never invents a missing answer. */
-import { digestOf } from '../data/hash.js';
+import { createHmac } from 'node:crypto';
+import { canonicalJson } from '../data/hash.js';
 import type { WorkflowOpinion } from '../data/group-types.js';
 import type { IndependentAnswer } from '../data/annotation-types.js';
 import type {
@@ -23,10 +24,16 @@ export function responseOpinion(
     throw new Error(
       'cannot attach an opinion to a failed material preparation',
     );
+  if (batch.retryKey === undefined || !/^[a-f0-9]{64}$/u.test(batch.retryKey))
+    throw new Error(
+      'batch lacks its private retry key; re-export for safe retries',
+    );
   const redactor = responseRedactor(
     `annotation:${batch.batchId}`,
     point.request,
   );
+  // Learn the complete envelope before deriving any persisted text or parse.
+  const returned = redactor.value(response);
   const rawResponse =
     response.rawResponse === null ? null : redactor.text(response.rawResponse);
   let parsed: unknown = null;
@@ -101,7 +108,7 @@ export function responseOpinion(
       registration,
       rawResponse,
       parsed,
-      returned: redactor.value(response),
+      returned,
       parameters: redactor.value(model.parameters),
       pairs: answer?.pairs ?? null,
       conflicts: answer?.conflicts ?? [],
@@ -110,7 +117,7 @@ export function responseOpinion(
       sourceCommit: batch.sourceCommit,
       context: batch.context,
       recordedOrder: 0,
-      responseHash: digestOf(response),
+      responseHash: `hmac-sha256:${createHmac('sha256', Buffer.from(batch.retryKey, 'hex')).update(canonicalJson(response)).digest('hex')}`,
     },
   };
 }
