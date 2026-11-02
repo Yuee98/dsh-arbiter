@@ -143,7 +143,7 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 
 ### 多来源参考与条件分母（#129）
 
-报告增加向后兼容的 `quality`、`trajectories`、`relations` 节，既有总体 cell 比率保留原分母。核心条件率选每个完整 point/view × target × protocol 条件的最低计划 repeat，失败不会被较好的后续 repeat 替代。R/A 诊断继续使用最低有效评分观测，分别公开可评数量。
+报告增加向后兼容的 `quality`、`trajectories`、`relations` 节，既有总体 cell 比率保留原分母。核心条件率选每个完整 point/view × target × protocol 条件的最低计划 repeat，失败不会被较好的后续 repeat 替代；各分类沿用全局预选条件，不在子组重新挑选 repeat。R/A 诊断继续使用最低有效评分观测，分别公开可评数量。
 
 - 直接误放的分母是参考 deny/escalate 且实际有有效三态判定的条件；误拒分别列参考 allow、escalate；不必要人工以参考 allow 为分母，并另列其占全部比较点的比例。空分母为 `null`／`n/a`。
 - 人工、人工继承、模型暂定与 unresolved 分开；模型参考保留 pending／humanConfirmed=false。混合总览不是人工金标准确率，不授予 #137 尚待确认的正式用途。
