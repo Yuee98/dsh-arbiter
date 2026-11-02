@@ -20,7 +20,8 @@ import { EMPTY_FORM } from './web-types.js';
 import { humanReferenceStatus } from './web-reference-status.js';
 import { opinionReport } from './web-opinion-report.js';
 import { settleHumanIntent } from './web-settlement.js';
-import { workflowSource, buildAnnotationView } from './workflow-view.js';
+import { buildAnnotationView } from './workflow-view.js';
+import type { GroupedDataset } from '../data/group-types.js';
 import { workflowState, workflowRecords } from './workflow-store.js';
 import { readWorkflowBatch } from './workflow-batch-read.js';
 import { importWorkflowHuman } from './workflow-service.js';
@@ -134,9 +135,13 @@ export class AnnotationWorkspace {
             throw error;
           }
         }
-        const source = await workflowSource(scope.dataset, scope.split, group);
-        // Validate labels without opening model opinions, even in assisted mode.
-        await workflowState(scope.dataset, scope.split, group, true);
+        // One fresh source-and-label snapshot; never opens model opinions.
+        const source = await workflowState(
+          scope.dataset,
+          scope.split,
+          group,
+          true,
+        );
         for (const entry of source.groups.flatMap((value) => value.workflows)) {
           workflow += 1;
           for (const [index, point] of entry.document.points.entries())
@@ -244,19 +249,33 @@ export class AnnotationWorkspace {
   }
   async bootstrap(): Promise<WebBootstrap> {
     const state = await this.load();
+    const groups = new Map<string, GroupedDataset>();
+    for (const group of new Set(state.points.map((point) => point.group)))
+      groups.set(
+        group,
+        await workflowState(this.scope.dataset, this.scope.split, group, true),
+      );
     return {
       mode: this.scope.mode,
       current: state.current,
       points: await Promise.all(
-        state.points.map((point) => this.summary(point)),
+        state.points.map((point) =>
+          this.summary(point, groups.get(point.group)),
+        ),
       ),
       risk: RISK_BANDS,
       authorization: AUTHORIZATION_BANDS,
     };
   }
   private async projection(point: DraftPoint): Promise<WebPoint> {
+    const source = await workflowState(
+      this.scope.dataset,
+      this.scope.split,
+      point.group,
+      true,
+    );
     const base = {
-      ...(await this.summary(point)),
+      ...(await this.summary(point, source)),
       revision: point.revision,
       form: point.form,
       exposed: point.exposed,
@@ -284,7 +303,7 @@ export class AnnotationWorkspace {
     const current = batch.points[0];
     if (current === undefined) throw new Error('missing point baseline');
     try {
-      await checkHumanView(batch);
+      await checkHumanView(batch, source);
     } catch {
       return {
         ...base,
@@ -297,11 +316,6 @@ export class AnnotationWorkspace {
         changedLines: [],
       };
     }
-    const source = await workflowSource(
-      this.scope.dataset,
-      this.scope.split,
-      point.group,
-    );
     const document = source.groups
       .flatMap((g) => g.workflows)
       .find((entry) => entry.document.rootId === point.rootId)?.document;
@@ -558,20 +572,19 @@ export class AnnotationWorkspace {
       return this.projection(point);
     });
   }
-  private async summary(point: DraftPoint): Promise<WebPointSummary> {
-    const source = await workflowSource(
-      this.scope.dataset,
-      this.scope.split,
-      point.group,
-    );
-    const records = workflowRecords(
-      await workflowState(
+  private async summary(
+    point: DraftPoint,
+    supplied?: GroupedDataset,
+  ): Promise<WebPointSummary> {
+    const source =
+      supplied ??
+      (await workflowState(
         this.scope.dataset,
         this.scope.split,
         point.group,
         true,
-      ),
-    );
+      ));
+    const records = workflowRecords(source);
     return {
       token: point.token,
       workflow: point.workflow,

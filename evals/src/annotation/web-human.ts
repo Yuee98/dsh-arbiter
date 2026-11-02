@@ -4,7 +4,8 @@ import type { Split } from '../data/types.js';
 import type { WorkflowBatch } from './workflow-types.js';
 import type { DraftPoint } from './web-draft-store.js';
 import { sameAnnotationView } from '../data/annotation-binding.js';
-import { buildAnnotationView, workflowSource } from './workflow-view.js';
+import { buildAnnotationView } from './workflow-view.js';
+import type { GroupedDataset } from '../data/group-types.js';
 import { workflowRecords, workflowState } from './workflow-store.js';
 import { canonicalJson } from '../data/hash.js';
 
@@ -14,16 +15,14 @@ export async function createHumanBatch(
   point: DraftPoint,
   context: AnnotationContext,
 ): Promise<WorkflowBatch> {
-  const source = await workflowSource(dataset, split, point.group);
+  const source = await workflowState(dataset, split, point.group, true);
   const view = await buildAnnotationView(
     source,
     point.rootId,
     point.pointId,
     context,
   );
-  const records = workflowRecords(
-    await workflowState(dataset, split, point.group, true),
-  );
+  const records = workflowRecords(source);
   const previous = records.labels.find(
     (label) =>
       label.source === 'human' &&
@@ -62,13 +61,18 @@ export async function createHumanBatch(
     ],
   };
 }
-export async function checkHumanView(batch: WorkflowBatch): Promise<void> {
+export async function checkHumanView(
+  batch: WorkflowBatch,
+  source?: GroupedDataset,
+): Promise<void> {
   const point = batch.points[0];
   if (point?.binding === undefined || point.binding === null)
     throw new Error('material preparation failed');
-  const source = await workflowSource(batch.dataset, batch.split, batch.group);
+  const current =
+    source ??
+    (await workflowState(batch.dataset, batch.split, batch.group, true));
   const actual = await buildAnnotationView(
-    source,
+    current,
     point.rootId,
     point.pointId,
     batch.context,
@@ -79,10 +83,14 @@ export async function checkHumanView(batch: WorkflowBatch): Promise<void> {
 export async function checkHumanDraftBaseline(
   batch: WorkflowBatch,
 ): Promise<void> {
-  await checkHumanView(batch);
-  const current = workflowRecords(
-    await workflowState(batch.dataset, batch.split, batch.group, true),
+  const source = await workflowState(
+    batch.dataset,
+    batch.split,
+    batch.group,
+    true,
   );
+  await checkHumanView(batch, source);
+  const current = workflowRecords(source);
   const point = batch.points[0];
   if (point === undefined) throw new Error('missing human point');
   const relevant = (labels: WorkflowBatch['labels']) =>
