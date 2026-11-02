@@ -44,6 +44,7 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
       ],
       properties: {
         batchVersion: { const: 'workflow-annotation-v1' },
+        purpose: { const: 'human' },
         batchId: idSchema,
         dataset: { type: 'string' },
         split: { enum: ['dev', 'calibration', 'holdout'] },
@@ -100,7 +101,17 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
     await readJson(path),
   );
   annotationContext(batch.context);
-  registeredModels(batch.models);
+  if (batch.purpose === 'human') {
+    if (
+      batch.models.length !== 0 ||
+      batch.opinions.length !== 0 ||
+      batch.retryKey !== undefined ||
+      batch.points.some((point) => point.registrations.length !== 0)
+    )
+      throw new Error(
+        'human batch must not register models or retain opinions/keys',
+      );
+  } else registeredModels(batch.models);
   const checkers = await compileCheckers();
   for (const result of [
     checkers.groupedLabels({
