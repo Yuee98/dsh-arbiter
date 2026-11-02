@@ -1,3 +1,9 @@
+import type {
+  WorkflowSelection,
+  WorkflowResource,
+  WorkflowIdentity,
+  WorkflowExecution,
+} from './workflow-types.js';
 /**
  * The run artifact's TypeScript shape.
  *
@@ -130,6 +136,8 @@ export interface RunBounds {
 
 /** The frozen experiment. */
 export interface RunPlan {
+  readonly workflow?: WorkflowSelection;
+  readonly resource?: WorkflowResource;
   readonly planVersion: typeof RUN_PLAN_VERSION;
   readonly datasetId: string;
   readonly datasetPath: string;
@@ -232,7 +240,7 @@ export interface CellExecution {
  */
 export interface CellEntryPoint {
   readonly kind: 'direct-service' | 'host-chain';
-  readonly materialChain: 'case-input' | 'session-log';
+  readonly materialChain: 'case-input' | 'session-log' | 'workflow-point';
   readonly detail: string;
 }
 
@@ -356,6 +364,7 @@ export interface CellAbandonment {
 }
 
 export interface CellRecord {
+  readonly workflow?: WorkflowIdentity;
   readonly documentVersion: typeof CELL_RECORD_VERSION;
   readonly runId: string;
   readonly cellId: string;
@@ -461,6 +470,7 @@ export type RunStatus =
 
 /** The run's mutable document. */
 export interface RunIndex {
+  readonly workflowExecution?: WorkflowExecution;
   readonly documentVersion: typeof RUN_INDEX_VERSION;
   readonly runId: string;
   readonly createdAt: string;
