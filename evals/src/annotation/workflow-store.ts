@@ -84,7 +84,9 @@ export async function workflowState(
   dataset: string,
   split: Split,
   group: string,
+  humanOnly = false,
 ): Promise<GroupedDataset> {
+  if (humanOnly) return humanWorkflowState(dataset, split, group);
   await regularWorkflowDirectory(dataset, split, group);
   const state = await readGroupedDataset(dataset, {
     split,
@@ -111,6 +113,80 @@ export function workflowRecords(state: GroupedDataset) {
       ),
     ),
   };
+}
+function validationLabels(
+  labels: readonly WorkflowLabel[],
+  humanOnly: boolean,
+) {
+  return labels
+    .filter(
+      (label) =>
+        !humanOnly || ['human', 'human-inherited'].includes(label.source),
+    )
+    .map((document) => ({
+      path: 'labels.json',
+      document: humanOnly
+        ? { ...document, supportingOpinionIds: [] }
+        : document,
+    }));
+}
+/** Physically never opens opinions. Existing machine caches are schema-checked,
+ * but only human references participate in cross-reference validation here. */
+async function humanWorkflowState(
+  dataset: string,
+  split: Split,
+  group: string,
+): Promise<GroupedDataset> {
+  const directory = await regularWorkflowDirectory(
+    dataset,
+    split,
+    group,
+    false,
+  );
+  const state = await readGroupedDataset(dataset, {
+    split,
+    group,
+    contentSet: 'workflows-v1',
+    references: false,
+  });
+  if (state.problems.length > 0)
+    throw new Error(state.problems.map((p) => p.message).join('; '));
+  const checkers = await compileCheckers();
+  let records: readonly WorkflowLabel[] = [];
+  try {
+    const labels = checkers.groupedLabels(
+      await readJson(join(directory, 'labels.json')),
+    );
+    if (!labels.ok) throw new Error(labels.problems.join('; '));
+    if (labels.document.records.some((label) => !('referenceId' in label)))
+      throw new Error('legacy labels cannot be filed in a workflow group');
+    records = labels.document.records.filter(
+      (label): label is WorkflowLabel => 'referenceId' in label,
+    );
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+      throw error;
+  }
+  const groups = state.groups.map((value) => ({
+    ...value,
+    labels: records.map((document) => ({ path: 'labels.json', document })),
+  }));
+  const checked = checkGroups(
+    groups.map((value) => ({
+      ...value,
+      // Opinion edges cannot be checked without reading opinions. Preserve them
+      // verbatim on disk; validate human semantics and point bindings here.
+      labels: validationLabels(records, true),
+    })),
+    checkers,
+    {
+      contract: REVIEW_CONTRACT_VERSION,
+      rubric: (await legacyMetadata()).versions.rubric,
+    },
+  );
+  if (checked.problems.length > 0)
+    throw new Error(checked.problems.map((p) => p.message).join('; '));
+  return { ...state, groups };
 }
 async function atomicRole(
   directory: string,
@@ -144,12 +220,18 @@ export async function changeWorkflowGroup<T>(
   operation: (
     state: GroupedDataset,
   ) => GroupChange<T> | Promise<GroupChange<T>>,
+  humanOnly = false,
 ): Promise<T> {
-  const directory = await regularWorkflowDirectory(dataset, split, group);
+  const directory = await regularWorkflowDirectory(
+    dataset,
+    split,
+    group,
+    !humanOnly,
+  );
   const lockPath = join(directory, '.annotation.lock');
   const lock = write ? await open(lockPath, 'wx') : null;
   try {
-    const state = await workflowState(dataset, split, group);
+    const state = await workflowState(dataset, split, group, humanOnly);
     const original = workflowRecords(state);
     const next = await operation(state);
     const checkers = await compileCheckers();
@@ -174,10 +256,7 @@ export async function changeWorkflowGroup<T>(
       [
         {
           ...first,
-          labels: next.labels.map((document) => ({
-            path: 'labels.json',
-            document,
-          })),
+          labels: validationLabels(next.labels, humanOnly),
           opinions: next.opinions.map((document) => ({
             path: 'opinions.json',
             document,
@@ -193,7 +272,7 @@ export async function changeWorkflowGroup<T>(
     if (checked.problems.length > 0)
       throw new Error(checked.problems.map((p) => p.message).join('; '));
     // An editor that doesn't participate in our lock must not be overwritten.
-    const freshState = await workflowState(dataset, split, group);
+    const freshState = await workflowState(dataset, split, group, humanOnly);
     const fresh = workflowRecords(freshState);
     if (
       canonicalJson(freshState.groups.flatMap((group) => group.workflows)) !==
@@ -209,14 +288,19 @@ export async function changeWorkflowGroup<T>(
     if (write) {
       const unchanged = async (role: 'opinions' | 'labels'): Promise<void> => {
         const latest = workflowRecords(
-          await workflowState(dataset, split, group),
+          await workflowState(dataset, split, group, humanOnly),
         );
         if (canonicalJson(latest[role]) !== canonicalJson(original[role]))
           throw new Error(
             `annotation conflict: ${role} changed before publication`,
           );
       };
-      if (canonicalJson(original.opinions) !== canonicalJson(next.opinions))
+      if (humanOnly && next.opinions.length !== 0)
+        throw new Error('human-only writes cannot publish opinions');
+      if (
+        !humanOnly &&
+        canonicalJson(original.opinions) !== canonicalJson(next.opinions)
+      )
         await atomicRole(directory, 'opinions', next.opinions, () =>
           unchanged('opinions'),
         );
