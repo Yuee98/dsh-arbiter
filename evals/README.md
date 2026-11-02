@@ -483,7 +483,7 @@ pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev
 
 运行中断、技术失败或预算耗尽不会因报告写出而改成成功。真正进入执行后发生持久化故障时，能读取的工件仍可产生诊断报告；抢锁、版本或资源校验拒绝不会自动发布别人的活动运行。索引与持久化记录不一致时并列两者并标记完成分布未经核实，自检返回非零；原 index、records、参考快照不改写。报告部分写入失败明确返回非零，不宣布整包生成完成。所有主文件和组明细继续受源证据与符号链接写保护，`--force` 不扩大权限。
 
-报告开头记录原运行位置、所选范围、实际输入预算、被测 Git/dirty/未知说明及参考入口。新 legacy 运行在初次创建时保存代码 Git，resume 保留原测量；workflow 使用已有 `workflowExecution` 的代码和数据源 Git，两套记录矛盾会标记证据不完整。旧工件缺字段保持 unknown，不用生成报告时的 HEAD 回填。后来提交报告的 commit 由 Git 历史追溯，与被测 commit 分开；dirty/外部未受版本覆盖的源也明确保留复现限制。
+报告开头记录原运行位置、所选范围、实际输入预算、被测 Git/dirty/未知说明及参考入口。新 legacy 运行在初次创建时保存代码 Git，resume 保留原测量，归档输出或文档提交导致的 Git 变化本身不会拒绝 legacy 续跑，仍使用既有计划、源、fixture 和语义版本校验；workflow 使用已有 `workflowExecution` 的代码和数据源 Git，两套记录矛盾会标记证据不完整。旧工件缺字段保持 unknown，不用生成报告时的 HEAD 回填。后来提交报告的 commit 由 Git 历史追溯，与被测 commit 分开；dirty/外部未受版本覆盖的源也明确保留复现限制。
 
 将 `--out` 指向 Git 目录即可保存主 MD 与必要 `.details/`；完整 JSON/HTML 和原始运行可另作附件。报告中的本机绝对路径标记为 local-only，不伪装成 GitHub 可访问链接；提交时确认组明细的相对链接有效，另行补充实际可访问的附件入口。简短版本/运行索引见 [报告归档说明](../validation/review-quality/README.md)。工具不会自动 commit、push 或发布，也不维护“最新通过”状态机。
 
