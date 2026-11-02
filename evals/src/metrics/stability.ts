@@ -27,6 +27,7 @@ import type {
   StabilitySection,
 } from './types.js';
 import type { RunProtocol } from '../run/types.js';
+import { conditionKeyOf, viewKeyOf } from './source.js';
 
 /** Whether a cell's answer is one of the three behaviours. */
 function behaviourOf(cell: CellFacts): BehaviourWord | null {
@@ -44,7 +45,7 @@ function spreadOf(values: readonly number[]): number | null {
 
 /** The key a repeat group is identified by. */
 function groupKeyOf(cell: CellFacts): string {
-  return [cell.caseId, cell.targetId, cell.protocol].join('~');
+  return conditionKeyOf(cell);
 }
 
 /**
@@ -108,7 +109,7 @@ export function sampleWeightsOf(cells: readonly CellFacts[]): SampleWeights {
   return {
     cells: cells.length,
     records: records.length,
-    distinctCases: distinct(cells.map((cell) => cell.caseId)).length,
+    distinctCases: distinct(cells.map(viewKeyOf)).length,
     distinctFamilies: distinct(
       cells.map((cell) => cell.caseFacts?.familyId ?? 'unknown'),
     ).length,

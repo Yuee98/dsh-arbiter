@@ -37,6 +37,7 @@ import {
   stabilitySection,
 } from './sections-support.js';
 import { usageSection } from './sections-usage.js';
+import { qualitySection } from './sections-quality.js';
 
 /**
  * Render one report as Markdown.
@@ -53,6 +54,7 @@ export function renderMarkdown(report: EvaluationReport): string {
     '',
     identitySection(report),
     coverageSection(report),
+    qualitySection(report),
     behaviourSection(report),
     diagnosticsSection(report),
     settlementSection(report),

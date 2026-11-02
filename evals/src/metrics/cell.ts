@@ -37,6 +37,9 @@ import type { CellRecord, CellState, RunProtocol } from '../run/types.js';
 import { aggregateUsage } from '../../../src/reviewer/usage.js';
 import type { UsageAttempt, UsageField } from '../../../src/reviewer/usage.js';
 import { usageAttemptsOf } from '../run/artifact.js';
+import { legacyReference } from './references.js';
+import type { MetricReference } from './references.js';
+import type { MetricSource } from './source.js';
 
 /** Which of the artifact's states a cell is in, as a report needs to state it. */
 export type CellStanding =
@@ -51,6 +54,8 @@ export type CellStanding =
 
 /** One planned cell, joined with its record, its dataset facts and its label. */
 export interface CellFacts {
+  readonly source: MetricSource;
+  readonly evaluationReference: MetricReference;
   readonly cellId: string;
   readonly caseId: string;
   readonly targetId: string;
@@ -115,6 +120,7 @@ export interface CellFacts {
    */
   readonly reference: ReferenceWord | null;
   readonly labelStatus:
+    | 'not-applicable'
     | 'gold'
     | 'missing'
     | 'excluded'
@@ -263,16 +269,6 @@ function labelStatusOf(parts: {
     return 'input-mismatch';
   }
   return 'gold';
-}
-
-/** The reference a gold label records, or null when there is none to compare against. */
-function referenceOf(
-  label: LabelFacts | null,
-  status: CellFacts['labelStatus'],
-): ReferenceWord | null {
-  if (label === null || status !== 'gold') return null;
-  const recorded = label.label.target.behaviourReference;
-  return recorded === null ? null : recorded;
 }
 
 /**
@@ -425,7 +421,15 @@ export function cellFactsOf(parts: {
     cellInputHash: inputHash,
     conflicted: parts.dataset.contestedCases.has(parts.state.caseId),
   });
+  const reference = legacyReference({
+    label,
+    caseKnown: facts !== null,
+    inputHash,
+    conflicted: parts.dataset.contestedCases.has(parts.state.caseId),
+  });
   return {
+    source: { kind: 'legacy', caseId: parts.state.caseId },
+    evaluationReference: reference,
     cellId: parts.state.cellId,
     caseId: parts.state.caseId,
     targetId: parts.state.targetId,
@@ -444,7 +448,9 @@ export function cellFactsOf(parts: {
     challengeClass: challengeClassOf(caseFacts?.challenge ?? null),
     label,
     engine,
-    reference: referenceOf(label, labelStatus),
+    reference: reference.behaviourEligible
+      ? (reference.target?.behaviourReference ?? null)
+      : null,
     labelStatus,
     labelReasons: label === null ? [] : [...label.reasons],
     engineWord: engine.word,
@@ -476,15 +482,9 @@ export function cellFactsOfRun(observation: Observation): readonly CellFacts[] {
 /**
  * Whether this cell's label may be used as a gold reference.
  *
- * The single predicate every gold-dependent metric consults. `cell.labelStatus` is where the
- * cross-artifact checks already landed — the label was approved, it was not contested, and it
- * judges the same input this cell submitted — so re-deriving eligibility from
- * `cell.label.gold` anywhere else would reintroduce exactly the defect that status exists to
- * prevent: the dataset's own view is about the dataset, not about this run.
- *
- * Layer one, both diagnostic fields, allowed-pair counting, monotonicity, the reference
- * distribution and the score differences all call this, so the layers cannot disagree about
- * which cells they measured.
+ * This is the legacy full-score human-label status. Behaviour and per-field score
+ * applicability use evaluationReference; neither a machine reference nor an approved
+ * no-score human reference is turned into legacy scoring gold.
  */
 export function hasGoldReference(cell: CellFacts): boolean {
   return cell.labelStatus === 'gold' && cell.reference !== null;

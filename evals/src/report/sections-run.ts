@@ -78,7 +78,7 @@ export function coverageSection(report: EvaluationReport): string {
   return [
     heading(2, '覆盖与分母'),
     '',
-    '分母在这里公开。缺少记录的格子和派发前已决定的格子都不进入任何比率；前者是真正的缺口，后者是运行器的正常状态。',
+    '分母在这里公开。缺少记录和派发前已决定的格子不进入有效判定比较；全计划覆盖与适用端到端负担仍保留这些状态。',
     '',
     row(['指标', '值']),
     separator(2),

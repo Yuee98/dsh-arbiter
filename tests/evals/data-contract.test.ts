@@ -375,7 +375,7 @@ describe('dataset inspection', () => {
     });
   });
 
-  it('reports a behaviour reference no legal pair reaches', async () => {
+  it('retains an independent behaviour reference and reports the matrix disagreement as a finding', async () => {
     await withDataset(async (dataset) => {
       await dataset.write('manifest.json', manifest(['case-a']));
       await dataset.write('cases/case-a.json', reviewCase());
@@ -390,9 +390,11 @@ describe('dataset inspection', () => {
         checkers,
         CURRENT,
       );
-      expect(inspection.problems.map((problem) => problem.message)).toEqual(
+      expect(inspection.problems).toEqual([]);
+      expect(inspection.labels.gold).toHaveLength(1);
+      expect(inspection.findings.map((finding) => finding.message)).toEqual(
         expect.arrayContaining([
-          'behaviour reference deny is not reachable from the legal pairs (escalate)',
+          'behaviour reference deny is not reachable from the legal pairs (escalate); retained as an independent reference',
         ]),
       );
     });
@@ -529,15 +531,14 @@ describe('dataset inspection', () => {
     });
   });
 
-  it('refuses a widened set whose pairs disagree about the stage', async () => {
+  it('continues to refuse an A1 mixture while keeping matrix disagreement diagnostic', async () => {
     await withDataset(async (dataset) => {
       await dataset.write('manifest.json', manifest(['case-a']));
       await dataset.write('cases/case-a.json', reviewCase());
       await dataset.write(
         'labels/case-a.json',
         reviewLabel(hash, {
-          // 1/1 is a prohibition and 3/8 is complete coverage, so the two pairs
-          // reach different stages; one label cannot record both.
+          // An effective prohibition cannot be mixed with positive authorization.
           target: widenedTarget([
             [1, 1],
             [3, 8],
@@ -549,12 +550,14 @@ describe('dataset inspection', () => {
         checkers,
         CURRENT,
       );
+      expect(inspection.problems.map((problem) => problem.message)).toContain(
+        'authorization combines band 1 (an applicable prohibition) with other bands; a prohibition denies at every risk, so these are opposite decisions rather than an interval',
+      );
       expect(
-        inspection.problems.some(
-          (problem) =>
-            problem.message.includes('is not reachable from the legal pairs') &&
-            problem.message.includes('deny') &&
-            problem.message.includes('allow'),
+        inspection.findings.some((finding) =>
+          finding.message.includes(
+            'is not reachable from the legal pairs (deny, allow)',
+          ),
         ),
       ).toBe(true);
     });

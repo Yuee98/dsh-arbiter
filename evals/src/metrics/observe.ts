@@ -19,7 +19,7 @@
  * silently and never counted as an answer.
  */
 
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
@@ -42,6 +42,9 @@ import type { RunArtifact } from '../run/artifact.js';
 import { compileRunCheckers } from '../run/schemas.js';
 import type { CellRecord, CellState, RunProtocol } from '../run/types.js';
 import type { DatasetSource } from './types.js';
+import type { WorkflowMetricSource } from './workflow-metrics-types.js';
+import { readReferenceSnapshot } from './reference-snapshot.js';
+import type { ReferenceSnapshot } from './reference-snapshot.js';
 
 /** One case's static identity, from the dataset rather than from the run. */
 export interface CaseFacts {
@@ -91,6 +94,8 @@ export interface DatasetFacts {
 
 /** What one run directory and its dataset amounted to. */
 export interface Observation {
+  readonly referenceSnapshots?: readonly ReferenceSnapshot[];
+  readonly workflowSources?: readonly WorkflowMetricSource[];
   readonly artifact: RunArtifact;
   readonly dataset: DatasetFacts;
   /** Records whose cell id is not one the index planned, which is an integrity failure. */
@@ -445,6 +450,7 @@ export function datasetPathOf(
  * reported as a stray rather than accepted as data.
  */
 export async function observeRun(parts: {
+  readonly references?: readonly string[];
   readonly directory: string;
   readonly root: string;
   readonly dataset: DatasetSource;
@@ -460,6 +466,21 @@ export async function observeRun(parts: {
     };
   }
   const artifact = read.artifact;
+  const referenceSnapshots: ReferenceSnapshot[] = [];
+  for (const path of parts.references ?? []) {
+    try {
+      referenceSnapshots.push(
+        await readReferenceSnapshot(resolve(parts.root, path)),
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        problems: [
+          `reference snapshot ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+      };
+    }
+  }
   const planned = new Set(artifact.index.cells.map((cell) => cell.cellId));
   const records = new Map<string, CellRecord>();
   const strays: string[] = [];
@@ -487,6 +508,7 @@ export async function observeRun(parts: {
   return {
     ok: true,
     observation: {
+      referenceSnapshots,
       artifact,
       dataset,
       strays,
