@@ -121,8 +121,8 @@ function populationOf(
     readonly mode: AskPolicy;
     readonly channel: 'available' | 'unavailable';
   },
+  conditions: readonly CellFacts[] = firstConditions(cells),
 ): QualityPopulation {
-  const conditions = firstConditions(cells);
   const shouldRequest = conditions.filter(
     (cell) =>
       cell.indexStatus !== 'unsupported' &&
@@ -298,6 +298,7 @@ export function qualitySection(
     readonly channel: 'available' | 'unavailable';
   },
 ): QualitySection {
+  const conditions = firstConditions(cells);
   const axes: readonly {
     readonly axis: QualitySection['byGroup'][number]['axis'];
     readonly key: (cell: CellFacts) => string;
@@ -329,14 +330,18 @@ export function qualitySection(
   ];
   return {
     conditionSelection: 'lowest-planned-repeat',
-    overall: populationOf(cells, settings),
+    overall: populationOf(cells, settings, conditions),
     byGroup: axes.flatMap(({ axis, key }) =>
       [...groupBy(cells, key).entries()]
         .sort(([a], [b]) => compareText(a, b))
         .map(([value, group]) => ({
           axis,
           key: value,
-          population: populationOf(group, settings),
+          population: populationOf(
+            group,
+            settings,
+            conditions.filter((cell) => key(cell) === value),
+          ),
         })),
     ),
     identities: identitiesOf(cells),

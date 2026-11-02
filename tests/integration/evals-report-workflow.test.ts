@@ -157,6 +157,11 @@ describe('formal workflow runner to report', () => {
         human: 7,
       });
       expect(
+        moved.quality?.byGroup.find(
+          (group) => group.axis === 'reference-source' && group.key === 'human',
+        )?.population.conditions.compared,
+      ).toBe(3);
+      expect(
         moved.examples.find((cell) => cell.cellId === recordState.cellId)
           ?.evaluationReference?.reasons,
       ).toContain('record-material-drift');

@@ -192,6 +192,37 @@ describe('complete populations and conditional quality', () => {
       stabilitySection(cells.slice(0, 2)).repeatGroups[0]?.stable,
     ).toBeNull();
   });
+  it('does not reselect a later reference-qualified repeat inside a reference-source subgroup', () => {
+    const section = qualitySection(
+      [
+        metricCell('same', {
+          outcome: FAILED,
+          reference: metricReference('allow', 'unresolved'),
+        }),
+        metricCell('same', { repeat: 2 }),
+      ],
+      settings,
+    );
+    const human = section.byGroup.find(
+      (group) => group.axis === 'reference-source' && group.key === 'human',
+    );
+    const unresolved = section.byGroup.find(
+      (group) =>
+        group.axis === 'reference-source' && group.key === 'unresolved',
+    );
+    expect(section.overall.conditions).toMatchObject({
+      cells: 1,
+      compared: 0,
+      technical: 1,
+    });
+    expect(human?.population).toMatchObject({
+      cells: { cells: 1 },
+      conditions: { cells: 0, compared: 0 },
+      burden: { plannedAllow: 0 },
+      cellBurden: { plannedAllow: 1 },
+    });
+    expect(unresolved?.population.conditions.cells).toBe(1);
+  });
   it('evaluates no-score engineering references without counting technical failures as semantic denials', () => {
     const m0 = metricReference('insufficient-material', 'human', {
       allowed: { risk: null, authorization: null },
