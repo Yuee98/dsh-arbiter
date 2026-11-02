@@ -27,6 +27,7 @@ import type {
   ReviewCase,
   ReviewLabel,
   RubricSnapshot,
+  LabelTarget,
 } from './types.js';
 
 import type {
@@ -60,6 +61,7 @@ export type Checker<T> = (value: unknown) => Checked<T>;
 
 /** Every document kind's checker. */
 export interface Checkers {
+  readonly labelTarget: Checker<LabelTarget>;
   readonly workflows: Checker<RecordCollection<Workflow>>;
   readonly groupedCases: Checker<RecordCollection<ReviewCase>>;
   readonly groupedLabels: Checker<
@@ -147,6 +149,11 @@ export async function compileCheckers(
     ajv.addSchema(document);
   }
   return {
+    labelTarget: checkerOf(
+      ajv.compile<LabelTarget>({
+        $ref: `${BASE}common${SUFFIX}#/definitions/labelTarget`,
+      }),
+    ),
     workflows: checkerOf(
       compile<RecordCollection<Workflow>>(ajv, 'group-workflows'),
     ),
