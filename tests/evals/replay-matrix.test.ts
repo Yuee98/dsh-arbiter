@@ -9,6 +9,7 @@ import {
 import { withArea } from './helpers/report-run.js';
 import { readSource } from '../../evals/src/replay/source.js';
 import { recordPathOf } from '../../evals/src/run/artifact.js';
+import { replayRunIdOf } from '../../evals/src/replay/assemble.js';
 import { REPOSITORY_ROOT } from './helpers/report-run.js';
 import {
   CASES,
@@ -24,6 +25,7 @@ import {
   readJson,
   objectsAt,
   numberAt,
+  textAt,
 } from './helpers/replay.js';
 
 const matrix = {
@@ -34,6 +36,33 @@ const variant = resolveVariant({ matrix });
 if (typeof variant === 'string') throw new Error(variant);
 
 describe('authored matrices are a separate offline replay axis', () => {
+  it('keeps long-label identity stable and distinct across complete axes and sources', () => {
+    const candidates = [
+      { matrix },
+      { matrix, thresholds: { risk: 'at-least' } },
+      { matrix, settlement: { mode: 'no-ask' } },
+      { matrix, answer: 'recorded-parse' },
+    ] as const;
+    const ids = candidates.map((stated) => {
+      const selected = resolveVariant(stated);
+      if (typeof selected === 'string') throw new Error(selected);
+      const id = replayRunIdOf('source-one', selected.variantId);
+      expect(id).toMatch(/^[a-z0-9-]{1,63}$/);
+      expect(replayRunIdOf('source-one', selected.variantId)).toBe(id);
+      return id;
+    });
+    expect(new Set(ids).size).toBe(candidates.length);
+    const sources = [
+      'source-one',
+      'source-two',
+      'a'.repeat(62) + 'b',
+      'a'.repeat(62) + 'c',
+    ];
+    expect(
+      new Set(sources.map((source) => replayRunIdOf(source, variant.variantId)))
+        .size,
+    ).toBe(sources.length);
+  });
   it('refuses workflow-marked records without their frozen workflow plan', async () => {
     await withArea(async (area) => {
       const first = CASES[0],
@@ -206,6 +235,7 @@ describe('authored matrices are a separate offline replay axis', () => {
           { matrix },
           { thresholds: { risk: 'at-least' } },
           { matrix, thresholds: { risk: 'at-least' } },
+          { matrix, settlement: { mode: 'no-ask' } },
         ],
       };
       const parsed = parseVariants(document);
@@ -222,10 +252,17 @@ describe('authored matrices are a separate offline replay axis', () => {
         ).code,
       ).toBe(0);
       const outcomes = [];
-      for (const selected of parsed.variants)
-        outcomes.push(
-          (await cellRecordOf(join(output, selected.variantId), id)).outcome,
-        );
+      const runIds = [];
+      for (const selected of parsed.variants) {
+        const directory = join(output, selected.variantId);
+        outcomes.push((await cellRecordOf(directory, id)).outcome);
+        const index = await readJson(join(directory, 'index.json'));
+        const report = await readJson(join(directory, 'report.json'));
+        const runId = textAt(index, 'runId');
+        expect(textAt(report, 'run.runId')).toBe(runId);
+        runIds.push(runId);
+      }
+      expect(new Set(runIds).size).toBe(parsed.variants.length);
       expect(outcomes).toMatchObject([
         {
           risk: 4,
@@ -247,6 +284,12 @@ describe('authored matrices are a separate offline replay axis', () => {
         },
         {
           risk: 3,
+          authorization: 8,
+          requiredAuthorization: 9,
+          verdict: 'review-escalate',
+        },
+        {
+          risk: 4,
           authorization: 8,
           requiredAuthorization: 9,
           verdict: 'review-escalate',
