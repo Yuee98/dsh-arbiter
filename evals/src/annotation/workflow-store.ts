@@ -116,6 +116,7 @@ async function atomicRole(
   directory: string,
   role: string,
   records: readonly unknown[],
+  beforePublish: () => Promise<void>,
 ): Promise<void> {
   const temporary = join(directory, `.${role}-${randomUUID()}.tmp`);
   try {
@@ -124,6 +125,7 @@ async function atomicRole(
       JSON.stringify({ schemaVersion: 'grouped-v1', records }, null, 2) + '\n',
       { flag: 'wx' },
     );
+    await beforePublish();
     await rename(temporary, join(directory, `${role}.json`));
   } finally {
     await rm(temporary, { force: true });
@@ -205,11 +207,24 @@ export async function changeWorkflowGroup<T>(
         'annotation conflict: role files changed while preparing the update',
       );
     if (write) {
+      const unchanged = async (role: 'opinions' | 'labels'): Promise<void> => {
+        const latest = workflowRecords(
+          await workflowState(dataset, split, group),
+        );
+        if (canonicalJson(latest[role]) !== canonicalJson(original[role]))
+          throw new Error(
+            `annotation conflict: ${role} changed before publication`,
+          );
+      };
       if (canonicalJson(original.opinions) !== canonicalJson(next.opinions))
-        await atomicRole(directory, 'opinions', next.opinions);
+        await atomicRole(directory, 'opinions', next.opinions, () =>
+          unchanged('opinions'),
+        );
       try {
         if (canonicalJson(original.labels) !== canonicalJson(next.labels))
-          await atomicRole(directory, 'labels', next.labels);
+          await atomicRole(directory, 'labels', next.labels, () =>
+            unchanged('labels'),
+          );
       } catch (error) {
         throw new Error(
           `opinions retained; labels were not updated; retry the same response IDs: ${String(error)}`,
@@ -273,16 +288,29 @@ export function mergeOpinions(
   }
   return [...records.values()];
 }
-export function assertLabelBaseline(
+export function assertHumanBaseline(
   batch: WorkflowBatch,
   current: readonly WorkflowLabel[],
   desired: readonly WorkflowLabel[],
-  pointIds: ReadonlySet<string>,
+  replacements: readonly WorkflowLabel[],
 ): void {
-  for (const pointId of pointIds) {
+  for (const replacement of replacements) {
     const sorted = (values: readonly WorkflowLabel[]) =>
       values
-        .filter((value) => value.pointId === pointId)
+        .filter((value) =>
+          replacement.annotation?.humanState === 'draft'
+            ? value.referenceId === replacement.referenceId
+            : value.pointId === replacement.pointId &&
+              value.viewId === replacement.viewId &&
+              ['human', 'human-inherited'].includes(value.source) &&
+              value.annotation !== undefined &&
+              value.annotation.humanState !== 'draft' &&
+              replacement.annotation !== undefined &&
+              sameAnnotationView(
+                value.annotation.binding,
+                replacement.annotation.binding,
+              ),
+        )
         .sort((a, b) => a.referenceId.localeCompare(b.referenceId));
     const before = sorted(batch.labels);
     const actual = sorted(current);
@@ -292,7 +320,7 @@ export function assertLabelBaseline(
       canonicalJson(actual) !== canonicalJson(after)
     )
       throw new Error(
-        `annotation conflict for ${pointId}; related labels changed since export`,
+        `annotation conflict for ${replacement.pointId}; related human decision changed since export`,
       );
   }
 }

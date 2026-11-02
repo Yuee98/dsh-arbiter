@@ -1,5 +1,6 @@
 /** Fixed integer arithmetic and semantic vetoes; no production matrix participates. */
 import type { WorkflowOpinion } from '../data/group-types.js';
+import { knownModelIdentity } from '../data/annotation-model.js';
 import type { BehaviourReference, ScorePair } from '../data/types.js';
 import type { ModelIdentity } from '../data/types.js';
 
@@ -42,11 +43,22 @@ export function modelConsensus(
     }
     return parent === key ? key : root(parent);
   };
+  const unite = (left: string, right: string): void => {
+    const a = root(left),
+      b = root(right);
+    if (a !== b) identities.set(a < b ? b : a, a < b ? a : b);
+  };
+  const known = new Map<string, string>();
   for (const value of opinions) {
     const annotation = value.annotation;
     if (annotation === undefined) continue;
-    for (const alias of annotation.aliases)
-      identities.set(root(alias), root(annotation.modelKey));
+    for (const alias of annotation.aliases) unite(alias, annotation.modelKey);
+    const identity = knownModelIdentity(value.opinion.model);
+    if (identity !== null) {
+      const previous = known.get(identity);
+      if (previous !== undefined) unite(previous, annotation.modelKey);
+      else known.set(identity, annotation.modelKey);
+    }
   }
   const groups = new Map<string, WorkflowOpinion[]>();
   for (const value of opinions) {

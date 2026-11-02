@@ -10,6 +10,7 @@ import type {
 } from '../../evals/src/data/group-types.js';
 import type { ScorePair } from '../../evals/src/data/types.js';
 import { opinion } from './helpers/workflow-annotation.js';
+import { registeredModels } from '../../evals/src/annotation/workflow-validation.js';
 
 function vote(
   index: number,
@@ -27,6 +28,26 @@ function vote(
   };
 }
 describe('independent model reference arithmetic and precedence', () => {
+  test('same-batch duplicate known identities are refused and cross-batch keys cannot add votes', () => {
+    const known = opinion(0).opinion.model;
+    const values = [0, 1, 2].map((index) => ({
+      ...opinion(index),
+      opinion: { ...opinion(index).opinion, model: known },
+    }));
+    expect(() =>
+      registeredModels(
+        values.map((value) => ({
+          modelKey: value.annotation?.modelKey,
+          aliases: [],
+          model: value.opinion.model,
+          parameters: {},
+        })),
+      ),
+    ).toThrow(/identity/u);
+    const result = modelConsensus(values);
+    expect(result.n).toBe(1);
+    expect(result.pair).toBeNull();
+  });
   test.each([
     [3, 3, true],
     [3, 2, false],

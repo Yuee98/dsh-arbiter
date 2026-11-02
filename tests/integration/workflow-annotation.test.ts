@@ -485,7 +485,7 @@ describe(
         ).toHaveLength(3);
       });
     });
-    test('visible changes reject import, source formatting and author notes do not, and related labels use CAS', async () => {
+    test('visible changes reject import, formatting and author notes do not, and real human decisions use CAS', async () => {
       await withWorkflowAnnotation(async (f) => {
         const file = join(f.dataset, 'dev/f01/workflows.json');
         await writeFile(
@@ -506,17 +506,42 @@ describe(
         });
         const baseline = await readWorkflowBatch(f.baseline);
         const label = baseline.labels[0];
-        if (label === undefined) throw new Error('fixture');
+        if (label?.annotation === undefined) throw new Error('fixture');
+        const human = {
+          ...label,
+          referenceId: 'external-human',
+          source: 'human' as const,
+          humanConfirmed: true,
+          scoringEligible: true,
+          annotation: {
+            binding: label.annotation.binding,
+            humanState: 'confirmed' as const,
+          },
+          target: {
+            ...label.target,
+            status: 'approved' as const,
+            rationale: 'external synthetic human decision',
+            decidedBy: 'synthetic-human',
+            decidedAt: '2026-11-02',
+          },
+        };
         await writeFile(
           join(f.dataset, 'dev/f01/labels.json'),
-          JSON.stringify(
-            collectionOf({ ...label, notes: 'external relevant change' }),
-          ),
+          JSON.stringify(collectionOf(label, human)),
         );
         await expect(
-          importWorkflowOpinions({
+          importWorkflowHuman({
             ...f,
-            returned: returns(f.batch),
+            fill: {
+              batchId: f.batch.batchId,
+              decisions: [
+                {
+                  questionId: f.batch.points[0]?.questionId,
+                  state: 'confirmed',
+                  target: human.target,
+                },
+              ],
+            },
             write: true,
           }),
         ).rejects.toThrow(/conflict/u);

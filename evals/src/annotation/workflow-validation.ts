@@ -2,6 +2,7 @@
 import { Ajv } from 'ajv';
 import type { JSONSchemaType } from 'ajv';
 import type { IndependentAnswer } from '../data/annotation-types.js';
+import { knownModelIdentity } from '../data/annotation-model.js';
 import type { RegisteredModel, ReturnedBatch } from './workflow-types.js';
 
 export function checked<T>(
@@ -96,7 +97,16 @@ export function registeredModels(value: unknown): readonly RegisteredModel[] {
     value,
   );
   const identities = new Set<string>();
+  const known = new Set<string>();
   for (const model of models) {
+    const identity = knownModelIdentity(model.model);
+    if (identity !== null) {
+      if (known.has(identity))
+        throw new Error(
+          'duplicate known model identity; use one modelKey with aliases',
+        );
+      known.add(identity);
+    }
     if (
       (model.model.version === null) !==
       (model.model.versionSource === 'unknown')

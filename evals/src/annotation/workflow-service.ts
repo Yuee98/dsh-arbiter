@@ -13,7 +13,7 @@ import { currentReference, freezeReferences } from './reference.js';
 import { responseOpinion, registrationOpinions } from './workflow-opinion.js';
 import { readWorkflowBatch } from './workflow-batch-read.js';
 import {
-  assertLabelBaseline,
+  assertHumanBaseline,
   changeWorkflowGroup,
   mergeOpinions,
   readJson,
@@ -102,10 +102,14 @@ function unresolvedLabel(
   );
   // Machine cache always stays separate, including when a human decision is effective.
   const model = current.reference;
-  if (model !== null) return model;
   const previous = labels.find(
     (value) => value.referenceId === point.modelReferenceId,
   );
+  if (model !== null)
+    return {
+      ...model,
+      ...(previous?.notes === undefined ? {} : { notes: previous.notes }),
+    };
   return {
     referenceId: point.modelReferenceId,
     rootId: point.rootId,
@@ -188,13 +192,31 @@ export async function importWorkflowOpinions(options: {
       ]);
       const replacements = batch.points
         .filter((point) => touched.has(point.pointId) && point.binding !== null)
-        .map((point) => unresolvedLabel(batch, point, opinions, now.labels));
+        .map((point) => {
+          const cache = now.labels.find(
+            (value) =>
+              value.pointId === point.pointId &&
+              value.viewId === point.viewId &&
+              ['model-consensus', 'unresolved'].includes(value.source) &&
+              value.annotation !== undefined &&
+              point.binding !== null &&
+              sameAnnotationView(value.annotation.binding, point.binding),
+          );
+          return unresolvedLabel(
+            batch,
+            {
+              ...point,
+              modelReferenceId: cache?.referenceId ?? point.modelReferenceId,
+            },
+            opinions,
+            now.labels,
+          );
+        });
       const ids = new Set(replacements.map((value) => value.referenceId));
       const labels = [
         ...now.labels.filter((value) => !ids.has(value.referenceId)),
         ...replacements,
       ];
-      assertLabelBaseline(batch, now.labels, labels, touched);
       return {
         labels,
         opinions,
@@ -335,12 +357,7 @@ export async function importWorkflowHuman(options: {
         ...now.labels.filter((value) => !ids.has(value.referenceId)),
         ...replacements,
       ];
-      assertLabelBaseline(
-        batch,
-        now.labels,
-        labels,
-        new Set(replacements.map((value) => value.pointId)),
-      );
+      assertHumanBaseline(batch, now.labels, labels, replacements);
       return {
         labels,
         opinions: now.opinions,
