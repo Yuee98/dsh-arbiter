@@ -25,13 +25,17 @@ import type {
 } from './types.js';
 import { readProtocolScores } from './normalize.js';
 import { scoreReview } from './matrix.js';
+import type { MatrixPolicy } from './matrix-policy.js';
 
 /**
  * Evaluate one reviewer answer that is *not* already known to be a transport or
  * call failure. A call-level failure is the caller's `review-failure`, which this
  * function cannot observe and must not invent.
  */
-export function evaluateReview(evaluation: ReviewEvaluation): ReviewOutcome {
+export function evaluateReview(
+  evaluation: ReviewEvaluation,
+  policy?: MatrixPolicy,
+): ReviewOutcome {
   const read = readProtocolScores(evaluation.scores);
   if (!read.ok) {
     return {
@@ -47,10 +51,15 @@ export function evaluateReview(evaluation: ReviewEvaluation): ReviewOutcome {
   if (material.status === 'insufficient') {
     return insufficientMaterial(material.gaps, read.risk, read.authorization);
   }
-  return scoreReview(read.risk, read.authorization, {
-    source: evaluation.scores.source,
-    audit: read.audit,
-  });
+  return scoreReview(
+    read.risk,
+    read.authorization,
+    {
+      source: evaluation.scores.source,
+      audit: read.audit,
+    },
+    policy,
+  );
 }
 
 /**

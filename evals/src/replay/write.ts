@@ -49,6 +49,8 @@ import { compileRunCheckers } from '../run/schemas.js';
 
 import type { Derivation } from './assemble.js';
 import { pathOfDerivedRecord } from './assemble.js';
+import { copyReferences, referencesMatch } from './references.js';
+import type { FrozenReference } from './references.js';
 
 /**
  * The prefix of a staging directory.
@@ -253,6 +255,7 @@ async function publish(parts: {
  * names the report files the derivation produced.
  */
 export async function writeDerivation(parts: {
+  readonly references?: readonly FrozenReference[];
   readonly derivation: Derivation;
   readonly directory: string;
   readonly settings: ReportSettings;
@@ -266,6 +269,13 @@ export async function writeDerivation(parts: {
     destination: parts.directory,
   });
   if (conflict !== null) return { ok: false, problems: [conflict] };
+  for (const reference of parts.references ?? []) {
+    const overlap = await destinationRefusal({
+      source: reference.sourcePath,
+      destination: parts.directory,
+    });
+    if (overlap !== null) return { ok: false, problems: [overlap] };
+  }
   if (!parts.force) {
     const conflicts = await Promise.all(
       writablePaths(parts.derivation, parts.directory).map(async (path) =>
@@ -303,6 +313,7 @@ export async function writeDerivation(parts: {
       directory: staging,
       settings: parts.settings,
       force: true,
+      references: parts.references ?? [],
     });
     if (!written.ok) {
       await rm(staging, { recursive: true, force: true });
@@ -337,6 +348,7 @@ export async function writeDerivation(parts: {
 
 /** Write the derivation's documents into a directory that is already this process's. */
 async function fill(parts: {
+  readonly references: readonly FrozenReference[];
   readonly derivation: Derivation;
   readonly directory: string;
   readonly settings: ReportSettings;
@@ -364,9 +376,34 @@ async function fill(parts: {
     await writeFile(join(parts.directory, RUN_FILES.fixture), fixture);
   }
   const prefix = defaultPrefixOf(parts.directory);
+  let evidence;
+  try {
+    evidence = await copyReferences(parts.directory, parts.references);
+  } catch (error) {
+    return {
+      ok: false,
+      problems: [
+        `reference snapshot: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    };
+  }
+  const lineage = {
+    ...parts.derivation.lineage,
+    replay: {
+      ...parts.derivation.lineage.replay,
+      ...(evidence.length === 0 ? {} : { references: evidence }),
+    },
+  };
+  // The observer verifies provenance while reports are built in private staging.
+  await writeJson(join(parts.directory, REPLAY_FILES.lineage), lineage);
   const read = await reportForRun({
     directory: parts.directory,
-    settings: parts.settings,
+    settings: {
+      ...parts.settings,
+      references: evidence.map((reference) =>
+        join(parts.directory, reference.path),
+      ),
+    },
   });
   if (!read.ok) {
     return {
@@ -378,11 +415,31 @@ async function fill(parts: {
   }
   const report = await writeReport({
     prefix,
-    report: read.report,
+    report: {
+      ...read.report,
+      notes: [
+        ...read.report.notes,
+        ...(parts.derivation.variant.matrix === undefined
+          ? []
+          : [
+              `Matrix ${parts.derivation.variant.matrix.id}: required authorization by risk 1..10 = ${parts.derivation.variant.matrix.requiredAuthorization.join(', ')}.`,
+              `N0 risk=${parts.derivation.variant.thresholds.risk}, authorization=${parts.derivation.variant.thresholds.authorization}; score, authorization-demand and verdict changes are separate observations.`,
+            ]),
+        ...evidence.map(
+          (reference) =>
+            `Frozen reference ${reference.path}: ${reference.digest}.`,
+        ),
+      ],
+    },
     force: parts.force,
     protectedEvidence: protectedEvidenceOf(parts.directory),
   });
   if (!report.ok) return { ok: false, problems: report.problems };
+  if (!(await referencesMatch(parts.directory, evidence)))
+    return {
+      ok: false,
+      problems: ['reference copies changed during report generation'],
+    };
   // Listed in the writer's own member order rather than a directory listing, so two
   // derivations of one variant produce the same lineage bytes.
   const reportFiles = [
@@ -391,7 +448,7 @@ async function fill(parts: {
     reportPathsOf(prefix).html,
   ].map((path) => relativeTo(parts.directory, path));
   await writeJson(join(parts.directory, REPLAY_FILES.lineage), {
-    ...parts.derivation.lineage,
+    ...lineage,
     derived: {
       ...parts.derivation.lineage.derived,
       report: reportFiles,

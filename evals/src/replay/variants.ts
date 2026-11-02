@@ -26,6 +26,8 @@
 import type { AskPolicy } from '../../../src/review-contract/matrix.js';
 
 import { digestOf } from '../data/hash.js';
+import { readReplayMatrix, matrixDigest } from './matrix.js';
+import type { ReplayMatrix } from './matrix.js';
 import type {
   AnswerCandidate,
   ThresholdRule,
@@ -63,6 +65,7 @@ const VARIANT_MEMBERS: readonly string[] = [
   'answer',
   'thresholds',
   'settlement',
+  'matrix',
 ];
 const THRESHOLD_MEMBERS: readonly string[] = ['risk', 'authorization'];
 const SETTLEMENT_MEMBERS: readonly string[] = ['mode', 'channel'];
@@ -135,6 +138,7 @@ const DEFAULT_ANSWER: AnswerCandidate = 'response-text';
 
 /** One variant as a caller states it, with every axis optional. */
 export interface StatedVariant {
+  readonly matrix?: unknown;
   readonly description?: string;
   readonly answer?: string;
   readonly thresholds?: {
@@ -179,11 +183,15 @@ function oneOf<T extends string>(
 
 /** A variant's axis digest, which is what its identity is. */
 export function variantDigest(axes: {
+  readonly matrix?: ReplayMatrix;
   readonly answer: AnswerCandidate;
   readonly thresholds: ThresholdRules;
   readonly settlement: SettlementChoice;
 }): string {
   return digestOf({
+    ...(axes.matrix === undefined
+      ? {}
+      : { matrix: axes.matrix.requiredAuthorization }),
     answer: axes.answer,
     thresholds: axes.thresholds,
     settlement: axes.settlement,
@@ -198,6 +206,7 @@ export function variantDigest(axes: {
  * what a variant was.
  */
 function labelOf(axes: {
+  readonly matrix?: ReplayMatrix;
   readonly answer: AnswerCandidate;
   readonly thresholds: ThresholdRules;
   readonly settlement: SettlementChoice;
@@ -211,11 +220,16 @@ function labelOf(axes: {
     axes.thresholds.authorization,
     axes.settlement.mode,
     axes.settlement.channel,
+    ...(axes.matrix === undefined
+      ? []
+      : ['matrix', axes.matrix.id, matrixDigest(axes.matrix).slice(-64)]),
   ].join('-');
 }
 
 /** One fully resolved variant, from its stated axes and a description. */
 export function resolveVariant(stated: StatedVariant): ReplayVariant | string {
+  const matrix = readReplayMatrix(stated.matrix);
+  if (typeof matrix === 'string') return matrix;
   const answer =
     stated.answer === undefined
       ? DEFAULT_ANSWER
@@ -252,6 +266,7 @@ export function resolveVariant(stated: StatedVariant): ReplayVariant | string {
     return `settlement.channel must be one of ${CHANNELS.join(', ')}, not ${String(stated.settlement?.channel)}`;
   }
   const axes = {
+    ...(matrix === undefined ? {} : { matrix }),
     answer,
     thresholds: { risk, authorization },
     settlement: { mode, channel },
@@ -414,6 +429,9 @@ function statedVariantOf(
   if ('problem' in settlement) return settlement;
   return {
     stated: {
+      ...(fieldOf(entry, 'matrix') === undefined
+        ? {}
+        : { matrix: fieldOf(entry, 'matrix') }),
       ...(description === undefined ? {} : { description }),
       ...(answer === null ? {} : { answer }),
       ...(thresholds.value === null ? {} : { thresholds: thresholds.value }),

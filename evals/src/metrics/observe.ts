@@ -512,6 +512,7 @@ export async function observeRun(parts: {
   try {
     if (artifact.plan.workflow !== undefined)
       workflow = await observeWorkflow({
+        directory: parts.directory,
         artifact,
         root: parts.root,
         datasetPath: datasetPathOf(parts.dataset, artifact),

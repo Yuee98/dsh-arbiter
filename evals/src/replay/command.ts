@@ -26,6 +26,7 @@ import { join, resolve } from 'node:path';
 
 import { REVIEW_CONTRACT_VERSION } from '../../../src/review-contract/index.js';
 import { REVIEW_PROMPT_VERSION } from '../../../src/reviewer/contract.js';
+import { RUNNER_IMPLEMENTATION_VERSION } from '../run/types.js';
 
 import { defaultSettings } from '../metrics/index.js';
 import type { ReportSettings } from '../metrics/types.js';
@@ -34,6 +35,9 @@ import { deriveRun } from './assemble.js';
 import { compareInputs } from './inputs.js';
 import type { InputComparison } from './inputs.js';
 import { readSource } from './source.js';
+import { freezeReferences } from './references.js';
+import type { FrozenReference } from './references.js';
+import { compareWorkflowInputs } from './workflow-inputs.js';
 import type { SourceRead } from './source.js';
 import { parseVariants, statesAnyAxis, variantFromFlags } from './variants.js';
 import type { FlagsVariant } from './variants.js';
@@ -49,6 +53,7 @@ export interface ReplayIo {
 
 /** What `replay` was asked for. */
 export interface ReplayCommand {
+  readonly references?: readonly string[];
   /** The run directory to replay, as the caller named it. */
   readonly directory: string;
   /** The variants document, or null when the variant is stated on the command line. */
@@ -63,6 +68,7 @@ export interface ReplayCommand {
 export const REPLAY_USAGE = [
   'replay commands (offline; a replay re-reads saved responses and never calls a model):',
   '  replay <run-dir> --variants FILE [--out DIR] [--force]',
+  '                   [--references SNAPSHOT.json] (repeat for separate scopes)',
   '  replay <run-dir> [--answer response-text|recorded-parse]',
   '                   [--threshold-risk strict|at-least]',
   '                   [--threshold-auth strict|at-least]',
@@ -73,6 +79,7 @@ export const REPLAY_USAGE = [
 
 /** The flags `replay` accepts, and no others. */
 interface ReplayFlags {
+  references: string[];
   variants: string | null;
   output: string | null;
   force: boolean;
@@ -81,6 +88,7 @@ interface ReplayFlags {
 
 /** The value-taking flags, and which member each fills. */
 const VALUE_FLAGS = [
+  '--references',
   '--variants',
   '--out',
   '--answer',
@@ -115,6 +123,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 function readReplayFlags(rest: readonly string[]): ReplayFlags | string {
   const inline = emptyInline();
   const flags: ReplayFlags = {
+    references: [],
     variants: null,
     output: null,
     force: false,
@@ -133,7 +142,8 @@ function readReplayFlags(rest: readonly string[]): ReplayFlags | string {
     const value = rest[index + 1];
     if (value === undefined) return `${flag} needs a value\n\n${REPLAY_USAGE}`;
     index += 1;
-    if (flag === '--variants') flags.variants = value;
+    if (flag === '--references') flags.references.push(value);
+    else if (flag === '--variants') flags.variants = value;
     else if (flag === '--out') flags.output = value;
     else if (flag === '--answer') inline.answer = value;
     else if (flag === '--threshold-risk') inline.thresholdRisk = value;
@@ -166,6 +176,9 @@ export function parseReplayCommand(
   }
   return {
     directory,
+    ...(parsed.references.length === 0
+      ? {}
+      : { references: parsed.references }),
     variants: parsed.variants,
     output: parsed.output,
     flags: parsed.inline,
@@ -331,7 +344,10 @@ export async function replayRun(
    * JSON parser before the invariant under test is reached. Production callers pass
    * nothing.
    */
-  hooks?: { readonly duringFirstRead?: () => Promise<void> },
+  hooks?: {
+    readonly duringFirstRead?: () => Promise<void>;
+    readonly afterVariant?: (directory: string) => Promise<void>;
+  },
 ): Promise<number> {
   const variants = await variantsOf(io, command);
   if (!variants.ok) {
@@ -350,16 +366,37 @@ export async function replayRun(
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  if (
+    read.plan.workflow !== undefined &&
+    read.index.versions.implementation !== RUNNER_IMPLEMENTATION_VERSION
+  ) {
+    io.err(
+      'problem workflow replay needs the original runner artifact; use the original lineage.source.directory rather than a derived run',
+    );
+    return 1;
+  }
+  let references: readonly FrozenReference[];
+  try {
+    references = await freezeReferences(io.root, command.references ?? []);
+  } catch (error) {
+    io.err(
+      `problem reference snapshot: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
   io.out(
     `source ${read.index.runId} (${read.index.status}), ${String(read.records.size)} record(s), ${String(read.index.cells.length)} cell(s)`,
   );
   // Version drift is reported on stderr as well as in the lineage, because the person
   // reading the terminal is the one who has to decide whether a new request is needed.
-  const inputs = await compareInputs({
-    root: io.root,
-    dataset: read.plan.datasetPath,
-    records: [...read.records.values()].map((sourced) => sourced.record),
-  });
+  const inputs =
+    read.plan.workflow !== undefined
+      ? await compareWorkflowInputs(io.root, read)
+      : await compareInputs({
+          root: io.root,
+          dataset: read.plan.datasetPath,
+          records: [...read.records.values()].map((sourced) => sourced.record),
+        });
   const notes = driftOf(read, inputs);
   for (const drift of notes) io.err(`warning ${drift}`);
   const parent =
@@ -384,6 +421,7 @@ export async function replayRun(
       settings: settingsOf(io.root, variant),
       force: command.force,
       sourceDirectory: directory,
+      references,
     });
     if ('problems' in written) {
       failed += 1;
@@ -396,12 +434,17 @@ export async function replayRun(
       `  cells ${String(totals.cells)}: re-derived ${String(totals.reDerived)}, kept ${String(totals.kept)}, not-replayable ${String(totals.notReplayable)}, no-record ${String(totals.noRecord)}`,
     );
     io.out(`  changed ${String(totals.changed)}`);
+    if (variant.matrix !== undefined)
+      io.out(
+        '  changed counts score, authorization-demand or verdict differences; it is not a verdict-migration count',
+      );
     io.out(
       `  derived run ${written.written.runId} in ${written.written.directory}`,
     );
     for (const file of written.written.report) {
       io.out(`  wrote ${join(written.written.directory, file)}`);
     }
+    await hooks?.afterVariant?.(written.written.directory);
   }
   return failed === 0 ? 0 : 1;
 }
