@@ -100,7 +100,8 @@ export interface DispatchOptions {
  * could not account for. No status is reused for it, because "a cell timed out" and "the
  * run stopped because a call was abandoned" are different facts about the artifact.
  */
-export type StopReason = 'cancelled' | 'budget-exhausted' | 'in-flight-timeout';
+export type StopReason =
+  'cancelled' | 'budget-exhausted' | 'in-flight-timeout' | 'failed';
 
 /** The whole run's dispatch outcome. */
 export interface DispatchOutcome {
@@ -392,7 +393,8 @@ export async function dispatch(
           // only once its record had been persisted would leave a window in which a peer
           // worker claims and starts another cell while the abandoned request is still
           // outstanding — the exact overrun this branch exists to prevent.
-          state.stopped = 'in-flight-timeout';
+          state.stopped =
+            settledCell.status === 'failed' ? 'failed' : 'in-flight-timeout';
           // The abandoned call may have sent more attempts than its record could report, so
           // its whole reservation stays consumed rather than being returned.
           await settle(charged(settledCell, ceiling));
@@ -656,6 +658,8 @@ function charged(
 /** Why the cells after a stop never started, in the artifact's own words. */
 function stopExplanation(reason: StopReason | null): string {
   switch (reason) {
+    case 'failed':
+      return 'the run stopped after a service failure whose requests may still be outstanding, so no further request was started';
     case 'budget-exhausted':
       return 'the run stopped after its budget was exhausted';
     case 'in-flight-timeout':
