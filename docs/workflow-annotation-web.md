@@ -39,6 +39,6 @@ pnpm check:evals
 pnpm verify
 ```
 
-浏览器脚本验证编辑、自动保存、刷新、SIGTERM 关闭、CLI 重启、续标、单点确认及文件回读，检查没有模型意见请求或作者/未来标记。结果和截图在 ignored 的 `.local/cw-128/browser-result.json`、`browser.png`。脚本清理自己创建的临时数据、DSH profile 和私有工作区。受限沙箱需要允许回环监听与浏览器子进程。
+浏览器脚本在含空格、#、% 和中文的临时检出目录中运行实际 CLI 与 bundle，验证编辑、自动保存、刷新、SIGTERM 关闭、CLI 重启、续标、单点确认及文件回读，检查没有模型意见请求或作者/未来标记。结果和截图在 ignored 的 `.local/cw-128/path-browser/browser-result.json`、`path-browser/browser.png`。脚本清理自己创建的临时数据、DSH profile 和私有工作区。受限沙箱需要允许回环监听与浏览器子进程。
 
 这些合成工程测试不代表真实模型质量或真人标注已完成；正式参考资格和随机抽检计划由相应任务决定。本工具不修改宿主插件加载、UI 或生命周期；宿主 E2E 由相关宿主任务承担。
