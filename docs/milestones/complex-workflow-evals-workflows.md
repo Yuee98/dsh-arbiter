@@ -373,3 +373,65 @@ checkpoint 为低优先级摘要来源，新投影默认最多考虑最新一条
 | F12 自动化与服务 | 一根修复一次性维护任务；一根设置周期清理或后台任务后暂停/缩小范围 | 一次执行与持续副作用、周期/对象范围、实际启停状态、既往批准不能无限扩张 |
 
 每根只标与判断相关的少量 P 机制，不要求固定数量或填满所有 prompt 字段。正常路径应能说明如何完成任务，困难分支有明确事实差异。扩充主要改变任务结构、资产后果和授权来源组合，不靠措辞改写扩大数字。
+
+## 10. CW-S18 首四根开发数据交接
+
+2026-11-02，#135 首阶段已制作 F01/F04/F07/F09 各一根，共 4 根、20 个基础审查点。它们包含在最终 24 根内；目前尚未完成 12 域各两根，也未形成模型意见、人工参考或模型质量结论。后续按首阶段材料反馈扩充，不以逐条人工审核作为数据制作的完成前置，口径以 #135 的 2026-11-01 执行修正为准。
+
+| 组与源集合 | 中性根 ID | 点数 | 任务与连续轨迹 |
+| --- | --- | --- | --- |
+| [F01](../../evals/datasets/reviewer-v2/dev/f01-build-cleanup/workflows.json) | `cw135-001` | 5 | 清理可重建缓存/产物，构建失败后改格式配置并重建；新一轮要求保留产物，人工素材始终保留 |
+| [F04](../../evals/datasets/reviewer-v2/dev/f04-support/workflows.json) | `cw135-007` | 5 | 本地排障、脱敏详情、上传前后绑定问答、指定工单/附件范围、暂停后继续本地总结 |
+| [F07](../../evals/datasets/reviewer-v2/dev/f07-release/workflows.json) | `cw135-013` | 5 | 多轮验证后生产小流量灰度，健康退化、暂停扩量、单次绑定回滚审批、恢复后清理零流量路由 |
+| [F09](../../evals/datasets/reviewer-v2/dev/f09-documents/workflows.json) | `cw135-017` | 5 | 父人类限定范围、child 自查与归档、relay 扩大、父消息局部解除与后续收窄；兄弟及父工具隔离 |
+
+每组只提交 `workflows.json`；未实际取得参考或意见时不预建 `labels.json`、`opinions.json`。根/点/视图使用中性稳定编号，作者任务说明、覆盖标签和来源说明不作为人类授权。当前 4 根均为独立设计的 `synthetic` 固定轨迹，未从 legacy 题目派生，全部属于 dev；不计入 calibration/holdout，也不支持日常线上频率推断。整体扩充目标仍为约 300 根/1,500 点、全 lineage 按 5:3:2 分组，此批不会为配比迁出 dev。
+
+关键本地结果用独立临时样本核实：目录/配置查询、删除可生成目录后人工素材仍保留、构建格式不兼容的实际失败与修复成功、演示邮箱/地址脱敏及本地附件副本、A/B 制品实际 SHA-256、文档移动及发布策略文件保留。它们不把合成轨迹升级为真实用户日志。工单上传、发布、健康、路由和审批结算是明确构造的服务事件，未访问外部服务、真实上传或部署。`settlement` 只描述固定源轨迹中的结算，不是新评测的模型回答或人类评分；当前 schema 不表达完整 reviewer 技术失败审计链，本批不声称验证该能力。
+
+主视图调用已合并的 `workflowMaterial`，经生产共享准备、选择、脱敏、T/H/C 预算与两协议 renderer 生成。默认使用 `DEFAULT_CONFIG`（T=6,000、H=10,000、普通单次调用整体 C 上界 600），配置修订取现有 `stableHash(DEFAULT_CONFIG)`，不新增内容身份体系。制作与逐点诊断只加载 `dev/workflows-v1` 且 `references:false`；`pnpm check:evals` 另执行全局结构、ID 与 lineage 检查。
+
+离线重建示例（在仓库根目录运行；只生成材料，不执行轨迹中的工具或调用模型）：
+
+```sh
+cw135_home=$(mktemp -d)
+DSH_HOME="$cw135_home" node --import ./evals/src/cli/register.ts --input-type=module <<'NODE'
+import { mkdir, writeFile } from 'node:fs/promises';
+import { readGroupedDataset } from './evals/src/data/group-read.ts';
+import { workflowMaterial } from './evals/src/run/material.ts';
+import { DEFAULT_CONFIG, stableHash } from './src/config.ts';
+const dataset = await readGroupedDataset('evals/datasets/reviewer-v2', {
+  split: 'dev', contentSet: 'workflows-v1', references: false,
+});
+if (dataset.problems.length) throw new Error(JSON.stringify(dataset.problems));
+const configRevision = stableHash(DEFAULT_CONFIG);
+const views = [];
+for (const group of dataset.groups) {
+  for (const { document: root } of group.workflows) {
+    for (const point of root.points) {
+      for (const protocol of ['chat', 'decision']) {
+        const material = await workflowMaterial(
+          dataset, root.rootId, point.pointId, protocol,
+          { config: DEFAULT_CONFIG, configRevision },
+        );
+        views.push({ rootId: root.rootId, pointId: point.pointId,
+          viewId: point.primaryViewId, protocol, ...material });
+      }
+    }
+  }
+}
+await mkdir('.local/cw-135', { recursive: true });
+await writeFile('.local/cw-135/views.json', JSON.stringify({
+  config: DEFAULT_CONFIG, configRevision, views,
+}, null, 2) + '\n');
+NODE
+cw135_status=$?
+rm -rf "$cw135_home"
+(exit "$cw135_status")
+```
+
+首阶段本机实际生成 40 份协议视图；逐点检查默认预算、关键可见事实、ask 绑定和父截止点，替换未来事件/兄弟内容/作者元数据后，当前请求保持不变。待审调用不作为历史重复进入，父工具/兄弟内容未串入。F07 的长组件报告在两协议中均出现真实 C 裁剪，身份与验证结论来自独立短汇总，不能假定被省略的中部内容仍可见。这些是材料结构验证，不是风险/授权参考裁决。
+
+供试标继续核对的材料问题：F07 后期接近 T，较早历史和长报告会竞争预算，必须按实际视图判断；原文中未取得的技术审计阶段链不能由摘要补成事实。项目规则文件未提供时，默认构建器产生 `known-empty` 非阻断说明，不能把它误报为读取失败或硬阻断。若后续意见发现其他材料缺失，应回交本源任务修正并重新生成受影响视图，现阶段不补造分数、共识或人工确认。
+
+本阶段在独立临时 `DSH_HOME` 下通过 `pnpm check:evals` 和完整 `pnpm verify`（2,050 项 unit、638 项 integration、366 项 UI，以及构建消费者/现行回归检查）。首次受限沙箱中的验证因 `127.0.0.1` 监听 `EPERM` 未完成；允许本机监听后全量重跑通过，未将该环境失败记为通过。未修改宿主加载、UI 接线或生命周期，本数据阶段未额外运行 DSH E2E。
