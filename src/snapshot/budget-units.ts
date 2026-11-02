@@ -5,7 +5,7 @@ import type {
   ReviewSnapshot,
 } from '../types.js';
 import { jsonFragment, shortenedText } from './budget-text.js';
-import { resultCopy } from './budget-results.js';
+import { resultBudgetCopy } from './tool-result-budget.js';
 
 type Snapshot = ReviewSnapshot;
 export interface BudgetUnit {
@@ -352,10 +352,11 @@ export function scaledUnit(
                 ...event,
                 body: {
                   ...event.body,
-                  content: resultCopy(
+                  content: resultBudgetCopy(
                     event.body.content,
                     bodyScale,
                     wholeResults,
+                    event.collection?.read === 'found',
                   ),
                 },
               };
