@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import type { Observation } from '../metrics/observe.js';
 import { datasetPathOf } from '../metrics/observe.js';
 import type { EvaluationReport, ReportSettings } from '../metrics/types.js';
-import { recordPathOf, RECORDLESS_STATUSES } from '../run/artifact.js';
+import { RECORDLESS_STATUSES } from '../run/artifact.js';
 import { canonicalJson } from '../data/hash.js';
 import type { GitObservation } from '../run/workflow-types.js';
 import type {
@@ -41,9 +41,7 @@ export function publishReport(parts: {
       recordStatus: record?.status ?? null,
       recordPresent: record !== undefined,
       recordPath:
-        record === undefined
-          ? null
-          : join(parts.directory, recordPathOf(state.cellId)),
+        record === undefined ? null : join(parts.directory, state.record),
       mismatch: reason !== null,
       reason,
     };

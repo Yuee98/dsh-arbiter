@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -152,32 +152,6 @@ describe(
         }
         if (provenance === undefined)
           throw new Error('missing initial provenance');
-        const moved = {
-          ...resumed.artifact.index,
-          provenance: {
-            codeGit: { ...provenance.codeGit, revision: 'a'.repeat(40) },
-          },
-        };
-        const movedText = JSON.stringify(moved);
-        await writeFile(join(directory, 'index.json'), movedText);
-        expect(
-          await runCli(
-            [
-              ...args,
-              '--resume',
-              '--report',
-              '--out',
-              join(area.path, 'moved'),
-            ],
-            io,
-          ),
-        ).toBe(1);
-        await expect(
-          readFile(join(area.path, 'moved.json')),
-        ).rejects.toMatchObject({ code: 'ENOENT' });
-        expect(await readFile(join(directory, 'index.json'), 'utf8')).toBe(
-          movedText,
-        );
         const { provenance: omitted, ...historical } = resumed.artifact.index;
         expect(omitted).toEqual(provenance);
         await writeFile(
@@ -198,6 +172,53 @@ describe(
           null,
         );
         expect(oldReport).toHaveProperty('publication.testedCode.dirty', null);
+        const saved = historical.cells[0];
+        if (saved === undefined) throw new Error('missing actual record state');
+        const relativeRecord = 'records/renamed.json';
+        await rename(
+          join(directory, saved.record),
+          join(directory, relativeRecord),
+        );
+        await writeFile(
+          join(directory, 'index.json'),
+          JSON.stringify({
+            ...historical,
+            cells: historical.cells.map((cell) =>
+              cell.cellId === saved.cellId
+                ? { ...cell, record: relativeRecord }
+                : cell,
+            ),
+          }),
+        );
+        const relocated = await readRun(directory, await compileRunCheckers());
+        if (!relocated.ok)
+          throw new Error('noncanonical legacy record was rejected');
+        expect(relocated.artifact.records).toHaveLength(1);
+        const relocatedPrefix = join(area.path, 'relocated');
+        expect(
+          await runCli(['report', directory, '--out', relocatedPrefix], io),
+        ).toBe(0);
+        const relocatedReport: unknown = JSON.parse(
+          await readFile(`${relocatedPrefix}.json`, 'utf8'),
+        );
+        expect(relocatedReport).toHaveProperty(
+          'publication.consistency.cells.0.recordPath',
+          join(directory, relativeRecord),
+        );
+        const relocatedMarkdown = await readFile(
+          `${relocatedPrefix}.md`,
+          'utf8',
+        );
+        expect(relocatedMarkdown).toContain('[dev/legacy-v1]');
+        const detailFiles = await readdir(`${relocatedPrefix}.details`);
+        const detail = await readFile(
+          join(`${relocatedPrefix}.details`, detailFiles[0] ?? ''),
+          'utf8',
+        );
+        expect(detail).toContain(join(directory, relativeRecord));
+        expect(await readFile(join(directory, relativeRecord), 'utf8')).toBe(
+          recordsBefore,
+        );
       });
     });
   },

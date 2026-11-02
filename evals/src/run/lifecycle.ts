@@ -511,24 +511,10 @@ async function resumeRunUnlocked(
         `refusing to continue a run under different versions — ${drift.join('; ')}`,
       );
     }
-    const recorded = options.existing.index.provenance?.codeGit;
-    if (
-      options.existing.index.workflowExecution === undefined &&
-      recorded !== undefined
-    ) {
-      const current = (await legacyRunProvenance()).codeGit;
-      if (
-        (recorded.revision !== null &&
-          current.revision !== null &&
-          recorded.revision !== current.revision) ||
-        (recorded.dirty !== null &&
-          current.dirty !== null &&
-          recorded.dirty !== current.dirty)
-      )
-        throw new Error(
-          'refusing to continue a legacy run whose tested Git provenance moved',
-        );
-    }
+    // Initial Git provenance is an observation, not an execution compatibility
+    // key: report archives and documentation commits can move HEAD or dirty state
+    // without changing the tested inputs. Existing plan/source/fixture/version
+    // checks still guard continuation; retain the original provenance unchanged.
     // An abandoned request may still be outstanding: the runner stopped waiting, but the
     // provider may be working and billing. Starting new requests beside it would put more
     // calls in flight than the plan's concurrency allows, and no budget arithmetic can make

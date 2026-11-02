@@ -8,6 +8,9 @@ import { compactText } from './compact.js';
 function groupOf(cell: CellView): string {
   return cell.source?.kind === 'workflow' ? cell.source.group : 'legacy-v1';
 }
+function splitOf(cell: CellView): string {
+  return cell.source?.kind === 'workflow' ? cell.source.split : cell.split;
+}
 export function reportGroups(report: PublishedReport): readonly {
   readonly name: string;
   readonly file: string;
@@ -15,7 +18,7 @@ export function reportGroups(report: PublishedReport): readonly {
 }[] {
   const groups = new Map<string, CellView[]>();
   for (const cell of report.examples) {
-    const key = JSON.stringify([cell.split, groupOf(cell)]);
+    const key = JSON.stringify([splitOf(cell), groupOf(cell)]);
     const rows = groups.get(key) ?? [];
     rows.push(cell);
     groups.set(key, rows);
@@ -26,7 +29,7 @@ export function reportGroups(report: PublishedReport): readonly {
       const first = cells[0];
       if (first === undefined) throw new Error('empty report group');
       return {
-        name: `${first.split}/${groupOf(first)}`,
+        name: `${splitOf(first)}/${groupOf(first)}`,
         file: `${encodeURIComponent(key)}.md`,
         cells,
       };

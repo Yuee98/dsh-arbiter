@@ -1,4 +1,11 @@
-import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { withWorkflowArea } from '../evals/helpers/workflow-run.js';
@@ -35,6 +42,34 @@ describe(
           actual.indexOf('format-clean-main~'),
         );
         expect(await readdir(`${prefix}.details`)).toHaveLength(1);
+      });
+    });
+    it('retains the frozen workflow split and every planned identity when the source disappears', async () => {
+      await withWorkflowArea(async (area) => {
+        await area.write();
+        expect(await area.cli(['run', area.planPath])).toBe(0);
+        const indexPath = join(area.runDirectory, 'index.json');
+        const before = await readFile(indexPath, 'utf8');
+        await rm(area.sourcePath);
+        const prefix = join(area.directory, 'missing-source');
+        expect(
+          await area.cli(['report', area.runDirectory, '--out', prefix]),
+        ).toBe(0);
+        const markdown = await readFile(`${prefix}.md`, 'utf8');
+        expect(markdown).toContain('[dev/f01]');
+        expect(markdown).not.toContain('[unknown/f01]');
+        const files = await readdir(`${prefix}.details`);
+        expect(files).toEqual([
+          `${encodeURIComponent(JSON.stringify(['dev', 'f01']))}.md`,
+        ]);
+        const detail = await readFile(
+          join(`${prefix}.details`, files[0] ?? ''),
+          'utf8',
+        );
+        expect(detail).toContain('分组明细 dev/f01');
+        expect(detail).toContain('format-clean-main~decision-a~decision~r1');
+        expect(detail).toContain('format-build-main~decision-a~decision~r1');
+        expect(await readFile(indexPath, 'utf8')).toBe(before);
       });
     });
     it('refuses a detail-directory alias into source evidence before writing any main output', async () => {
