@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { digestOf } from '../../evals/src/data/hash.js';
+import { responseOpinion } from '../../evals/src/annotation/workflow-opinion.js';
 import {
   importWorkflowOpinions,
   workflowReferences,
@@ -42,7 +43,7 @@ function password(
 
 describe('annotation retry identity cannot disclose low-entropy credentials', () => {
   test.each(['metadata', 'rawResponse', 'error'] as const)(
-    '%s has no public offline password verifier',
+    '%s retry identity requires private key material that stays out of public artifacts',
     async (channel) => {
       await withWorkflowAnnotation(async (f) => {
         expect((await stat(f.baseline)).mode & 0o777).toBe(0o600);
@@ -59,16 +60,23 @@ describe('annotation retry identity cannot disclose low-entropy credentials', ()
         const record = workflowRecords(
           await workflowState(f.dataset, 'dev', 'f01'),
         ).opinions.find((value) => value.opinion.reviewId === first.responseId);
-        const guesses: string[] = [];
-        for (let index = 0; index < 10000; index += 1) {
-          const value = String(index).padStart(4, '0');
-          if (
-            record?.annotation?.responseHash ===
-            digestOf(password(first, channel, value))
-          )
-            guesses.push(value);
-        }
-        expect(guesses).toEqual([]);
+        const point = f.batch.points.find(
+          (value) => value.questionId === first.questionId,
+        );
+        const model = f.batch.models.find(
+          (value) => value.modelKey === first.modelKey,
+        );
+        if (point === undefined || model === undefined)
+          throw new Error('fixture identity');
+        const other = responseOpinion(
+          { ...f.batch, retryKey: randomBytes(32).toString('hex') },
+          point,
+          model,
+          password(first, channel, '0421'),
+        );
+        expect(
+          other.annotation?.responseHash === record?.annotation?.responseHash,
+        ).toBe(false);
         expect(record?.annotation?.responseHash).toMatch(
           /^hmac-sha256:[a-f0-9]{64}$/u,
         );
@@ -97,9 +105,6 @@ describe('annotation retry identity cannot disclose low-entropy credentials', ()
         ).toBe(false);
         expect(publicText).not.toContain('password=0421');
         expect(publicText).not.toContain('"password": "0421"');
-        expect(
-          publicText.includes(digestOf(password(first, channel, '0421'))),
-        ).toBe(false);
         expect((await stat(f.baseline)).mode & 0o777).toBe(0o600);
         for (const name of await readdir(f.out)) {
           expect(
