@@ -84,6 +84,7 @@ export function TextInput(props: {
 export function NumberInput(props: {
   readonly value: number;
   readonly onChange: (value: number) => void;
+  readonly onInvalid?: () => void;
   readonly onBlur?: () => void;
   readonly min?: number;
   readonly max?: number;
@@ -108,6 +109,9 @@ export function NumberInput(props: {
         if (event.target.value.trim() !== '') {
           const next = Number(event.target.value);
           if (Number.isFinite(next)) props.onChange(next);
+          else props.onInvalid?.();
+        } else {
+          props.onInvalid?.();
         }
       }}
       onBlur={() => {
