@@ -172,6 +172,10 @@ describe(
           null,
         );
         expect(oldReport).toHaveProperty('publication.testedCode.dirty', null);
+        expect(oldReport).toHaveProperty(
+          'publication.context.targetInputTokens',
+          null,
+        );
         const saved = historical.cells[0];
         if (saved === undefined) throw new Error('missing actual record state');
         const relativeRecord = 'summary.json';

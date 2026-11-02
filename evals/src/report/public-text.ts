@@ -63,6 +63,20 @@ const CLOSED_GROUP_AXES = new Set([
   'provenance',
 ]);
 const CANDIDATE_AXES = new Set(['prompt', 'structure', 'history', 'scale']);
+// The replay writer emits this finite protocol explanation. Its closed modes
+// are not an authentication field; appended or adjacent prose remains untrusted.
+const N0_MODES = ['strict', 'at-least'] as const;
+const N0_NOTES = new Set(
+  N0_MODES.flatMap((risk) =>
+    N0_MODES.map(
+      (authorization) =>
+        `N0 risk=${risk}, authorization=${authorization}; score, authorization-demand and verdict changes are separate observations.`,
+    ),
+  ),
+);
+function closedProtocolNote(key: string, value: string): boolean {
+  return key === 'notes' && N0_NOTES.has(value);
+}
 const IDENTITIES = new Set([
   'cellId',
   'caseId',
@@ -118,7 +132,7 @@ export function publicReport<
   try {
     if (credentialEvidence !== undefined) redactor.value(credentialEvidence);
     strings(report, (key, text) => {
-      if (CLOSED_FIELDS.has(key)) return;
+      if (CLOSED_FIELDS.has(key) || closedProtocolNote(key, text)) return;
       const identity = JSON.stringify([key, text]);
       if (fields.has(identity)) return;
       const cleaned = redactor.value({ [key]: text });
@@ -140,7 +154,7 @@ export function publicReport<
     );
   const identities = new Map<string, string>();
   const text = (key: string, value: string): string => {
-    if (CLOSED_FIELDS.has(key)) return value;
+    if (CLOSED_FIELDS.has(key) || closedProtocolNote(key, value)) return value;
     try {
       return fields.get(JSON.stringify([key, value])) === '[redacted]' ||
         redactor.text(value) !== value

@@ -90,8 +90,13 @@ export function publishReport(parts: {
       ].sort(),
     },
     context: {
-      maxInputTokens: artifact.plan.context.maxInputTokens,
-      targetInputTokens: artifact.plan.context.targetInputTokens ?? null,
+      maxInputTokens:
+        publicWorkflow?.config.context.maxInputTokens ??
+        artifact.plan.context.maxInputTokens,
+      targetInputTokens:
+        publicWorkflow?.config.context.targetInputTokens ??
+        artifact.plan.context.targetInputTokens ??
+        null,
     },
     consistency: {
       indexReliable: reliable,

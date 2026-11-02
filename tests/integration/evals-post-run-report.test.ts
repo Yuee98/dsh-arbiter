@@ -1,8 +1,9 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { withWorkflowArea } from '../evals/helpers/workflow-run.js';
 import { chatTarget } from '../evals/helpers/run.js';
+import { inventory } from '../evals/helpers/replay.js';
 import { claimRun } from '../../evals/src/run/artifact.js';
 
 describe('explicit post-run complete publication', { timeout: 30_000 }, () => {
@@ -50,6 +51,43 @@ describe('explicit post-run complete publication', { timeout: 30_000 }, () => {
         expect(details).toContain(
           kind === 'complete' ? '| reviewed | reviewed |' : '无记录',
         );
+      });
+    },
+  );
+  it.each(['--mode', '--channel'] as const)(
+    'rejects invalid %s before creating or dispatching a run',
+    async (flag) => {
+      await withWorkflowArea(async (area) => {
+        await area.write();
+        expect(
+          await area.cli(['run', area.planPath, '--report', flag, 'typo']),
+        ).toBe(2);
+        await expect(stat(area.runDirectory)).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+        expect(area.log.join('\n')).toContain(`${flag} takes`);
+      });
+    },
+  );
+  it.each(['--mode', '--channel'] as const)(
+    'rejects invalid %s on resume without changing any saved evidence',
+    async (flag) => {
+      await withWorkflowArea(async (area) => {
+        await area.write();
+        expect(await area.cli(['run', area.planPath])).toBe(0);
+        const before = await inventory(area.runDirectory);
+        expect(
+          await area.cli([
+            'run',
+            area.planPath,
+            '--resume',
+            '--report',
+            flag,
+            'typo',
+          ]),
+        ).toBe(2);
+        expect(await inventory(area.runDirectory)).toEqual(before);
+        expect(area.log.join('\n')).toContain(`${flag} takes`);
       });
     },
   );

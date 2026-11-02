@@ -144,3 +144,34 @@ test('free family keys and dynamic reason keys remain sanitized when schema keys
   expect(result.excludedByReason).toEqual({ '[redacted]': 1 });
   expect(result.notes).toEqual(['[redacted]', '[redacted]']);
 });
+
+test.each([
+  { risk: 'strict', authorization: 'at-least' },
+  { risk: 'strict', authorization: 'strict' },
+  { risk: 'at-least', authorization: 'at-least' },
+  { risk: 'at-least', authorization: 'strict' },
+])(
+  'keeps fixed N0 $risk/$authorization while rejecting adjacent credential-bearing prose',
+  ({ risk, authorization }) => {
+    const note = `N0 risk=${risk}, authorization=${authorization}; score, authorization-demand and verdict changes are separate observations.`;
+    const secret = 'synthetic_n0_adjacent_credential_131';
+    const report = {
+      run: { runId: 'fixture' },
+      notes: [
+        note,
+        `Authorization: Bearer ${secret}`,
+        `${note}\nAuthorization: Bearer ${secret}`,
+        `N0 risk=unknown, authorization=${secret}; score, authorization-demand and verdict changes are separate observations.`,
+      ],
+    };
+    const result = publicReport(report);
+    expect(result.notes[0]).toBe(note);
+    expect(result.notes.slice(1)).toEqual([
+      '[redacted]',
+      '[redacted]',
+      '[redacted]',
+    ]);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(publicReport(report)).toEqual(result);
+  },
+);

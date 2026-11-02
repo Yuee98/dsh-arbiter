@@ -128,6 +128,8 @@ export function parseReportCommand(
   }
   const parsed = readReportFlags(flags);
   if (typeof parsed === 'string') return parsed;
+  const selection = selectionOf(parsed);
+  if (typeof selection === 'string') return selection;
   return {
     directory,
     ...(parsed.references.length === 0
@@ -135,8 +137,7 @@ export function parseReportCommand(
       : { references: parsed.references }),
     output: parsed.output,
     dataset: parsed.dataset,
-    mode: parsed.mode,
-    channel: parsed.channel,
+    ...selection,
     force: parsed.force,
   };
 }
@@ -224,11 +225,10 @@ function protectedEvidenceOf(parts: {
   return evidence;
 }
 
-/** The settings a parsed command implies. */
-function settingsOf(
-  io: ReportIo,
-  command: ReportCommand,
-): ReportSettings | string {
+/** Validate the shared report selection before any caller may execute a run. */
+function selectionOf(
+  command: Pick<ReportCommand, 'mode' | 'channel'>,
+): Pick<ReportSettings, 'mode' | 'channel'> | string {
   const mode = parseSettlementMode(command.mode);
   if (mode === null) {
     return `--mode takes ask or no-ask, not ${command.mode}`;
@@ -240,11 +240,20 @@ function settingsOf(
   if (channel === null) {
     return `--channel takes available or unavailable, not ${command.channel}`;
   }
+  return { mode, channel };
+}
+
+/** The settings a parsed command implies. */
+function settingsOf(
+  io: ReportIo,
+  command: ReportCommand,
+): ReportSettings | string {
+  const selection = selectionOf(command);
+  if (typeof selection === 'string') return selection;
   const base = defaultSettings(io.root);
   return {
     ...base,
-    mode,
-    channel,
+    ...selection,
     // A named dataset wins; otherwise the run's own recorded path is read, which is what
     // makes a rebuild reproducible without the caller having to know the path.
     dataset: datasetSourceOf(command.dataset),
