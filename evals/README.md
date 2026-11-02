@@ -399,3 +399,50 @@ pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev
 加载与标注路由共享 `manifest.json` 优先级：混合布局继续使用旧单文件数据源，其分组格式预览可仅展示部分案例。没有根 manifest 的 legacy 源则按保留的历史清单校验所选 split 的完整成员和 family，删除或替换案例不能让 `check-all` 通过；未选 split 的文件仍不读取。
 
 新运行／实验需显式指定 `datasetId: legacy-v1` 和 `datasetPath: evals/datasets/reviewer-v2`。未提供 caseIds 时按 split 读取；显式 caseIds 优先于 split，保留原有跨 split 选择与顺序语义。报告按冻结案例列表定位实际组，显示集合文件与 record 路径。旧运行仍读取其原 core-v1 路径，不自动改用新标签，也不重写历史计划或结果。
+
+## workflows-v1 正式运行与资源范围
+
+工作流复用既有 `plan`、`run --dry-run`、`run`、`run --resume`、只读 `resume` 和 `show`。计划仍是 `eval-run-plan-v1`；旧 legacy 计划、工件和续跑保留原义。新计划删除 `caseIds`，明确 `split`（dev/calibration/holdout，不能 all），加入 `workflow` 与 `resource`。以下是完整 RunPlan 的字段片段，须替换真实路径和源身份，不是可直接派发的运行授权：
+
+```json
+{
+  "workflow": {
+    "contentSet": "workflows-v1",
+    "points": [
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p01",
+        "viewId": "cw135-001-p01-main"
+      }
+    ],
+    "input": {
+      "customRules": "",
+      "projectRules": { "kind": "disabled" }
+    }
+  },
+  "resource": {
+    "runDirectory": "/absolute/path/to/isolated-run",
+    "maxAttempts": 20,
+    "maxEstimatedInputTokens": 200000
+  }
+}
+```
+
+首四根 CW-135 固定源尚未合入 main 时，须明确外部 datasetPath 和 source revision，不能假称示例已在当前 checkout。workflow 的 datasetId 是计划命名，真实源由路径、split/group、root/lineage/point/view 与既有执行内容校验定位；grouped 源没有新 manifest。只加载指定组的 workflows-v1，`references:false`，不打开标签、模型意见或作者说明文件。未知/重复身份、错误 lineage、非 primaryViewId 和缺源拒绝；解析后的实际 lineage 随既有 plan 冻结，recordless 格子也能恢复来源。
+
+项目规则必须明确声明：`disabled` 表示本评测主动禁用；`{ "kind": "provided", "text": "实际非空规则正文" }` 表示计划提供离线规则文本，不读取项目磁盘文件。未取得材料不是“已经检查没有文件”。T/H 沿用 context；完整实际配置和 configRevision 保存于新 index 的 workflowExecution，续跑比较配置。显式来源状态与旧 default-enabled/null 预演不同，须重算请求预算和参考适用性，不能强套旧估计。
+
+`plan` 和 `run --dry-run` 使用真实 workflowMaterial 和候选 renderer，列出完整身份、支持/unsupported、输入估计、截断和缺口，不构造模型 backend 或读取目标凭据。离线 fixture 只替换响应边界，仍经过同一材料、scheduler、生产 reviewer、解析、usage 和不可变 records；这证明工程行为，不是模型质量、实际端点可用或人工参考。
+
+资源范围首版强制为一个规范化绝对目录，只能在原目录续跑。同一计划换 `--dir` 或复制 run 不能取得新额度；路径别名共享真实目录和 claim。创建在既有 claim 内拒绝原 plan/index 或孤儿 records；派发持 claim 重读记录，扣除已发送 attempts 和无法确认结束的 abandonment 预留。缺失/损坏/无法确认的记录不能按零计，锁外旧快照不能重置消耗。材料准备和准入遵循原 cell 顺序，实际 review 调用仍按 concurrency 并行。
+
+累计输入使用保守口径：每个可能已发 attempt 预留 `bounds.maxInputTokens`，包括 repair，未使用 attempts 释放。有效累计 attempt 上限为 `min(bounds.maxAttempts, resource.maxAttempts, floor(resource.maxEstimatedInputTokens / bounds.maxInputTokens))`，再扣原记录支出。`spent.estimatedInputTokens` 保留既有每格材料估计含义，不能冒充包含 repair 的累计计费输入。per-attempt 估计及可得 usage 原样保存；provider 实际计费 input/output、费用和缓存未知时保持未知，不能用 timeout 冒充 token/金额硬 cap。
+
+外层 timeout、reviewer 进入后异常且没有交回 attempts，都保留最坏预留并停止续派；明确的 pre-send refusal 不计费。请求可能已发而 records/index 写失败时保留 claim，崩溃 claim 也不自动删除。须先确认进程、在途和原记录，不能删锁、删记录或换目录恢复额度。普通 resume 只补无 record 格子，不重写失败记录；另一候选或补测不能直接另建目录重复领取此范围的额度。
+
+新 index 分别记录实际加载代码与数据源的 Git revision、dirty 或未知及原因。外部源不能套用代码 SHA，内容 digest 也不是 Git SHA；源不受 tracked revision 覆盖时不伪称该 HEAD 定位了源。dirty/未知明确表示复现限制，不自动提交代码；计划、源、fixture、实际配置与适用版本漂移继续拒绝。旧 legacy 工件不回填字段。
+
+新 records 的结构化 workflow 身份与 `entryPoint.materialChain: workflow-point` 是实际来源；caseId/familyId 仅为 view/lineage 兼容执行键，不代表 legacy 案例或金标。`readRun` 默认拒绝 workflow 工件，既有报告/回放不能静默误配旧标签；runner 的 `show` 显式识别新工件。新的参考资格、工作流报告与回放接入由 #129/#137 负责。
+
+本工程不授权真实调用。实际运行仍受 #134 的具体资源计划、目标能力及用户适用授权约束，不沿用 S1 额度，不创建凭据，不由 verify/CI 自动派发模型。
