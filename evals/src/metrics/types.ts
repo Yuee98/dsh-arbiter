@@ -34,7 +34,7 @@ import type {
 import type { LabelVersions } from '../data/types.js';
 import type { CellState, RunProtocol } from '../run/types.js';
 import type { PlanCandidate } from '../run/types.js';
-import type { WorkflowExecution } from '../run/workflow-types.js';
+import type { PublicWorkflowExecution } from './workflow-publication.js';
 import type { MetricReference } from './references.js';
 import type { MetricSource } from './source.js';
 import type { QualitySection } from './quality-types.js';
@@ -701,7 +701,7 @@ export interface ReportCheck {
 
 /** What produced the report, taken from the run index rather than from a clock. */
 export interface RunIdentity {
-  readonly workflowExecution?: WorkflowExecution;
+  readonly workflowExecution?: PublicWorkflowExecution;
   readonly candidate?: PlanCandidate;
   readonly runId: string;
   readonly status: string;

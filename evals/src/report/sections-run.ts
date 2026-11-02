@@ -37,9 +37,10 @@ export function identitySection(report: EvaluationReport): string {
             run.workflowExecution.configRevision,
           ]),
           row([
-            'workflow effective config',
+            'workflow 配置公开视图（省略自由文本）',
             JSON.stringify(run.workflowExecution.config),
           ]),
+          row(['workflow 完整配置证据', run.workflowExecution.configEvidence]),
           row([
             'workflow code Git',
             JSON.stringify(run.workflowExecution.codeGit),

@@ -33,6 +33,7 @@ import type { Observation, ObservationRead } from './observe.js';
 import { settlementSection } from './settlement.js';
 import { qualitySection } from './quality.js';
 import { sourceOf } from './source.js';
+import { publicWorkflowExecution } from './workflow-publication.js';
 import { trajectorySection } from './trajectories.js';
 import { relationSection } from './relations.js';
 import { stabilitySection } from './stability.js';
@@ -63,7 +64,12 @@ function runIdentityOf(
   return {
     ...(index.workflowExecution === undefined
       ? {}
-      : { workflowExecution: index.workflowExecution }),
+      : {
+          workflowExecution: publicWorkflowExecution(
+            index.workflowExecution,
+            index.runId,
+          ),
+        }),
     ...(artifact.plan.candidate === undefined
       ? {}
       : { candidate: artifact.plan.candidate }),
@@ -211,7 +217,12 @@ function checksOf(parts: {
     },
     {
       name: 'records-read',
-      ok: parts.recordCount > 0 || artifact.index.cells.length === 0,
+      ok:
+        parts.recordCount > 0 ||
+        (missing === 0 &&
+          artifact.index.cells.every((cell) =>
+            RECORDLESS_STATUSES.has(cell.status),
+          )),
       detail: `索引计划 ${String(artifact.index.cells.length)} 个格子，读取到 ${String(parts.recordCount)} 条记录。`,
     },
   ];
