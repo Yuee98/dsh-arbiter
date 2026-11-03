@@ -178,6 +178,8 @@ export function RulesPanel(props: ExtendedRulesPanelProps): ReactNode {
         draft={draft}
         focusedRule={focusedRule}
         focusRequest={callState.focusRequest}
+        handledFocusRequest={callState.handledFocusRequest}
+        onFocusRequestHandled={calls.focusHandled}
         openerRef={ruleTestOpenerRef}
         renderTrigger={false}
         {...(callState.activeSeed === null

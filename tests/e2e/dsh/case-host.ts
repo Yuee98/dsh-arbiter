@@ -59,13 +59,21 @@ function fixtureRow(options: CaseOptions): Record<string, unknown> {
       {
         id: 'agent-default-model',
         name: '@deepseek-ai/dsh-agent-default-model',
-        config: { provider: 'arbiter-fixture', model: 'arbiter-fixture' },
+        config: options.agentModel ?? {
+          provider: 'arbiter-fixture',
+          model: 'arbiter-fixture',
+        },
       },
     ],
   };
 }
 
 export interface CaseOptions {
+  /** Offline agent route selected when the case supplies its own trajectory. */
+  readonly agentModel?: {
+    readonly provider: string;
+    readonly model: string;
+  };
   /** The arbiter row's own configuration (rules, boundary, modes). */
   readonly arbiterRowConfig?: Record<string, unknown>;
   /**
