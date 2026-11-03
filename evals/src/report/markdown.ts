@@ -39,6 +39,7 @@ import {
 } from './sections-support.js';
 import { usageSection } from './sections-usage.js';
 import { qualitySection } from './sections-quality.js';
+import { versionComparisonSection } from './sections-version-comparison.js';
 
 /**
  * Render one report as Markdown.
@@ -64,6 +65,7 @@ export function renderMarkdown(report: PublishedReport): string {
     stabilitySection(report),
     efficiencySection(report),
     comparisonSection(report),
+    versionComparisonSection(report, 'markdown'),
     differencesSection(report),
     examplesSection(report),
     closingSection(report),

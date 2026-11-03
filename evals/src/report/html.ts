@@ -32,6 +32,7 @@ import { humanCostOf } from '../metrics/settlement.js';
 import { fraction, num, pct, rateText } from './format.js';
 import { qualitySection } from './sections-quality.js';
 import { publicationSection } from './sections-publication.js';
+import { versionComparisonSection } from './sections-version-comparison.js';
 import type { PublishedReport } from './publication-types.js';
 
 import { escape } from './html-format.js';
@@ -1051,6 +1052,7 @@ export function renderHtml(report: PublishedReport): string {
     stability(report),
     efficiency(report),
     comparison(report),
+    versionComparisonSection(report, 'html'),
     differences(report),
     examples(report),
     closing(report),

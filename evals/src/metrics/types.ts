@@ -38,6 +38,7 @@ import type { PublicWorkflowExecution } from './workflow-publication.js';
 import type { MetricReference } from './references.js';
 import type { MetricSource } from './source.js';
 import type { QualitySection } from './quality-types.js';
+import type { VersionComparison } from './version-comparison-types.js';
 import type {
   RelationSection,
   TrajectorySection,
@@ -780,6 +781,7 @@ export interface ReportSettings {
 
 /** The report, as one document. */
 export interface EvaluationReport {
+  readonly versionComparison?: VersionComparison;
   readonly trajectories?: TrajectorySection;
   readonly relations?: RelationSection;
   /** Additive denominator views; absent in historical v1 reports. */
