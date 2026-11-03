@@ -4,7 +4,7 @@
 
 ## 被测版本与执行环境
 
-- 被测代码提交：`0ad0f43e502a5c7e4e116e218efa8071f53aa007`；运行前工作区无源码或测试改动。报告为后续独立文档提交，不冒充被测代码提交。
+- 当前被测代码提交：`e95715b8238377f5b0ad2aee39866c89332ae793`；运行前工作区无源码或测试改动。初轮代码 `0ad0f43e502a5c7e4e116e218efa8071f53aa007` 与原始证据保留，当前结果以安装入口返修后的提交为准。报告为后续独立文档提交，不冒充被测代码提交。
 - 最初独立基线为 `9ae3a6a264ed9c536f93afa1bb3a0b081bf97214`；提交前同步到 `ef632237fe0203d53d6bfaf056fda810dcd3dc2a`。新增上游内容属于已合并的资源计划与 annotation 修复，不是本任务的额外交付。
 - Node `v24.21.0`，DSH `0.2.1-rc.3`，`darwin/arm64`，Playwright Chromium，3 workers，retries=0。
 - 宿主使用本工作树独立安装的锁定 npm CLI；agent 与 reviewer 均为本地受控 adapter，不访问真实模型或凭据。
@@ -18,7 +18,7 @@ Arbiter 配置为 `arbiter-config-v3`，boundary=guarded，main=ask / subagent=n
 | --- | --- |
 | `pnpm verify` | PASS，exit 0 |
 | unit | 110 文件 / 2231 passed |
-| integration | 80 文件 / 862 passed |
+| integration | 82 文件 / 875 passed |
 | UI | 23 文件 / 382 passed |
 | 完整 `pnpm test:e2e:dsh` | 76 passed / 0 failed / 0 skipped / 0 flaky，149.3 秒 |
 | 原三项失败 | locale、trusted rollback、drain 均实际通过 |
@@ -59,13 +59,29 @@ Arbiter 配置为 `arbiter-config-v3`，boundary=guarded，main=ask / subagent=n
 2. 原 sandbox 负向目标位于 SDK 明确允许的 temp roots。新探针读取锁定 SDK 的实际 writableRoots，校验 canonical 路径，普通测试进程先写读其独占 0700 目录。trusted 阶段真实可写；rollback 后 temp 正向 control 仍可写，真正范围外目标 ENOENT。drain 等待本次 callId 的实际 result 与所属 turn/end，继续核物理效果、rollback 和 dispatch 位于 drain 窗口。
 3. 锁定 SDK 将 subagent 初始委派记录为 source.kind=user。新适配只在原生 origin/parent 已知、完整且连续的 own 初始前缀可识别时捕获该事件身份，并在读保护前冻结为 relay。读取器入口、fallback、父来源与 redaction/rebuild 接线同义；截断或内部缺口不猜第一条可见消息，后续真实人类/原生 ask 保留。对应集成测试还验证 rebuild 不重新读取移动来源。
 4. locale 泄漏检查检查可见界面文案，原样模型/审计 `<pre>/<code>` 内容单独逐值比较。原协议中合法的英文单词 `undefined` 不再被当成翻译错误；原始材料和响应的语言往返一致性断言保留。
+5. 安装入口返修：边界探针不再要求 launcher 的 `args[0]` 必须是 npm JS 入口。仅在这两项用例中挂载独立测试夹具，在实际启动的宿主内解析其 sandbox 包并执行公开 `writableRoots`；测试端校验该 workspace 和绝对 roots 后再建立负向目标，不回退到另一份 SDK。真实 npm `.bin` 又暴露 records 安装锚点缺失：普通 import 与原直接锚点仍优先，只在缺少锚点时解析实际 CLI symlink 目标，再复用原安装根解析。公共 `appendPluginRecord`、错误诊断、缓存与原记录格式不变，不回退到原始 `session.append`。
+
+## 安装入口返修的真实回归
+
+对应 [PR #188 的安装入口评审](https://github.com/Yuee98/dsh-arbiter/pull/188#discussion_r4458829762)。改前两项实际 npm `.bin` 用例均在探针处报 required-CLI；捕获 roots 修复后，记录了两项真实 `record-unavailable` 失败，继续定位并修复上面的生产接缝。独立子进程集成测试中，相对、绝对、链式 symlink 三项改前失败，修后 6 项全部通过；同时保留直达入口、不可识别/丢失入口、公共 writer 与不降级断言。另有 7 项集成测试校验根来源缺失、错误 workspace、异常 roots 与自有探针清理。新增的 13 项集成测试不计为新的业务样本或九项工程 fixture。
+
+以下全部使用同一被测代码提交，DSH `0.2.1-rc.3`、macOS arm64、独立 home/profile/agents/spill 和离线模型夹具：
+
+| 启动入口 | 实际回归 | 结果 |
+| --- | --- | --- |
+| `DSH_E2E_CLI`：锁定 npm `lib/bin.js` | 完整套件 | 76 passed / 0 failed / skipped / flaky |
+| `DSH_E2E_BIN`：锁定 npm `node_modules/.bin/dsh` | trusted rollback 与 drain | 2 passed / 0 failed / skipped / flaky |
+| `DSH_E2E_BIN=/usr/local/bin/dsh`：实际桌面安装版 | 同上两项，根来源来自该 Electron/asar 宿主 | 2 passed / 0 failed / skipped / flaky |
+| 默认 PATH：实际解析 `/usr/local/bin/dsh` | 同上两项 | 2 passed / 0 failed / skipped / flaky |
+
+完整套件的 79 份宿主记录与上述额外 6 份记录全部清理成功，216 项当前构建指纹一致；五个外层 home 均为空，合计八份独占负向探针均在宿主退出后删除。安装入口额外验收只覆盖两项原有沙箱用例，不据此声称各安装入口的 76 项全量套件、独立单文件可执行版或 Windows 全量旅程通过。
 
 ## 证据定位与边界
 
-本轮真实 SDK 与边界探针使用锁定 npm CLI；独立打包可执行版没有本轮运行证明。
+完整真实 SDK 套件使用锁定 npm CLI；实际安装版及 PATH 的额外边界证明范围见上表。独立单文件可执行版没有本轮运行证明。
 
 受版本控制的主要用例：[结果](../../../../tests/e2e/workflow-results.spec.ts)、[问答](../../../../tests/e2e/workflow-questions.spec.ts)、[审批](../../../../tests/e2e/workflow-approval.spec.ts)、[父刷新](../../../../tests/e2e/workflow-parent.spec.ts)、[来源捕获回归](../../../../tests/integration/initial-delegation.test.ts)。
 
-本任务最终运行与九项轨迹的原始证据在本次工作树本地目录 `.local/cw-126/final/`，包括 `verify.log`、`e2e.log`、`results.json`、逐例 environment/cleanup/fingerprint、native-sessions、实际 agent/reviewer request、完整审计记录、profile 配置、hot/cold/source-loss projection 与 proof.json。执行者工作树为 `/private/tmp/dsh-arbiter-cw-126`。这些大工件为 **local-only**，没有上传到仓库；GitHub 上的此报告不是原始日志附件链接，也不以本地路径冒充可下载证据。
+当前被测提交的最终运行与九项轨迹证据在本次工作树本地目录 `.local/cw-126/reentry/final/`，包括 `verify.log`、`e2e.log`、`results.json`、三组安装入口各自的 results/log、逐例 environment/cleanup/fingerprint、实际宿主 `sandbox-roots`、native-sessions、实际 agent/reviewer request、完整审计记录、profile 配置、hot/cold/source-loss projection 与 proof.json。改前证据在同级 `red-bin/`、`green-bin-v3/` 与 `records-red.json`；初轮 `.local/cw-126/final/` 及中间通过记录保留，但不替代当前提交验证。执行者工作树为 `/private/tmp/dsh-arbiter-cw-126`。这些大工件为 **local-only**，没有上传到仓库；GitHub 上的此报告不是原始日志附件链接，也不以本地路径冒充可下载证据。
 
 需要复查原始数据时，应在执行者环境读取上述目录；没有该目录的评审者可以按受版本控制的测试复跑。正式 PR 的当前准确 head 还须完成线上 CI 与开发评审；本报告只记录上述被测代码和本地执行事实。没有调用业务模型、编辑主数据、收集新人工意见或测量业务质量。
