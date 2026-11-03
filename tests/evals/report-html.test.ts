@@ -44,8 +44,8 @@ describe('complete static HTML report', { timeout: 30_000 }, () => {
     const fixture = await reportBrowserFixture('unsafe');
     try {
       const html = await fixture.text('html');
-      expect(html).not.toMatch(/<(?:img|svg|iframe|link)\b/u);
-      expect([...html.matchAll(/<script>/gu)].length).toBe(1);
+      expect(html).not.toMatch(/<(?:img|svg|iframe|link)\b/iu);
+      expect([...html.matchAll(/<script\b/giu)].length).toBe(1);
       expect(html.split('<script>')[1]).not.toContain(ATTACK_TEXT);
       expect(html).toContain(
         '&lt;/script&gt;&lt;script&gt;globalThis.reportAttack = true&lt;/script&gt;',
@@ -82,7 +82,7 @@ describe('complete static HTML report', { timeout: 30_000 }, () => {
       const html = renderHtml(report);
       expect(renderHtml(report)).toBe(html);
       expect(rowsIn(html)).toHaveLength(8);
-      expect(html).not.toMatch(/<(?:img|svg)\b/u);
+      expect(html).not.toMatch(/<(?:img|svg)\b/iu);
       expect(html).toContain('&quot; autofocus onfocus=');
       expect(html).toContain('未提供材料公开视图');
       expect(html).toContain(

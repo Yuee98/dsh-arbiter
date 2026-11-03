@@ -19,7 +19,7 @@ import {
 } from './report-workflow.js';
 
 export const ATTACK_TEXT =
-  '</script><script>globalThis.reportAttack = true</script><img src="https://example.invalid/report-leak" onerror="globalThis.reportAttack=true"><svg onload="globalThis.reportAttack=true"></svg>';
+  '</script><script>globalThis.reportAttack = true</script><SCRIPT>globalThis.reportAttack=true</SCRIPT><ScRiPt>globalThis.reportAttack=true</ScRiPt><img src="https://example.invalid/report-leak" onerror="globalThis.reportAttack=true"><IMG SRC="https://example.invalid/upper-leak" ONERROR="globalThis.reportAttack=true"><svg onload="globalThis.reportAttack=true"></svg>';
 export const BODY_CANARY = 'synthetic_body_secret_132';
 
 export async function reportBrowserFixture(
