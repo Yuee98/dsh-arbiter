@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { workflowReferences } from '../annotation/workflow-service.js';
 import type { CurrentReference } from '../annotation/reference.js';
 import type { Consensus } from '../annotation/consensus.js';
-import { checked } from '../annotation/workflow-validation.js';
+import { checked, contextSchema } from '../annotation/workflow-validation.js';
 import { compileCheckers } from '../data/schemas.js';
 import { sameAnnotationView } from '../data/annotation-binding.js';
 import {
@@ -145,24 +145,7 @@ export async function readReferenceSnapshot(
             group: { type: 'string', minLength: 1 },
           },
         },
-        context: {
-          type: 'object',
-          required: [
-            'protocol',
-            'targetInputTokens',
-            'maxInputTokens',
-            'customRules',
-            'projectRules',
-          ],
-          additionalProperties: false,
-          properties: {
-            protocol: { enum: ['chat', 'decision'] },
-            targetInputTokens: { type: 'integer', minimum: 1 },
-            maxInputTokens: { type: 'integer', minimum: 1 },
-            customRules: { type: 'string' },
-            projectRules: { type: ['string', 'null'] },
-          },
-        },
+        context: contextSchema(),
         entries: { type: 'array', items: entrySchema },
       },
     },

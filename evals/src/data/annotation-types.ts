@@ -13,6 +13,8 @@ export interface AnnotationContext {
   readonly maxInputTokens: number;
   readonly customRules: string;
   readonly projectRules: string | null;
+  /** Omission preserves enabled legacy semantics; false requires null rules. */
+  readonly projectRulesEnabled?: boolean;
 }
 export interface OpinionAnnotation {
   readonly binding: AnnotationBinding;

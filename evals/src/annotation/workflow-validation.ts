@@ -168,6 +168,10 @@ export function contextSchema(): object {
       'customRules',
       'projectRules',
     ],
+    anyOf: [
+      { properties: { projectRulesEnabled: { const: true } } },
+      { properties: { projectRules: { type: 'null' } } },
+    ],
     properties: {
       protocol: { enum: ['chat', 'decision'] },
       targetInputTokens: {
@@ -182,6 +186,7 @@ export function contextSchema(): object {
       },
       customRules: { type: 'string' },
       projectRules: { type: ['string', 'null'] },
+      projectRulesEnabled: { type: 'boolean' },
     },
   };
 }

@@ -566,3 +566,22 @@ legacy 数据集使用当前 `--dataset` 的标签作共同新参考；`--baseli
 相同输入也须分别具备匹配来源、响应和适用共同参考；修改材料后不能用旧响应重新贴标签。源输入哈希变化会明确披露；两侧都有各自匹配的新响应、且既有规范化绑定证明有效视图等价时，仍可配对。凭据视图继续要求既有输入哈希关系一致；有效事实改变或来源证明不足时不可配对。未保存输入指纹或凭据关系无法确认时保持未验证，不推断输入发生变化。不同模型或 prompt 可在各自新响应和分别合格的共同裁决下作为系统观测比较，同时列出实际配置/返回模型、候选、预算和策略差异；具体模型版本未返回时保持未知。模型参数注明为保存计划值，工件未保留的实际执行参数不补造；端点、凭据引用、repair 和未公开参数的变化只输出受控差异类别，不输出私有 URL 或引用原文。端点的显式认证信息加入两侧共同的既有脱敏词表。已验证的 `replay` 派生目录列出实际矩阵、N0 与离线重算身份，共用原响应，不计为新增模型测量。
 
 报告生成、两侧工程自检和质量结论仍分别解释。基线独有的自检失败也返回非零，同时保留可生成的诊断表。局部缺记录或索引冲突仅排除受影响的格子，其他已验证配对仍参与；系统性来源或语义证明不足继续保持不可比。原始 outcome 的既有分类继续保留，质量配对另要求 `reviewed` 的完成终态；取消、超时等终态即使留有评分和响应，也只保留技术覆盖与原始证据，不进入共同质量分母。比较完全离线，不扩大到未选 holdout，不做显著性检验、因果归因或最佳版本选择，也不授权真实调用、人工裁决或改变未知费用。
+
+## 工作流标注 context 的项目规则状态
+
+`workflow-export`、`workflow-import`、`workflow-reference` 和本地 `annotate` 共用 `--context <context.json>`。context 保留必填的 `protocol`、`targetInputTokens`、`maxInputTokens`、`customRules` 与 `projectRules`；可选 `projectRulesEnabled` 明确表达项目规则开关。例如与正式 runner 的 `{ "kind": "disabled" }` 对齐：
+
+```json
+{
+  "protocol": "chat",
+  "targetInputTokens": 6000,
+  "maxInputTokens": 10000,
+  "customRules": "",
+  "projectRules": null,
+  "projectRulesEnabled": false
+}
+```
+
+省略 `projectRulesEnabled` 或设置为 `true` 均保留旧的启用语义：`projectRules` 为字符串时提供该文本，为 `null` 时表示没有可用规则文件；旧 `null` 不表示禁用。明确 `false` 时必须配合 `projectRules: null`，包括空字符串在内的规则文本均会作为矛盾输入拒绝。对应 runner 的 `provided` 时使用相同文本及启用状态，协议、T/H 与自定义规则也应对齐。
+
+显式状态随导出批次、意见与参考快照保存，网页使用同一启动 context 恢复私有草稿。旧 context 不补写新字段，历史批次和快照仍可读。是否可复用参考继续由实际生产视图 binding 判断；改动规则状态或文本后，失配意见不能按 point ID 强行复用。此能力只支持离线材料对齐，不授权真实模型调用、费用或人工意见。

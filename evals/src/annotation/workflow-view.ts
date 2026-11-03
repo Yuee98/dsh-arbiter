@@ -69,6 +69,12 @@ export async function buildAnnotationView(
       targetInputTokens: context.targetInputTokens,
       maxInputTokens: context.maxInputTokens,
       customRules: context.customRules,
+      projectRules: {
+        ...DEFAULT_CONFIG.context.projectRules,
+        enabled:
+          context.projectRulesEnabled ??
+          DEFAULT_CONFIG.context.projectRules.enabled,
+      },
     },
   };
   const material = await workflowMaterial(
