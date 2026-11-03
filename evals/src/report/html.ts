@@ -4,9 +4,8 @@
  * The HTML variant exists for reading away from a terminal: it is the same document as
  * the Markdown, with the same figures and the same warnings, presented so the three
  * layers can be compared side by side. It is deliberately one self-contained file with
- * no script and no external stylesheet, because a report gets archived, mailed and
- * opened from a path that may not have network access — and because a report that ran
- * code would be a much larger security surface than a document needs.
+ * a fixed offline filter script and no external stylesheet, because a report gets archived, mailed and
+ * opened from a path that may not have network access — with no untrusted data embedded in executable code.
  *
  * Every piece of text that came from the artifact is escaped. Case ids, model names,
  * adjudication rationales and provider reasons are user-supplied strings; a rationale
@@ -20,7 +19,6 @@ import type {
   AttemptUsageRow,
   BehaviourCounts,
   BehaviourGroup,
-  CellView,
   DifferenceRow,
   EvaluationReport,
   FieldErrorStats,
@@ -36,15 +34,9 @@ import { qualitySection } from './sections-quality.js';
 import { publicationSection } from './sections-publication.js';
 import type { PublishedReport } from './publication-types.js';
 
-/** Escape one value for HTML text or an attribute. */
-function escape(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+import { escape } from './html-format.js';
+import { examples, EXAMPLES_STYLE } from './html-examples.js';
+import { HTML_BROWSER_SCRIPT } from './html-browser.js';
 
 /** A heading element. */
 function h(level: number, text: string): string {
@@ -997,63 +989,10 @@ function differences(report: EvaluationReport): string {
           escape(entry.caseId === '' ? '（数据集）' : entry.caseId),
           escape(entry.observed),
           escape(entry.expected),
-          escape(entry.detail),
+          `<details><summary>差异说明</summary><pre class="evidence-text" tabindex="0">${escape(entry.detail)}</pre></details>`,
         ]),
       ),
     ),
-  ].join('');
-}
-
-/** One per-example row. */
-function exampleRow(example: CellView): string {
-  return tr(
-    [
-      example.cellId,
-      example.caseId,
-      example.familyId,
-      example.protocol,
-      `r${String(example.repeat)}`,
-      example.classification,
-      example.engine.word === null
-        ? '（无判定）'
-        : example.engine.risk === null
-          ? example.engine.word
-          : `${example.engine.word} ${String(example.engine.risk)}/${String(example.engine.authorization)}`,
-      example.reference ?? '（无参考）',
-      example.settlement,
-      example.inputHash === '' ? '（无记录）' : example.inputHash,
-      example.casePath ?? '（未读到）',
-      example.labelPath ?? '（无标签）',
-      example.rationale ?? '',
-    ].map(escape),
-  );
-}
-
-/** The per-example evidence. */
-function examples(report: EvaluationReport): string {
-  return [
-    h(2, '逐例证据'),
-    p(
-      '每一行对应一个计划格子，包括从未运行的格子；把未运行的格子移出表格，会让一个小分母看起来像完整覆盖。输入指纹是标签审批所用的同一摘要，案例与标签路径相对数据集目录。引擎答案与人类参考分列，从不合并成一列。',
-    ),
-    `<table><caption>${escape('逐例证据')}</caption><thead>${tr(
-      [
-        'cell',
-        '案例',
-        '家族',
-        '协议',
-        '重复',
-        '分类',
-        '引擎',
-        '参考',
-        '结算',
-        '输入指纹',
-        '案例文件',
-        '标签文件',
-        '裁决理由',
-      ].map(escape),
-      true,
-    )}</thead><tbody>${report.examples.map(exampleRow).join('')}</tbody></table>`,
   ].join('');
 }
 
@@ -1093,7 +1032,7 @@ export function renderHtml(report: PublishedReport): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>评测报告 ${escape(report.run.runId)}</title>`,
-    `<style>${STYLE}</style>`,
+    `<style>${STYLE}${EXAMPLES_STYLE}</style>`,
     '</head>',
     '<body>',
     header(report),
@@ -1115,6 +1054,7 @@ export function renderHtml(report: PublishedReport): string {
     differences(report),
     examples(report),
     closing(report),
+    `<script>${HTML_BROWSER_SCRIPT}</script>`,
     '</body>',
     '</html>',
   ].join('\n');

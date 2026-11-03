@@ -1,5 +1,6 @@
 import type { EvaluationReport } from '../metrics/types.js';
 import type { GitObservation } from '../run/workflow-types.js';
+import type { ReportCellEvidence } from './evidence.js';
 
 export interface PublicationCell {
   readonly cellId: string;
@@ -43,4 +44,5 @@ export interface ReportPublication {
 /** Optional only for historical callers that render an already built report directly. */
 export interface PublishedReport extends EvaluationReport {
   readonly publication?: ReportPublication;
+  readonly evidence?: readonly ReportCellEvidence[];
 }
