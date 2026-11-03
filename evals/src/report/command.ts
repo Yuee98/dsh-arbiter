@@ -32,6 +32,8 @@ import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
 import type { EvidencePath } from './write.js';
 import { publishReport } from './publication.js';
+import { prepareComparison } from './compare.js';
+import { targetCredentialEvidence } from './target-credentials.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -42,6 +44,9 @@ export interface ReportIo {
 
 /** What `report` was asked for. */
 export interface ReportCommand {
+  readonly compare?: string;
+  readonly baselineReferences?: readonly string[];
+  readonly baselineDataset?: string;
   readonly references?: readonly string[];
   /** The run directory, relative to the repository root. */
   readonly directory: string;
@@ -62,11 +67,16 @@ export const REPORT_USAGE = [
   '  report <run-dir> [--out PREFIX] [--dataset DIR] [--mode ask|no-ask]',
   '                   [--channel available|unavailable] [--force]',
   '                   [--references SNAPSHOT.json] (repeat for separate scopes)',
+  '                   [--compare BASELINE_RUN_DIR] [--baseline-dataset DIR]',
+  '                   [--baseline-references SNAPSHOT.json] (repeat for separate scopes)',
   '                                         write PREFIX.json, PREFIX.md and PREFIX.html',
 ].join('\n');
 
 /** The flags `report` accepts, and no others. */
 interface ReportFlags {
+  compare?: string;
+  baselineDataset?: string;
+  baselineReferences: string[];
   references: string[];
   output: string | null;
   dataset: string | null;
@@ -78,6 +88,7 @@ interface ReportFlags {
 /** Read `report`'s flags; an unknown one is refused rather than ignored. */
 function readReportFlags(rest: readonly string[]): ReportFlags | string {
   const flags: ReportFlags = {
+    baselineReferences: [],
     references: [],
     output: null,
     dataset: null,
@@ -95,16 +106,26 @@ function readReportFlags(rest: readonly string[]): ReportFlags | string {
       flag !== '--out' &&
       flag !== '--dataset' &&
       flag !== '--references' &&
+      flag !== '--compare' &&
+      flag !== '--baseline-references' &&
+      flag !== '--baseline-dataset' &&
       flag !== '--mode' &&
       flag !== '--channel'
     ) {
       return `report does not take ${String(flag)}\n\n${REPORT_USAGE}`;
     }
     const value = rest[index + 1];
-    if (value === undefined) return `${flag} needs a value\n\n${REPORT_USAGE}`;
+    if (value === undefined || value.startsWith('--'))
+      return `${flag} needs a value\n\n${REPORT_USAGE}`;
     index += 1;
     if (flag === '--references') flags.references.push(value);
-    else if (flag === '--out') flags.output = value;
+    else if (flag === '--baseline-references')
+      flags.baselineReferences.push(value);
+    else if (flag === '--compare' || flag === '--baseline-dataset') {
+      const key = flag === '--compare' ? 'compare' : 'baselineDataset';
+      if (flags[key] !== undefined) return `${flag} must be supplied once`;
+      flags[key] = value;
+    } else if (flag === '--out') flags.output = value;
     else if (flag === '--dataset') flags.dataset = value;
     else if (flag === '--mode') flags.mode = value;
     else flags.channel = value;
@@ -130,8 +151,21 @@ export function parseReportCommand(
   if (typeof parsed === 'string') return parsed;
   const selection = selectionOf(parsed);
   if (typeof selection === 'string') return selection;
+  if (
+    parsed.compare === undefined &&
+    (parsed.baselineDataset !== undefined ||
+      parsed.baselineReferences.length > 0)
+  )
+    return '--baseline-dataset and --baseline-references require --compare';
   return {
     directory,
+    ...(parsed.compare === undefined ? {} : { compare: parsed.compare }),
+    ...(parsed.baselineDataset === undefined
+      ? {}
+      : { baselineDataset: parsed.baselineDataset }),
+    ...(parsed.baselineReferences.length === 0
+      ? {}
+      : { baselineReferences: parsed.baselineReferences }),
     ...(parsed.references.length === 0
       ? {}
       : { references: parsed.references }),
@@ -248,6 +282,12 @@ function settingsOf(
   io: ReportIo,
   command: ReportCommand,
 ): ReportSettings | string {
+  if (
+    command.compare === undefined &&
+    (command.baselineDataset !== undefined ||
+      command.baselineReferences !== undefined)
+  )
+    return '--baseline-dataset and --baseline-references require --compare';
   const selection = selectionOf(command);
   if (typeof selection === 'string') return selection;
   const base = defaultSettings(io.root);
@@ -297,24 +337,77 @@ async function generateReport(
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const report = publishReport({
+  let comparison: Awaited<ReturnType<typeof prepareComparison>>;
+  try {
+    comparison = await prepareComparison({
+      command,
+      settings,
+      current: read.observation,
+    });
+  } catch {
+    io.err(
+      'problem baseline comparison input is unavailable, invalid, ambiguous or changed during evaluation; no report was written',
+    );
+    return 1;
+  }
+  const published = publishReport({
     report: buildReport({ observation: read.observation, settings }),
     observation: read.observation,
     directory,
     settings,
   });
+  const report =
+    comparison === null
+      ? published
+      : {
+          ...published,
+          versionComparison: comparison.comparison,
+          checks: [
+            ...published.checks,
+            ...comparison.comparison.baseline.checks.map((check) => ({
+              ...check,
+              name: `baseline:${check.name}`,
+            })),
+          ],
+        };
   const written = await writeReport({
-    credentialEvidence:
+    credentialEvidence: [
       read.observation.artifact.index.workflowExecution?.config,
+      comparison?.baseline.artifact.index.workflowExecution?.config,
+      targetCredentialEvidence(read.observation.artifact.plan.targets),
+      comparison === null
+        ? []
+        : targetCredentialEvidence(comparison.baseline.artifact.plan.targets),
+    ],
     prefix,
     report,
     force: command.force,
-    protectedEvidence: protectedEvidenceOf({
-      directory,
-      root: io.root,
-      settings,
-      observation: read.observation,
-    }),
+    protectedEvidence: [
+      ...protectedEvidenceOf({
+        directory,
+        root: io.root,
+        settings,
+        observation: read.observation,
+      }),
+      ...(comparison === null
+        ? []
+        : [
+            ...comparison.protectedEvidence,
+            { path: comparison.directory, kind: 'directory' as const },
+            ...protectedEvidenceOf({
+              directory: comparison.directory,
+              root: io.root,
+              settings: comparison.originalSettings,
+              observation: comparison.baseline,
+            }),
+            ...protectedEvidenceOf({
+              directory: comparison.directory,
+              root: io.root,
+              settings: comparison.commonSettings,
+              observation: comparison.baseline,
+            }),
+          ]),
+    ],
   });
   if (!written.ok) {
     for (const problem of written.problems) io.err(`problem ${problem}`);

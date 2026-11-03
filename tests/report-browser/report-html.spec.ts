@@ -4,11 +4,71 @@ import { test, expect } from '@playwright/test';
 import type { Page, BrowserContext } from '@playwright/test';
 import { renderHtml } from '../../evals/src/report/html.js';
 import { publicReport } from '../../evals/src/report/public-text.js';
+import { workflowArea } from '../evals/helpers/workflow-run.js';
+import {
+  compared,
+  savedRun,
+  syntheticReferences,
+} from '../evals/helpers/version-comparison.js';
 import {
   ATTACK_TEXT,
   BODY_CANARY,
   reportBrowserFixture,
 } from '../evals/helpers/report-browser.js';
+
+test('comparison tables stay fixed while current example filters change, and hostile baseline text stays inert', async ({
+  page,
+  context,
+}) => {
+  const area = await workflowArea();
+  try {
+    const hostile =
+      '<img src="https://example.invalid/comparison-leak" onerror="globalThis.comparisonAttack=true">';
+    const plan = {
+      ...area.plan,
+      targets: area.plan.targets.map((target) => ({
+        ...target,
+        model: hostile,
+        decision:
+          target.decision === null
+            ? null
+            : { ...target.decision, model: hostile },
+      })),
+    };
+    const baseline = await savedRun(area, 'baseline', plan);
+    const current = await savedRun(area, 'current');
+    const references = await syntheticReferences(area, 'references', area.plan);
+    const result = await compared(area, baseline, current, references);
+    expect(result.exit).toBe(0);
+    const url = pathToFileURL(`${result.command.output ?? ''}.html`).href;
+    const unexpected = trackRequests(context, page, url);
+    await page.goto(url);
+    const comparison = page.locator('#version-comparison');
+    await expect(comparison).toBeVisible();
+    await expect(
+      comparison.getByRole('columnheader', { name: '基线行为', exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      comparison.getByRole('columnheader', { name: '当前行为', exact: true }),
+    ).toHaveCount(1);
+    await expect(comparison).toContainText(hostile);
+    expect(await comparison.locator('img, script').count()).toBe(0);
+    const before = await comparison.textContent();
+    await page
+      .locator('#example-search')
+      .fill('no-current-example-matches-133');
+    await expect(page.locator('tr[data-example]:visible')).toHaveCount(0);
+    expect(await comparison.textContent()).toBe(before);
+    expect(
+      await page.evaluate(
+        () => Reflect.get(globalThis, 'comparisonAttack') as unknown,
+      ),
+    ).toBeUndefined();
+    expect(unexpected).toEqual([]);
+  } finally {
+    await area.remove();
+  }
+});
 
 async function globalText(page: Page) {
   return page.locator('body').evaluate((body) =>
