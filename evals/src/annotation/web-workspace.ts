@@ -20,7 +20,7 @@ import { EMPTY_FORM } from './web-types.js';
 import { humanReferenceStatus } from './web-reference-status.js';
 import { opinionReport } from './web-opinion-report.js';
 import { settleHumanIntent } from './web-settlement.js';
-import { buildAnnotationView } from './workflow-view.js';
+import { annotationContext, buildAnnotationView } from './workflow-view.js';
 import type { GroupedDataset } from '../data/group-types.js';
 import { workflowState, workflowRecords } from './workflow-store.js';
 import { readWorkflowBatch } from './workflow-batch-read.js';
@@ -79,6 +79,7 @@ export class AnnotationWorkspace {
   static async open(supplied: WebScope): Promise<AnnotationWorkspace> {
     const scope = {
       ...supplied,
+      context: annotationContext(supplied.context),
       root: resolve(supplied.root),
       dataset: resolve(supplied.dataset),
     };

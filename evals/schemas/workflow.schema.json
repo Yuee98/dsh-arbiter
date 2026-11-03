@@ -1030,6 +1030,10 @@
             "context": {
               "type": "object",
               "additionalProperties": false,
+              "anyOf": [
+                { "properties": { "projectRulesEnabled": { "const": true } } },
+                { "properties": { "projectRules": { "type": "null" } } }
+              ],
               "required": [
                 "protocol",
                 "targetInputTokens",
@@ -1056,6 +1060,9 @@
                 },
                 "projectRules": {
                   "type": ["string", "null"]
+                },
+                "projectRulesEnabled": {
+                  "type": "boolean"
                 }
               }
             },
