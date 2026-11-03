@@ -45,6 +45,12 @@ test('comparison tables stay fixed while current example filters change, and hos
     await page.goto(url);
     const comparison = page.locator('#version-comparison');
     await expect(comparison).toBeVisible();
+    await expect(
+      comparison.getByRole('columnheader', { name: '基线行为', exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      comparison.getByRole('columnheader', { name: '当前行为', exact: true }),
+    ).toHaveCount(1);
     await expect(comparison).toContainText(hostile);
     expect(await comparison.locator('img, script').count()).toBe(0);
     const before = await comparison.textContent();

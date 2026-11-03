@@ -4,6 +4,8 @@ import type { CellFacts } from './cell.js';
 import type { RunPlan } from '../run/types.js';
 import { pairStats } from './diagnostics.js';
 import { canonicalJson } from '../data/hash.js';
+import { legalPairs } from '../data/eligibility.js';
+import { sameAnnotationView } from '../data/annotation-binding.js';
 import type {
   ComparisonCell,
   ComparisonMeasurement,
@@ -59,6 +61,8 @@ export function comparisonCell(
     model: original.model,
     inputHash: original.inputHash,
     promptFingerprint: original.record?.material?.promptFingerprint ?? null,
+    viewFingerprint:
+      common.evaluationReference.binding?.promptFingerprint ?? null,
     maxInputTokens: original.record?.material?.maxInputTokens ?? null,
     targetInputTokens: original.record?.material?.targetInputTokens ?? null,
     original: measurementOf(original),
@@ -87,6 +91,11 @@ export function evidenceVerified(cell: CellFacts): boolean {
     identity &&
     cell.record !== null &&
     cell.record.status === cell.indexStatus &&
+    cell.record.cellId === cell.cellId &&
+    cell.record.case.caseId === cell.caseId &&
+    cell.record.target.targetId === cell.targetId &&
+    cell.record.target.protocol === cell.protocol &&
+    cell.record.execution.repeat === cell.repeat &&
     cell.model !== null &&
     cell.model.provider.trim() !== '' &&
     cell.model.configured.trim() !== '' &&
@@ -97,11 +106,21 @@ export function evidenceVerified(cell: CellFacts): boolean {
     (cell.source.kind === 'legacy' || cell.evaluationReference.binding !== null)
   );
 }
-/** Each workflow binding has already qualified its own candidate's actual request. */
-export function commonReferenceEqual(
-  left: CellFacts,
-  right: CellFacts,
-): boolean {
+/** A source change can remain the same verified effective view; credentials keep their input relationship. */
+export function comparableViews(left: CellFacts, right: CellFacts): boolean {
+  if (left.source.kind !== right.source.kind) return false;
+  if (left.inputHash !== null && left.inputHash === right.inputHash)
+    return true;
+  const a = left.evaluationReference.binding,
+    b = right.evaluationReference.binding;
+  return (
+    left.source.kind === 'workflow' &&
+    a !== null &&
+    b !== null &&
+    sameAnnotationView(a, b)
+  );
+}
+function commonReferenceSource(left: CellFacts, right: CellFacts): boolean {
   const a = left.evaluationReference,
     b = right.evaluationReference;
   return (
@@ -109,13 +128,39 @@ export function commonReferenceEqual(
     a.source === b.source &&
     a.basis === b.basis &&
     a.humanConfirmed === b.humanConfirmed &&
-    a.behaviourEligible === b.behaviourEligible &&
-    a.scoringEligible === b.scoringEligible &&
     (left.source.kind === 'legacy' ||
       (a.referenceId !== null && a.referenceId === b.referenceId)) &&
-    canonicalJson(a.target) === canonicalJson(b.target) &&
     canonicalJson(a.binding?.versions ?? null) ===
       canonicalJson(b.binding?.versions ?? null) &&
     canonicalJson(a.consensus) === canonicalJson(b.consensus)
   );
+}
+/** Common provenance is shared; behaviour and legal scoring pairs have independent applicability. */
+export function commonReferenceEqual(
+  left: CellFacts,
+  right: CellFacts,
+  metric: 'behaviour' | 'scoring' = 'behaviour',
+): boolean {
+  const a = left.evaluationReference,
+    b = right.evaluationReference;
+  if (
+    !commonReferenceSource(left, right) ||
+    a.target === null ||
+    b.target === null
+  )
+    return false;
+  if (metric === 'behaviour')
+    return (
+      a.behaviourEligible &&
+      b.behaviourEligible &&
+      a.target.behaviourReference !== null &&
+      a.target.behaviourReference === b.target.behaviourReference
+    );
+  if (!a.scoringEligible || !b.scoringEligible) return false;
+  const pairsA = legalPairs({ target: a.target }),
+    pairsB = legalPairs({ target: b.target });
+  if (pairsA === null || pairsB === null) return false;
+  const order = (pairs: typeof pairsA) =>
+    [...pairs].sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  return canonicalJson(order(pairsA)) === canonicalJson(order(pairsB));
 }

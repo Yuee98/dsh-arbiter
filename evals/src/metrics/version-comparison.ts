@@ -10,6 +10,7 @@ import { compareText, groupBy, rate, tally } from './support.js';
 import type { EvaluationReport } from './types.js';
 import {
   commonReferenceEqual,
+  comparableViews,
   comparisonCell,
   evidenceVerified,
   measurementOf,
@@ -101,6 +102,7 @@ function conditionsChanged(
   current: ComparisonInput,
 ): readonly string[] {
   const changes: string[] = [];
+  if (left.inputHash !== right.inputHash) changes.push('source-input');
   if (canonicalJson(baseline.conditions) !== canonicalJson(current.conditions))
     changes.push('policy-or-replay');
   const before = comparisonCell(left, left, baseline.original.artifact.plan);
@@ -146,32 +148,37 @@ function pairedRow(
   current: ComparisonInput,
 ): ComparisonRow {
   const reasons: ComparisonReason[] = [];
-  if (
-    !evidenceVerified(left) ||
-    baseline.conditions.origin === 'unverified' ||
-    baseline.report.checks.some((check) => !check.ok)
-  )
+  if (!evidenceVerified(left) || baseline.conditions.origin === 'unverified')
     reasons.push('baseline-evidence-unverified');
-  if (
-    !evidenceVerified(right) ||
-    current.conditions.origin === 'unverified' ||
-    current.report.checks.some((check) => !check.ok)
-  )
+  if (!evidenceVerified(right) || current.conditions.origin === 'unverified')
     reasons.push('current-evidence-unverified');
-  if (left.inputHash !== right.inputHash) reasons.push('input-changed');
+  if (!comparableViews(left, right)) reasons.push('input-changed');
   if (
     left.evaluationReference.source === 'unresolved' ||
     right.evaluationReference.source === 'unresolved'
   )
     reasons.push('common-reference-unavailable');
-  else if (!commonReferenceEqual(left, right))
-    reasons.push('common-reference-differs');
   const applicable = reasons.length === 0;
   const a = measurementOf(left),
     b = measurementOf(right);
+  const behaviourReference = commonReferenceEqual(left, right, 'behaviour');
+  const scoringReference = commonReferenceEqual(left, right, 'scoring');
   const behaviour =
-    applicable && isCompared(a.classification) && isCompared(b.classification);
-  const scoring = applicable && a.pairHit !== null && b.pairHit !== null;
+    applicable &&
+    behaviourReference &&
+    isCompared(a.classification) &&
+    isCompared(b.classification);
+  const scoring =
+    applicable && scoringReference && a.pairHit !== null && b.pairHit !== null;
+  if (
+    applicable &&
+    a.behaviourEligible &&
+    b.behaviourEligible &&
+    !behaviourReference
+  )
+    reasons.push('behaviour-reference-differs');
+  if (applicable && a.scoringEligible && b.scoringEligible && !scoringReference)
+    reasons.push('scoring-reference-differs');
   if (!behaviour) reasons.push('behaviour-unavailable');
   if (!scoring) reasons.push('scoring-unavailable');
   return {
@@ -179,6 +186,18 @@ function pairedRow(
     baselineCellId: left.cellId,
     currentCellId: right.cellId,
     reasons,
+    behaviourMigration: behaviour
+      ? {
+          baseline: {
+            behaviour: a.behaviour,
+            classification: a.classification,
+          },
+          current: { behaviour: b.behaviour, classification: b.classification },
+          changed:
+            a.behaviour !== b.behaviour ||
+            a.classification !== b.classification,
+        }
+      : null,
     behaviourChange: behaviour
       ? {
           outcome: transition(
@@ -274,6 +293,7 @@ export function versionComparison(
               : 'baseline-only',
         ],
         behaviourChange: null,
+        behaviourMigration: null,
         scoringChange: null,
         conditionChanges: [],
       });

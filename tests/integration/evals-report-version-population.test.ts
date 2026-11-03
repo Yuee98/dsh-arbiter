@@ -154,7 +154,14 @@ describe('comparison denominators and coverage', { timeout: 60_000 }, () => {
         result.section.rows.find((row) => row.baselineCellId === first.cellId)
           ?.reasons,
       ).toContain('baseline-evidence-unverified');
-      expect(result.section.behaviour.paired).toBe(0);
+      expect(result.section.behaviour.paired).toBe(1);
+      const reversed = await compared(area, current, baseline, refs);
+      expect(reversed.exit).toBe(1);
+      expect(reversed.section.behaviour.paired).toBe(1);
+      expect(
+        reversed.section.rows.find((row) => row.currentCellId === first.cellId)
+          ?.reasons,
+      ).toContain('current-evidence-unverified');
     });
   });
   it('keeps a technical first response outside the denominator despite successful later repeats', async () => {

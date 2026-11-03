@@ -166,7 +166,7 @@ describe(
         expect(result.section.current.checks.every((check) => check.ok)).toBe(
           true,
         );
-        expect(result.section.pairedConditions).toBe(0);
+        expect(result.section.pairedConditions).toBe(1);
         expect(result.errors.join('\n')).toContain(
           'baseline:index-record-consistency',
         );

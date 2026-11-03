@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   commonReferenceEqual,
+  comparableViews,
   evidenceVerified,
   measurementOf,
 } from '../../evals/src/metrics/version-comparison-cell.js';
@@ -18,10 +19,6 @@ describe('version comparison metric qualification', () => {
     const changed = [
       metricReference('deny'),
       metricReference('allow', 'human-inherited'),
-      { ...metricReference('allow'), scoringEligible: false },
-      metricReference('allow', 'human', {
-        allowed: { risk: [1], authorization: [1] },
-      }),
       metricReference('allow', 'unresolved'),
       metricReference('allow', 'model-consensus'),
     ];
@@ -29,6 +26,76 @@ describe('version comparison metric qualification', () => {
       expect(
         commonReferenceEqual(cell, { ...cell, evaluationReference: reference }),
       ).toBe(false);
+  });
+  it('keeps behaviour and scoring target qualification independent and ignores adjudication prose', () => {
+    const cell = metricCell('same');
+    for (const reference of [
+      { ...metricReference('allow'), scoringEligible: false },
+      metricReference('allow', 'human', {
+        allowed: { risk: [1], authorization: [1] },
+      }),
+    ]) {
+      const other = { ...cell, evaluationReference: reference };
+      expect(commonReferenceEqual(cell, other, 'behaviour')).toBe(true);
+      expect(commonReferenceEqual(cell, other, 'scoring')).toBe(false);
+    }
+    const scoringOnly = metricCell('same', {
+      reference: metricReference(null, 'model-consensus', {
+        status: 'pending',
+      }),
+    });
+    const both = metricCell('same', {
+      reference: metricReference('allow', 'model-consensus', {
+        status: 'pending',
+      }),
+    });
+    expect(commonReferenceEqual(scoringOnly, both, 'behaviour')).toBe(false);
+    expect(commonReferenceEqual(scoringOnly, both, 'scoring')).toBe(true);
+    const prose = {
+      ...cell,
+      evaluationReference: metricReference('allow', 'human', {
+        rationale: 'Different annotation prose.',
+        decidedAt: '2026-11-03',
+      }),
+    };
+    expect(commonReferenceEqual(cell, prose, 'behaviour')).toBe(true);
+    expect(commonReferenceEqual(cell, prose, 'scoring')).toBe(true);
+  });
+  it('qualifies equivalent effective views with different source hashes while preserving credential relationships', () => {
+    const cell = metricCell('same'),
+      binding = cell.evaluationReference.binding;
+    if (binding === null) throw new Error('fixture binding missing');
+    const changed = {
+      ...cell,
+      inputHash: 'different-source',
+      evaluationReference: {
+        ...cell.evaluationReference,
+        binding: { ...binding, inputHash: 'different-source' },
+      },
+    };
+    expect(comparableViews(cell, changed)).toBe(true);
+    expect(
+      comparableViews(cell, {
+        ...changed,
+        evaluationReference: {
+          ...changed.evaluationReference,
+          binding: {
+            ...binding,
+            inputHash: 'different-source',
+            credentials: true,
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      comparableViews(cell, {
+        ...changed,
+        evaluationReference: {
+          ...changed.evaluationReference,
+          binding: { ...binding, promptFingerprint: 'different-visible-facts' },
+        },
+      }),
+    ).toBe(false);
   });
   it('uses separately qualified candidate bindings without pretending their prompt hashes are equal', () => {
     const cell = metricCell('same');

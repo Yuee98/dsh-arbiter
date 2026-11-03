@@ -19,7 +19,8 @@ export type ComparisonReason =
   | 'current-evidence-unverified'
   | 'input-changed'
   | 'common-reference-unavailable'
-  | 'common-reference-differs'
+  | 'behaviour-reference-differs'
+  | 'scoring-reference-differs'
   | 'behaviour-unavailable'
   | 'scoring-unavailable';
 
@@ -53,6 +54,7 @@ export interface ComparisonCell {
   readonly model: CellFacts['model'];
   readonly inputHash: string | null;
   readonly promptFingerprint: string | null;
+  readonly viewFingerprint: string | null;
   readonly maxInputTokens: number | null;
   readonly targetInputTokens: number | null;
   readonly original: ComparisonMeasurement;
@@ -75,6 +77,17 @@ export interface ComparisonSide {
   readonly cells: readonly ComparisonCell[];
 }
 export interface ComparisonRow {
+  readonly behaviourMigration: {
+    readonly baseline: Pick<
+      ComparisonMeasurement,
+      'behaviour' | 'classification'
+    >;
+    readonly current: Pick<
+      ComparisonMeasurement,
+      'behaviour' | 'classification'
+    >;
+    readonly changed: boolean;
+  } | null;
   readonly key: string;
   readonly baselineCellId: string | null;
   readonly currentCellId: string | null;
