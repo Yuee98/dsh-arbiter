@@ -12,6 +12,7 @@ import type {
 } from './types.js';
 import type { Sourced } from './read.js';
 import type { Finding } from './inspect.js';
+import type { LabelAnnotation, OpinionAnnotation } from './annotation-types.js';
 
 export interface RecordCollection<T> {
   readonly schemaVersion: 'grouped-v1';
@@ -162,6 +163,7 @@ export interface Workflow {
 }
 
 export interface WorkflowLabel {
+  readonly annotation?: LabelAnnotation;
   readonly referenceId: string;
   readonly rootId: string;
   readonly pointId: string;
@@ -178,6 +180,7 @@ export interface WorkflowLabel {
 }
 
 export interface WorkflowOpinion {
+  readonly annotation?: OpinionAnnotation;
   readonly rootId: string;
   readonly pointId: string;
   readonly viewId: string;

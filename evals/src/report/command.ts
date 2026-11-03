@@ -31,6 +31,9 @@ import type { ReportSettings } from '../metrics/types.js';
 import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
 import type { EvidencePath } from './write.js';
+import { publishReport } from './publication.js';
+import { prepareComparison } from './compare.js';
+import { targetCredentialEvidence } from './target-credentials.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -41,6 +44,10 @@ export interface ReportIo {
 
 /** What `report` was asked for. */
 export interface ReportCommand {
+  readonly compare?: string;
+  readonly baselineReferences?: readonly string[];
+  readonly baselineDataset?: string;
+  readonly references?: readonly string[];
   /** The run directory, relative to the repository root. */
   readonly directory: string;
   /** The output prefix without an extension, or null to write inside the run directory. */
@@ -59,11 +66,18 @@ export const REPORT_USAGE = [
   'report commands (offline; a report is rebuilt from a saved run, never by calling a model):',
   '  report <run-dir> [--out PREFIX] [--dataset DIR] [--mode ask|no-ask]',
   '                   [--channel available|unavailable] [--force]',
+  '                   [--references SNAPSHOT.json] (repeat for separate scopes)',
+  '                   [--compare BASELINE_RUN_DIR] [--baseline-dataset DIR]',
+  '                   [--baseline-references SNAPSHOT.json] (repeat for separate scopes)',
   '                                         write PREFIX.json, PREFIX.md and PREFIX.html',
 ].join('\n');
 
 /** The flags `report` accepts, and no others. */
 interface ReportFlags {
+  compare?: string;
+  baselineDataset?: string;
+  baselineReferences: string[];
+  references: string[];
   output: string | null;
   dataset: string | null;
   mode: string;
@@ -74,6 +88,8 @@ interface ReportFlags {
 /** Read `report`'s flags; an unknown one is refused rather than ignored. */
 function readReportFlags(rest: readonly string[]): ReportFlags | string {
   const flags: ReportFlags = {
+    baselineReferences: [],
+    references: [],
     output: null,
     dataset: null,
     mode: 'ask',
@@ -89,15 +105,27 @@ function readReportFlags(rest: readonly string[]): ReportFlags | string {
     if (
       flag !== '--out' &&
       flag !== '--dataset' &&
+      flag !== '--references' &&
+      flag !== '--compare' &&
+      flag !== '--baseline-references' &&
+      flag !== '--baseline-dataset' &&
       flag !== '--mode' &&
       flag !== '--channel'
     ) {
       return `report does not take ${String(flag)}\n\n${REPORT_USAGE}`;
     }
     const value = rest[index + 1];
-    if (value === undefined) return `${flag} needs a value\n\n${REPORT_USAGE}`;
+    if (value === undefined || value.startsWith('--'))
+      return `${flag} needs a value\n\n${REPORT_USAGE}`;
     index += 1;
-    if (flag === '--out') flags.output = value;
+    if (flag === '--references') flags.references.push(value);
+    else if (flag === '--baseline-references')
+      flags.baselineReferences.push(value);
+    else if (flag === '--compare' || flag === '--baseline-dataset') {
+      const key = flag === '--compare' ? 'compare' : 'baselineDataset';
+      if (flags[key] !== undefined) return `${flag} must be supplied once`;
+      flags[key] = value;
+    } else if (flag === '--out') flags.output = value;
     else if (flag === '--dataset') flags.dataset = value;
     else if (flag === '--mode') flags.mode = value;
     else flags.channel = value;
@@ -121,12 +149,29 @@ export function parseReportCommand(
   }
   const parsed = readReportFlags(flags);
   if (typeof parsed === 'string') return parsed;
+  const selection = selectionOf(parsed);
+  if (typeof selection === 'string') return selection;
+  if (
+    parsed.compare === undefined &&
+    (parsed.baselineDataset !== undefined ||
+      parsed.baselineReferences.length > 0)
+  )
+    return '--baseline-dataset and --baseline-references require --compare';
   return {
     directory,
+    ...(parsed.compare === undefined ? {} : { compare: parsed.compare }),
+    ...(parsed.baselineDataset === undefined
+      ? {}
+      : { baselineDataset: parsed.baselineDataset }),
+    ...(parsed.baselineReferences.length === 0
+      ? {}
+      : { baselineReferences: parsed.baselineReferences }),
+    ...(parsed.references.length === 0
+      ? {}
+      : { references: parsed.references }),
     output: parsed.output,
     dataset: parsed.dataset,
-    mode: parsed.mode,
-    channel: parsed.channel,
+    ...selection,
     force: parsed.force,
   };
 }
@@ -140,9 +185,9 @@ export function isReportCommand(name: string): boolean {
  * The evidence this report reads, and may therefore never overwrite.
  *
  * The run directory's own documents are protected by name and its records directory by
- * prefix, because a record is addressed by cell id and a report must not be able to land on
- * one by choosing a clever prefix. The dataset's three document directories are protected
- * the same way. What is deliberately *not* protected is the run directory itself: a report
+ * prefix, plus every actual index-declared record location accepted by the reader.
+ * Legacy v1 records need not use the conventional records directory. The dataset's three
+ * document directories are protected the same way. What is deliberately *not* protected is the run directory itself: a report
  * written beside the run's index is the normal, documented destination.
  *
  * A dataset the report did not actually join is not protected, because writing a report into
@@ -155,15 +200,26 @@ function protectedEvidenceOf(parts: {
   readonly observation: {
     readonly dataset: { readonly status: string };
     readonly artifact: {
-      readonly index: { readonly plan: { readonly datasetPath: string } };
+      readonly index: {
+        readonly plan: { readonly datasetPath: string };
+        readonly cells: readonly { readonly record: string }[];
+      };
     };
   };
 }): readonly EvidencePath[] {
   const evidence: EvidencePath[] = [
+    ...(parts.settings.references ?? []).map((path): EvidencePath => ({
+      path: resolve(parts.root, path),
+      kind: 'file',
+    })),
     { path: join(parts.directory, RUN_FILES.plan), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.index), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
+    ...parts.observation.artifact.index.cells.map((cell): EvidencePath => ({
+      path: join(parts.directory, cell.record),
+      kind: 'file',
+    })),
   ];
   // The dataset's location is resolved the same way the read resolved it, whichever source
   // named it — and whether or not it was readable. A damaged dataset is exactly when
@@ -176,12 +232,22 @@ function protectedEvidenceOf(parts: {
     parts.settings.dataset,
     parts.observation.artifact,
   );
+  const recorded = resolve(
+    parts.root,
+    parts.observation.artifact.index.plan.datasetPath,
+  );
+  evidence.push(...datasetEvidence(parts.root, recorded));
+  for (const split of ['dev', 'calibration', 'holdout'])
+    evidence.push({ path: join(recorded, split), kind: 'directory' });
   if (base === null)
     return [
       ...evidence,
       ...datasetEvidence(parts.root, 'evals/datasets/reviewer-v2'),
     ];
   const absolute = base.startsWith('/') ? base : resolve(parts.root, base);
+  // Protect source groups even when their JSON is damaged and cannot be joined.
+  for (const split of ['dev', 'calibration', 'holdout'])
+    evidence.push({ path: join(absolute, split), kind: 'directory' });
   // The manifest is protected as a file and the three document directories as directories: a
   // report written over `manifest.json` would replace the dataset's own table of contents,
   // which every later check depends on.
@@ -193,11 +259,10 @@ function protectedEvidenceOf(parts: {
   return evidence;
 }
 
-/** The settings a parsed command implies. */
-function settingsOf(
-  io: ReportIo,
-  command: ReportCommand,
-): ReportSettings | string {
+/** Validate the shared report selection before any caller may execute a run. */
+function selectionOf(
+  command: Pick<ReportCommand, 'mode' | 'channel'>,
+): Pick<ReportSettings, 'mode' | 'channel'> | string {
   const mode = parseSettlementMode(command.mode);
   if (mode === null) {
     return `--mode takes ask or no-ask, not ${command.mode}`;
@@ -209,14 +274,30 @@ function settingsOf(
   if (channel === null) {
     return `--channel takes available or unavailable, not ${command.channel}`;
   }
+  return { mode, channel };
+}
+
+/** The settings a parsed command implies. */
+function settingsOf(
+  io: ReportIo,
+  command: ReportCommand,
+): ReportSettings | string {
+  if (
+    command.compare === undefined &&
+    (command.baselineDataset !== undefined ||
+      command.baselineReferences !== undefined)
+  )
+    return '--baseline-dataset and --baseline-references require --compare';
+  const selection = selectionOf(command);
+  if (typeof selection === 'string') return selection;
   const base = defaultSettings(io.root);
   return {
     ...base,
-    mode,
-    channel,
+    ...selection,
     // A named dataset wins; otherwise the run's own recorded path is read, which is what
     // makes a rebuild reproducible without the caller having to know the path.
     dataset: datasetSourceOf(command.dataset),
+    references: command.references ?? [],
   };
 }
 
@@ -229,7 +310,7 @@ function settingsOf(
  * evidence is complete without labels, and an empty `labels/` is the state this
  * repository is actually in.
  */
-export async function reportRun(
+async function generateReport(
   io: ReportIo,
   command: ReportCommand,
 ): Promise<number> {
@@ -250,22 +331,83 @@ export async function reportRun(
     directory,
     root: io.root,
     dataset: settings.dataset,
+    references: settings.references ?? [],
   });
   if (!read.ok) {
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const report = buildReport({ observation: read.observation, settings });
+  let comparison: Awaited<ReturnType<typeof prepareComparison>>;
+  try {
+    comparison = await prepareComparison({
+      command,
+      settings,
+      current: read.observation,
+    });
+  } catch {
+    io.err(
+      'problem baseline comparison input is unavailable, invalid, ambiguous or changed during evaluation; no report was written',
+    );
+    return 1;
+  }
+  const published = publishReport({
+    report: buildReport({ observation: read.observation, settings }),
+    observation: read.observation,
+    directory,
+    settings,
+  });
+  const report =
+    comparison === null
+      ? published
+      : {
+          ...published,
+          versionComparison: comparison.comparison,
+          checks: [
+            ...published.checks,
+            ...comparison.comparison.baseline.checks.map((check) => ({
+              ...check,
+              name: `baseline:${check.name}`,
+            })),
+          ],
+        };
   const written = await writeReport({
+    credentialEvidence: [
+      read.observation.artifact.index.workflowExecution?.config,
+      comparison?.baseline.artifact.index.workflowExecution?.config,
+      targetCredentialEvidence(read.observation.artifact.plan.targets),
+      comparison === null
+        ? []
+        : targetCredentialEvidence(comparison.baseline.artifact.plan.targets),
+    ],
     prefix,
     report,
     force: command.force,
-    protectedEvidence: protectedEvidenceOf({
-      directory,
-      root: io.root,
-      settings,
-      observation: read.observation,
-    }),
+    protectedEvidence: [
+      ...protectedEvidenceOf({
+        directory,
+        root: io.root,
+        settings,
+        observation: read.observation,
+      }),
+      ...(comparison === null
+        ? []
+        : [
+            ...comparison.protectedEvidence,
+            { path: comparison.directory, kind: 'directory' as const },
+            ...protectedEvidenceOf({
+              directory: comparison.directory,
+              root: io.root,
+              settings: comparison.originalSettings,
+              observation: comparison.baseline,
+            }),
+            ...protectedEvidenceOf({
+              directory: comparison.directory,
+              root: io.root,
+              settings: comparison.commonSettings,
+              observation: comparison.baseline,
+            }),
+          ]),
+    ],
   });
   if (!written.ok) {
     for (const problem of written.problems) io.err(`problem ${problem}`);
@@ -294,5 +436,20 @@ export async function reportRun(
   io.out(`wrote ${prefix}.json`);
   io.out(`wrote ${prefix}.md`);
   io.out(`wrote ${prefix}.html`);
+  io.out('report generation complete; quality acceptance not-assessed');
   return report.checks.every((check) => check.ok) ? 0 : 1;
+}
+
+export async function reportRun(
+  io: ReportIo,
+  command: ReportCommand,
+): Promise<number> {
+  try {
+    return await generateReport(io, command);
+  } catch {
+    io.err(
+      'problem report generation failed; the output package is incomplete; original run evidence was retained',
+    );
+    return 1;
+  }
 }

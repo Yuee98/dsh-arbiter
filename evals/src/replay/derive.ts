@@ -323,7 +323,10 @@ function outcomeFor(parts: {
   const material = materialAvailability(
     parts.record.material?.blockingGaps ?? [],
   );
-  const production = evaluateReview({ scores: parts.scores, material });
+  const production = evaluateReview(
+    { scores: parts.scores, material },
+    parts.variant.matrix,
+  );
   if (thresholdsAreProduction(parts.variant.thresholds)) {
     return { outcome: production, note: null };
   }
@@ -358,14 +361,19 @@ function outcomeFor(parts: {
     parts.variant.thresholds.authorization,
   );
   return {
-    outcome: scoreReview(derivedRisk, derivedAuthorization, {
-      source: parts.scores.source,
-      audit: derivedAudit({
-        scores: parts.scores,
-        risk: derivedRisk,
-        authorization: derivedAuthorization,
-      }),
-    }),
+    outcome: scoreReview(
+      derivedRisk,
+      derivedAuthorization,
+      {
+        source: parts.scores.source,
+        audit: derivedAudit({
+          scores: parts.scores,
+          risk: derivedRisk,
+          authorization: derivedAuthorization,
+        }),
+      },
+      parts.variant.matrix,
+    ),
     note: null,
   };
 }
@@ -381,6 +389,7 @@ export function factsOf(outcome: ReviewOutcome | null): OutcomeFacts | null {
       status: outcome.status,
       risk: null,
       authorization: null,
+      requiredAuthorization: null,
       verdict: null,
     };
   }
@@ -388,6 +397,7 @@ export function factsOf(outcome: ReviewOutcome | null): OutcomeFacts | null {
     status: outcome.status,
     risk: outcome.risk,
     authorization: outcome.authorization,
+    requiredAuthorization: outcome.requiredAuthorization,
     verdict: outcome.verdict,
   };
 }
@@ -402,6 +412,7 @@ export function factsChanged(
     stored.status !== derived.status ||
     stored.risk !== derived.risk ||
     stored.authorization !== derived.authorization ||
+    stored.requiredAuthorization !== derived.requiredAuthorization ||
     stored.verdict !== derived.verdict
   );
 }

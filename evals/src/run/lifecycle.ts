@@ -1,3 +1,17 @@
+import { sourceKeys } from './workflow-types.js';
+import { workflowSourceDigest, resolveWorkflowPlan } from './source.js';
+import {
+  workflowExecutionOf,
+  executionProblems,
+  legacyRunProvenance,
+} from './provenance.js';
+import {
+  withResourceClaim,
+  requireUnoccupiedResource,
+  certifyResourceAccounting,
+} from './resource.js';
+import type { ResourceLease } from './resource.js';
+import { readRun, attemptsOfCell } from './artifact.js';
 /**
  * The run lifecycle: freeze a plan, write records, continue an interrupted run.
  *
@@ -27,7 +41,7 @@ import { mkdir, open, readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { canonicalJson, digestOf } from '../data/hash.js';
-import type { ReviewCase } from '../data/types.js';
+import type { RunSource } from './source.js';
 
 import {
   claimRun,
@@ -57,7 +71,7 @@ export interface CreateRunOptions {
   readonly directory: string;
   readonly runId: string;
   readonly plan: RunPlan;
-  readonly cases: readonly ReviewCase[];
+  readonly cases: readonly RunSource[];
   readonly datasetDigest: string;
   readonly versions: RunVersions;
   /** The scripted socket this run will replay; its contents are frozen with the plan. */
@@ -74,10 +88,10 @@ export type CreateResult =
 /** The cells a plan's dataset can actually supply. */
 export function planCases(
   plan: RunPlan,
-  cases: readonly ReviewCase[],
-): readonly ReviewCase[] {
+  cases: readonly RunSource[],
+): readonly RunSource[] {
   const byId = new Map(cases.map((entry) => [entry.caseId, entry] as const));
-  return (plan.caseIds ?? []).flatMap((caseId) => {
+  return sourceKeys(plan).flatMap((caseId) => {
     const entry = byId.get(caseId);
     return entry === undefined ? [] : [entry];
   });
@@ -94,8 +108,33 @@ export function planCases(
 export async function createRun(
   options: CreateRunOptions,
 ): Promise<CreateResult> {
+  if (options.plan.workflow === undefined) return createRunUnlocked(options);
+  options = {
+    ...options,
+    plan: resolveWorkflowPlan(options.plan, options.cases),
+  };
+  try {
+    return await withResourceClaim(
+      options.plan,
+      options.directory,
+      async () => {
+        await requireUnoccupiedResource(options.directory);
+        return createRunUnlocked(options);
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      problems: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+}
+
+async function createRunUnlocked(
+  options: CreateRunOptions,
+): Promise<CreateResult> {
   const problems = [...planProblems(options.plan)];
-  const missing = (options.plan.caseIds ?? []).filter(
+  const missing = sourceKeys(options.plan).filter(
     (caseId) => !options.cases.some((entry) => entry.caseId === caseId),
   );
   if (missing.length > 0) {
@@ -106,6 +145,14 @@ export async function createRun(
   if (problems.length > 0) return { ok: false, problems };
   const grid = cellGrid(options.plan);
   const index: RunIndex = {
+    ...(options.plan.workflow === undefined
+      ? { provenance: await legacyRunProvenance() }
+      : {
+          workflowExecution: await workflowExecutionOf(
+            options.plan,
+            options.cases,
+          ),
+        }),
     documentVersion: RUN_INDEX_VERSION,
     runId: options.runId,
     createdAt: new Date(options.now()).toISOString(),
@@ -116,8 +163,8 @@ export async function createRun(
     dataset: {
       datasetId: options.plan.datasetId,
       digest: options.datasetDigest,
-      caseCount: (options.plan.caseIds ?? []).length,
-      caseIds: options.plan.caseIds ?? [],
+      caseCount: sourceKeys(options.plan).length,
+      caseIds: sourceKeys(options.plan),
     },
     versions: options.versions,
     // The fixture *contents* are part of the frozen experiment, not just its path. A run
@@ -192,7 +239,12 @@ async function readRecords(
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return { records: [], problems: [] };
     }
-    throw error;
+    return {
+      records: [],
+      problems: [
+        `records are unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    };
   }
   const records: CellRecord[] = [];
   const problems: string[] = [];
@@ -201,9 +253,17 @@ async function readRecords(
   )) {
     if (!name.endsWith('.json')) continue;
     const path = `${RUN_FILES.records}/${name}`;
-    const parsed: unknown = JSON.parse(
-      await readFile(join(directory, RUN_FILES.records, name), 'utf8'),
-    );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(
+        await readFile(join(directory, RUN_FILES.records, name), 'utf8'),
+      );
+    } catch {
+      problems.push(
+        `${path}: record is unreadable JSON; consumption is unknown`,
+      );
+      continue;
+    }
     const checked = checkers.record(parsed);
     if (!checked.ok) {
       problems.push(`${path}: ${checked.problems.join('; ')}`);
@@ -346,10 +406,12 @@ export interface ResumeOutcome {
  * its only job is to describe the directory: recomputing it from the records is
  * exactly what keeps a continuation from double-counting.
  */
-export async function resumeRun(options: {
+export interface ResumeOptions {
+  /** Called under the claim after preflight, immediately before entering dispatch. */
+  readonly onExecutionStarted?: () => void;
   readonly directory: string;
   readonly existing: ExistingRun;
-  readonly cases: readonly ReviewCase[];
+  readonly cases: readonly RunSource[];
   readonly fixture: RunFixture;
   readonly versions: RunVersions;
   readonly checkers: RunCheckers;
@@ -366,7 +428,77 @@ export async function resumeRun(options: {
    */
   readonly continuation: boolean;
   readonly now?: () => number;
-}): Promise<ResumeOutcome> {
+}
+
+export async function resumeRun(
+  options: ResumeOptions,
+): Promise<ResumeOutcome> {
+  const plan = options.existing.index.plan;
+  if (plan.workflow === undefined) return resumeRunUnlocked(options);
+  return withResourceClaim(plan, options.directory, async (lease) => {
+    if (
+      sourceKeys(plan).some(
+        (key) => !options.cases.some((source) => source.caseId === key),
+      )
+    )
+      throw new Error(
+        'workflow execution sources do not cover the frozen selection',
+      );
+    const fresh = await readExisting(
+      options.directory,
+      plan,
+      options.checkers,
+      workflowSourceDigest(plan, options.cases),
+      digestOf(options.fixture),
+    );
+    if (!fresh.ok) throw new Error(fresh.problems.join('; '));
+    const plannedIds = new Set(
+      fresh.existing.index.cells.map((cell) => cell.cellId),
+    );
+    const recordedIds = new Set(
+      fresh.existing.records.map((record) => record.cellId),
+    );
+    if (
+      recordedIds.size !== fresh.existing.records.length ||
+      fresh.existing.records.some((record) => !plannedIds.has(record.cellId))
+    )
+      throw new Error(
+        'resource records contain duplicate or unknown cells; consumption cannot be verified',
+      );
+    const complete = await readRun(options.directory, options.checkers, {
+      allowWorkflow: true,
+    });
+    if (!complete.ok || complete.artifact.missing.length > 0)
+      throw new Error(
+        'resource records are missing or unreadable; consumption is unknown',
+      );
+    const current = await workflowExecutionOf(plan, options.cases);
+    const problems = executionProblems(
+      fresh.existing.index.workflowExecution,
+      current,
+    );
+    if (problems.length > 0) throw new Error(problems.join('; '));
+    await certifyResourceAccounting(plan, lease, options.checkers);
+    const outcome = await resumeRunUnlocked(
+      {
+        ...options,
+        existing: fresh.existing,
+        continuation:
+          options.continuation ||
+          fresh.existing.records.length > 0 ||
+          fresh.existing.index.status !== 'running',
+      },
+      lease,
+    );
+    lease.accounted = true;
+    return outcome;
+  });
+}
+
+async function resumeRunUnlocked(
+  options: ResumeOptions,
+  lease?: ResourceLease,
+): Promise<ResumeOutcome> {
   const now = options.now ?? (() => Date.now());
   // A continuation must not mix reviewer semantics inside one run. The index declares what
   // the run started under, so a build that disagrees is refused before dispatching
@@ -379,6 +511,10 @@ export async function resumeRun(options: {
         `refusing to continue a run under different versions — ${drift.join('; ')}`,
       );
     }
+    // Initial Git provenance is an observation, not an execution compatibility
+    // key: report archives and documentation commits can move HEAD or dirty state
+    // without changing the tested inputs. Existing plan/source/fixture/version
+    // checks still guard continuation; retain the original provenance unchanged.
     // An abandoned request may still be outstanding: the runner stopped waiting, but the
     // provider may be working and billing. Starting new requests beside it would put more
     // calls in flight than the plan's concurrency allows, and no budget arithmetic can make
@@ -401,10 +537,15 @@ export async function resumeRun(options: {
   );
   // One writer per run: the claim is taken before any cell is dispatched and released
   // however the dispatch ends, so a second process cannot spend the same budget.
-  const release = await claimRun(options.directory);
+  const release =
+    lease === undefined
+      ? await claimRun(options.directory)
+      : async (): Promise<void> => {};
   let outcome: DispatchOutcome;
   try {
+    options.onExecutionStarted?.();
     outcome = await dispatch({
+      ...(lease === undefined ? {} : { resourceLease: lease }),
       runId: options.existing.index.runId,
       plan: options.existing.index.plan,
       cells: pending,
@@ -475,28 +616,6 @@ function outstandingAbandonments(
   return records
     .filter((record) => record.abandonment !== null)
     .map((record) => record.cellId);
-}
-
-/**
- * What one record spent against the run's budget.
- *
- * A settled cell reports its attempts, so that is the figure. An abandoned cell reports
- * nothing — the transport never returned — and guessing one attempt would under-count a
- * call that could have sent its whole reservation. So the reservation is what gets
- * charged, for both timeout and cancellation: what the run knows is that it may have spent
- * that much, and a budget that assumes less is not a bound.
- */
-function attemptsOfCell(record: CellRecord): number {
-  // Only requests that were sent count. A pre-send refusal is kept in the record as
-  // evidence, but charging it would make the persisted index disagree with the budget the
-  // scheduler enforced — and a continuation reading it would start from an inflated count.
-  const sent = record.attempts.filter(
-    (attempt) => attempt.sent !== false,
-  ).length;
-  if (sent > 0) return sent;
-  // An abandoned cell reports nothing it can prove; its reservation is the only figure that
-  // does not under-count.
-  return record.abandonment?.reservedAttempts ?? 0;
 }
 
 /** The fixture entries, keyed by cell id for the scheduler. */

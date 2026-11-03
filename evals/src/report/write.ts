@@ -28,8 +28,10 @@ import {
   resolve,
 } from 'node:path';
 
-import type { EvaluationReport } from '../metrics/types.js';
+import type { PublishedReport } from './publication-types.js';
+import { detailDirectoryOf, detailsIndex, renderDetails } from './details.js';
 import { renderHtml } from './html.js';
+import { publicReport } from './public-text.js';
 import { renderMarkdown } from './markdown.js';
 
 /** The three files a report is written as, named by their extension. */
@@ -92,7 +94,7 @@ function canonical(value: unknown, indent = 0): string {
  * consumer — a later comparison, the replay task — able to work from the JSON alone
  * rather than parsing a table.
  */
-export function renderReport(report: EvaluationReport): RenderedReport {
+function renderPreparedReport(report: PublishedReport): RenderedReport {
   return {
     json: `${canonical(report)}\n`,
     markdown: renderMarkdown(report),
@@ -100,12 +102,16 @@ export function renderReport(report: EvaluationReport): RenderedReport {
   };
 }
 
+export function renderReport(report: PublishedReport): RenderedReport {
+  return renderPreparedReport(publicReport(report));
+}
+
 /** What one write produced. */
 export interface WrittenReport {
   readonly json: string;
   readonly markdown: string;
   readonly html: string;
-  readonly report: EvaluationReport;
+  readonly report: PublishedReport;
 }
 
 /** A write that failed because a file already exists. */
@@ -335,14 +341,36 @@ export function linkTargetOf(path: string): string | null {
  */
 export async function writeReport(parts: {
   readonly prefix: string;
-  readonly report: EvaluationReport;
+  readonly report: PublishedReport;
   readonly force: boolean;
   readonly protectedEvidence?: readonly EvidencePath[];
+  /** Recognition vocabulary only; never serialized into the public report. */
+  readonly credentialEvidence?: unknown;
 }): Promise<WriteSuccess | WriteConflict> {
-  const rendered = renderReport(parts.report);
+  const view = publicReport(
+    { run: parts.report.run, report: parts.report, outputPrefix: parts.prefix },
+    parts.credentialEvidence,
+  );
+  if (view.outputPrefix !== parts.prefix)
+    throw new Error(
+      'report output destination contains credential material; publication refused',
+    );
+  const report = view.report;
+  const core = renderPreparedReport(report);
+  const rendered = {
+    ...core,
+    markdown:
+      core.markdown + detailsIndex(report, detailDirectoryOf(parts.prefix)),
+  };
+  const details = renderDetails(report);
+  const directory = join(
+    dirname(parts.prefix),
+    detailDirectoryOf(parts.prefix),
+  );
+  const detailPaths = [...details.keys()].map((file) => join(directory, file));
   const paths = reportPathsOf(parts.prefix);
   const collisions = destinationsInside(
-    [paths.json, paths.markdown, paths.html],
+    [paths.json, paths.markdown, paths.html, ...detailPaths],
     parts.protectedEvidence ?? [],
   );
   if (collisions.length > 0) {
@@ -355,7 +383,10 @@ export async function writeReport(parts: {
     };
   }
   if (!parts.force) {
-    const conflicts = await existing(paths);
+    const conflicts = [
+      ...(await existing(paths)),
+      ...(await existingDetails(detailPaths)),
+    ];
     if (conflicts.length > 0) {
       return {
         ok: false,
@@ -370,10 +401,22 @@ export async function writeReport(parts: {
   await writeFile(paths.json, rendered.json, 'utf8');
   await writeFile(paths.markdown, rendered.markdown, 'utf8');
   await writeFile(paths.html, rendered.html, 'utf8');
+  await mkdir(directory, { recursive: true });
+  for (const [file, content] of details)
+    await writeFile(join(directory, file), content, 'utf8');
   return {
     ok: true,
-    written: { ...rendered, report: parts.report },
+    written: { ...rendered, report },
   };
+}
+
+async function existingDetails(
+  paths: readonly string[],
+): Promise<readonly string[]> {
+  const results = await Promise.all(
+    paths.map(async (path) => ((await isFile(path)) ? path : null)),
+  );
+  return results.filter((path): path is string => path !== null);
 }
 
 /** The paths among these that already exist. */

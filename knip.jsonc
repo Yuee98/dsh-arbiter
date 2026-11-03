@@ -1,5 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "playwright": {
+    "config": [
+      "playwright.config.ts",
+      "tests/report-browser/playwright.config.ts",
+    ],
+  },
   "entry": [
     "src/index.ts",
     "src/client/index.tsx",

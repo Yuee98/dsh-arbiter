@@ -29,6 +29,7 @@
  * would report a smaller, cleaner experiment than the one it was asked about.
  */
 
+import { digestOf } from '../data/hash.js';
 import { cellIdOf, recordPathOf } from '../run/artifact.js';
 import type { CellRecord, CellState, RunIndex, RunPlan } from '../run/types.js';
 import { RUN_INDEX_VERSION } from '../run/types.js';
@@ -81,15 +82,16 @@ export interface Derivation {
  * The run id a derived directory reports.
  *
  * The variant's own label is readable but can be long, and a run id is a slug with
- * a bounded length. The suffix is kept whole — it ends in the variant's digest, so
- * two variants never collapse into one id — and only the source's prefix is
- * shortened when the budget runs out. A reader who needs the whole axis list reads
- * the lineage, which always carries it.
+ * a bounded length. Short labels retain their historical readable form. When the
+ * suffix cannot fit, hash the complete source id and variant label together so
+ * every axis and the original run contribute to the derived identity. A reader
+ * who needs the whole axis list reads the lineage, which always carries it.
  */
 export function replayRunIdOf(sourceRunId: string, variantId: string): string {
   const suffix = `-replay-${variantId}`;
   const room = 63 - suffix.length;
-  if (room < 1) return `replay-${variantId.slice(-8)}`;
+  if (room < 1)
+    return `replay-${digestOf({ sourceRunId, variantId }).slice(-56)}`;
   const trimmed =
     sourceRunId.length > room ? sourceRunId.slice(0, room) : sourceRunId;
   return `${trimmed}${suffix}`;
@@ -349,7 +351,7 @@ export function deriveRun(parts: {
         thresholds: parts.variant.thresholds,
         settlement: parts.variant.settlement,
         description: parts.variant.description,
-        matrix: 'shared',
+        matrix: parts.variant.matrix ?? 'shared',
         contract: parts.runningContract,
         variantsDocument: parts.variantsDocument,
       },

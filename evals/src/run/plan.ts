@@ -1,3 +1,7 @@
+import { isAbsolute } from 'node:path';
+import { sourceKeys } from './workflow-types.js';
+export { cellGrid } from './grid.js';
+export type { CellGrid, PlannedCell } from './grid.js';
 /**
  * Turning a frozen plan into the exact cells it plans to run.
  *
@@ -21,22 +25,8 @@
 
 import type { ReviewCase } from '../data/types.js';
 
-import { cellIdOf } from './artifact.js';
 import { candidateProblems } from './candidate.js';
 import type { RunBounds, RunPlan, RunProtocol, RunTarget } from './types.js';
-
-/** One planned cell, before anything ran. */
-export interface PlannedCell {
-  readonly cellId: string;
-  readonly caseId: string;
-  readonly targetId: string;
-  readonly protocol: RunProtocol;
-  readonly repeat: number;
-  /** Whether the plan's target offers this protocol at all. */
-  readonly supported: boolean;
-  /** Why this cell cannot be sent, when it cannot. */
-  readonly unsupportedReason: string | null;
-}
 
 /** A plan that could be resolved, or why it could not. */
 export type PlanResolution =
@@ -46,13 +36,6 @@ export type PlanResolution =
       readonly cases: readonly ReviewCase[];
     }
   | { readonly ok: false; readonly problems: readonly string[] };
-
-/** The cells a plan produces, in the plan's own order. */
-export interface CellGrid {
-  readonly cells: readonly PlannedCell[];
-  readonly supported: number;
-  readonly unsupported: number;
-}
 
 /** The bounds a plan may state, checked before anything runs. */
 const MAX_CONCURRENCY = 32;
@@ -91,9 +74,47 @@ export function planProblems(
   // a resolved one selected anything: checking the raw list would refuse a document the
   // schema accepts, and the two would then disagree about what a valid plan is.
   if (options.selectionKnown !== false) {
-    const selected = options.resolvedCases ?? (plan.caseIds ?? []).length;
+    const selected = options.resolvedCases ?? sourceKeys(plan).length;
     if (selected === 0) problems.push('the plan selects no case');
   }
+  if (plan.workflow !== undefined) {
+    if (plan.caseIds !== undefined)
+      problems.push('workflow and legacy caseIds are mutually exclusive');
+    if (plan.split === 'all')
+      problems.push('workflow needs an explicit split, not all');
+    const seenViews = new Set<string>();
+    const seenPoints = new Set<string>();
+    const rootGroups = new Map<string, string>();
+    for (const point of plan.workflow.points) {
+      if (
+        seenViews.has(point.viewId) ||
+        seenPoints.has(`${point.rootId}/${point.pointId}`)
+      )
+        problems.push('duplicate workflow point/view');
+      if (
+        rootGroups.has(point.rootId) &&
+        rootGroups.get(point.rootId) !== point.group
+      )
+        problems.push('workflow root occurs in multiple groups');
+      rootGroups.set(point.rootId, point.group);
+      seenViews.add(point.viewId);
+      seenPoints.add(`${point.rootId}/${point.pointId}`);
+    }
+    const rules = plan.workflow.input.projectRules;
+    if (rules.kind === 'provided' && rules.text.trim().length === 0)
+      problems.push('provided project rules must contain text');
+    if (plan.resource !== undefined) {
+      for (const value of [
+        plan.resource.maxAttempts,
+        plan.resource.maxEstimatedInputTokens,
+      ])
+        if (!Number.isSafeInteger(value) || value < 1)
+          problems.push('resource allowance must be a positive safe integer');
+    }
+    if (plan.resource === undefined || !isAbsolute(plan.resource.runDirectory))
+      problems.push('workflow requires an absolute resource runDirectory');
+  } else if (plan.resource !== undefined)
+    problems.push('resource scope requires workflow selection');
   const context = plan.context;
   const target =
     context.targetInputTokens ?? Math.min(6_000, context.maxInputTokens);
@@ -198,89 +219,6 @@ export function credentialRefOf(
     };
   }
   return { ok: true, ref: outer ?? inner ?? '' };
-}
-
-/**
- * Whether one target offers one protocol, and why not.
- *
- * The reason is written from the plan alone so it is identical on a first run and
- * on a continuation: a cell that was unsupported before must still read as
- * unsupported afterwards, with the same sentence.
- */
-function supportOf(
-  target: RunTarget,
-  protocol: RunProtocol,
-): { readonly supported: boolean; readonly reason: string | null } {
-  if (protocol === 'chat') {
-    const config = target.chat;
-    if (config === null) {
-      return {
-        supported: false,
-        reason: `target ${target.targetId} does not offer protocol chat`,
-      };
-    }
-    if (config.model.length === 0) {
-      return {
-        supported: false,
-        reason: `target ${target.targetId} names no chat model`,
-      };
-    }
-    return { supported: true, reason: null };
-  }
-  const config = target.decision;
-  if (config === null) {
-    return {
-      supported: false,
-      reason: `target ${target.targetId} does not offer protocol decision`,
-    };
-  }
-  if (config.url.length === 0) {
-    return {
-      supported: false,
-      reason: `target ${target.targetId} names no decision endpoint`,
-    };
-  }
-  return { supported: true, reason: null };
-}
-
-/**
- * Expand a plan into its cells.
- *
- * The loop order is the plan's, so the result is deterministic: cases in the
- * resolved order, then targets, then protocols, then repeats. A caller that wants
- * a different order sorts the result; nothing here depends on a hash or a clock.
- */
-export function cellGrid(plan: RunPlan): CellGrid {
-  const cells: PlannedCell[] = [];
-  for (const caseId of plan.caseIds ?? []) {
-    for (const target of plan.targets) {
-      for (const protocol of plan.protocols) {
-        const support = supportOf(target, protocol);
-        for (let repeat = 1; repeat <= plan.repeats; repeat += 1) {
-          cells.push({
-            cellId: cellIdOf({
-              caseId,
-              targetId: target.targetId,
-              protocol,
-              repeat,
-            }),
-            caseId,
-            targetId: target.targetId,
-            protocol,
-            repeat,
-            supported: support.supported,
-            unsupportedReason: support.reason,
-          });
-        }
-      }
-    }
-  }
-  const unsupported = cells.filter((cell) => !cell.supported).length;
-  return {
-    cells,
-    supported: cells.length - unsupported,
-    unsupported,
-  };
 }
 
 /** The target one cell names, or null when the plan does not declare it. */

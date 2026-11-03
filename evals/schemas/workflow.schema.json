@@ -817,6 +817,49 @@
         },
         "notes": {
           "type": "string"
+        },
+        "annotation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binding"],
+          "properties": {
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputHash",
+                "promptFingerprint",
+                "credentials",
+                "versions"
+              ],
+              "properties": {
+                "inputHash": {
+                  "type": "string"
+                },
+                "promptFingerprint": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "boolean"
+                },
+                "versions": {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+                }
+              }
+            },
+            "humanState": {
+              "enum": [
+                "draft",
+                "confirmed",
+                "disputed",
+                "undecidable",
+                "needs-review"
+              ]
+            },
+            "inheritedFrom": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -885,6 +928,145 @@
         },
         "error": {
           "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/text"
+        },
+        "annotation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "binding",
+            "modelKey",
+            "aliases",
+            "registration",
+            "rawResponse",
+            "parsed",
+            "returned",
+            "parameters",
+            "pairs",
+            "conflicts",
+            "problems",
+            "complete",
+            "sourceCommit",
+            "context",
+            "recordedOrder",
+            "responseHash"
+          ],
+          "properties": {
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputHash",
+                "promptFingerprint",
+                "credentials",
+                "versions"
+              ],
+              "properties": {
+                "inputHash": {
+                  "type": "string"
+                },
+                "promptFingerprint": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "boolean"
+                },
+                "versions": {
+                  "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
+                }
+              }
+            },
+            "modelKey": {
+              "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/slug"
+              },
+              "uniqueItems": true
+            },
+            "registration": {
+              "type": "boolean"
+            },
+            "rawResponse": {
+              "type": ["string", "null"]
+            },
+            "parsed": {},
+            "returned": {},
+            "parameters": {},
+            "pairs": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/scorePair"
+                  }
+                }
+              ]
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "sourceCommit": {
+              "type": ["string", "null"]
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "protocol",
+                "targetInputTokens",
+                "maxInputTokens",
+                "customRules",
+                "projectRules"
+              ],
+              "properties": {
+                "protocol": {
+                  "enum": ["chat", "decision"]
+                },
+                "targetInputTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "maxInputTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "customRules": {
+                  "type": "string"
+                },
+                "projectRules": {
+                  "type": ["string", "null"]
+                }
+              }
+            },
+            "recordedOrder": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "responseHash": {
+              "type": "string"
+            }
+          }
         }
       }
     }

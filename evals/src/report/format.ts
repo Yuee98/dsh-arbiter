@@ -35,7 +35,14 @@ export function rateText(part: number, whole: number): string {
 
 /** A cell value escaped for a Markdown table. */
 export function cellOf(value: string): string {
-  return value.replaceAll('|', '\\|').replaceAll('\n', ' ');
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('[', '\\[')
+    .replaceAll(']', '\\]')
+    .replaceAll('|', '\\|')
+    .replaceAll('\n', ' ');
 }
 
 /** One row of a table, as a Markdown line. */
@@ -55,5 +62,7 @@ export function heading(level: number, text: string): string {
 
 /** A bulleted list, or nothing at all when the list is empty. */
 export function bullets(items: readonly string[]): string {
-  return items.length === 0 ? '' : items.map((item) => `- ${item}`).join('\n');
+  return items.length === 0
+    ? ''
+    : items.map((item) => `- ${cellOf(item)}`).join('\n');
 }

@@ -3,7 +3,7 @@
   "policyFixed": "档位、N0 归一化与判定矩阵属于共用审查契约，不再提供可调阈值；模式只在状态页选择。",
   "policyModesNote": "两模式（ask / no-ask）使用同一矩阵，没有任何风险代批上限、后端专属门或概率阈值。",
   "contextTitle": "上下文与输入预算",
-  "maxInput": "最大输入 tokens",
+  "maxInput": "输入硬上限 H（估算 tokens）",
   "evidenceMax": "授权证据条数",
   "parentHuman": "父会话人类原话条数",
   "parentFloor": "父证据保底",
@@ -13,7 +13,7 @@
   "projectFiles": "项目规则文件",
   "projectEnabled": "读取项目规则",
   "enabled": "启用",
-  "customRules": "CUSTOM_RULES（全局审查指引，最多 2000 字符）",
+  "customRules": "CUSTOM_RULES（全局审查指引）",
   "auditTitle": "审计与熔断",
   "retentionDays": "保留天数",
   "retentionBytes": "容量目标 (bytes)",
@@ -37,5 +37,7 @@
   "retentionPreset100MB": "100 MB",
   "retentionPreset500MB": "500 MB",
   "retentionPreset1GB": "1 GB",
-  "retentionFormatted": "约 {formatted}"
+  "retentionFormatted": "约 {formatted}",
+  "targetInput": "常态输入目标 T（估算 tokens）",
+  "inputBudgetHelp": "T 是普通材料的常态目标，H 是完整送审输入的硬上限；均须为正安全整数且 T ≤ H。输入 token 由本地估算，与 Reviewer 的输出额度 maxTokens 分开。本版已停用旧 20/5/40 条数限制。旧配置保留显式 H；缺少 T 时使用 min(6000, H)。"
 }

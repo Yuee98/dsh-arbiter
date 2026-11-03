@@ -63,8 +63,28 @@ function ContextSettings({
   const [filesText, setFilesText] = useState<string | null>(null);
 
   return (
-    <Section title={t('advanced.contextTitle')}>
+    <Section
+      title={t('advanced.contextTitle')}
+      description={t('advanced.inputBudgetHelp')}
+    >
       <div className="arb:grid arb:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] arb:gap-x-6 arb:gap-y-3.5 arb:max-w-2xl">
+        <Field label={t('advanced.targetInput')}>
+          <NumberInput
+            value={draft.context.targetInputTokens}
+            min={1}
+            max={Number.MAX_SAFE_INTEGER}
+            onChange={(value) => {
+              onDraft((next) => {
+                next.context.targetInputTokens = value;
+              });
+            }}
+            onInvalid={() => {
+              onDraft((next) => {
+                next.context.targetInputTokens = 0;
+              });
+            }}
+          />
+        </Field>
         <Field label={t('advanced.maxInput')}>
           <NumberInput
             value={draft.context.maxInputTokens}
@@ -75,18 +95,10 @@ function ContextSettings({
                 next.context.maxInputTokens = value;
               });
             }}
-            onBlur={() => {
-              const hard = draft.context.maxInputTokens;
-              // Commit once: intermediate digits must not ratchet the hidden T down.
-              if (
-                Number.isSafeInteger(hard) &&
-                hard > 0 &&
-                draft.context.targetInputTokens > hard
-              ) {
-                onDraft((next) => {
-                  next.context.targetInputTokens = hard;
-                });
-              }
+            onInvalid={() => {
+              onDraft((next) => {
+                next.context.maxInputTokens = 0;
+              });
             }}
           />
         </Field>

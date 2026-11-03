@@ -53,6 +53,21 @@ describe('the report command line', () => {
     });
   });
 
+  it('accepts explicit frozen snapshot scopes without changing omitted-flag defaults', () => {
+    expect(
+      parseReportCommand([
+        'runs/a',
+        '--references',
+        'dev-f01.json',
+        '--references',
+        'dev-f04.json',
+      ]),
+    ).toMatchObject({ references: ['dev-f01.json', 'dev-f04.json'] });
+    expect(parseReportCommand(['runs/a', '--references'])).toContain(
+      '--references needs a value',
+    );
+  });
+
   it('defaults the settlement to ask with a channel', () => {
     // The default is the product's own: the shared matrix escalates to a person when one
     // can be reached, and a report should describe that unless told otherwise.

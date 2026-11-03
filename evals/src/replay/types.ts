@@ -37,6 +37,8 @@
  */
 
 import type { AskPolicy } from '../../../src/review-contract/matrix.js';
+import type { ReplayMatrix } from './matrix.js';
+import type { ReferenceEvidence } from './references.js';
 
 /** The derived index's implementation version, so a reader can tell it apart. */
 export const REPLAY_IMPLEMENTATION_VERSION = 'eval-replayer-v1';
@@ -93,6 +95,7 @@ export interface SettlementChoice {
 
 /** One fully resolved replay configuration. */
 export interface ReplayVariant {
+  readonly matrix?: ReplayMatrix;
   readonly answer: AnswerCandidate;
   readonly thresholds: ThresholdRules;
   readonly settlement: SettlementChoice;
@@ -149,6 +152,7 @@ export type ReplayDisposition =
 
 /** What one outcome said, in the few members a comparison needs. */
 export interface OutcomeFacts {
+  readonly requiredAuthorization: number | null;
   readonly status: string;
   readonly risk: number | null;
   readonly authorization: number | null;
@@ -242,6 +246,7 @@ export interface ReplayTotals {
 export interface ReplayLineage {
   readonly documentVersion: typeof REPLAY_LINEAGE_VERSION;
   readonly replay: {
+    readonly references?: readonly ReferenceEvidence[];
     readonly implementation: string;
     readonly variantId: string;
     readonly digest: string;
@@ -255,7 +260,7 @@ export interface ReplayLineage {
      * Recorded as a fact rather than a knob: a replay never varies it, and saying
      * so is what stops a reader from assuming a candidate table was applied.
      */
-    readonly matrix: 'shared';
+    readonly matrix: 'shared' | ReplayMatrix;
     /** The contract version the re-derivation actually ran under. */
     readonly contract: string;
     /** The variants document's version, when the caller supplied one. */

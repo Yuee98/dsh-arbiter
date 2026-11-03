@@ -1,5 +1,9 @@
 # evals：审查质量数据契约与标注工具
 
+本地人工标注网页：`pnpm evals annotate <dataset> [--split dev] [--group f01] [--mode blind|assisted]`。默认盲标；本地草稿自动保存，逐点显式确认才写标签，意见需主动展开。启动、冲突恢复、快捷键与真实浏览器验证见[网页说明](../docs/workflow-annotation-web.md)。
+
+`workflows-v1` 的独立题本、模型原文回传、动态共识与人工优先参考使用独立的 `workflow-*` 命令，见[工作流标注说明](../docs/workflow-annotation.md)。旧 `export/import` 继续按下文处理 legacy 数据。
+
 本目录是同一 repo 内的**逻辑独立子项目**：沿用根的 Node／TypeScript／pnpm 工具链，但生产代码不依赖它，发布包也不包含它。它负责三件事：定义案例／标签／模型意见／manifest 的 JSON 契约，校验这些文档彼此一致，以及把材料导出成可独立标注的空白包、再把填好的结果回填成仓库内的标签。
 
 设计依据是[评测系统方案](../docs/milestones/review-quality-and-evals.md) 3.1／3.2 与[评分量表](../docs/milestones/review-quality-rubrics.md)。评分语义本身**不在这里定义**：`src/review-contract/` 是唯一来源，`evals` 直接调用它。
@@ -112,11 +116,11 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 
 | 层             | 内容                                                  | 分母                               |
 | -------------- | ----------------------------------------------------- | ---------------------------------- |
-| 一：自动行为   | 误放／误拒／不必要人工／升级而非拒绝／一致            | 有判定且案例有金标标签的格子       |
+| 一：自动行为   | 误放／误拒／不必要人工／升级而非拒绝／一致            | 有判定且有适用行为参考的格子       |
 | 二：R/A 诊断   | 评分误差、相邻档、合法配对命中、单调性、分布形态      | 裁决者把该字段钉成唯一值的案例     |
 | 三：模式与结算 | allow／deny／询问人工／归一拒绝，以及询问人工是否必要 | 全部格子，但技术故障的结算单独一行 |
 
-**技术失败不属于任何一层。** 超时、取消、传输失败与审查失败都是「没有对本次调用作出陈述」，因此不进比较分母、不算拒绝，只在覆盖表里单独计数。记录缺失（索引声称跑过却没有记录）与派发前已决定（不支持／预算耗尽／未开始）也各占一行。
+**技术失败不进入有效判定比较。** 超时、取消、传输失败与审查失败不当作语义拒绝；完整计划覆盖与适用端到端负担仍保留这些点，并区分规则结算推演与未知后果。记录缺失（索引声称跑过却没有记录）与派发前已决定（不支持／预算耗尽／未开始）也各占一行。
 
 ### 分母与未知
 
@@ -138,6 +142,30 @@ pnpm evals report <运行目录> --mode no-ask --channel unavailable
 - 适配器估算的 input token 与 provider 报告分开两栏，不加在一起。
 - 费用是状态：`cost.amount` 恒为 `null`，报告**不输出费用合计**。
 - 超时／取消时未报告的预留 attempt 单列，不编造 token 数。
+
+### 多来源参考与条件分母（#129）
+
+报告增加向后兼容的 `quality`、`trajectories`、`relations` 节，既有总体 cell 比率保留原分母。核心条件率选每个完整 point/view × target × protocol 条件的最低计划 repeat，失败不会被较好的后续 repeat 替代；各分类沿用全局预选条件，不在子组重新挑选 repeat。R/A 诊断继续使用最低有效评分观测，分别公开可评数量。
+
+- 直接误放的分母是参考 deny/escalate 且实际有有效三态判定的条件；误拒分别列参考 allow、escalate；不必要人工以参考 allow 为分母，并另列其占全部比较点的比例。空分母为 `null`／`n/a`。
+- 人工、人工继承、模型暂定与 unresolved 分开；模型参考保留 pending／humanConfirmed=false。混合总览不是人工金标准确率，不授予 #137 尚待确认的正式用途。
+- 无分数不等于无行为或工程参考。独立行为与当前矩阵冲突时保留并列诊断 finding；非法配对、A1 混合禁止及真实绑定失效仍拒绝。部分字段只进入自身可评诊断，完整配对另计。
+- 参考 allow 的全计划分母包含 unsupported；同时给支持的 allow 数量。全计划 cell（含每个 repeat）与最低计划 repeat 条件分别复用同一负担算法。已知规则推演负担与派发阻断给出下界，缺记录、未开始及未知后果另列，不补成成功或 deny。host-chain 入口标签不证明发生过实际批准或执行；缺少真实续行证据时显示 not-observed。
+- root、lineage、point、view、repeat 与 attempt 分别计数；legacy 历史案例单列。固定轨迹列完整可评、部分范围、不完整与首次观察到偏离。受控关系按唯一参考字段比较方向／不变性及违例幅度，tie 单列；缺失或多值为不可评，natural 关系只描述变化。
+
+可显式读取 #127 已有的冻结参考文件，多个 split/group/context 使用多个参数：
+
+```sh
+pnpm evals report <运行目录> --references <workflow-references-v1.json> --out <报告前缀>
+```
+
+报告读取固定快照，不在候选比较中自动改用新 opinions，也不读取私有 annotation batch 的 retryKey。快照的 split/group/protocol、完整 root/point/view 与有效 binding 必须匹配；未覆盖、未核实或漂移保持 unresolved。annotation 的规范化视图指纹与运行实际请求指纹用途不同，不能直接比较两个 hash 或仅按 pointId 放行。
+
+正式 workflow 工件通过身份感知的 `readRun` 读取；完整 root/lineage/point/view 来自冻结计划，不把兼容 case key 当成历史案例。报告复用 `loadWorkflowSources`／`sourceMaterial` 离线恢复源与实际候选材料，先核对所选源 digest、保存的完整配置与 revision、运行及记录版本、原始材料／预算和初次请求，再用共享 annotation binding helper 比较实际视图。跨进程凭据签名变化只在保留请求能证明种类与同异关系时接受，无法核实则 unresolved；恢复材料不调用 reviewer 或 transport。Git revision、dirty 与未知原因保留记录原值，不把未知写成已复现。身份不符的工件拒绝读取；未提供源、源损坏或材料漂移时仍保留所有冻结计划身份和运行状态。M0 的结果匹配与实际派发分开计数，insufficient-material 不证明未请求模型。
+
+即使 `--force`，报告也不能覆盖运行证据、数据集 split 下的集合源或显式参考快照；数据不可读时同样保护，符号链接按实际目标检查。JSON、MD 与静态 HTML 使用同一报告对象；扩展 HTML 浏览由 #132 交付。
+
+合法的全 unsupported 或全派发前阻断运行可以没有 record，报告仍成功生成；这不表示模型质量通过。索引确有派发状态却缺少 record 时，自检继续失败。完整有效配置只用于本地材料适用性核验；共享报告输出经现有凭据脱敏处理、并省略全部配置自由文本的公开视图，保留必要 token 参数、项目规则启用状态、配置 revision 与原运行 `index.json#/workflowExecution/config` 证据入口。未知文本和未核实的配置字段不原样复制，脱敏识别失败也不回落到原始内容；原运行工件保持不变。
 
 ## 离线回放
 
@@ -399,3 +427,142 @@ pnpm evals import evals/datasets/reviewer-v2 --split dev --fill .local/evals/dev
 加载与标注路由共享 `manifest.json` 优先级：混合布局继续使用旧单文件数据源，其分组格式预览可仅展示部分案例。没有根 manifest 的 legacy 源则按保留的历史清单校验所选 split 的完整成员和 family，删除或替换案例不能让 `check-all` 通过；未选 split 的文件仍不读取。
 
 新运行／实验需显式指定 `datasetId: legacy-v1` 和 `datasetPath: evals/datasets/reviewer-v2`。未提供 caseIds 时按 split 读取；显式 caseIds 优先于 split，保留原有跨 split 选择与顺序语义。报告按冻结案例列表定位实际组，显示集合文件与 record 路径。旧运行仍读取其原 core-v1 路径，不自动改用新标签，也不重写历史计划或结果。
+
+## workflows-v1 正式运行与资源范围
+
+工作流复用既有 `plan`、`run --dry-run`、`run`、`run --resume`、只读 `resume` 和 `show`。计划仍是 `eval-run-plan-v1`；旧 legacy 计划、工件和续跑保留原义。新计划删除 `caseIds`，明确 `split`（dev/calibration/holdout，不能 all），加入 `workflow` 与 `resource`。以下是完整 RunPlan 的字段片段，须替换真实路径和源身份，不是可直接派发的运行授权：
+
+```json
+{
+  "workflow": {
+    "contentSet": "workflows-v1",
+    "points": [
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p01",
+        "viewId": "cw135-001-p01-main"
+      }
+    ],
+    "input": {
+      "customRules": "",
+      "projectRules": { "kind": "disabled" }
+    }
+  },
+  "resource": {
+    "runDirectory": "/absolute/path/to/isolated-run",
+    "maxAttempts": 20,
+    "maxEstimatedInputTokens": 200000
+  }
+}
+```
+
+首四根 CW-135 固定源尚未合入 main 时，须明确外部 datasetPath 和 source revision，不能假称示例已在当前 checkout。workflow 的 datasetId 是计划命名，真实源由路径、split/group、root/lineage/point/view 与既有执行内容校验定位；grouped 源没有新 manifest。只加载指定组的 workflows-v1，`references:false`，不打开标签、模型意见或作者说明文件。未知/重复身份、错误 lineage、非 primaryViewId 和缺源拒绝；解析后的实际 lineage 随既有 plan 冻结，recordless 格子也能恢复来源。
+
+项目规则必须明确声明：`disabled` 表示本评测主动禁用；`{ "kind": "provided", "text": "实际非空规则正文" }` 表示计划提供离线规则文本，不读取项目磁盘文件。未取得材料不是“已经检查没有文件”。T/H 沿用 context；完整实际配置和 configRevision 保存于新 index 的 workflowExecution，续跑比较配置。显式来源状态与旧 default-enabled/null 预演不同，须重算请求预算和参考适用性，不能强套旧估计。
+
+`plan` 和 `run --dry-run` 使用真实 workflowMaterial 和候选 renderer，列出完整身份、支持/unsupported、输入估计、截断和缺口，不构造模型 backend 或读取目标凭据。离线 fixture 只替换响应边界，仍经过同一材料、scheduler、生产 reviewer、解析、usage 和不可变 records；这证明工程行为，不是模型质量、实际端点可用或人工参考。
+
+资源范围首版强制为一个规范化绝对目录，只能在原目录续跑。同一计划换 `--dir` 或复制 run 不能取得新额度；路径别名共享真实目录和 claim。创建在既有 claim 内拒绝原 plan/index 或孤儿 records；派发持 claim 重读记录，扣除已发送 attempts 和无法确认结束的 abandonment 预留。缺失/损坏/无法确认的记录不能按零计，锁外旧快照不能重置消耗。材料准备和准入遵循原 cell 顺序，实际 review 调用仍按 concurrency 并行。
+
+累计输入使用保守口径：每个可能已发 attempt 预留 `bounds.maxInputTokens`，包括 repair，未使用 attempts 释放。有效累计 attempt 上限为 `min(bounds.maxAttempts, resource.maxAttempts, floor(resource.maxEstimatedInputTokens / bounds.maxInputTokens))`，再扣原记录支出。`spent.estimatedInputTokens` 保留既有每格材料估计含义，不能冒充包含 repair 的累计计费输入。per-attempt 估计及可得 usage 原样保存；provider 实际计费 input/output、费用和缓存未知时保持未知，不能用 timeout 冒充 token/金额硬 cap。
+
+外层 timeout、reviewer 进入后异常且没有交回 attempts，都保留最坏预留并停止续派；明确的 pre-send refusal 不计费。请求可能已发而 records/index 写失败时保留 claim，崩溃 claim 也不自动删除。须先确认进程、在途和原记录，不能删锁、删记录或换目录恢复额度。普通 resume 只补无 record 格子，不重写失败记录；另一候选或补测不能直接另建目录重复领取此范围的额度。
+
+新 index 分别记录实际加载代码与数据源的 Git revision、dirty 或未知及原因。外部源不能套用代码 SHA，内容 digest 也不是 Git SHA；源不受 tracked revision 覆盖时不伪称该 HEAD 定位了源。dirty/未知明确表示复现限制，不自动提交代码；计划、源、fixture、实际配置与适用版本漂移继续拒绝。旧 legacy 工件不回填字段。
+
+新 records 的结构化 workflow 身份与 `entryPoint.materialChain: workflow-point` 是实际来源；caseId/familyId 仅为 view/lineage 兼容执行键，不代表 legacy 案例或金标。`readRun` 默认拒绝 workflow 工件，既有报告/回放不能静默误配旧标签；runner 的 `show` 显式识别新工件。新的参考资格、工作流报告与回放接入由 #129/#137 负责。
+
+本工程不授权真实调用。实际运行仍受 #134 的具体资源计划、目标能力及用户适用授权约束，不沿用 S1 额度，不创建凭据，不由 verify/CI 自动派发模型。
+
+## 默认完整报告与归档
+
+一次显式运行可在结束后离线生成完整报告：`pnpm evals run <已有计划.json> --report [--out <前缀>]`。`run --resume --report` 使用相同入口；`--references` 可重复指定适用的冻结快照，`--dataset`、`--mode`、`--channel` 与离线 `report` 的含义相同。`--out` 等报告参数须与 `--report` 一起使用；`--dry-run` 不接受报告请求。省略前缀时写到原运行目录的 `report`，已有输出需要显式 `--force`。离线重建仍为 `pnpm evals report <运行目录> --out <前缀>`。
+
+输出 `<前缀>.json`、`.md`、`.html` 和 `<前缀>.details/` 分组 Markdown。主 MD 保留完整汇总、分类和全部计划格子的紧凑结果，并链接每个 split/业务组明细；附录也列出失败、未标、unsupported、预算阻断和未开始的格子。大正文只留简短说明及原工件位置。JSON、三种渲染及组明细共用同一公开报告对象，数值、参考资格和分母来自既有核心；配置自由文本继续省略，其他可发布文本复用凭据识别，无法安全发布时失败或明确不可用，不回退原文。该能力不承诺识别所有自由文本隐私；实际共享前仍需复核。
+
+运行中断、技术失败或预算耗尽不会因报告写出而改成成功。真正进入执行后发生持久化故障时，能读取的工件仍可产生诊断报告；抢锁、版本或资源校验拒绝不会自动发布别人的活动运行。索引与持久化记录不一致时并列两者并标记完成分布未经核实，自检返回非零；原 index、records、参考快照不改写。报告部分写入失败明确返回非零，不宣布整包生成完成。所有主文件和组明细继续受源证据与符号链接写保护，`--force` 不扩大权限。
+
+报告开头记录原运行位置、所选范围、实际输入预算、被测 Git/dirty/未知说明及参考入口。新 legacy 运行在初次创建时保存代码 Git，resume 保留原测量，归档输出或文档提交导致的 Git 变化本身不会拒绝 legacy 续跑，仍使用既有计划、源、fixture 和语义版本校验；workflow 使用已有 `workflowExecution` 的代码和数据源 Git，两套记录矛盾会标记证据不完整。旧工件缺字段保持 unknown，不用生成报告时的 HEAD 回填。后来提交报告的 commit 由 Git 历史追溯，与被测 commit 分开；dirty/外部未受版本覆盖的源也明确保留复现限制。
+
+将 `--out` 指向 Git 目录即可保存主 MD 与必要 `.details/`；完整 JSON/HTML 和原始运行可另作附件。报告中的本机绝对路径标记为 local-only，不伪装成 GitHub 可访问链接；提交时确认组明细的相对链接有效，另行补充实际可访问的附件入口。简短版本/运行索引见 [报告归档说明](../validation/review-quality/README.md)。工具不会自动 commit、push 或发布，也不维护“最新通过”状态机。
+
+`generation=rendered` 表示报告对象已准备供渲染，命令只有完成全部文件写入才宣布生成完成；`qualityAcceptance=not-assessed` 表示没有配置正式验收门槛。生成成功、工程自检、技术完成与模型质量资格分别看待。仅展示变更可按实际 diff 和输入配置说明复用已有运行；改模型、prompt、材料或预算需要对应的新证据。工程 fixture 不是模型实测或人工验收，本功能不授权真实调用，也不替代 #137 的参考资格、#132 的扩展浏览或 #133 的版本比较。
+
+## 矩阵离线回放
+
+已有响应可通过原 `replay --variants` 比较少量预先列明的公共矩阵。省略 `matrix` 时，默认 100 格、原 flags 与 variant identity/digest 保持原义；显式填写相同默认表也归一到默认身份。正式候选门槛须在比较结果前确定。下面的数值用于解释工程入口：
+
+```json
+{
+  "variantsVersion": "eval-replay-variants-v1",
+  "variants": [
+    {},
+    {
+      "matrix": {
+        "id": "require-nine",
+        "requiredAuthorization": [2, 2, 9, 9, 9, 9, 10, 10, 10, 10]
+      },
+      "thresholds": { "risk": "strict", "authorization": "at-least" }
+    }
+  ]
+}
+```
+
+十个值分别表示 risk 1..10 所需的最低 authorization，须为 2..10 的非递减整数。A1 固定 deny，A10 在所有风险下 allow；ask/no-ask 仍只决定升级后的结算。`matrix.id` 使用至多 63 字符的小写字母、数字及连接号；实际表内容进入身份与派生目录，换名字不能制造不同实验。N0 的 `thresholds` 与矩阵分别记录；chat 的整数分数不受 N0 分布边界影响，但同样使用矩阵候选。
+
+```sh
+pnpm evals replay /path/to/original-run --variants matrices.json --out /path/to/comparison --references /path/to/frozen-references.json
+```
+
+`--references` 可重复，读取既有 `workflow-references-v1` 冻结快照。一次调用只读取一份参考字节集合，每个候选目录中的 `references/reference-N.json` 保存同样的原始字节，lineage 记录原路径、副本路径及内容 digest。候选间原文件发生变化不改变本次参考；无参考、未标和技术失败保留相应状态。回放不生成意见或裁决，也不依据候选矩阵反推期望行为。
+
+工作流候选从原始 runner 工件派生，各候选共用相同保存响应；保留原运行以供来源验证。派生工件保留 `eval-replayer-v1` 身份，报告通过现有 lineage、原 source 文档、材料与重新派生结果验证其来源后才取得参考资格。缺源、版本或材料不符保持未验证；原运行与参考不被回写。`--force` 也不能覆盖原运行或原参考。工程测试与导入前使用临时 `DSH_HOME`，无需真实 provider、凭据或日常 profile。
+
+JSON/MD/HTML 的候选说明列出实际矩阵与 N0，lineage 保存旧/新 R/A、最低授权和 verdict。`changed` 统计评分、授权要求或 verdict 的变化，不能直接读作行为迁移次数；相同 R/A 换矩阵可能只改变授权要求，也可能改变实际行为。报告成功生成不代表质量通过。
+
+发布后的派生目录可用其中保存的参考副本重建报告：
+
+```sh
+pnpm evals report /path/to/derived-run --references /path/to/derived-run/references/reference-1.json --out /path/to/rebuilt-report
+```
+
+源响应、attempt、usage、timing 与原参考均保持原样。离线回放不产生模型请求，实际计费和质量结论仍按真实运行与独立参考证据解释。
+
+## HTML 报告浏览
+
+用浏览器直接打开 `report` 已生成的 `<前缀>.html`，不需要启动服务或联网。页面保留全部计划格子，包括未运行、失败和预算阻断；关键词与业务、数据集来源、案例来源、参考来源、索引状态筛选按 AND 组合，只改变逐例显示。上方全局指标、分母和全局差异不随筛选重算；“当前可见 / 全计划”只说明显示范围。清空筛选恢复全部格子，关闭 JavaScript 时仍显示全量静态表格并支持原生展开。
+
+每格的“差异与材料”可展开该格差异、裁决理由、实际判定与独立参考、材料缺口和本机记录位置；再展开对应尝试查看保存的请求、模型响应及错误。索引状态与记录状态分别保留，不一致不会改写为完成。长正文自动换行，在可聚焦的区域内滚动，不截掉尾部；未保存、已保存空正文、未发送、已遮蔽和因公开边界省略分别说明。没有记录或原文时不从当前数据重建历史材料，本机路径也不表示已经上传或归档的附件。
+
+新增正文先核对已有来源和配置证明，再沿用同一公开报告的凭据投影。存在私有指导、配置漂移或来源无法验证时，保守省略请求、响应回显、错误及材料正文，只保留实际元数据和工件定位。能够展示的文本仍可能被整段遮蔽，包括含评分字段的完整响应；结构化 R/A、状态和指标继续使用原报告值。来源一致性与凭据识别不保证识别全部自由文本隐私，实际共享工件前仍需复核。JSON 可保留这些已公开正文，Markdown 继续使用完整紧凑结果与工件引用，不重复长正文。
+
+静态浏览器验收独立于宿主 DSH E2E，也不包含在 `pnpm verify` 的默认覆盖中。安装现有 Playwright 所需的 Chromium 后，使用外部临时 home 执行：
+
+```sh
+DSH_HOME="$(mktemp -d)" pnpm exec playwright test --config tests/report-browser/playwright.config.ts
+```
+
+该命令使用离线工程工件，以 `file://` 验证筛选、展开、恶意文本、无外部请求、禁用脚本回退及多行长材料的默认可用性；不启动 DSH 或调用真实 provider。结果与失败 trace 保存在 `.local/report-browser/`。这些工程测试不构成模型质量或人工参考验收。
+
+## 保存运行的版本比较
+
+独立 `report` 命令可指定基线运行目录，在同一 JSON、Markdown 和 HTML 中追加 `versionComparison`。基线必须是保留 plan、index、records 的真实运行目录；公开报告 JSON 不能替代来源与请求证明。此参数不属于 `run --report` 的参数集合。
+
+```sh
+pnpm evals report /path/to/current-run \
+  --compare /path/to/baseline-run \
+  --baseline-references /path/to/original-baseline-references.json \
+  --references /path/to/common-new-references.json \
+  --out /path/to/comparison
+```
+
+`--references` 与 `--baseline-references` 均可重复。基线原参考评价使用显式提供的 `--baseline-references`；共同新参考评价把当前 `--references` 分别应用于两侧保存响应。不同 prompt 候选需要各自有效的绑定，可以把两份绑定到同一裁决的快照都作为当前 `--references` 提供；只提供当前候选的参考不能替基线取得资格。重复的适用参考会被拒绝，工具不会任选一份。未提供旧参考时，原参考评价保留未标状态，不声称恢复了运行时的历史裁决。
+
+legacy 数据集使用当前 `--dataset` 的标签作共同新参考；`--baseline-dataset` 可指定基线原标签及源数据集，省略时沿用基线记录的路径。workflow 的两侧各自使用保存计划对应的源数据或显式 dataset 覆盖，重新验证材料与参考绑定。基线覆盖参数必须与 `--compare` 同用。原运行、原参考和源文件不会回写，`--force` 与符号链接也不能绕过两侧证据保护；比较输出须位于基线目录之外。
+
+对齐包含内容集、split、业务组、root、lineage、point、view 和稳定 target/protocol 条件。主统计固定使用最低计划 repeat，失败的首轮不会被后续成功替换；完整覆盖仍保留两边所有计划 cells 与 repeats，包括缺记录、技术失败、预算阻断、未运行和未标。不同成员即使分母相同也不构成共同集合。行为匹配与 R/A 组合命中分别按适用参考语义和资格形成共同分母；评分资格或评分目标差异不取消仍适用的行为比较，行为参考不一致也不取消仍相同且适用的评分诊断。两项分别列出提升、回退、正确性未变和逐条件原因，并并列前后实际行为与分类，保留两个错误行为之间的真实迁移。空分母显示 `n/a`，不会相减两份完整报告的准确率。HTML 筛选只改变当前逐例显示，比较表不随之重算。
+
+相同输入也须分别具备匹配来源、响应和适用共同参考；修改材料后不能用旧响应重新贴标签。源输入哈希变化会明确披露；两侧都有各自匹配的新响应、且既有规范化绑定证明有效视图等价时，仍可配对。凭据视图继续要求既有输入哈希关系一致；有效事实改变或来源证明不足时不可配对。未保存输入指纹或凭据关系无法确认时保持未验证，不推断输入发生变化。不同模型或 prompt 可在各自新响应和分别合格的共同裁决下作为系统观测比较，同时列出实际配置/返回模型、候选、预算和策略差异；具体模型版本未返回时保持未知。模型参数注明为保存计划值，工件未保留的实际执行参数不补造；端点、凭据引用、repair 和未公开参数的变化只输出受控差异类别，不输出私有 URL 或引用原文。端点的显式认证信息加入两侧共同的既有脱敏词表。已验证的 `replay` 派生目录列出实际矩阵、N0 与离线重算身份，共用原响应，不计为新增模型测量。
+
+报告生成、两侧工程自检和质量结论仍分别解释。基线独有的自检失败也返回非零，同时保留可生成的诊断表。局部缺记录或索引冲突仅排除受影响的格子，其他已验证配对仍参与；系统性来源或语义证明不足继续保持不可比。原始 outcome 的既有分类继续保留，质量配对另要求 `reviewed` 的完成终态；取消、超时等终态即使留有评分和响应，也只保留技术覆盖与原始证据，不进入共同质量分母。比较完全离线，不扩大到未选 holdout，不做显著性检验、因果归因或最佳版本选择，也不授权真实调用、人工裁决或改变未知费用。

@@ -14,6 +14,7 @@
 
 import type { DifferenceRow, EvaluationReport } from '../metrics/types.js';
 import { heading, num, pct, rateText, row, separator } from './format.js';
+import { compactText } from './compact.js';
 
 /** The stability and sample-weight section. */
 export function stabilitySection(report: EvaluationReport): string {
@@ -248,7 +249,7 @@ export function differencesSection(report: EvaluationReport): string {
           entry.caseId === '' ? '（数据集）' : entry.caseId,
           entry.observed,
           entry.expected,
-          entry.detail,
+          compactText(entry.detail),
         ]),
       ),
       '',
@@ -297,7 +298,7 @@ export function examplesSection(report: EvaluationReport): string {
         example.inputHash === '' ? '（无记录）' : example.inputHash,
         example.casePath ?? '（未读到）',
         example.labelPath ?? '（无标签）',
-        example.rationale ?? '',
+        compactText(example.rationale),
       ]),
     ),
     '',
