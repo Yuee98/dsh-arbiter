@@ -544,3 +544,25 @@ DSH_HOME="$(mktemp -d)" pnpm exec playwright test --config tests/report-browser/
 ```
 
 该命令使用离线工程工件，以 `file://` 验证筛选、展开、恶意文本、无外部请求、禁用脚本回退及多行长材料的默认可用性；不启动 DSH 或调用真实 provider。结果与失败 trace 保存在 `.local/report-browser/`。这些工程测试不构成模型质量或人工参考验收。
+
+## 保存运行的版本比较
+
+独立 `report` 命令可指定基线运行目录，在同一 JSON、Markdown 和 HTML 中追加 `versionComparison`。基线必须是保留 plan、index、records 的真实运行目录；公开报告 JSON 不能替代来源与请求证明。此参数不属于 `run --report` 的参数集合。
+
+```sh
+pnpm evals report /path/to/current-run \
+  --compare /path/to/baseline-run \
+  --baseline-references /path/to/original-baseline-references.json \
+  --references /path/to/common-new-references.json \
+  --out /path/to/comparison
+```
+
+`--references` 与 `--baseline-references` 均可重复。基线原参考评价使用显式提供的 `--baseline-references`；共同新参考评价把当前 `--references` 分别应用于两侧保存响应。不同 prompt 候选需要各自有效的绑定，可以把两份绑定到同一裁决的快照都作为当前 `--references` 提供；只提供当前候选的参考不能替基线取得资格。重复的适用参考会被拒绝，工具不会任选一份。未提供旧参考时，原参考评价保留未标状态，不声称恢复了运行时的历史裁决。
+
+legacy 数据集使用当前 `--dataset` 的标签作共同新参考；`--baseline-dataset` 可指定基线原标签及源数据集，省略时沿用基线记录的路径。workflow 的两侧各自使用保存计划对应的源数据或显式 dataset 覆盖，重新验证材料与参考绑定。基线覆盖参数必须与 `--compare` 同用。原运行、原参考和源文件不会回写，`--force` 与符号链接也不能绕过两侧证据保护；比较输出须位于基线目录之外。
+
+对齐包含内容集、split、业务组、root、lineage、point、view 和稳定 target/protocol 条件。主统计固定使用最低计划 repeat，失败的首轮不会被后续成功替换；完整覆盖仍保留两边所有计划 cells 与 repeats，包括缺记录、技术失败、预算阻断、未运行和未标。不同成员即使分母相同也不构成共同集合。行为匹配与 R/A 组合命中各有自己的共同分母、提升、回退、未变和逐条件原因，空分母显示 `n/a`，不会相减两份完整报告的准确率。HTML 筛选只改变当前逐例显示，比较表不随之重算。
+
+相同输入也须分别具备匹配来源、响应和适用共同参考；修改材料后不能用旧响应重新贴标签。新的不同输入响应会作为两侧真实覆盖保留，输入不一致时仍不可配对。不同模型或 prompt 可在各自新响应和分别合格的共同裁决下作为系统观测比较，同时列出实际配置/返回模型、候选、预算和策略差异；具体模型版本未返回时保持未知。模型参数注明为保存计划值，工件未保留的实际执行参数不补造。已验证的 `replay` 派生目录列出实际矩阵、N0 与离线重算身份，共用原响应，不计为新增模型测量。
+
+报告生成、两侧工程自检和质量结论仍分别解释。基线独有的自检失败也返回非零，同时保留可生成的诊断表。比较完全离线，不扩大到未选 holdout，不做显著性检验、因果归因或最佳版本选择，也不授权真实调用、人工裁决或改变未知费用。
