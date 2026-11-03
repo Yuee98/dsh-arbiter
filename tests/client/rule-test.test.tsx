@@ -3,6 +3,10 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, test } from 'vitest';
 
 import { RuleTest } from '../../src/client/components/rules/rule-test.js';
+import {
+  INITIAL_RULES_PANEL_CALL,
+  rulesPanelCallReducer,
+} from '../../src/client/components/rules/rule-from-call-state.js';
 import { ArbiterI18nProvider } from '../../src/client/i18n-provider.js';
 import { cloneDraft } from '../../src/client/view-helpers.js';
 import type { Draft } from '../../src/client/view-types.js';
@@ -252,6 +256,46 @@ function openTester(rules: Draft['rules'] = [ALLOW_TEST_ENV, ASK_DEPLOY]): {
 }
 
 describe('rule test panel', () => {
+  test('a stale acknowledgment cannot replay a consumed request or swallow a fresh request', async () => {
+    const first = rulesPanelCallReducer(INITIAL_RULES_PANEL_CALL, {
+      kind: 'focus-none',
+    });
+    const second = rulesPanelCallReducer(first, { kind: 'focus-none' });
+    const consumed = rulesPanelCallReducer(second, {
+      kind: 'focus-handled',
+      request: second.focusRequest,
+    });
+    const stale = rulesPanelCallReducer(consumed, {
+      kind: 'focus-handled',
+      request: first.focusRequest,
+    });
+    const draft = draftWith([ALLOW_TEST_ENV]);
+    const { rerender, i18n } = renderClient(
+      <RuleTest
+        draft={draft}
+        focusedRule={null}
+        focusRequest={stale.focusRequest}
+        handledFocusRequest={stale.handledFocusRequest}
+      />,
+    );
+    expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+
+    const fresh = rulesPanelCallReducer(stale, { kind: 'focus-none' });
+    rerender(
+      <ArbiterI18nProvider i18n={i18n}>
+        <RuleTest
+          draft={draft}
+          focusedRule={null}
+          focusRequest={fresh.focusRequest}
+          handledFocusRequest={fresh.handledFocusRequest}
+        />
+      </ArbiterI18nProvider>,
+    );
+    expect(
+      await screen.findByRole('dialog', { name: '规则测试' }),
+    ).toBeVisible();
+  });
+
   test('a header test action opens the tester and focuses its sample', async () => {
     const draft = draftWith([ALLOW_TEST_ENV]);
     const { user, rerender, i18n } = renderClient(

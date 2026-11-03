@@ -205,7 +205,13 @@ function captureEventSources(
   const identity = { turn: captured.turn };
   const parentLog = captured.parentLog ?? null;
   const sources: ReviewEventSources = captured.eventSources ?? {
-    local: hostEventSource(log, session.id ?? 'unknown', parentId),
+    local: hostEventSource(
+      log,
+      session.id ?? 'unknown',
+      parentId,
+      false,
+      captured.delegation,
+    ),
     parent:
       parentId === undefined
         ? null
@@ -221,7 +227,13 @@ function captureEventSources(
               },
               events: [],
             }
-          : hostEventSource(parentLog, parentId, undefined, true),
+          : hostEventSource(
+              parentLog,
+              parentId,
+              undefined,
+              true,
+              captured.parentDelegation,
+            ),
   };
   return {
     sources,

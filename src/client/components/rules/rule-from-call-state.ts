@@ -30,6 +30,8 @@ export interface RulesPanelCallState {
   readonly focusedId: string | null;
   /** Bumped per request, so re-targeting the tester is always a new request. */
   readonly focusRequest: number;
+  /** A consumed request stays consumed when the Rules panel remounts. */
+  readonly handledFocusRequest: number;
   /** The seed the tester should apply now, if any. */
   readonly activeSeed: SampleSeed | null;
 }
@@ -47,6 +49,7 @@ export type RulesPanelCallAction =
   | { readonly kind: 'prune'; readonly ruleIds: readonly string[] }
   | { readonly kind: 'focus-rule'; readonly ruleId: string }
   | { readonly kind: 'focus-none' }
+  | { readonly kind: 'focus-handled'; readonly request: number }
   | { readonly kind: 'clear-focus' };
 
 export const INITIAL_RULES_PANEL_CALL: RulesPanelCallState = {
@@ -54,6 +57,7 @@ export const INITIAL_RULES_PANEL_CALL: RulesPanelCallState = {
   seeds: {},
   focusedId: null,
   focusRequest: 0,
+  handledFocusRequest: 0,
   activeSeed: null,
 };
 
@@ -113,6 +117,13 @@ export function rulesPanelCallReducer(
         focusRequest: state.focusRequest + 1,
         activeSeed: null,
       };
+    case 'focus-handled':
+      if (
+        action.request !== state.focusRequest ||
+        action.request <= state.handledFocusRequest
+      )
+        return state;
+      return { ...state, handledFocusRequest: action.request };
     case 'clear-focus':
       return { ...state, focusedId: null };
   }
@@ -131,6 +142,7 @@ export function useRulesPanelCall(): {
   readonly pruneSeeds: (ruleIds: readonly string[]) => void;
   readonly focusRule: (ruleId: string) => void;
   readonly focusNone: () => void;
+  readonly focusHandled: (request: number) => void;
   readonly clearFocus: () => void;
 } {
   const [state, dispatch] = useReducer(
@@ -157,6 +169,9 @@ export function useRulesPanelCall(): {
       },
       focusNone: () => {
         dispatch({ kind: 'focus-none' });
+      },
+      focusHandled: (request) => {
+        dispatch({ kind: 'focus-handled', request });
       },
       clearFocus: () => {
         dispatch({ kind: 'clear-focus' });

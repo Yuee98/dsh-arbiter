@@ -1,0 +1,6 @@
+{
+  "name": "arbiter-e2e-workflow-fixture",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts"
+}

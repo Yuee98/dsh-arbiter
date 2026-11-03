@@ -94,6 +94,7 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
     env[key] = value;
   }
   env['DSH_HOME'] = home;
+  env['DSH_AGENTS_HOME'] = join(home, 'agents');
   env['DSH_TELEMETRY_DISABLED'] = '1';
   return env;
 }
@@ -216,6 +217,7 @@ export async function createIsolatedProfile(
     return { root, home, workspace, documentPath };
   }
   await mkdir(join(profile, 'node_modules'), { recursive: true });
+  await mkdir(join(home, 'agents'), { recursive: true });
   await mkdir(workspace, { recursive: true });
   await writeFile(
     join(profile, 'package.json'),
@@ -283,6 +285,10 @@ export async function createIsolatedProfile(
         id: 'workspace-controller',
         name: '@deepseek-ai/dsh-api-workspace-controller',
         config: { documentsDirectory: workspace },
+      },
+      {
+        id: 'spill-local',
+        config: { root: join(home, 'spill'), cleanupPeriodDays: 0 },
       },
       ...(options.extraRows ?? []),
     ]),

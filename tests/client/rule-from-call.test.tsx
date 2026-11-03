@@ -534,6 +534,33 @@ describe('creating a rule draft from a recorded call', () => {
     ).toBeNull();
   });
 
+  test('a consumed tester request stays closed after a tab remount and a new request retains its seed', async () => {
+    baseHandlers();
+    const { user } = renderClient(<ArbiterPage />);
+    await openCall(user);
+    const draft = await openDraftDialog(user);
+    await user.click(
+      within(draft).getByRole('button', { name: '生成草稿并测试' }),
+    );
+    const first = await screen.findByRole('dialog', { name: '规则测试' });
+    await user.click(within(first).getByRole('button', { name: /^关闭$/u }));
+    await user.click(await screen.findByRole('button', { name: '状态与模式' }));
+    await user.click(await screen.findByRole('button', { name: '规则' }));
+
+    const next = await screen.findByRole('button', { name: /^测试规则/u });
+    expect(screen.queryByRole('dialog', { name: '规则测试' })).toBeNull();
+    await user.click(next);
+    const reopened = await screen.findByRole('dialog', { name: '规则测试' });
+    expect(
+      within(reopened).getByText(
+        `本次测试使用调用记录 ${CALL_ID} 的原始输入。`,
+      ),
+    ).toBeVisible();
+    expect(within(reopened).getByLabelText('工具参数')).toHaveValue(
+      JSON.stringify(DEPLOY_ARGS, null, 2),
+    );
+  });
+
   test('the recorded call survives a trip to another tab and back', async () => {
     baseHandlers();
     const { user } = renderClient(<ArbiterPage />);
