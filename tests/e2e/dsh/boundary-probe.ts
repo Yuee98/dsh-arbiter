@@ -8,12 +8,10 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { isRecord } from '../../../src/config/values.js';
 import type { CaseHost } from './case-host.js';
-import { resolveDshCommand } from './profile.js';
 
 export interface BoundaryProbe {
   readonly directory: string;
@@ -28,23 +26,36 @@ function inside(root: string, path: string): boolean {
   );
 }
 
-/** Ask the pinned runtime for its real allowlist, including canonical temp roots. */
-async function writableRoots(workspace: string): Promise<readonly string[]> {
-  const entry = (await resolveDshCommand()).args[0];
-  if (entry === undefined)
-    throw new Error('DSH_E2E_CLI is required for the sandbox boundary probe');
-  const requireFromHost = createRequire(entry);
-  const module: unknown = await import(
-    requireFromHost.resolve('@deepseek-ai/dsh-sandbox')
+/** Mount only in the two cases that need an actual-runtime boundary probe. */
+export function boundaryRootsRow(artifacts: string): Record<string, unknown> {
+  return {
+    insert: [
+      {
+        id: 'arbiter-boundary-roots',
+        name: new URL('./boundary-runtime/index.ts', import.meta.url).href,
+        config: { outputPath: join(artifacts, 'sandbox-roots.json') },
+      },
+    ],
+  };
+}
+
+/** Consume the selected host's allowlist, never a different installed SDK. */
+async function writableRoots(
+  artifacts: string,
+  workspace: string,
+): Promise<readonly string[]> {
+  const evidence: unknown = JSON.parse(
+    await readFile(join(artifacts, 'sandbox-roots.json'), 'utf8'),
   );
-  if (!isRecord(module) || typeof module['writableRoots'] !== 'function')
-    throw new Error('the pinned SDK does not expose writableRoots');
-  const value: unknown = Reflect.apply(module['writableRoots'], module, [
-    { mode: 'workspace-write', workspaceRoot: workspace },
-  ]);
+  if (!isRecord(evidence) || evidence['workspace'] !== workspace)
+    throw new Error('sandbox roots do not belong to this host workspace');
+  const value = evidence['writableRoots'];
   if (!Array.isArray(value)) throw new Error('invalid runtime writable roots');
+  if (!value.includes(workspace))
+    throw new Error('runtime writable roots omit this host workspace');
   return value.map((root: unknown) => {
-    if (typeof root !== 'string') throw new Error('invalid writable root');
+    if (typeof root !== 'string' || !isAbsolute(root))
+      throw new Error('invalid writable root');
     return root;
   });
 }
@@ -55,7 +66,7 @@ export async function createBoundaryProbe(
   workspace: string,
 ): Promise<BoundaryProbe> {
   await mkdir(artifacts, { recursive: true });
-  const roots = await writableRoots(await realpath(workspace));
+  const roots = await writableRoots(artifacts, await realpath(workspace));
   const artifactRoot = await realpath(artifacts);
   const parent = roots.some((root) => inside(root, artifactRoot))
     ? await realpath(homedir())

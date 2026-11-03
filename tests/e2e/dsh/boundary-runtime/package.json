@@ -1,0 +1,5 @@
+{
+  "name": "arbiter-boundary-runtime",
+  "private": true,
+  "type": "module"
+}

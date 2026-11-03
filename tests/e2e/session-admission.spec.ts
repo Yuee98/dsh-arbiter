@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  boundaryRootsRow,
   createBoundaryProbe,
   disposeBoundaryCase,
   type BoundaryProbe,
@@ -659,6 +660,7 @@ test.describe('session admission', () => {
   }, testInfo) => {
     const artifacts = testInfo.outputPath('dsh-trusted');
     const caseHost = await createCaseHost(artifacts, {
+      extraRows: [boundaryRootsRow(artifacts)],
       // Before policy: the call reaches review, and the deterministic reviewer
       // allows it. The effect is still the host's own sandbox decision.
       arbiterRowConfig: { boundary: 'trusted' },
@@ -678,7 +680,7 @@ test.describe('session admission', () => {
         sessionId: session.sessionId,
         action: 'enable',
       });
-      expect(enabled.status).toBe(200);
+      expect(enabled.status, JSON.stringify(enabled.body)).toBe(200);
       expect(admissionOf(enabled.body)['boundary']).toBe('trusted');
       // The plugin applied the trusted bundle to the enabled session.
       const afterEnable = await waitForSession(
@@ -850,7 +852,7 @@ test.describe('session admission', () => {
         sessionId: session.sessionId,
         action: 'enable',
       });
-      expect(enabled.status).toBe(200);
+      expect(enabled.status, JSON.stringify(enabled.body)).toBe(200);
 
       await openHost(page, host);
       await sendPrompt(page, '/permission read-only');
@@ -923,6 +925,7 @@ test.describe('plugin-manager disable with a call in flight', () => {
     const barrierDir = join(artifacts, 'barrier');
     await mkdir(artifacts, { recursive: true });
     const caseHost = await createCaseHost(artifacts, {
+      extraRows: [boundaryRootsRow(artifacts)],
       arbiterRowConfig: { boundary: 'trusted' },
       tracePath,
       barrierDir,
