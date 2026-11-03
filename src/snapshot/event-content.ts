@@ -124,7 +124,7 @@ function encodedBody(
   );
 }
 
-function mediaType(value: Record<string, unknown>): string | null {
+export function mediaType(value: Record<string, unknown>): string | null {
   const type = value['type'];
   const mime =
     value['mimeType'] ??

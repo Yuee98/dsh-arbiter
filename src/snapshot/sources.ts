@@ -7,7 +7,7 @@ import {
   projectRulesCopy,
   type ProjectRulesResult,
 } from './guidance.js';
-import type { ReviewEventSources } from '../types.js';
+import type { ReviewEventSource, ReviewEventSources } from '../types.js';
 import {
   beforePending,
   boundSourceLog,
@@ -18,6 +18,7 @@ import { resultContent } from './event-content.js';
 import { currentTurnOf } from './window.js';
 import { redactEventSources } from './prefix-redaction.js';
 import { discoverLog, redactLog } from './source-redaction.js';
+import { prepareToolResultLog, enrichToolResults } from './tool-results.js';
 
 export interface SnapshotSources {
   readonly eventSources?: ReviewEventSources;
@@ -49,6 +50,60 @@ function captureParentLog(options: SnapshotOptions): SessionLog | undefined {
         turnOf: [...parentObserved.turnOf],
       };
 }
+function capturedEvents(
+  options: SnapshotOptions,
+  log: SessionLog,
+  parentLog: SessionLog | undefined,
+  reader: SnapshotOptions['toolResults'],
+) {
+  const sessionId = options.agent.session.id ?? 'unknown';
+  const eventSources =
+    options.eventSources ??
+    (reader === undefined
+      ? undefined
+      : {
+          local: enrichToolResults(
+            hostEventSource(
+              log,
+              sessionId,
+              options.agent.session.header?.parentSession,
+            ),
+            log,
+            reader,
+          ),
+          parent:
+            parentLog === undefined
+              ? unavailableParent(options.agent.session.header?.parentSession)
+              : hostEventSource(
+                  parentLog,
+                  options.agent.session.header?.parentSession ?? 'unknown',
+                  undefined,
+                  true,
+                ),
+        });
+  const frozenEvents =
+    eventSources === undefined
+      ? undefined
+      : structuredClone(boundEventSources(eventSources));
+  return frozenEvents;
+}
+function unavailableParent(
+  parentId: string | undefined,
+): ReviewEventSource | null {
+  return parentId === undefined
+    ? null
+    : {
+        status: {
+          sessionId: parentId,
+          status: 'unavailable',
+          cutoff: null,
+          fromSeq: null,
+          reason: 'direct parent session is unavailable',
+          access: 'snapshot',
+        },
+        events: [],
+      };
+}
 export async function captureSnapshotSources(
   options: SnapshotOptions,
 ): Promise<SnapshotSources> {
@@ -58,14 +113,23 @@ export async function captureSnapshotSources(
     options.callId,
     options.turn ?? null,
   ).turn;
+  const prefix = beforePending(captured, options.callId);
+  const reader =
+    options.eventSources === undefined ? options.toolResults : undefined;
+  const sessionId = options.agent.session.id ?? 'unknown';
+  const prepared =
+    reader === undefined
+      ? prefix
+      : prepareToolResultLog(prefix, sessionId, reader);
   const observed = boundSourceLog(
-    beforePending(captured, options.callId),
+    prepared,
     options.agent.session.id ?? 'unknown',
     options.agent.session.header?.parentSession,
   );
   const own = structuredClone(observed.own);
   const log = { ...observed, events: own, own, turnOf: [...observed.turnOf] };
   const parentLog = captureParentLog(options);
+  const frozenEvents = capturedEvents(options, log, parentLog, reader);
   const project =
     options.projectRulesMaterial ??
     (await readProjectRulesSource(
@@ -74,12 +138,10 @@ export async function captureSnapshotSources(
     ));
   return {
     turn,
-    ...(options.eventSources === undefined
+    ...(frozenEvents === undefined
       ? {}
       : {
-          eventSources: structuredClone(
-            boundEventSources(options.eventSources),
-          ),
+          eventSources: frozenEvents,
         }),
     log,
     ...(parentLog === undefined ? {} : { parentLog }),
@@ -103,7 +165,8 @@ function redactCapturedLog(
     ),
   );
   return redactLog(log, redactor, (event, content) =>
-    event.type === 'tool/result' && ordinaryResults.has(event.seq)
+    (event.type === 'tool/result' || event.type === 'tool/ptc-dispatch') &&
+    ordinaryResults.has(event.seq)
       ? resultContent(content)
       : content,
   );
