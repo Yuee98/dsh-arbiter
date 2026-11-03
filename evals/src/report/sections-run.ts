@@ -8,7 +8,8 @@
  */
 
 import type { EvaluationReport } from '../metrics/types.js';
-import { heading, row, separator } from './format.js';
+import { heading, row, separator, cellOf } from './format.js';
+import { compactText } from './compact.js';
 
 /** The run's identity and the settings the report was built under. */
 export function identitySection(report: EvaluationReport): string {
@@ -152,7 +153,7 @@ export function closingSection(report: EvaluationReport): string {
     '',
     ...(report.notes.length === 0
       ? ['无额外说明。']
-      : report.notes.map((note) => `- ${note}`)),
+      : report.notes.map((note) => `- ${cellOf(compactText(note))}`)),
     '',
   ].join('\n');
 }

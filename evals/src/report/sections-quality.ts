@@ -2,6 +2,7 @@
 import type { EvaluationReport } from '../metrics/types.js';
 import type { ConditionalQuality, Fraction } from '../metrics/quality-types.js';
 import { heading, rateText, row, separator } from './format.js';
+import { compactText } from './compact.js';
 
 function fraction(value: Fraction): string {
   return rateText(value.numerator, value.denominator);
@@ -375,7 +376,9 @@ function detailsSection(report: EvaluationReport): string {
         `${JSON.stringify(target?.allowedPairs ?? target?.allowed ?? null)} / ${entry.reference ?? '未知'}`,
         `${String(entry.engine.risk)}/${String(entry.engine.authorization)} / ${entry.engine.word ?? '未知'}`,
         `${entry.status}/${entry.classification}`,
-        reference?.reasons.join('; ') ?? entry.labelReasons.join('; '),
+        compactText(
+          reference?.reasons.join('; ') ?? entry.labelReasons.join('; '),
+        ),
       ]);
     }),
     '',

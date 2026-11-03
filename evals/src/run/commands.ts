@@ -59,6 +59,8 @@ import { RUNNER_IMPLEMENTATION_VERSION, RUN_PLAN_VERSION } from './types.js';
 
 /** Where one command writes its human-readable output. */
 export interface RunIo {
+  /** CLI-owned offline publication, only after this invocation entered execution. */
+  readonly completed?: (directory: string) => Promise<number>;
   readonly root: string;
   readonly out: (line: string) => void;
   readonly err: (line: string) => void;
@@ -647,7 +649,11 @@ export async function executeRun(
       for (const problem of existing.problems) io.err(`problem ${problem}`);
       return 1;
     }
+    const execution = { started: false };
     const outcome = await guardedResume(io, {
+      onExecutionStarted: () => {
+        execution.started = true;
+      },
       directory,
       existing: existing.existing,
       cases,
@@ -666,9 +672,14 @@ export async function executeRun(
       continuation: true,
       now,
     });
-    if (outcome === null) return 1;
+    if (outcome === null)
+      return execution.started ? completeInvocation(io, directory, 1) : 1;
     reportRun(io, directory, outcome.index.status, outcome.index.spent);
-    return outcome.index.status === 'complete' ? 0 : 1;
+    return completeInvocation(
+      io,
+      directory,
+      outcome.index.status === 'complete' ? 0 : 1,
+    );
   }
   // An occupied destination is refused before either document is published. Continuing
   // an experiment is `--resume`, which checks the plan hash; a second `run` into the same
@@ -704,7 +715,11 @@ export async function executeRun(
     for (const problem of created.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  const execution = { started: false };
   const outcome = await guardedResume(io, {
+    onExecutionStarted: () => {
+      execution.started = true;
+    },
     directory,
     existing: { index: created.index, records: [] },
     cases,
@@ -722,9 +737,30 @@ export async function executeRun(
     continuation: false,
     now,
   });
-  if (outcome === null) return 1;
+  if (outcome === null)
+    return execution.started ? completeInvocation(io, directory, 1) : 1;
   reportRun(io, directory, outcome.index.status, outcome.index.spent);
-  return outcome.index.status === 'complete' ? 0 : 1;
+  return completeInvocation(
+    io,
+    directory,
+    outcome.index.status === 'complete' ? 0 : 1,
+  );
+}
+
+async function completeInvocation(
+  io: RunIo,
+  directory: string,
+  runExit: number,
+): Promise<number> {
+  try {
+    const reportExit = (await io.completed?.(directory)) ?? 0;
+    return runExit === 0 ? reportExit : runExit;
+  } catch (error) {
+    io.err(
+      `report generation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
 }
 
 /**

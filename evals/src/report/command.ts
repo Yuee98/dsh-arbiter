@@ -31,6 +31,7 @@ import type { ReportSettings } from '../metrics/types.js';
 import { RUN_FILES } from '../run/artifact.js';
 import { defaultPrefixOf, writeReport } from './write.js';
 import type { EvidencePath } from './write.js';
+import { publishReport } from './publication.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -127,6 +128,8 @@ export function parseReportCommand(
   }
   const parsed = readReportFlags(flags);
   if (typeof parsed === 'string') return parsed;
+  const selection = selectionOf(parsed);
+  if (typeof selection === 'string') return selection;
   return {
     directory,
     ...(parsed.references.length === 0
@@ -134,8 +137,7 @@ export function parseReportCommand(
       : { references: parsed.references }),
     output: parsed.output,
     dataset: parsed.dataset,
-    mode: parsed.mode,
-    channel: parsed.channel,
+    ...selection,
     force: parsed.force,
   };
 }
@@ -149,9 +151,9 @@ export function isReportCommand(name: string): boolean {
  * The evidence this report reads, and may therefore never overwrite.
  *
  * The run directory's own documents are protected by name and its records directory by
- * prefix, because a record is addressed by cell id and a report must not be able to land on
- * one by choosing a clever prefix. The dataset's three document directories are protected
- * the same way. What is deliberately *not* protected is the run directory itself: a report
+ * prefix, plus every actual index-declared record location accepted by the reader.
+ * Legacy v1 records need not use the conventional records directory. The dataset's three
+ * document directories are protected the same way. What is deliberately *not* protected is the run directory itself: a report
  * written beside the run's index is the normal, documented destination.
  *
  * A dataset the report did not actually join is not protected, because writing a report into
@@ -164,7 +166,10 @@ function protectedEvidenceOf(parts: {
   readonly observation: {
     readonly dataset: { readonly status: string };
     readonly artifact: {
-      readonly index: { readonly plan: { readonly datasetPath: string } };
+      readonly index: {
+        readonly plan: { readonly datasetPath: string };
+        readonly cells: readonly { readonly record: string }[];
+      };
     };
   };
 }): readonly EvidencePath[] {
@@ -177,6 +182,10 @@ function protectedEvidenceOf(parts: {
     { path: join(parts.directory, RUN_FILES.index), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.fixture), kind: 'file' },
     { path: join(parts.directory, RUN_FILES.records), kind: 'directory' },
+    ...parts.observation.artifact.index.cells.map((cell): EvidencePath => ({
+      path: join(parts.directory, cell.record),
+      kind: 'file',
+    })),
   ];
   // The dataset's location is resolved the same way the read resolved it, whichever source
   // named it — and whether or not it was readable. A damaged dataset is exactly when
@@ -216,11 +225,10 @@ function protectedEvidenceOf(parts: {
   return evidence;
 }
 
-/** The settings a parsed command implies. */
-function settingsOf(
-  io: ReportIo,
-  command: ReportCommand,
-): ReportSettings | string {
+/** Validate the shared report selection before any caller may execute a run. */
+function selectionOf(
+  command: Pick<ReportCommand, 'mode' | 'channel'>,
+): Pick<ReportSettings, 'mode' | 'channel'> | string {
   const mode = parseSettlementMode(command.mode);
   if (mode === null) {
     return `--mode takes ask or no-ask, not ${command.mode}`;
@@ -232,11 +240,20 @@ function settingsOf(
   if (channel === null) {
     return `--channel takes available or unavailable, not ${command.channel}`;
   }
+  return { mode, channel };
+}
+
+/** The settings a parsed command implies. */
+function settingsOf(
+  io: ReportIo,
+  command: ReportCommand,
+): ReportSettings | string {
+  const selection = selectionOf(command);
+  if (typeof selection === 'string') return selection;
   const base = defaultSettings(io.root);
   return {
     ...base,
-    mode,
-    channel,
+    ...selection,
     // A named dataset wins; otherwise the run's own recorded path is read, which is what
     // makes a rebuild reproducible without the caller having to know the path.
     dataset: datasetSourceOf(command.dataset),
@@ -253,7 +270,7 @@ function settingsOf(
  * evidence is complete without labels, and an empty `labels/` is the state this
  * repository is actually in.
  */
-export async function reportRun(
+async function generateReport(
   io: ReportIo,
   command: ReportCommand,
 ): Promise<number> {
@@ -280,8 +297,15 @@ export async function reportRun(
     for (const problem of read.problems) io.err(`problem ${problem}`);
     return 1;
   }
-  const report = buildReport({ observation: read.observation, settings });
+  const report = publishReport({
+    report: buildReport({ observation: read.observation, settings }),
+    observation: read.observation,
+    directory,
+    settings,
+  });
   const written = await writeReport({
+    credentialEvidence:
+      read.observation.artifact.index.workflowExecution?.config,
     prefix,
     report,
     force: command.force,
@@ -319,5 +343,20 @@ export async function reportRun(
   io.out(`wrote ${prefix}.json`);
   io.out(`wrote ${prefix}.md`);
   io.out(`wrote ${prefix}.html`);
+  io.out('report generation complete; quality acceptance not-assessed');
   return report.checks.every((check) => check.ok) ? 0 : 1;
+}
+
+export async function reportRun(
+  io: ReportIo,
+  command: ReportCommand,
+): Promise<number> {
+  try {
+    return await generateReport(io, command);
+  } catch {
+    io.err(
+      'problem report generation failed; the output package is incomplete; original run evidence was retained',
+    );
+    return 1;
+  }
 }

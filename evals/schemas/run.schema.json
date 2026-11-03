@@ -296,6 +296,16 @@
           }
         }
       }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codeGit"],
+      "properties": {
+        "codeGit": {
+          "$ref": "#/properties/workflowExecution/properties/codeGit"
+        }
+      }
     }
   },
   "definitions": {

@@ -1,6 +1,10 @@
 import { sourceKeys } from './workflow-types.js';
 import { workflowSourceDigest, resolveWorkflowPlan } from './source.js';
-import { workflowExecutionOf, executionProblems } from './provenance.js';
+import {
+  workflowExecutionOf,
+  executionProblems,
+  legacyRunProvenance,
+} from './provenance.js';
 import {
   withResourceClaim,
   requireUnoccupiedResource,
@@ -142,7 +146,7 @@ async function createRunUnlocked(
   const grid = cellGrid(options.plan);
   const index: RunIndex = {
     ...(options.plan.workflow === undefined
-      ? {}
+      ? { provenance: await legacyRunProvenance() }
       : {
           workflowExecution: await workflowExecutionOf(
             options.plan,
@@ -403,6 +407,8 @@ export interface ResumeOutcome {
  * exactly what keeps a continuation from double-counting.
  */
 export interface ResumeOptions {
+  /** Called under the claim after preflight, immediately before entering dispatch. */
+  readonly onExecutionStarted?: () => void;
   readonly directory: string;
   readonly existing: ExistingRun;
   readonly cases: readonly RunSource[];
@@ -505,6 +511,10 @@ async function resumeRunUnlocked(
         `refusing to continue a run under different versions — ${drift.join('; ')}`,
       );
     }
+    // Initial Git provenance is an observation, not an execution compatibility
+    // key: report archives and documentation commits can move HEAD or dirty state
+    // without changing the tested inputs. Existing plan/source/fixture/version
+    // checks still guard continuation; retain the original provenance unchanged.
     // An abandoned request may still be outstanding: the runner stopped waiting, but the
     // provider may be working and billing. Starting new requests beside it would put more
     // calls in flight than the plan's concurrency allows, and no budget arithmetic can make
@@ -533,6 +543,7 @@ async function resumeRunUnlocked(
       : async (): Promise<void> => {};
   let outcome: DispatchOutcome;
   try {
+    options.onExecutionStarted?.();
     outcome = await dispatch({
       ...(lease === undefined ? {} : { resourceLease: lease }),
       runId: options.existing.index.runId,

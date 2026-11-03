@@ -85,6 +85,52 @@ async function runReport(
 }
 
 describe('report denominator and evidence IO', { timeout: 30_000 }, () => {
+  it('renders a valid gold report when credential text quotes schema keys and eligibility states', async () => {
+    await withArea(async (created) => {
+      const { directory, dataset } = await syntheticRun(created);
+      const rationale = [
+        'notes',
+        'runId',
+        'source',
+        'gold',
+        'record',
+        'reviewed',
+      ]
+        .map((value) => `Authorization: Bearer ${value}`)
+        .join('\n');
+      await created.write(
+        'dataset/labels/case-a.json',
+        reviewLabel(inputHashOf(reviewCase().input), {
+          target: approvedTarget({
+            allowed: { risk: [3], authorization: [10] },
+            behaviourReference: 'deny',
+            rationale,
+          }),
+        }),
+      );
+      const labelPath = join(dataset, 'labels/case-a.json');
+      const labelBefore = await readFile(labelPath, 'utf8');
+      const output = join(created.path, 'schema-publication');
+      expect(await runReport(created, directory, dataset, output)).toBe(0);
+      const text = await readFile(`${output}.json`, 'utf8');
+      const report: unknown = JSON.parse(text);
+      expect(report).toHaveProperty('run.runId', 'report-run');
+      expect(report).toHaveProperty('notes');
+      expect(report).toHaveProperty('examples.0.labelStatus', 'gold');
+      expect(report).toHaveProperty(
+        'examples.0.caseFactsSource',
+        'record-and-dataset',
+      );
+      expect(report).toHaveProperty('examples.0.outcomeStatus', 'scored');
+      expect(report).toHaveProperty('diagnostics.labels.gold', 1);
+      expect(report).toHaveProperty('examples.0.rationale', '[redacted]');
+      expect(await readFile(labelPath, 'utf8')).toBe(labelBefore);
+      for (const extension of ['json', 'md', 'html']) {
+        const content = await readFile(`${output}.${extension}`, 'utf8');
+        expect(content).not.toContain('Authorization: Bearer');
+      }
+    });
+  });
   it('refuses workflow-shaped records under a legacy frozen plan', async () => {
     await withArea(async (created) => {
       const { directory, dataset } = await syntheticRun(created);

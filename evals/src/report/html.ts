@@ -33,6 +33,8 @@ import type { BehaviourClass } from '../metrics/types.js';
 import { humanCostOf } from '../metrics/settlement.js';
 import { fraction, num, pct, rateText } from './format.js';
 import { qualitySection } from './sections-quality.js';
+import { publicationSection } from './sections-publication.js';
+import type { PublishedReport } from './publication-types.js';
 
 /** Escape one value for HTML text or an attribute. */
 function escape(value: string): string {
@@ -1083,7 +1085,7 @@ function closing(report: EvaluationReport): string {
  * guessed would render it as mojibake; the doctype is before that because a standards
  * mode document is what keeps the table layout predictable across browsers.
  */
-export function renderHtml(report: EvaluationReport): string {
+export function renderHtml(report: PublishedReport): string {
   return [
     '<!doctype html>',
     '<html lang="zh-CN">',
@@ -1095,6 +1097,9 @@ export function renderHtml(report: EvaluationReport): string {
     '</head>',
     '<body>',
     header(report),
+    report.publication === undefined
+      ? ''
+      : `<section>${h(2, '被测来源与归档')}<pre>${escape(publicationSection(report))}</pre></section>`,
     identity(report),
     coverage(report),
     report.quality === undefined

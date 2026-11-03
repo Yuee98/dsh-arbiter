@@ -11,6 +11,12 @@ import type { GitObservation, WorkflowExecution } from './workflow-types.js';
 const execute = promisify(execFile);
 const codeDirectory = fileURLToPath(new URL('../../../', import.meta.url));
 
+export async function legacyRunProvenance(): Promise<{
+  readonly codeGit: GitObservation;
+}> {
+  return { codeGit: await observeGit(codeDirectory) };
+}
+
 /** Read-only provenance; an unavailable repository is unknown, never a fake SHA. */
 export async function observeGit(
   directory: string,
