@@ -36,6 +36,7 @@ import type {
   ReferenceWord,
 } from './types.js';
 import { COMPARED_CLASSES, ERROR_CLASSES } from './types.js';
+import { viewKeyOf } from './source.js';
 
 /**
  * How strict each behaviour is, which is what makes "looser" meaningful.
@@ -215,7 +216,7 @@ export function caseBalancedFromGroups(
 function classListsByCase(
   cells: readonly CellFacts[],
 ): readonly (readonly BehaviourClass[])[] {
-  return [...groupBy(cells, (cell) => cell.caseId).values()].map((group) =>
+  return [...groupBy(cells, viewKeyOf).values()].map((group) =>
     group.map((cell) => classifyCell(cell)),
   );
 }

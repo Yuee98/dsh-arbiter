@@ -6,9 +6,11 @@
 
 **接手这个仓库请先读 [docs/handover.md](docs/handover.md)**：代码地图（按「改什么」组织）、一个调用从 gate 到结算的完整链路、测试分层、常见改动步骤、已知缺口与调试入口。
 
-## 输入预算升级（CW-S07）
+## 输入预算升级（CW-S07 / CW-S08）
 
-生产与评测共用 T/H/C 预算：`context.targetInputTokens` 默认 6000，`context.maxInputTokens` 默认 10000，均为正整数且 T≤H。旧配置缺少 T 时取 `min(6000,H)`；显式非法值拒绝保存。输出 `reviewer.chat.maxTokens` 独立。
+生产与评测共用 T/H/C 预算：`context.targetInputTokens` 默认 6000，`context.maxInputTokens` 默认 10000，均为正安全整数且 T≤H。旧配置缺少 T 时取 `min(6000,H)`；显式非法值拒绝保存。输出 `reviewer.chat.maxTokens` 独立。
+
+当前 `0.1.0` 开发版已接入这次升级（旧限制停用自 `5a7fca1` 起；尚未发布新版本）。在「策略与高级 → 上下文与输入预算」分别编辑 T/H，点击「校验草稿」或「保存并应用」。两项按显式值校验：先降低 H 造成 T>H 时，需要继续调整 T，不会自动覆盖 T 或扩大 H；清空、非正整数或超出安全整数的值也会拒绝保存。成功保存后，后续送审使用新预算，刷新页面和重启 DSH 均保留；读取旧配置本身不改写文件。
 
 旧 `evidenceMaxItems`、`parentHumanItems`、`parentEvidenceFloor`、`historyMaxItems`、`checkpointMaxItems` 和 `toolCallArgumentMaxChars` 在本次升级后停用，读取旧文档时忽略，不转成缓存参数。规则和人类原文取消前置字符截断，也不设最近 N 轮窗口；是否送审由共同预算决定。缓存淘汰只丢副本，来源不可用与预算省略分别记录，已有审计继续按原始送审材料解释。具体见[配置与审计](docs/configuration-and-audit.md)。
 

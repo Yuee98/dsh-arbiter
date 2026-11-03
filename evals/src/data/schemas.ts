@@ -27,6 +27,7 @@ import type {
   ReviewCase,
   ReviewLabel,
   RubricSnapshot,
+  LabelTarget,
 } from './types.js';
 
 import type {
@@ -60,6 +61,7 @@ export type Checker<T> = (value: unknown) => Checked<T>;
 
 /** Every document kind's checker. */
 export interface Checkers {
+  readonly labelTarget: Checker<LabelTarget>;
   readonly workflows: Checker<RecordCollection<Workflow>>;
   readonly groupedCases: Checker<RecordCollection<ReviewCase>>;
   readonly groupedLabels: Checker<
@@ -127,15 +129,23 @@ async function schemaNames(directory: string): Promise<readonly string[]> {
     .sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Compile every schema in one directory.
- *
- * `common.schema.json` is a definition file with no document of its own, so it is
- * registered but never handed out as a checker.
- */
-export async function compileCheckers(
-  directory = SCHEMA_DIRECTORY,
-): Promise<Checkers> {
+let publishedCheckers: Promise<Checkers> | undefined;
+
+/** Compile published schemas once; explicit authoring directories remain fresh. */
+export function compileCheckers(directory?: string): Promise<Checkers> {
+  // Explicit directories are editable authoring inputs and must stay fresh.
+  if (directory !== undefined) return compileDirectory(directory);
+  publishedCheckers ??= compileDirectory(SCHEMA_DIRECTORY).catch(
+    (error: unknown) => {
+      publishedCheckers = undefined;
+      throw error;
+    },
+  );
+  return publishedCheckers;
+}
+
+/** Register common definitions and compile every document schema. */
+async function compileDirectory(directory: string): Promise<Checkers> {
   const ajv = new Ajv({ allErrors: true, strict: true });
   for (const name of await schemaNames(directory)) {
     const document: unknown = JSON.parse(
@@ -147,6 +157,11 @@ export async function compileCheckers(
     ajv.addSchema(document);
   }
   return {
+    labelTarget: checkerOf(
+      ajv.compile<LabelTarget>({
+        $ref: `${BASE}common${SUFFIX}#/definitions/labelTarget`,
+      }),
+    ),
     workflows: checkerOf(
       compile<RecordCollection<Workflow>>(ajv, 'group-workflows'),
     ),

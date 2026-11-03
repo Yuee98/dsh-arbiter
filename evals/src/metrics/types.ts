@@ -33,6 +33,16 @@ import type {
 } from '../../../src/reviewer/usage.js';
 import type { LabelVersions } from '../data/types.js';
 import type { CellState, RunProtocol } from '../run/types.js';
+import type { PlanCandidate } from '../run/types.js';
+import type { PublicWorkflowExecution } from './workflow-publication.js';
+import type { MetricReference } from './references.js';
+import type { MetricSource } from './source.js';
+import type { QualitySection } from './quality-types.js';
+import type { VersionComparison } from './version-comparison-types.js';
+import type {
+  RelationSection,
+  TrajectorySection,
+} from './workflow-metrics-types.js';
 
 /** The report document's own version. A change to any member's meaning bumps it. */
 export const REPORT_FORMAT_VERSION = 'eval-report-v1';
@@ -621,6 +631,8 @@ export interface ComparisonSection {
  * engine answered, how it was classified, and what the host would have done.
  */
 export interface CellView {
+  readonly source?: MetricSource;
+  readonly evaluationReference?: MetricReference;
   readonly cellId: string;
   readonly caseId: string;
   readonly familyId: string;
@@ -641,6 +653,7 @@ export interface CellView {
   readonly engine: EngineAnswer;
   readonly reference: ReferenceWord | null;
   readonly labelStatus:
+    | 'not-applicable'
     | 'gold'
     | 'missing'
     | 'excluded'
@@ -689,6 +702,8 @@ export interface ReportCheck {
 
 /** What produced the report, taken from the run index rather than from a clock. */
 export interface RunIdentity {
+  readonly workflowExecution?: PublicWorkflowExecution;
+  readonly candidate?: PlanCandidate;
   readonly runId: string;
   readonly status: string;
   readonly createdAt: string;
@@ -754,6 +769,7 @@ export type DatasetSource =
 
 /** The settings the report was asked for, which are not properties of the artifact. */
 export interface ReportSettings {
+  readonly references?: readonly string[];
   /** Which ask policy the settlement layer is computed under. */
   readonly mode: AskPolicy;
   /** Whether an approval channel is reachable; an unavailable one settles escalations as denials. */
@@ -765,9 +781,22 @@ export interface ReportSettings {
 
 /** The report, as one document. */
 export interface EvaluationReport {
+  readonly versionComparison?: VersionComparison;
+  readonly trajectories?: TrajectorySection;
+  readonly relations?: RelationSection;
+  /** Additive denominator views; absent in historical v1 reports. */
+  readonly quality?: QualitySection;
   readonly formatVersion: typeof REPORT_FORMAT_VERSION;
   readonly run: RunIdentity;
   readonly setup: {
+    readonly referenceSnapshots?: readonly {
+      readonly sourceCommit: string | null;
+      readonly sourceDirty: boolean | null;
+      readonly createdAt: string;
+      readonly split: string;
+      readonly group: string;
+      readonly protocol: string;
+    }[];
     readonly mode: AskPolicy;
     readonly channel: 'available' | 'unavailable';
     readonly labels: 'joined' | 'absent' | 'unreadable';

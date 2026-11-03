@@ -200,6 +200,7 @@ export function hasGold(coverage: LabelCoverage): boolean {
  * has to know which one they are looking at.
  */
 export function emptyGoldNote(coverage: LabelCoverage): string {
+  if (coverage.cases === 0) return '';
   if (coverage.source === 'unreadable') {
     return '数据集不可读，因此没有任何人类参考可比；这并不是 0% 通过率。';
   }

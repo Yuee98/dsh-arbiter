@@ -109,6 +109,7 @@ describe('an interrupted run', () => {
           join(area.path, 'plan.json'),
           '--dir',
           join(area.path, 'run'),
+          '--report',
         ],
         { cwd: REPOSITORY, stdio: ['ignore', 'pipe', 'pipe'] },
       );
@@ -145,6 +146,21 @@ describe('an interrupted run', () => {
       ).toBeGreaterThan(0);
       // Nothing claims to have run without leaving evidence.
       expect(read.artifact.missing).toEqual([]);
+      const published: unknown = JSON.parse(
+        await readFile(join(area.path, 'run/report.json'), 'utf8'),
+      );
+      expect(published).toHaveProperty('run.status', 'cancelled');
+      expect(published).toHaveProperty(
+        'examples.length',
+        cases.length * repeats,
+      );
+      expect(published).toHaveProperty(
+        'publication.qualityAcceptance.status',
+        'not-assessed',
+      );
+      const markdown = await readFile(join(area.path, 'run/report.md'), 'utf8');
+      for (const cell of read.artifact.index.cells)
+        expect(markdown).toContain(cell.cellId);
     });
   }, 60_000);
 });

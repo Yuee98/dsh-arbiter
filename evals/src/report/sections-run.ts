@@ -8,7 +8,8 @@
  */
 
 import type { EvaluationReport } from '../metrics/types.js';
-import { heading, row, separator } from './format.js';
+import { heading, row, separator, cellOf } from './format.js';
+import { compactText } from './compact.js';
 
 /** The run's identity and the settings the report was built under. */
 export function identitySection(report: EvaluationReport): string {
@@ -29,6 +30,28 @@ export function identitySection(report: EvaluationReport): string {
     row(['协议', run.protocols.join('、')]),
     row(['重复次数', String(run.repeats)]),
     row(['入口链', run.entryPoints.join('、') || '（无记录）']),
+    ...(run.workflowExecution === undefined
+      ? []
+      : [
+          row([
+            'workflow config revision',
+            run.workflowExecution.configRevision,
+          ]),
+          row([
+            'workflow 配置公开视图（省略自由文本）',
+            JSON.stringify(run.workflowExecution.config),
+          ]),
+          row(['workflow 完整配置证据', run.workflowExecution.configEvidence]),
+          row([
+            'workflow code Git',
+            JSON.stringify(run.workflowExecution.codeGit),
+          ]),
+          row([
+            'workflow source Git',
+            JSON.stringify(run.workflowExecution.sourceGit),
+          ]),
+          row(['candidate', JSON.stringify(run.candidate ?? null)]),
+        ]),
     '',
     heading(3, '版本'),
     '',
@@ -65,7 +88,7 @@ export function identitySection(report: EvaluationReport): string {
     row([
       '第三层口径',
       report.setup.settlementProjection
-        ? '推演（无宿主链单元格）'
+        ? '按共享规则推演（无实际结算证据）'
         : '宿主实际结算',
     ]),
     '',
@@ -78,7 +101,7 @@ export function coverageSection(report: EvaluationReport): string {
   return [
     heading(2, '覆盖与分母'),
     '',
-    '分母在这里公开。缺少记录的格子和派发前已决定的格子都不进入任何比率；前者是真正的缺口，后者是运行器的正常状态。',
+    '分母在这里公开。缺少记录和派发前已决定的格子不进入有效判定比较；全计划覆盖与适用端到端负担仍保留这些状态。',
     '',
     row(['指标', '值']),
     separator(2),
@@ -130,7 +153,7 @@ export function closingSection(report: EvaluationReport): string {
     '',
     ...(report.notes.length === 0
       ? ['无额外说明。']
-      : report.notes.map((note) => `- ${note}`)),
+      : report.notes.map((note) => `- ${cellOf(compactText(note))}`)),
     '',
   ].join('\n');
 }

@@ -20,6 +20,7 @@
 
 import type { CellFacts } from './cell.js';
 import { compareText, distinct, groupBy, rate } from './support.js';
+import { viewKeyOf } from './source.js';
 import type {
   ComparisonSection,
   ProtocolComparison,
@@ -28,6 +29,7 @@ import type {
 
 /** One case's answer under one protocol. */
 interface ProtocolAnswer {
+  readonly caseId: string;
   readonly risk: number;
   readonly authorization: number;
   readonly behaviour: string;
@@ -40,7 +42,7 @@ function answerOf(cell: CellFacts): ProtocolAnswer | null {
   const behaviour = cell.engineWord;
   if (risk === null || authorization === null || behaviour === null)
     return null;
-  return { risk, authorization, behaviour };
+  return { caseId: cell.caseId, risk, authorization, behaviour };
 }
 
 /**
@@ -62,8 +64,9 @@ function answersByCase(
     );
   for (const cell of ordered) {
     const answer = answerOf(cell);
-    if (answer === null || answers.has(cell.caseId)) continue;
-    answers.set(cell.caseId, answer);
+    const key = viewKeyOf(cell);
+    if (answer === null || answers.has(key)) continue;
+    answers.set(key, answer);
   }
   return answers;
 }
@@ -93,7 +96,7 @@ function pairedCases(
       const right = decisionByCase.get(caseId);
       return left === undefined || right === undefined
         ? []
-        : [{ caseId, chat: left, decision: right }];
+        : [{ caseId: left.caseId, chat: left, decision: right }];
     });
 }
 
@@ -125,10 +128,8 @@ function comparisonOf(
     targetId,
     model,
     basis: 'one-target-two-protocols',
-    cases: distinct([
-      ...chat.map((cell) => cell.caseId),
-      ...decision.map((cell) => cell.caseId),
-    ]).length,
+    cases: distinct([...chat.map(viewKeyOf), ...decision.map(viewKeyOf)])
+      .length,
     paired: pairs.length,
     behaviourAgree,
     scoreAgree,

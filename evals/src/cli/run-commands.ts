@@ -13,9 +13,12 @@
  */
 
 import { RUN_FILES } from '../run/artifact.js';
+import { runReportFlags } from './run-report.js';
+import type { PostRunReport } from './run-report.js';
 
 /** Where one run command reads from and whether it may write. */
 export interface RunCommandLine {
+  readonly report?: PostRunReport;
   readonly name: 'plan' | 'run' | 'resume' | 'show';
   /** The plan document, for the commands that read one. */
   readonly plan: string | null;
@@ -39,6 +42,7 @@ export const RUN_USAGE = [
   'run commands (explicit invocation only; none of them runs during verify or CI):',
   '  plan <plan.json>                       expand a frozen plan and report every cell',
   '  run <plan.json> [--dir DIR] [--resume] [--dry-run]',
+  '                    [--report [--out PREFIX] [--references SNAPSHOT] [--force]]',
   '                                         dispatch the plan; --dry-run only reports',
   '  resume <plan.json> [--dir DIR]         report which cells a continuation would run',
   '  show <run-dir>                         read a finished run and print its cells',
@@ -101,7 +105,9 @@ export function parseRunCommand(
       ? `show needs a run directory\n\n${RUN_USAGE}`
       : `${name} needs a plan document\n\n${RUN_USAGE}`;
   }
-  const parsed = readRunFlags(name, flags);
+  const reporting = runReportFlags(name, flags);
+  if (typeof reporting === 'string') return reporting;
+  const parsed = readRunFlags(name, reporting.rest);
   if (typeof parsed === 'string') return `${parsed}\n\n${RUN_USAGE}`;
   if (name === 'show') {
     if (parsed.dir !== null)
@@ -116,6 +122,7 @@ export function parseRunCommand(
   }
   return {
     name,
+    ...(reporting.report === undefined ? {} : { report: reporting.report }),
     plan: target,
     // The directory stays null when the caller names none: its default depends on the
     // dataset id inside the plan, so deriving it here would need the document read at

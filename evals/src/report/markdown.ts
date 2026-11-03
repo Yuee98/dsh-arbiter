@@ -19,7 +19,8 @@
  * outline and nothing else.
  */
 
-import type { EvaluationReport } from '../metrics/types.js';
+import type { PublishedReport } from './publication-types.js';
+import { publicationSection } from './sections-publication.js';
 import { heading } from './format.js';
 import { behaviourSection } from './sections-behaviour.js';
 import { diagnosticsSection } from './sections-diagnostics.js';
@@ -37,6 +38,8 @@ import {
   stabilitySection,
 } from './sections-support.js';
 import { usageSection } from './sections-usage.js';
+import { qualitySection } from './sections-quality.js';
+import { versionComparisonSection } from './sections-version-comparison.js';
 
 /**
  * Render one report as Markdown.
@@ -45,14 +48,16 @@ import { usageSection } from './sections-usage.js';
  * it did, why, what the host settled, what it cost, what may be compared, where it
  * differed, and the per-cell evidence behind all of it.
  */
-export function renderMarkdown(report: EvaluationReport): string {
+export function renderMarkdown(report: PublishedReport): string {
   return [
     heading(1, `评测报告 ${report.run.runId}`),
     '',
     '本报告由保存的运行记录离线重建：不新增请求、不覆盖证据、不回写任何标签。三层分开报告——主要自动行为指标、R/A 诊断、实际模式与宿主结算——技术失败不当成禁止。',
     '',
+    publicationSection(report),
     identitySection(report),
     coverageSection(report),
+    qualitySection(report),
     behaviourSection(report),
     diagnosticsSection(report),
     settlementSection(report),
@@ -60,6 +65,7 @@ export function renderMarkdown(report: EvaluationReport): string {
     stabilitySection(report),
     efficiencySection(report),
     comparisonSection(report),
+    versionComparisonSection(report, 'markdown'),
     differencesSection(report),
     examplesSection(report),
     closingSection(report),
