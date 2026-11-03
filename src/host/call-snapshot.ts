@@ -1,6 +1,8 @@
 import { credentialRegistry } from '../reviewer/credential-registry.js';
 import { workflowRedactor } from '../snapshot/workflow.js';
 import type { CredentialRedactor } from '../reviewer/credential-redactor.js';
+import { discoverLog } from '../snapshot/source-redaction.js';
+import { emptyToolResult } from '../audit/tool-result-reader.js';
 /**
  * The gate's bridge to the snapshot builder.
  *
@@ -64,9 +66,20 @@ export async function buildCallSnapshot(
       ? path.hint
       : undefined;
   const sessionId = call.session.id;
+  const workflow = callRedactor(host, call.session);
+  const audit = host.currentAudit();
   const prepared = await prepareReviewSnapshot(
     {
       agent: call.agent,
+      toolResults: {
+        discover: (log) => {
+          discoverLog(log, workflow);
+        },
+        read: (receipt) =>
+          audit === null
+            ? emptyToolResult('unavailable')
+            : audit.getToolResult(receipt.sessionId, receipt.callId, receipt),
+      },
       ...(services.sessions === undefined
         ? {}
         : { sessions: services.sessions }),
@@ -92,7 +105,7 @@ export async function buildCallSnapshot(
         runtime.sessionRecordErrors.get(call.exec.callId) ?? null,
       configRevision: call.view.revision,
     },
-    callRedactor(host, call.session),
+    workflow,
   );
   return { ...prepared, llm };
 }

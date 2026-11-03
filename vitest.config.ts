@@ -30,6 +30,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
+          setupFiles: ['tests/helpers/isolated-home.ts'],
           include: ['tests/**/*.test.{ts,tsx}'],
           exclude: [
             'tests/audit.test.ts',
@@ -46,6 +47,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
+          setupFiles: ['tests/helpers/isolated-home.ts'],
           include: [
             'tests/audit.test.ts',
             'tests/suggestions.test.ts',
@@ -68,7 +70,10 @@ export default defineConfig({
           name: 'ui',
           environment: 'jsdom',
           include: ['tests/client/**/*.test.{ts,tsx}'],
-          setupFiles: ['tests/helpers/client-setup.ts'],
+          setupFiles: [
+            'tests/helpers/isolated-home.ts',
+            'tests/helpers/client-setup.ts',
+          ],
           restoreMocks: true,
         },
       },

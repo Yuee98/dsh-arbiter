@@ -1,3 +1,4 @@
+import { rememberRecordError } from './record-errors.js';
 import { fingerprintOf, type CallRecord } from '../audit.js';
 import { appendRecord } from '../records.js';
 import type {
@@ -150,9 +151,6 @@ function channelOf(
     ? unavailable('host_approval_policy_never')
     : { available: true, unavailableCode: null, unavailableText: null };
 }
-
-/** How many session-record failures stay addressable for diagnostics. */
-const MAX_SESSION_RECORD_ERRORS = 200;
 
 /**
  * How long an approved call may wait for a result before its entry is reaped.
@@ -329,14 +327,7 @@ export class CallSettlement {
       this.history.clearRecordFailure(sessionId);
       return state;
     }
-    runtime.sessionRecordErrors.set(callId, state);
-    // The map is diagnostic state, not history: keep the newest entries so a
-    // session with a persistent write failure cannot grow it without bound.
-    while (runtime.sessionRecordErrors.size > MAX_SESSION_RECORD_ERRORS) {
-      const oldest = runtime.sessionRecordErrors.keys().next().value;
-      if (oldest === undefined) break;
-      runtime.sessionRecordErrors.delete(oldest);
-    }
+    rememberRecordError(runtime.sessionRecordErrors, callId, state);
     this.history.noteRecordFailure(sessionId, state);
     return state;
   }

@@ -15,6 +15,8 @@ import {
 } from './event-content.js';
 
 import { SOURCE_BYTE_LIMIT, sourceBytes as bytes } from './source-guard.js';
+import { resultReference } from './tool-result-reference.js';
+import { referenceEvent } from './tool-results.js';
 
 function dataOf(event: SessionEventLike): Record<string, unknown> {
   return eventRecord(event.data) ? event.data : {};
@@ -27,6 +29,12 @@ function messageOf(event: SessionEventLike): Record<string, unknown> {
 
 function callOf(event: SessionEventLike): string | null {
   const data = dataOf(event);
+  if (
+    (event.type === 'tool/ptc-dispatch-start' ||
+      event.type === 'tool/ptc-dispatch') &&
+    typeof data['subCallId'] === 'string'
+  )
+    return data['subCallId'];
   if (typeof data['callId'] === 'string') return data['callId'];
   const message = messageOf(event);
   const source = message['source'];
@@ -267,11 +275,16 @@ function ordinaryOf(
 ): ReviewEvent | null {
   const visible = messageEvent(event, base, parentId);
   if (visible !== null) return visible;
+  const reference = resultReference(event, base.sessionId);
+  if (reference !== null) return referenceEvent(reference, base);
   const data = dataOf(event);
   const message = messageOf(event);
   const callId = callOf(event);
   if (callId === null) return null;
-  if (event.type === 'tool/call' && typeof data['name'] === 'string')
+  if (
+    (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') &&
+    typeof data['name'] === 'string'
+  )
     return {
       ...base,
       kind: 'call',
@@ -280,7 +293,8 @@ function ordinaryOf(
       arguments: structuredClone(data['arguments'] ?? {}),
       ...(typeof data['cwd'] === 'string' ? { cwd: data['cwd'] } : {}),
     };
-  if (event.type !== 'tool/result') return null;
+  if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch')
+    return null;
   const status =
     message['isError'] === true
       ? 'failure'
@@ -302,7 +316,10 @@ function ordinaryOf(
 /** Freeze the local call cutoff before redaction or any source selection. */
 export function beforePending(log: SessionLog, callId: string): SessionLog {
   const at = log.own.findIndex(
-    (event) => event.type === 'tool/call' && callOf(event) === callId,
+    (event) =>
+      (event.type === 'tool/call' ||
+        event.type === 'tool/ptc-dispatch-start') &&
+      callOf(event) === callId,
   );
   if (at < 0) return log;
   const own = log.own.slice(0, at);
@@ -410,7 +427,8 @@ function scanEvents(
     if (
       event === undefined ||
       base === undefined ||
-      reservedIds.has(base.eventId)
+      reservedIds.has(base.eventId) ||
+      context.log.redundantToolResults?.has(event.seq) === true
     )
       continue;
     total += bytes(event.data, SOURCE_BYTE_LIMIT - total);

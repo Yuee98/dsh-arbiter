@@ -25,6 +25,8 @@ export const SOURCE_EVENT_LIMIT = 16_384;
 
 /** How an event's turn was established. */
 export interface SessionLog {
+  /** Internal projection provenance; native observation identities remain in coverage. */
+  readonly redundantToolResults?: ReadonlySet<number>;
   readonly coverage?: {
     readonly cutoff?: { readonly eventId: string; readonly seq: number } | null;
     readonly protectedOriginalMissing?: string;
