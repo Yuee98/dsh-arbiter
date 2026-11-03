@@ -18,6 +18,7 @@ export type ComparisonReason =
   | 'baseline-evidence-unverified'
   | 'current-evidence-unverified'
   | 'input-changed'
+  | 'input-view-unverified'
   | 'common-reference-unavailable'
   | 'behaviour-reference-differs'
   | 'scoring-reference-differs'
@@ -41,6 +42,7 @@ export interface ComparisonCell {
     readonly evidence: 'frozen-plan-only';
     readonly temperature: number | null;
     readonly maxTokens: number | null;
+    readonly maxRepairRetries: number | null;
     readonly timeoutMs: number | null;
     readonly reasoningEffort: string | null;
   };
@@ -51,6 +53,7 @@ export interface ComparisonCell {
   readonly repeat: number;
   readonly standing: CellFacts['standing'];
   readonly indexStatus: CellFacts['indexStatus'];
+  readonly completed: boolean;
   readonly model: CellFacts['model'];
   readonly inputHash: string | null;
   readonly promptFingerprint: string | null;
@@ -72,6 +75,7 @@ export interface ComparisonSide {
   readonly cellsPlanned: number;
   readonly conditionsPlanned: number;
   readonly statuses: Readonly<Record<string, number>>;
+  /** Raw existing classifications retain original outcomes; paired quality has separate admission. */
   readonly original: BehaviourCounts;
   readonly common: BehaviourCounts;
   readonly cells: readonly ComparisonCell[];

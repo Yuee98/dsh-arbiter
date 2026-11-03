@@ -6,11 +6,12 @@ import type { CellFacts } from './cell.js';
 import type { Observation } from './observe.js';
 import type { VersionConditions } from './version-conditions.js';
 import { firstConditions } from './source.js';
+import { targetConditionChanges } from './version-target-conditions.js';
 import { compareText, groupBy, rate, tally } from './support.js';
 import type { EvaluationReport } from './types.js';
 import {
   commonReferenceEqual,
-  comparableViews,
+  viewComparability,
   comparisonCell,
   evidenceVerified,
   measurementOf,
@@ -102,40 +103,58 @@ function conditionsChanged(
   current: ComparisonInput,
 ): readonly string[] {
   const changes: string[] = [];
-  if (left.inputHash !== right.inputHash) changes.push('source-input');
+  const before = left.record?.material ?? null,
+    after = right.record?.material ?? null;
+  if (
+    left.inputHash !== null &&
+    right.inputHash !== null &&
+    left.inputHash !== right.inputHash
+  )
+    changes.push('source-input');
   if (canonicalJson(baseline.conditions) !== canonicalJson(current.conditions))
     changes.push('policy-or-replay');
-  const before = comparisonCell(left, left, baseline.original.artifact.plan);
-  const after = comparisonCell(right, right, current.original.artifact.plan);
-  if (canonicalJson(before.settings) !== canonicalJson(after.settings))
-    changes.push('model-settings');
-  if (canonicalJson(left.model) !== canonicalJson(right.model))
+  changes.push(
+    ...targetConditionChanges(
+      left,
+      right,
+      baseline.original.artifact.plan,
+      current.original.artifact.plan,
+    ),
+  );
+  if (
+    left.model !== null &&
+    right.model !== null &&
+    canonicalJson(left.model) !== canonicalJson(right.model)
+  )
     changes.push('actual-model');
-  if (
-    left.record?.material?.promptFingerprint !==
-    right.record?.material?.promptFingerprint
-  )
-    changes.push('rendered-prompt');
-  if (
-    left.record?.material?.maxInputTokens !==
-      right.record?.material?.maxInputTokens ||
-    left.record?.material?.targetInputTokens !==
-      right.record?.material?.targetInputTokens
-  )
-    changes.push('input-budget');
+  if (before !== null && after !== null) {
+    if (before.promptFingerprint !== after.promptFingerprint)
+      changes.push('rendered-prompt');
+    if (
+      before.maxInputTokens !== after.maxInputTokens ||
+      (before.targetInputTokens !== undefined &&
+        after.targetInputTokens !== undefined &&
+        before.targetInputTokens !== after.targetInputTokens)
+    )
+      changes.push('input-budget');
+  }
   if (
     canonicalJson(baseline.report.run.candidate ?? null) !==
     canonicalJson(current.report.run.candidate ?? null)
   )
     changes.push('candidate');
+  const oldConfig = baseline.report.run.workflowExecution,
+    newConfig = current.report.run.workflowExecution;
   if (
-    baseline.report.run.workflowExecution?.configRevision !==
-    current.report.run.workflowExecution?.configRevision
+    oldConfig !== undefined &&
+    newConfig !== undefined &&
+    oldConfig.configRevision !== newConfig.configRevision
   )
     changes.push('saved-configuration');
   if (
-    canonicalJson(left.record?.versions ?? null) !==
-    canonicalJson(right.record?.versions ?? null)
+    left.record !== null &&
+    right.record !== null &&
+    canonicalJson(left.record.versions) !== canonicalJson(right.record.versions)
   )
     changes.push('versions');
   return changes;
@@ -152,7 +171,9 @@ function pairedRow(
     reasons.push('baseline-evidence-unverified');
   if (!evidenceVerified(right) || current.conditions.origin === 'unverified')
     reasons.push('current-evidence-unverified');
-  if (!comparableViews(left, right)) reasons.push('input-changed');
+  const view = viewComparability(left, right);
+  if (view === 'different') reasons.push('input-changed');
+  else if (view === 'unverified') reasons.push('input-view-unverified');
   if (
     left.evaluationReference.source === 'unresolved' ||
     right.evaluationReference.source === 'unresolved'

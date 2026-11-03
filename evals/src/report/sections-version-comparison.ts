@@ -25,6 +25,7 @@ function sideRows(
     String(cell.repeat),
     cell.indexStatus,
     cell.standing,
+    String(cell.completed),
     cell.model === null
       ? 'unknown'
       : [
@@ -81,8 +82,8 @@ function tablesOf(report: EvaluationReport): readonly ComparisonTable[] {
         '状态',
         '原参考输入',
         '共同参考输入',
-        '原参考匹配/分母',
-        '共同参考匹配/分母',
+        '原参考原始分类匹配/分母',
+        '共同参考原始分类匹配/分母',
       ],
       rows: [section.baseline, section.current].map((side, index) => [
         index === 0 ? 'baseline' : 'current',
@@ -165,6 +166,7 @@ function tablesOf(report: EvaluationReport): readonly ComparisonTable[] {
         'repeat',
         '状态',
         '记录',
+        '完成终态',
         '实际模型',
         '模型参数',
         '输入 hash',
@@ -205,7 +207,7 @@ function tablesOf(report: EvaluationReport): readonly ComparisonTable[] {
   ];
 }
 const EXPLANATION =
-  '最低计划 repeat 构成主统计；全部 cells 保留在覆盖表。正确性计数与前后实际行为、分类分别列示。共同新参考分别验证两侧已保存响应，不新增模型请求。历史参考无法仅凭保存运行确认，原参考指本次显式提供的报告时输入。两侧总准确率不相减；不同模型、prompt、预算或策略属于系统观测，不能归因于单一变量。模型具体版本未返回时保持未知。';
+  '最低计划 repeat 构成主统计；全部 cells 保留在覆盖表。原始 outcome 的既有分类保留，质量配对另要求有效完成的终态。正确性计数与前后实际行为、分类分别列示。共同新参考分别验证两侧已保存响应，不新增模型请求。历史参考无法仅凭保存运行确认，原参考指本次显式提供的报告时输入。两侧总准确率不相减；不同模型、prompt、预算或策略属于系统观测，不能归因于单一变量。模型具体版本未返回时保持未知。';
 export function versionComparisonSection(
   report: EvaluationReport,
   format: 'markdown' | 'html',

@@ -33,6 +33,7 @@ import { defaultPrefixOf, writeReport } from './write.js';
 import type { EvidencePath } from './write.js';
 import { publishReport } from './publication.js';
 import { prepareComparison } from './compare.js';
+import { targetCredentialEvidence } from './target-credentials.js';
 
 /** Where the command writes its human-readable output. */
 export interface ReportIo {
@@ -373,6 +374,10 @@ async function generateReport(
     credentialEvidence: [
       read.observation.artifact.index.workflowExecution?.config,
       comparison?.baseline.artifact.index.workflowExecution?.config,
+      targetCredentialEvidence(read.observation.artifact.plan.targets),
+      comparison === null
+        ? []
+        : targetCredentialEvidence(comparison.baseline.artifact.plan.targets),
     ],
     prefix,
     report,

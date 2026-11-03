@@ -40,6 +40,7 @@ export function comparisonCell(
       evidence: 'frozen-plan-only',
       temperature: chat?.temperature ?? null,
       maxTokens: chat?.maxTokens ?? null,
+      maxRepairRetries: chat?.maxRepairRetries ?? null,
       timeoutMs:
         (original.protocol === 'chat'
           ? target?.chat?.timeoutMs
@@ -58,6 +59,9 @@ export function comparisonCell(
     repeat: original.repeat,
     standing: original.standing,
     indexStatus: original.indexStatus,
+    completed:
+      original.indexStatus === 'reviewed' &&
+      original.record?.status === 'reviewed',
     model: original.model,
     inputHash: original.inputHash,
     promptFingerprint: original.record?.material?.promptFingerprint ?? null,
@@ -90,7 +94,9 @@ export function evidenceVerified(cell: CellFacts): boolean {
     response &&
     identity &&
     cell.record !== null &&
+    cell.indexStatus === 'reviewed' &&
     cell.record.status === cell.indexStatus &&
+    cell.record.material !== null &&
     cell.record.cellId === cell.cellId &&
     cell.record.case.caseId === cell.caseId &&
     cell.record.target.targetId === cell.targetId &&
@@ -107,18 +113,21 @@ export function evidenceVerified(cell: CellFacts): boolean {
   );
 }
 /** A source change can remain the same verified effective view; credentials keep their input relationship. */
-export function comparableViews(left: CellFacts, right: CellFacts): boolean {
-  if (left.source.kind !== right.source.kind) return false;
-  if (left.inputHash !== null && left.inputHash === right.inputHash)
-    return true;
+export function viewComparability(
+  left: CellFacts,
+  right: CellFacts,
+): 'comparable' | 'different' | 'unverified' {
+  if (left.inputHash === null || right.inputHash === null) return 'unverified';
+  if (left.source.kind !== right.source.kind) return 'different';
+  if (left.inputHash === right.inputHash) return 'comparable';
+  if (left.source.kind === 'legacy') return 'different';
   const a = left.evaluationReference.binding,
     b = right.evaluationReference.binding;
-  return (
-    left.source.kind === 'workflow' &&
-    a !== null &&
-    b !== null &&
-    sameAnnotationView(a, b)
-  );
+  if (a === null || b === null) return 'unverified';
+  if (sameAnnotationView(a, b)) return 'comparable';
+  return a.promptFingerprint !== b.promptFingerprint
+    ? 'different'
+    : 'unverified';
 }
 function commonReferenceSource(left: CellFacts, right: CellFacts): boolean {
   const a = left.evaluationReference,

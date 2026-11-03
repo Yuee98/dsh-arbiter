@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   commonReferenceEqual,
-  comparableViews,
+  viewComparability,
   evidenceVerified,
   measurementOf,
 } from '../../evals/src/metrics/version-comparison-cell.js';
@@ -73,9 +73,18 @@ describe('version comparison metric qualification', () => {
         binding: { ...binding, inputHash: 'different-source' },
       },
     };
-    expect(comparableViews(cell, changed)).toBe(true);
+    expect(viewComparability(cell, changed)).toBe('comparable');
     expect(
-      comparableViews(cell, {
+      viewComparability(
+        { ...cell, inputHash: null },
+        { ...changed, inputHash: null },
+      ),
+    ).toBe('unverified');
+    expect(viewComparability({ ...cell, inputHash: null }, changed)).toBe(
+      'unverified',
+    );
+    expect(
+      viewComparability(cell, {
         ...changed,
         evaluationReference: {
           ...changed.evaluationReference,
@@ -86,16 +95,16 @@ describe('version comparison metric qualification', () => {
           },
         },
       }),
-    ).toBe(false);
+    ).toBe('unverified');
     expect(
-      comparableViews(cell, {
+      viewComparability(cell, {
         ...changed,
         evaluationReference: {
           ...changed.evaluationReference,
           binding: { ...binding, promptFingerprint: 'different-visible-facts' },
         },
       }),
-    ).toBe(false);
+    ).toBe('different');
   });
   it('uses separately qualified candidate bindings without pretending their prompt hashes are equal', () => {
     const cell = metricCell('same');
@@ -181,6 +190,15 @@ describe('version comparison metric qualification', () => {
       { caseFacts: null },
       { caseFacts: { ...verified.caseFacts, conflictsWithDataset: true } },
       { indexStatus: 'failed' as const },
+      {
+        indexStatus: 'timeout' as const,
+        record: { ...record, status: 'timeout' as const },
+      },
+      {
+        indexStatus: 'cancelled' as const,
+        record: { ...record, status: 'cancelled' as const },
+      },
+      { record: { ...record, material: null } },
     ])
       expect(evidenceVerified({ ...verified, ...patch })).toBe(false);
   });
