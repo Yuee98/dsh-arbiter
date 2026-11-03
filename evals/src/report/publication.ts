@@ -5,6 +5,7 @@ import { datasetPathOf } from '../metrics/observe.js';
 import type { EvaluationReport, ReportSettings } from '../metrics/types.js';
 import { RECORDLESS_STATUSES } from '../run/artifact.js';
 import { canonicalJson } from '../data/hash.js';
+import { reportEvidence } from './evidence.js';
 import type { GitObservation } from '../run/workflow-types.js';
 import type {
   PublishedReport,
@@ -107,6 +108,7 @@ export function publishReport(parts: {
   return {
     ...parts.report,
     publication,
+    evidence: reportEvidence(parts.report, parts.observation),
     checks: [
       ...parts.report.checks,
       {
