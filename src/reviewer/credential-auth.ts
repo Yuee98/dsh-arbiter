@@ -11,15 +11,12 @@ import {
 } from './credential-syntax.js';
 export type CredentialMask = (value: string, kind: string) => string;
 const AUTH_FIELD = String.raw`authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|api_key|access[-_\s]*token|refresh[-_\s]*token|${ROTATING_CREDENTIAL_FIELD_SOURCE}`;
-const NEXT_ASSIGNMENT = new RegExp(
-  String.raw`[ \t]+(?:["']?(?:${AUTH_FIELD}|[a-z][\w-]*)["']?|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\s*[:=]`,
-  'iu',
-);
+const NEXT_ASSIGNMENT = String.raw`(?<![ \t])[ \t]+(?:["']?(?:${AUTH_FIELD}|[a-z][\w-]*)["']?|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\s*[:=]`;
 const AUTH_VALUE = String.raw`(?:${QUOTED_CREDENTIAL_VALUE}|(?:${CREDENTIAL_MARKER_SOURCE}|[^,;}\]\n"'\x60])+)`;
-function pattern(indices = false): RegExp {
+function pattern(): RegExp {
   return new RegExp(
-    `(?<![\\w-])((?:"|')?(?:${AUTH_FIELD})(?:"|')?)(\\s*[:=]\\s*)(${AUTH_VALUE})`,
-    indices ? 'gidu' : 'giu',
+    `(?<![\\w-])((?:"|')?(?:${AUTH_FIELD})(?:"|')?)\\s*[:=]\\s*`,
+    'giu',
   );
 }
 function fieldKind(field: string): string {
@@ -27,35 +24,67 @@ function fieldKind(field: string): string {
     ? 'authorization'
     : (credentialKind(field.replace(/["']/gu, '')) ?? 'token');
 }
-function adjacentValueEnd(field: string, value: string): number {
-  if (['"', "'", '`'].includes(value[0] ?? '')) return value.length;
-  const scheme = /authorization/iu.test(field)
-    ? /^(Bearer|Basic|Digest|Token)[ \t]+/iu.exec(value)
-    : null;
-  // Digest parameters are part of the authentication value, not new fields.
-  if (scheme?.[1]?.toLowerCase() === 'digest') return value.length;
-  const from = scheme?.[0].length ?? 0;
-  const next = NEXT_ASSIGNMENT.exec(value.slice(from));
-  return next === null ? value.length : from + next.index;
+function wholeValue(
+  text: string,
+  start: number,
+  scheme: RegExpExecArray | null,
+): boolean {
+  return (
+    ['"', "'", '`'].includes(text[start] ?? '') ||
+    scheme?.[1]?.toLowerCase() === 'digest'
+  );
+}
+function valueBoundary(text: string) {
+  const boundaries = new RegExp(NEXT_ASSIGNMENT, 'giu');
+  const queryBoundaries = /[&#]/gu;
+  let next = boundaries.exec(text);
+  let queryEnd = queryBoundaries.exec(text);
+  return (
+    start: number,
+    fieldStart: number,
+    scheme: RegExpExecArray | null,
+  ) => {
+    const from = start + (scheme?.[0].length ?? 0);
+    while (next !== null && next.index < from) next = boundaries.exec(text);
+    const whole = wholeValue(text, start, scheme);
+    let limit = whole ? text.length : (next?.index ?? text.length);
+    if (!whole && ['?', '&'].includes(text[fieldStart - 1] ?? '')) {
+      while (queryEnd !== null && queryEnd.index < start)
+        queryEnd = queryBoundaries.exec(text);
+      limit = Math.min(limit, queryEnd?.index ?? text.length);
+    }
+    return limit;
+  };
 }
 function authenticationFields(text: string) {
   const fields: { field: string; value: string; start: number; end: number }[] =
     [];
-  const matcher = pattern(true);
+  const matcher = pattern();
+  const schemeMatcher = /(Bearer|Basic|Digest|Token)[ \t]+/iuy;
+  const valueMatcher = new RegExp(AUTH_VALUE, 'yu');
+  const boundary = valueBoundary(text);
   for (
     let match = matcher.exec(text);
     match !== null;
     match = matcher.exec(text)
   ) {
-    const range = match.indices?.[3];
-    if (range === undefined) continue;
     const field = match[1] ?? '';
-    const start = range[0];
+    const start = matcher.lastIndex;
+    schemeMatcher.lastIndex = start;
+    const scheme = /authorization/iu.test(field)
+      ? schemeMatcher.exec(text)
+      : null;
+    // Both cursors advance only forwards. Never greedily read a line's entire
+    // suffix and rewind to its first assignment for every credential field.
+    const limit = boundary(start, match.index, scheme);
+    valueMatcher.lastIndex = 0;
+    const value = valueMatcher.exec(text.slice(start, limit))?.[0];
+    if (value === undefined) continue;
     const end = credentialValueEnd(
       text,
       match.index,
       start,
-      start + adjacentValueEnd(field, match[3] ?? ''),
+      start + value.length,
     );
     fields.push({ field, value: text.slice(start, end), start, end });
     matcher.lastIndex = end;

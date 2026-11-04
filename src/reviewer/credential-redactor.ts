@@ -361,6 +361,7 @@ export class CredentialRedactor {
     // Tokens are local and absent from input; only exact tokens are restored.
     let prefix = '\0crd';
     while (text.includes(prefix)) prefix += 'x';
+    const protectedToken = new RegExp(`${prefix}\\d+\0`, 'gu');
     const replacements = new Map<string, string>();
     const hold = (value: string): string => {
       const token = `${prefix}${String(replacements.size)}\0`;
@@ -372,12 +373,11 @@ export class CredentialRedactor {
         if (!this.isMarker(marker)) return marker;
         return hold(marker);
       });
-    const restore = (value: string): string => {
-      let restored = value;
-      for (const [token, marker] of replacements)
-        restored = restored.replaceAll(token, () => marker);
-      return restored;
-    };
+    const restore = (value: string): string =>
+      value.replace(
+        protectedToken,
+        (token) => replacements.get(token) ?? token,
+      );
     const mask = (value: string, kind: string): string =>
       protect(this.mask(restore(value), kind));
     const queried = maskCredentialQueries(

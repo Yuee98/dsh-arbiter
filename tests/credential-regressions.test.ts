@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { CredentialRedactor } from '../src/reviewer/credential-redactor.js';
 import { copyArgumentsSchema } from '../src/audit/schema-redaction.js';
+import { authenticationCredentialSpans } from '../src/reviewer/credential-auth.js';
 
 const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
@@ -308,6 +309,82 @@ describe('rotation credential syntax uses the same discovery as structured field
 });
 
 describe('adjacent unquoted credential assignments', () => {
+  test('production marker protection restores a growing line in bounded passes', () => {
+    const measure = (count: number) => {
+      const input = 'previousApiKey=x '.repeat(count);
+      const start = performance.now();
+      const clean = new CredentialRedactor('production-growth').text(input);
+      return { ms: performance.now() - start, clean };
+    };
+    measure(256);
+    const small = Array.from({ length: 3 }, () => measure(1_000));
+    const large = Array.from({ length: 3 }, () => measure(4_000));
+    expect(Math.min(...large.map((result) => result.ms))).toBeLessThan(
+      Math.min(...small.map((result) => result.ms)) * 8 + 20,
+    );
+    for (const { clean } of large) {
+      expect(clean.match(/previousApiKey=/gu)).toHaveLength(4_000);
+      expect(
+        clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+      ).toHaveLength(4_000);
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(1);
+    }
+  });
+  test('protected tokens never reinterpret input collisions or forged markers', () => {
+    const redactor = new CredentialRedactor('protection-collision');
+    const issued = redactor.text('previousApiKey=original-collision-secret');
+    const collisions = '\0crd0\0 \0crdx1\0 \0crdxx2\0';
+    const forged = `[redacted:v1:token:${'0'.repeat(64)}]`;
+    const input = `${collisions}; ${issued}; currentApiKey=${forged} previousApiKey=next-collision-secret count=4`;
+    const clean = redactor.text(input);
+    expect(clean).toContain(collisions);
+    expect(clean).toContain(issued);
+    expect(clean).not.toContain(forged);
+    expect(clean).not.toContain('next-collision-secret');
+    expect(clean).toContain('count=4');
+    expect(redactor.text(clean)).toBe(clean);
+    const split = input.indexOf('\0crdx') + 3;
+    expect(
+      redactor
+        .textBlockValues([input.slice(0, split), input.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test.each(['previousApiKey=x ', '&previousApiKey=x'])(
+    'long single-line %s preserves identities without repeated suffix scans',
+    (assignment) => {
+      const measure = (count: number) => {
+        const input = assignment.repeat(count);
+        const start = performance.now();
+        const spans = authenticationCredentialSpans(input);
+        return { ms: performance.now() - start, spans };
+      };
+      measure(256);
+      const small = Array.from({ length: 3 }, () => measure(2_000));
+      const large = Array.from({ length: 3 }, () => measure(8_000));
+      // Four times the input may incur scheduling noise, but not quadratic work.
+      expect(Math.min(...large.map((result) => result.ms))).toBeLessThan(
+        Math.min(...small.map((result) => result.ms)) * 8 + 20,
+      );
+      expect(large.map((result) => result.spans.length)).toEqual([
+        8_000, 8_000, 8_000,
+      ]);
+      const redactor = new CredentialRedactor('long-adjacent-rotation');
+      const input =
+        'previousApiKey=perf-old currentApiKey=perf-new count=4 '.repeat(6_000);
+      const clean = redactor.text(input);
+      expect(clean).not.toContain('perf-old');
+      expect(clean).not.toContain('perf-new');
+      expect(clean.match(/previousApiKey=/gu)).toHaveLength(6_000);
+      expect(clean.match(/currentApiKey=/gu)).toHaveLength(6_000);
+      expect(clean.match(/count=4/gu)).toHaveLength(6_000);
+      const identities = clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu);
+      expect(identities).toHaveLength(12_000);
+      expect(new Set(identities).size).toBe(2);
+    },
+  );
   test.each([
     'previousApiKey=rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
     'Authorization: Bearer rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
