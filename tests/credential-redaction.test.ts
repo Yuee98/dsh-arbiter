@@ -349,3 +349,51 @@ describe('shared bounded credential materials', () => {
     );
   });
 });
+
+describe('rotation credential field names', () => {
+  test.each([
+    'previousApiKey',
+    'old_api_key',
+    'new-api-key',
+    'currentAccessToken',
+    'next_refresh_token',
+    'previousPassword',
+    'current_secret_key',
+  ])(
+    '%s discovers current-prefix values without learning future material',
+    (field) => {
+      const redactor = new CredentialRedactor(`rotation-${field}`);
+      const oldValue = 'rotation-before-value';
+      const newValue = 'rotation-after-value';
+      const clean = redactor.value({
+        echo: oldValue,
+        nested: { [field]: oldValue, newApiKey: newValue },
+        count: 2,
+        path: '/tmp/rotation-backup',
+      });
+      const text = JSON.stringify(clean);
+      expect(text).not.toContain(oldValue);
+      expect(text).not.toContain(newValue);
+      expect(new Set(text.match(marker)).size).toBe(2);
+      expect(clean).toMatchObject({ count: 2, path: '/tmp/rotation-backup' });
+      expect(redactor.text(oldValue)).not.toBe(redactor.text(newValue));
+      expect(redactor.value(clean)).toEqual(clean);
+    },
+  );
+  test('credential-like business names and scoring members keep their values', () => {
+    const ordinary = {
+      previousKey: 'business-key',
+      newKey: 'another-business-key',
+      previousApiKeyCount: 4,
+      currentAccessTokenPath: '/tmp/cache',
+      previousApiKeyVersion: 'v2',
+      key: 'generic-value',
+    };
+    const redactor = new CredentialRedactor('rotation-business');
+    expect(redactor.value(ordinary)).toEqual(ordinary);
+    expect(redactor.value({ risk: 4, authorization: 10 }, 'chat')).toEqual({
+      risk: 4,
+      authorization: 10,
+    });
+  });
+});

@@ -271,3 +271,38 @@ describe('credential boundary regressions from the first PR review', () => {
     }
   });
 });
+
+describe('rotation credential syntax uses the same discovery as structured fields', () => {
+  test.each([
+    'accessToken="rotation-old-text"; refresh-token="rotation-new-text"',
+    'previousApiKey="rotation-old-text"; newApiKey="rotation-new-text"',
+    'old_api_key: "rotation-old-text"\ncurrent-api-key: "rotation-new-text"',
+    'nextAccessToken="rotation-old-text"; previous_refresh_token="rotation-new-text"',
+    'previousPassword="rotation-old-text"; current_secret_key="rotation-new-text"',
+    '{"nested":{"previousApiKey":"rotation-old-text","newApiKey":"rotation-new-text"}}',
+    'https://example.test/rotate?previous_api_key=rotation-old-text&newApiKey=rotation-new-text',
+  ])('preserves distinct identities in %s', (source) => {
+    const redactor = new CredentialRedactor('rotation-syntax');
+    const clean = redactor.text(source);
+    expect(clean).not.toContain('rotation-old-text');
+    expect(clean).not.toContain('rotation-new-text');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+    expect(redactor.text(clean)).toBe(clean);
+    const split = source.indexOf('rotation-old-text') + 4;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, split), source.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test('rotation suffixes do not turn counts, paths or score prose into credentials', () => {
+    const source =
+      'previousKey=ordinary; previousApiKeyCount=4; newTokenPath=/tmp/key';
+    const redactor = new CredentialRedactor('rotation-text-business');
+    expect(redactor.text(source)).toBe(source);
+    const score = '{"risk":4,"authorization":10}';
+    expect(redactor.text(score, 'chat')).toBe(score);
+  });
+});
