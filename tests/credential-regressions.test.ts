@@ -437,6 +437,120 @@ describe('adjacent unquoted credential assignments', () => {
 });
 
 describe('authentication headers keep their own value framing', () => {
+  test.each([
+    ['Authorization: SCRAM-SHA-256 sid=session-secret', ['session-secret']],
+    [
+      'Authorization: SCRAM-SHA-256 sid=session-secret data=proof-secret',
+      ['session-secret', 'proof-secret'],
+    ],
+    [
+      'Authorization: SCRAM-SHA-256 sid="session-secret", data="proof-secret with spaces"',
+      ['session-secret', 'proof-secret'],
+    ],
+    [
+      'Authorization: AWS4-HMAC-SHA256 Credential=access-secret/scope, SignedHeaders=host;x-amz-date, Signature=signature-secret',
+      ['access-secret', 'signature-secret'],
+    ],
+    [
+      'Authorization: CustomAuth first="custom-secret", second=another-secret',
+      ['custom-secret', 'another-secret'],
+    ],
+    [
+      'Authorization: CustomAuth token=first-secret, nonce=next-secret',
+      ['first-secret', 'next-secret'],
+    ],
+    [
+      'Proxy-Authorization: SCRAM-SHA-256 sid=proxy-secret, data=proxy-proof',
+      ['proxy-secret', 'proxy-proof'],
+    ],
+  ])('protects every parameter in %s', (source, secrets) => {
+    const redactor = new CredentialRedactor('parameterized-auth');
+    const clean = redactor.text(source);
+    for (const secret of secrets) expect(clean).not.toContain(secret);
+    expect(clean).toMatch(marker);
+    expect(redactor.text(clean)).toBe(clean);
+    const split = source.indexOf('=') + 3;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, split), source.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test.each([' ', '; '])(
+    'keeps an independent credential after parameterized authentication separated by %j',
+    (separator) => {
+      const redactor = new CredentialRedactor('independent-auth-parameter');
+      const clean = redactor.text(
+        `Authorization: SCRAM-SHA-256 sid=bound-session${separator}currentApiKey=bound-next count=4`,
+      );
+      expect(clean).not.toContain('bound-session');
+      expect(clean).not.toContain('bound-next');
+      expect(clean).toContain('currentApiKey=');
+      expect(clean).toContain('count=4');
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(2);
+    },
+  );
+  test.each([
+    'Negotiate opaque-payload==',
+    'Negotiate token==',
+    'CustomAuth opaque-payload',
+  ])('keeps ordinary fields after a non-parameterized value %s', (value) => {
+    const clean = new CredentialRedactor('opaque-auth-scheme').text(
+      `Authorization: ${value} count=4 path=/tmp/cache`,
+    );
+    expect(clean).not.toContain(value.split(' ')[1]);
+    expect(clean).toContain('count=4 path=/tmp/cache');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a bare authentication value keeps the following independent credential', () => {
+    const clean = new CredentialRedactor('bare-auth-value').text(
+      'Authorization: raw-value currentApiKey=bound-next count=4',
+    );
+    expect(clean).not.toContain('raw-value');
+    expect(clean).not.toContain('bound-next');
+    expect(clean).toContain('currentApiKey=');
+    expect(clean).toContain('count=4');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+  });
+  test('an outer quoted authentication value retains assignment-looking text as one value', () => {
+    const clean = new CredentialRedactor('quoted-parameterized-auth').text(
+      'Authorization: "SCRAM-SHA-256 sid=quoted-session currentApiKey=part-of-header" count=4',
+    );
+    expect(clean).not.toContain('quoted-session');
+    expect(clean).not.toContain('part-of-header');
+    expect(clean).toContain('count=4');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a growing parameter list is completely protected without repeated suffix work', () => {
+    const measure = (count: number) => {
+      const source = `Authorization: CustomAuth ${Array.from({ length: count }, (_, index) => `p${String(index)}=x`).join(', ')} last=tail-secret`;
+      const start = performance.now();
+      const clean = new CredentialRedactor('parameter-list-growth').text(
+        source,
+      );
+      return { ms: performance.now() - start, clean };
+    };
+    measure(256);
+    const small = Array.from({ length: 3 }, () => measure(2_000));
+    const large = Array.from({ length: 3 }, () => measure(8_000));
+    expect(Math.min(...large.map((entry) => entry.ms))).toBeLessThan(
+      Math.min(...small.map((entry) => entry.ms)) * 8 + 20,
+    );
+    for (const { clean } of large) {
+      expect(clean).not.toContain('tail-secret');
+      expect(
+        clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+      ).toHaveLength(1);
+    }
+  });
   test('a Digest value with internal assignments remains one authentication value', () => {
     const clean = new CredentialRedactor('digest-adjacent').text(
       'Authorization: Digest username=member-value nonce=nonce-value',

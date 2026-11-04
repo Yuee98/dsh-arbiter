@@ -20,6 +20,10 @@ afterAll(async () => {
 const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu;
 const oldValue = 'synthetic-rotation-before';
 const newValue = 'synthetic-rotation-after';
+const oldHeaderValue = 'synthetic-header-session';
+const oldHeaderProof = 'synthetic-header-proof';
+const newHeaderValue = 'synthetic-header-access';
+const newHeaderSignature = 'synthetic-header-signature';
 const config = {
   ...DEFAULT_CONFIG,
   context: {
@@ -46,6 +50,8 @@ describe('credential rotation through real production and annotation materials',
                   path: '/tmp/rotation-check',
                   nested: { previousApiKey: oldValue, apiKey: newValue },
                   oldEcho: oldValue,
+                  oldHeader: `Authorization: SCRAM-SHA-256 sid=${oldHeaderValue}, data="${oldHeaderProof}"`,
+                  newHeader: `Authorization: AWS4-HMAC-SHA256 Credential=${newHeaderValue}/scope, SignedHeaders=host;x-amz-date, Signature=${newHeaderSignature}`,
                 },
               },
             };
@@ -89,7 +95,14 @@ describe('credential rotation through real production and annotation materials',
       const wire = JSON.stringify(material.request);
       expect(wire).not.toContain(oldValue);
       expect(wire).not.toContain(newValue);
-      expect(new Set(wire.match(marker)).size).toBe(2);
+      for (const secret of [
+        oldHeaderValue,
+        oldHeaderProof,
+        newHeaderValue,
+        newHeaderSignature,
+      ])
+        expect(wire).not.toContain(secret);
+      expect(new Set(wire.match(marker)).size).toBe(4);
       expect(wire).toContain('/tmp/rotation-check');
       expect(wire).toContain('previousApiKey');
       expect(material.material.blockingGaps).toEqual([]);
