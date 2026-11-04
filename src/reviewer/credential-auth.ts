@@ -57,6 +57,8 @@ function valueBoundary(text: string) {
   };
 }
 function authenticationFields(text: string) {
+  // Every explicit authentication assignment requires one of these separators.
+  if (!text.includes(':') && !text.includes('=')) return [];
   const fields: { field: string; value: string; start: number; end: number }[] =
     [];
   const matcher = pattern();

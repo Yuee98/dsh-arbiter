@@ -309,6 +309,18 @@ describe('rotation credential syntax uses the same discovery as structured field
 });
 
 describe('adjacent unquoted credential assignments', () => {
+  test('separator-free tool text preserves ordinary bytes and still masks known credentials', () => {
+    const redactor = new CredentialRedactor('separator-free-result', [
+      'known-plaintext-credential',
+    ]);
+    const ordinary = 'x'.repeat(1_048_576);
+    expect(redactor.text(ordinary)).toBe(ordinary);
+    const identity = redactor.text('known-plaintext-credential');
+    expect(identity).toMatch(marker);
+    expect(redactor.text(`${ordinary} known-plaintext-credential`)).toBe(
+      `${ordinary} ${identity}`,
+    );
+  });
   test('production marker protection restores a growing line in bounded passes', () => {
     const measure = (count: number) => {
       const input = 'previousApiKey=x '.repeat(count);
