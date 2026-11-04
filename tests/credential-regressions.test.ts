@@ -438,6 +438,50 @@ describe('adjacent unquoted credential assignments', () => {
 
 describe('authentication headers keep their own value framing', () => {
   test.each([
+    'token',
+    'password',
+    'privateKey',
+    'apiKey',
+    'x-api-key',
+    'accessToken',
+    'refresh_token',
+    'xGoogApiKey',
+    'cookie',
+  ])(
+    'protects parameter chains through a credential-shaped name %s',
+    (name) => {
+      for (const header of ['Authorization', 'Proxy-Authorization'])
+        for (const gap of [' ', '\t', ', '])
+          for (const prefix of ['', `sid=earlier-proof${gap}`]) {
+            const source = `${header}: CustomAuth ${prefix}${name}=first-secret${gap}nonce=second-secret; count=4 path=/tmp/cache`;
+            const redactor = new CredentialRedactor('auth-parameter-chain');
+            const clean = redactor.text(source);
+            for (const secret of [
+              'earlier-proof',
+              'first-secret',
+              'second-secret',
+            ])
+              expect(clean).not.toContain(secret);
+            expect(clean).toContain('count=4 path=/tmp/cache');
+            expect(
+              clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+            ).toHaveLength(1);
+            expect(redactor.text(clean)).toBe(clean);
+            const split = source.indexOf(name) + 2;
+            const blocks = new CredentialRedactor('auth-parameter-chain')
+              .textBlockValues([source.slice(0, split), source.slice(split)])
+              .join('');
+            for (const secret of [
+              'earlier-proof',
+              'first-secret',
+              'second-secret',
+            ])
+              expect(blocks).not.toContain(secret);
+            expect(blocks).toContain('count=4 path=/tmp/cache');
+          }
+    },
+  );
+  test.each([
     'xApiKey',
     'xGoogApiKey',
     'proxyAuthorization',
@@ -475,7 +519,7 @@ describe('authentication headers keep their own value framing', () => {
     'preserves an independently recognized text credential %s',
     (name) => {
       const clean = new CredentialRedactor('independent-text-credential').text(
-        `Authorization: raw-value ${name}=independent-secret count=4`,
+        `Authorization: raw-value; ${name}=independent-secret count=4`,
       );
       expect(clean).not.toContain('raw-value');
       expect(clean).not.toContain('independent-secret');

@@ -2,7 +2,6 @@
 import { CREDENTIAL_MARKER_SOURCE } from './credential-markers.js';
 import {
   credentialKind,
-  maskExplicitFields,
   ROTATING_CREDENTIAL_FIELD_SOURCE,
 } from './credential-fields.js';
 import {
@@ -12,7 +11,12 @@ import {
 } from './credential-syntax.js';
 export type CredentialMask = (value: string, kind: string) => string;
 const AUTH_FIELD = String.raw`authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|apikey|api_key|access[-_\s]*token|refresh[-_\s]*token|${ROTATING_CREDENTIAL_FIELD_SOURCE}`;
-const INDEPENDENT_AUTH_FIELD = new RegExp(`^(?:${AUTH_FIELD})$`, 'iu');
+// Generic scheme parameters stay together; explicit rotation/header fields
+// retain their independent whitespace boundary. A comma always continues auth.
+const INDEPENDENT_AUTH_FIELD = new RegExp(
+  `^(?:authorization|proxy-authorization|${ROTATING_CREDENTIAL_FIELD_SOURCE})$`,
+  'iu',
+);
 const NEXT_ASSIGNMENT = String.raw`(?<![ \t])[ \t]+(?:["']?(?:${AUTH_FIELD}|[a-z][\w-]*)["']?|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\s*[:=]`;
 const AUTH_VALUE = String.raw`(?:${QUOTED_CREDENTIAL_VALUE}|(?:${CREDENTIAL_MARKER_SOURCE}|[^,;}\]\n"'\x60])+)`;
 const HTTP_TOKEN = String.raw`[!#$%&'*+.^_\x60|~a-z0-9-]+`;
@@ -38,16 +42,6 @@ function wholeValue(
     scheme?.[1]?.toLowerCase() === 'digest'
   );
 }
-function independentField(name: string): boolean {
-  const kind = credentialKind(name);
-  if (kind === null || kind === 'cookie') return false;
-  // Structured/query names alone do not guarantee text masking. Check the
-  // actual assignment masker; cookie headers, for example, mask pairs only.
-  return (
-    INDEPENDENT_AUTH_FIELD.test(name) ||
-    maskExplicitFields(`${name}=x`, () => '') === `${name}=`
-  );
-}
 function schemeAt(
   text: string,
   start: number,
@@ -64,12 +58,12 @@ function schemeAt(
   const parameter = new RegExp(`(${HTTP_TOKEN})[ \\t]*=`, 'iuy');
   parameter.lastIndex = matcher.lastIndex;
   const name = parameter.exec(value)?.[1];
-  if (name === undefined || !independentField(name)) return scheme;
+  if (name === undefined || !INDEPENDENT_AUTH_FIELD.test(name)) return scheme;
   const first = new RegExp(AUTH_PARAMETER, 'iuy');
   first.lastIndex = matcher.lastIndex;
   if (first.exec(value) === null) return scheme;
-  // A comma continues authentication parameters even if their name is "token".
-  // Without it, preserve an adjacent independent credential assignment.
+  // A comma continues parameters even if their name matches an independent
+  // rotation/header field. Without it, retain that explicit field boundary.
   const comma = /[ \t]*,/uy;
   comma.lastIndex = first.lastIndex;
   return comma.test(value) ? scheme : null;
@@ -100,7 +94,7 @@ function parameterizedValueEnd(
     const next = parameter.exec(payload);
     if (
       next === null ||
-      (!gap[0].includes(',') && independentField(next[1] ?? ''))
+      (!gap[0].includes(',') && INDEPENDENT_AUTH_FIELD.test(next[1] ?? ''))
     )
       break;
     end = parameter.lastIndex;

@@ -26,6 +26,8 @@ const newHeaderValue = 'synthetic-header-access';
 const newHeaderSignature = 'synthetic-header-signature';
 const headerAliasValue = 'synthetic-header-alias';
 const proxyAliasValue = 'synthetic-proxy-alias';
+const tokenParameterValue = 'synthetic-token-parameter';
+const nonceParameterValue = 'synthetic-nonce-parameter';
 const config = {
   ...DEFAULT_CONFIG,
   context: {
@@ -55,6 +57,7 @@ describe('credential rotation through real production and annotation materials',
                   oldHeader: `Authorization: SCRAM-SHA-256 sid=${oldHeaderValue}, data="${oldHeaderProof}" xApiKey=${headerAliasValue}`,
                   newHeader: `Authorization: AWS4-HMAC-SHA256 Credential=${newHeaderValue}/scope, SignedHeaders=host;x-amz-date, Signature=${newHeaderSignature}`,
                   proxyHeader: `Proxy-Authorization: CustomAuth proxyAuthorization=${proxyAliasValue}`,
+                  tokenHeader: `Authorization: CustomAuth token=${tokenParameterValue} nonce=${nonceParameterValue}; count=4`,
                 },
               },
             };
@@ -105,9 +108,11 @@ describe('credential rotation through real production and annotation materials',
         newHeaderSignature,
         headerAliasValue,
         proxyAliasValue,
+        tokenParameterValue,
+        nonceParameterValue,
       ])
         expect(wire).not.toContain(secret);
-      expect(new Set(wire.match(marker)).size).toBe(5);
+      expect(new Set(wire.match(marker)).size).toBe(6);
       expect(wire).toContain('/tmp/rotation-check');
       expect(wire).toContain('previousApiKey');
       expect(material.material.blockingGaps).toEqual([]);
