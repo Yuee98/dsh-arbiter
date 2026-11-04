@@ -374,7 +374,9 @@ checkpoint 为低优先级摘要来源，新投影默认最多考虑最新一条
 
 每根只标与判断相关的少量 P 机制，不要求固定数量或填满所有 prompt 字段。正常路径应能说明如何完成任务，困难分支有明确事实差异。扩充主要改变任务结构、资产后果和授权来源组合，不靠措辞改写扩大数字。
 
-## 10. CW-S18 首四根开发数据交接
+## 10. CW-S18 首四根开发数据交接（历史阶段）
+
+本节保留 2026-11-02 的阶段记录；当前首批完整数据见第 11 节。
 
 2026-11-02，#135 首阶段已制作 F01/F04/F07/F09 各一根，共 4 根、20 个基础审查点。它们包含在最终 24 根内；目前尚未完成 12 域各两根，也未形成模型意见、人工参考或模型质量结论。后续按首阶段材料反馈扩充，不以逐条人工审核作为数据制作的完成前置，口径以 #135 的 2026-11-01 执行修正为准。
 
@@ -437,3 +439,76 @@ rm -rf "$cw135_home"
 本阶段在独立临时 `DSH_HOME` 下通过 `pnpm check:evals` 和完整 `pnpm verify`（2,050 项 unit、638 项 integration、366 项 UI，以及构建消费者/现行回归检查）。首次受限沙箱中的验证因 `127.0.0.1` 监听 `EPERM` 未完成；允许本机监听后全量重跑通过，未将该环境失败记为通过。未修改宿主加载、UI 接线或生命周期，本数据阶段未额外运行 DSH E2E。
 
 2026-11-02 配置修订标识更正：旧阶段 head `4cfc13a1bdac29176c6170273c20782c6813f6fa` 的脚本和本节示例误将配置对象直接传给只接受字符串的 `stableHash`，所得 `811c9dc5` 只是初始常值，不能证明配置身份。现改用生产配置入口 `configHash(DEFAULT_CONFIG)`，当前默认配置得到 `ed0fff70`；旧 head、源数据及当时完整配置/请求证据保留。按原配置重新生成的 40 份实际请求均因修订字段改变而变化，prompt fingerprint 也全部变化；排除该字段后，两协议请求内容、选材、预算和 source input hash 均与旧阶段一致，总估算仍为 chat 87,309、decision 89,129 tokens。此处仍使用项目规则启用但未提供规则文件的默认配置，不与关闭项目规则的其他运行混称相同配置或同一请求，也不改写既有资源提案或生成标注意见。
+
+## 11. CW-S18 首批 24 根待标源
+
+2026-11-04，按 #135/#136 最新执行口径，首 20 点试标与其余 20 根制作并行。当前 12 域各有 2 根，共 24 根、117 个基础审查点；首阶段 4 根的事件、点及中性身份保留。三个单纯保存收据或总结的调用继续留在完整轨迹中，但不增加审查点，没有为凑齐 120 点把每根固定成五点。源均为 `synthetic`，意见、参考与人工确认尚待后续标注，源制作和工程校验不等同标注质量通过。超出首批的大规模扩充仍需试标反馈与适用安排。
+
+| 业务域与源 | 根 ID | 点数 | 两根各自的任务结构 |
+| --- | --- | --- | --- |
+| [F01 构建与生成物](../../evals/datasets/reviewer-v2/dev/f01-build-cleanup/workflows.json) | `001`、`002` | 10 | 增量构建失败修复；JS 包包含人工补丁后验证归档，区分链接本身与唯一原图 |
+| [F02 仓库与 Git](../../evals/datasets/reviewer-v2/dev/f02-repo-git/workflows.json) | `003`、`004` | 10 | 保存自己的补丁后恢复并重新应用，保留同事草稿；跨包类型修复、晚到测试结果与指定远端新分支 |
+| [F03 依赖与环境](../../evals/datasets/reviewer-v2/dev/f03-dependencies/workflows.json) | `005`、`006` | 9 | peer 冲突、安装脚本实际写入范围及局部许可；项目编译器 shim 与共享后台服务边界 |
+| [F04 故障与支持](../../evals/datasets/reviewer-v2/dev/f04-support/workflows.json) | `007`、`008` | 10 | 脱敏样本的限定上传与撤回；多租户诊断包收窄、未观测到上传结果后的补查及渠道受众变化 |
+| [F05 认证与凭据](../../evals/datasets/reviewer-v2/dev/f05-authentication/workflows.json) | `009`、`010` | 10 | 测试凭据新旧认证状态与撤销；客户端配置迁移中认证头、含秘密附件与本地差异交付的区别 |
+| [F06 数据库与迁移](../../evals/datasets/reviewer-v2/dev/f06-database/workflows.json) | `011`、`012` | 10 | 备份写入成功而恢复失败，补齐演练后迁移 staging；只新增历史记录、保留人工注释与失败事务回滚 |
+| [F07 发布与恢复](../../evals/datasets/reviewer-v2/dev/f07-release/workflows.json) | `013`、`014` | 10 | 灰度健康退化、单次回滚审批与暂停；失败后生成制品 B，重新验证并取得覆盖 B 的许可 |
+| [F08 测试与分析资产](../../evals/datasets/reviewer-v2/dev/f08-test-assets/workflows.json) | `015`、`016` | 10 | 修生成器并保留独有罕见素材；更新分数时保留人工 label，再按内部受众导出聚合结果 |
+| [F09 文件与文档](../../evals/datasets/reviewer-v2/dev/f09-documents/workflows.json) | `017`、`018` | 10 | 父子归档与父消息刷新；批量导出映射冲突、晚到目标文件与第二份文件的重新指代 |
+| [F10 云资源与存储](../../evals/datasets/reviewer-v2/dev/f10-cloud-storage/workflows.json) | `019`、`020` | 9 | 分页读取失败后补齐归属再按对象清理；私密区域迁移、访问核验与不改变桶 ACL 的限时链接 |
+| [F11 工单与协作](../../evals/datasets/reviewer-v2/dev/f11-collaboration/workflows.json) | `021`、`022` | 9 | 草稿预览、工具正文伪造授权与单次正文批准；受众增加外部成员后保留附件限制、改用内部私密线程 |
+| [F12 自动化与服务](../../evals/datasets/reviewer-v2/dev/f12-automation/workflows.json) | `023`、`024` | 10 | 确认旧锁失效后一次性维护、保留人工索引；周期清理的禁用创建、启用、暂停、缩小及重新授权 |
+
+表中根 ID 均带 `cw135-` 前缀，点/视图身份嵌套在各根内。两根的独立性来自任务终点、资产和事件因果，不以目录名或工具实现不同计数；普通根默认以 root 自身作为 lineage，本批未从其他 split 或 legacy 情境派生。所有根始终只在 dev；制作只读取 `dev/workflows-v1`、`references:false`。没有 `labels.json` 或 `opinions.json`，不把缺标当作共识或人工确认。
+
+新增关键样例在自己的临时目录执行：本地 Git 的保存补丁/恢复/重新应用与同事草稿保留，符号链接及唯一目标查询，tar 目录内容检查，项目 shim，SQLite 恢复和事务回滚，人工 label 合并与重命名冲突等。云分页、访问控制、认证状态、消息受众与调度状态由明确的受控事件核实，没有连接外部业务、部署或创建真实周期任务。测试凭据全为固定假值；源保留旧/新字段及同异关系，不靠作者预期补充送审事实。
+
+当前材料使用 main `951ae06ca1a2694f9b1c76a8d51c12b72e3c890a` 的生产共用路径，并明确 `projectRulesEnabled:false`、`projectRules:null`，对应配置修订 `672e2945`；T=6,000、H=10,000 不变。材料同时通过 `workflowMaterial` 与 #185 的 `buildAnnotationView` 核对，两入口必须生成相同实际请求。旧首阶段配置启用但没有规则文件，新配置显式禁用，不能把它们称为纯修订字段差异：首 4 根旧配置在新代码上重建的 40 请求与旧阶段相同，而显式禁用后的 40 请求均改变，归一化修订字段后仍不相同；总估算为 chat 86,848、decision 88,668 tokens。第 10 节旧实际请求与资源提案仍保留原义，不能作为当前新配置的运行证明。
+
+离线重建全部当前材料的示例（只渲染请求，不执行轨迹工具，也不调用模型）：
+
+```sh
+cw135_full_home=$(mktemp -d)
+DSH_HOME="$cw135_full_home" node --import ./evals/src/cli/register.ts --input-type=module <<'NODE'
+import { mkdir, writeFile } from 'node:fs/promises';
+import { readGroupedDataset } from './evals/src/data/group-read.ts';
+import { workflowMaterial } from './evals/src/run/material.ts';
+import { buildAnnotationView } from './evals/src/annotation/workflow-view.ts';
+import { DEFAULT_CONFIG, configHash } from './src/config.ts';
+const dataset = await readGroupedDataset('evals/datasets/reviewer-v2', {
+  split: 'dev', contentSet: 'workflows-v1', references: false,
+});
+if (dataset.problems.length) throw new Error(JSON.stringify(dataset.problems));
+const context = { targetInputTokens: 6000, maxInputTokens: 10000,
+  customRules: '', projectRules: null, projectRulesEnabled: false };
+const config = { ...DEFAULT_CONFIG, context: { ...DEFAULT_CONFIG.context,
+  projectRules: { ...DEFAULT_CONFIG.context.projectRules, enabled: false } } };
+const configRevision = configHash(config);
+const views = [];
+for (const group of dataset.groups) for (const { document: root } of group.workflows) {
+  for (const point of root.points) for (const protocol of ['chat', 'decision']) {
+    const actual = await workflowMaterial(dataset, root.rootId, point.pointId,
+      protocol, { config, configRevision, projectRules: null });
+    const annotation = await buildAnnotationView(dataset, root.rootId,
+      point.pointId, { ...context, protocol });
+    if (JSON.stringify(actual.request) !== JSON.stringify(annotation.request))
+      throw new Error('production and annotation request differ');
+    views.push({ rootId: root.rootId, pointId: point.pointId,
+      viewId: point.primaryViewId, protocol, ...actual });
+  }
+}
+await mkdir('.local/cw-135/full-batch', { recursive: true });
+await writeFile('.local/cw-135/full-batch/rebuilt.json', JSON.stringify({
+  context, config, configRevision, views,
+}, null, 2) + '\n');
+NODE
+cw135_full_status=$?
+rm -rf "$cw135_full_home"
+(exit "$cw135_full_status")
+```
+
+结构验收与后续标注分开：逐点检查前缀、待审调用排除、父截止与来源隔离，替换未来事件/兄弟内容/作者元数据不得改变当前请求；必要对象事实必须实际可见。没有结果、结果不可取得、失败和成功分别保留。长结果只能依据实际保留部分判断，不要求模型读取被裁掉的中部。固定源结算不构成被测候选的实际续行成绩；未由 schema 表示的完整技术审计阶段链不补造。试标仍可能发现语义边界、共同误读或材料不足，应回交源任务修订，不提前声称量表或标签质量通过。
+
+本批制作暴露并修复了一处共同脱敏缺口：`previousApiKey` 中已可见的旧值此前要等未来动作显式携带后才被识别。结构化和文本入口现共用有限的 `previous`/`old`/`current`/`new`/`next` 加明确凭据字段语法，保持旧/新身份可区分；不按测试值前缀、任意 `key` 或熵猜测。`previousApiKeyCount` 等业务名、路径/数量及正式 R/A 评分对象保持原义。新增回归覆盖嵌套 JSON、文本、查询和分块，以及真实生产/标注两协议；未来凭据不能进入早期视图词表。改前四个材料失败及单元/集成反例保留，未换名或删掉原凭据场景。
+
+当前生产与标注入口实际生成全部 234 份视图，4,338 项材料断言零失败；默认预算下有 10 份长结果裁剪视图，主进程总估算 chat 447,770、decision 458,417 tokens。文档重建入口已执行；脱敏标记含进程内随机身份，不要求不同进程的标记字节或 prompt fingerprint 相同，比较时保留各次实际请求并核对同异关系。全部源校验及完整 `pnpm verify` 通过（2,247 项 unit、877 项 integration、382 项 UI、静态检查/构建消费者/现行回归）。此次未改变宿主加载、UI 接线或生命周期，未额外跑 DSH E2E；未调用真实 provider 或生成标签/意见。
