@@ -306,3 +306,64 @@ describe('rotation credential syntax uses the same discovery as structured field
     expect(redactor.text(score, 'chat')).toBe(score);
   });
 });
+
+describe('adjacent unquoted credential assignments', () => {
+  test.each([
+    'previousApiKey=rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
+    'Authorization: Bearer rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
+  ])('keeps each field and ordinary suffix in %s', (source) => {
+    const redactor = new CredentialRedactor('adjacent-rotation');
+    const clean = redactor.text(source);
+    expect(clean).not.toContain('rotation-old-adjacent');
+    expect(clean).not.toContain('rotation-new-adjacent');
+    expect(clean).toContain('currentApiKey=');
+    expect(clean).toContain('count=4 path=/tmp/cache');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+    expect(redactor.text(clean)).toBe(clean);
+    const at = source.indexOf('currentApiKey') + 5;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, at), source.slice(at)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test('a quoted value may contain assignment-looking text and an auth value keeps its scheme', () => {
+    const redactor = new CredentialRedactor('quoted-adjacent');
+    const quoted = redactor.text(
+      'previousApiKey="old currentApiKey=part-of-one-value" count=4',
+    );
+    expect(quoted).toContain('count=4');
+    expect(quoted.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+    const header = redactor.text('Authorization: Bearer unique-auth-value');
+    expect(header).toContain('Authorization: Bearer ');
+    expect(header).not.toContain('unique-auth-value');
+    expect(header.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe('authentication headers keep their own value framing', () => {
+  test('a Digest value with internal assignments remains one authentication value', () => {
+    const clean = new CredentialRedactor('digest-adjacent').text(
+      'Authorization: Digest username=member-value nonce=nonce-value',
+    );
+    expect(clean).toContain('Authorization: Digest ');
+    expect(clean).not.toContain('member-value');
+    expect(clean).not.toContain('nonce-value');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a scheme without a payload does not consume the next line credential field', () => {
+    const clean = new CredentialRedactor('separate-auth-line').text(
+      'Authorization: Bearer\ncurrentApiKey=separate-line-value',
+    );
+    expect(clean).toContain('\ncurrentApiKey=');
+    expect(clean).not.toContain('separate-line-value');
+  });
+});
