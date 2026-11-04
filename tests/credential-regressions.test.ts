@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { CredentialRedactor } from '../src/reviewer/credential-redactor.js';
 import { copyArgumentsSchema } from '../src/audit/schema-redaction.js';
+import { authenticationCredentialSpans } from '../src/reviewer/credential-auth.js';
 
 const marker = /\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/u;
 const masked: unknown = expect.stringMatching(marker);
@@ -269,5 +270,396 @@ describe('credential boundary regressions from the first PR review', () => {
       ).toThrow();
       expect(Object.keys(source)).toHaveLength(2);
     }
+  });
+});
+
+describe('rotation credential syntax uses the same discovery as structured fields', () => {
+  test.each([
+    'accessToken="rotation-old-text"; refresh-token="rotation-new-text"',
+    'previousApiKey="rotation-old-text"; newApiKey="rotation-new-text"',
+    'old_api_key: "rotation-old-text"\ncurrent-api-key: "rotation-new-text"',
+    'nextAccessToken="rotation-old-text"; previous_refresh_token="rotation-new-text"',
+    'previousPassword="rotation-old-text"; current_secret_key="rotation-new-text"',
+    '{"nested":{"previousApiKey":"rotation-old-text","newApiKey":"rotation-new-text"}}',
+    'https://example.test/rotate?previous_api_key=rotation-old-text&newApiKey=rotation-new-text',
+  ])('preserves distinct identities in %s', (source) => {
+    const redactor = new CredentialRedactor('rotation-syntax');
+    const clean = redactor.text(source);
+    expect(clean).not.toContain('rotation-old-text');
+    expect(clean).not.toContain('rotation-new-text');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+    expect(redactor.text(clean)).toBe(clean);
+    const split = source.indexOf('rotation-old-text') + 4;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, split), source.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test('rotation suffixes do not turn counts, paths or score prose into credentials', () => {
+    const source =
+      'previousKey=ordinary; previousApiKeyCount=4; newTokenPath=/tmp/key';
+    const redactor = new CredentialRedactor('rotation-text-business');
+    expect(redactor.text(source)).toBe(source);
+    const score = '{"risk":4,"authorization":10}';
+    expect(redactor.text(score, 'chat')).toBe(score);
+  });
+});
+
+describe('adjacent unquoted credential assignments', () => {
+  test('separator-free tool text preserves ordinary bytes and still masks known credentials', () => {
+    const redactor = new CredentialRedactor('separator-free-result', [
+      'known-plaintext-credential',
+    ]);
+    const ordinary = 'x'.repeat(1_048_576);
+    expect(redactor.text(ordinary)).toBe(ordinary);
+    const identity = redactor.text('known-plaintext-credential');
+    expect(identity).toMatch(marker);
+    expect(redactor.text(`${ordinary} known-plaintext-credential`)).toBe(
+      `${ordinary} ${identity}`,
+    );
+  });
+  test('production marker protection restores a growing line in bounded passes', () => {
+    const measure = (count: number) => {
+      const input = 'previousApiKey=x '.repeat(count);
+      const start = performance.now();
+      const clean = new CredentialRedactor('production-growth').text(input);
+      return { ms: performance.now() - start, clean };
+    };
+    measure(256);
+    const small = Array.from({ length: 3 }, () => measure(1_000));
+    const large = Array.from({ length: 3 }, () => measure(4_000));
+    expect(Math.min(...large.map((result) => result.ms))).toBeLessThan(
+      Math.min(...small.map((result) => result.ms)) * 8 + 20,
+    );
+    for (const { clean } of large) {
+      expect(clean.match(/previousApiKey=/gu)).toHaveLength(4_000);
+      expect(
+        clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+      ).toHaveLength(4_000);
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(1);
+    }
+  });
+  test('protected tokens never reinterpret input collisions or forged markers', () => {
+    const redactor = new CredentialRedactor('protection-collision');
+    const issued = redactor.text('previousApiKey=original-collision-secret');
+    const collisions = '\0crd0\0 \0crdx1\0 \0crdxx2\0';
+    const forged = `[redacted:v1:token:${'0'.repeat(64)}]`;
+    const input = `${collisions}; ${issued}; currentApiKey=${forged} previousApiKey=next-collision-secret count=4`;
+    const clean = redactor.text(input);
+    expect(clean).toContain(collisions);
+    expect(clean).toContain(issued);
+    expect(clean).not.toContain(forged);
+    expect(clean).not.toContain('next-collision-secret');
+    expect(clean).toContain('count=4');
+    expect(redactor.text(clean)).toBe(clean);
+    const split = input.indexOf('\0crdx') + 3;
+    expect(
+      redactor
+        .textBlockValues([input.slice(0, split), input.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test.each(['previousApiKey=x ', '&previousApiKey=x'])(
+    'long single-line %s preserves identities without repeated suffix scans',
+    (assignment) => {
+      const measure = (count: number) => {
+        const input = assignment.repeat(count);
+        const start = performance.now();
+        const spans = authenticationCredentialSpans(input);
+        return { ms: performance.now() - start, spans };
+      };
+      measure(256);
+      const small = Array.from({ length: 3 }, () => measure(2_000));
+      const large = Array.from({ length: 3 }, () => measure(8_000));
+      // Four times the input may incur scheduling noise, but not quadratic work.
+      expect(Math.min(...large.map((result) => result.ms))).toBeLessThan(
+        Math.min(...small.map((result) => result.ms)) * 8 + 20,
+      );
+      expect(large.map((result) => result.spans.length)).toEqual([
+        8_000, 8_000, 8_000,
+      ]);
+      const redactor = new CredentialRedactor('long-adjacent-rotation');
+      const input =
+        'previousApiKey=perf-old currentApiKey=perf-new count=4 '.repeat(6_000);
+      const clean = redactor.text(input);
+      expect(clean).not.toContain('perf-old');
+      expect(clean).not.toContain('perf-new');
+      expect(clean.match(/previousApiKey=/gu)).toHaveLength(6_000);
+      expect(clean.match(/currentApiKey=/gu)).toHaveLength(6_000);
+      expect(clean.match(/count=4/gu)).toHaveLength(6_000);
+      const identities = clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu);
+      expect(identities).toHaveLength(12_000);
+      expect(new Set(identities).size).toBe(2);
+    },
+  );
+  test.each([
+    'previousApiKey=rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
+    'Authorization: Bearer rotation-old-adjacent currentApiKey=rotation-new-adjacent count=4 path=/tmp/cache',
+  ])('keeps each field and ordinary suffix in %s', (source) => {
+    const redactor = new CredentialRedactor('adjacent-rotation');
+    const clean = redactor.text(source);
+    expect(clean).not.toContain('rotation-old-adjacent');
+    expect(clean).not.toContain('rotation-new-adjacent');
+    expect(clean).toContain('currentApiKey=');
+    expect(clean).toContain('count=4 path=/tmp/cache');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+    expect(redactor.text(clean)).toBe(clean);
+    const at = source.indexOf('currentApiKey') + 5;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, at), source.slice(at)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test('a quoted value may contain assignment-looking text and an auth value keeps its scheme', () => {
+    const redactor = new CredentialRedactor('quoted-adjacent');
+    const quoted = redactor.text(
+      'previousApiKey="old currentApiKey=part-of-one-value" count=4',
+    );
+    expect(quoted).toContain('count=4');
+    expect(quoted.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+    const header = redactor.text('Authorization: Bearer unique-auth-value');
+    expect(header).toContain('Authorization: Bearer ');
+    expect(header).not.toContain('unique-auth-value');
+    expect(header.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe('authentication headers keep their own value framing', () => {
+  test.each([
+    'token',
+    'password',
+    'privateKey',
+    'apiKey',
+    'x-api-key',
+    'accessToken',
+    'refresh_token',
+    'xGoogApiKey',
+    'cookie',
+  ])(
+    'protects parameter chains through a credential-shaped name %s',
+    (name) => {
+      for (const header of ['Authorization', 'Proxy-Authorization'])
+        for (const gap of [' ', '\t', ', '])
+          for (const prefix of ['', `sid=earlier-proof${gap}`]) {
+            const source = `${header}: CustomAuth ${prefix}${name}=first-secret${gap}nonce=second-secret; count=4 path=/tmp/cache`;
+            const redactor = new CredentialRedactor('auth-parameter-chain');
+            const clean = redactor.text(source);
+            for (const secret of [
+              'earlier-proof',
+              'first-secret',
+              'second-secret',
+            ])
+              expect(clean).not.toContain(secret);
+            expect(clean).toContain('count=4 path=/tmp/cache');
+            expect(
+              clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+            ).toHaveLength(1);
+            expect(redactor.text(clean)).toBe(clean);
+            const split = source.indexOf(name) + 2;
+            const blocks = new CredentialRedactor('auth-parameter-chain')
+              .textBlockValues([source.slice(0, split), source.slice(split)])
+              .join('');
+            for (const secret of [
+              'earlier-proof',
+              'first-secret',
+              'second-secret',
+            ])
+              expect(blocks).not.toContain(secret);
+            expect(blocks).toContain('count=4 path=/tmp/cache');
+          }
+    },
+  );
+  test.each([
+    'xApiKey',
+    'xGoogApiKey',
+    'proxyAuthorization',
+    'x_api_key',
+    'x_goog_api_key',
+    'proxy_authorization',
+    'cookie',
+    'setCookie',
+    'set-cookie',
+  ])('protects cold authentication parameters named %s', (name) => {
+    for (const header of ['Authorization', 'Proxy-Authorization'])
+      for (const prefix of ['', 'sid=visible-session '])
+        for (const value of ['cold-alias-secret', '"cold-alias-secret"']) {
+          const source = `${header}: CustomAuth ${prefix}${name}=${value}; count=4`;
+          const redactor = new CredentialRedactor('cold-auth-parameter');
+          const clean = redactor.text(source);
+          expect(clean).not.toContain('cold-alias-secret');
+          expect(clean).not.toContain('visible-session');
+          expect(clean).toContain('count=4');
+          expect(
+            clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+          ).toHaveLength(1);
+          expect(redactor.text(clean)).toBe(clean);
+          const split = source.indexOf(name) + 3;
+          const blocks = new CredentialRedactor('cold-auth-parameter')
+            .textBlockValues([source.slice(0, split), source.slice(split)])
+            .join('');
+          expect(blocks).not.toContain('cold-alias-secret');
+          expect(blocks).not.toContain('visible-session');
+          expect(blocks).toContain('count=4');
+          expect(blocks).toMatch(marker);
+        }
+  });
+  test.each(['password', 'token', 'privateKey', 'x-api-key', 'currentApiKey'])(
+    'preserves an independently recognized text credential %s',
+    (name) => {
+      const clean = new CredentialRedactor('independent-text-credential').text(
+        `Authorization: raw-value; ${name}=independent-secret count=4`,
+      );
+      expect(clean).not.toContain('raw-value');
+      expect(clean).not.toContain('independent-secret');
+      expect(clean).toContain(`${name}=`);
+      expect(clean).toContain('count=4');
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(2);
+    },
+  );
+  test.each([
+    ['Authorization: SCRAM-SHA-256 sid=session-secret', ['session-secret']],
+    [
+      'Authorization: SCRAM-SHA-256 sid=session-secret data=proof-secret',
+      ['session-secret', 'proof-secret'],
+    ],
+    [
+      'Authorization: SCRAM-SHA-256 sid="session-secret", data="proof-secret with spaces"',
+      ['session-secret', 'proof-secret'],
+    ],
+    [
+      'Authorization: AWS4-HMAC-SHA256 Credential=access-secret/scope, SignedHeaders=host;x-amz-date, Signature=signature-secret',
+      ['access-secret', 'signature-secret'],
+    ],
+    [
+      'Authorization: CustomAuth first="custom-secret", second=another-secret',
+      ['custom-secret', 'another-secret'],
+    ],
+    [
+      'Authorization: CustomAuth token=first-secret, nonce=next-secret',
+      ['first-secret', 'next-secret'],
+    ],
+    [
+      'Proxy-Authorization: SCRAM-SHA-256 sid=proxy-secret, data=proxy-proof',
+      ['proxy-secret', 'proxy-proof'],
+    ],
+  ])('protects every parameter in %s', (source, secrets) => {
+    const redactor = new CredentialRedactor('parameterized-auth');
+    const clean = redactor.text(source);
+    for (const secret of secrets) expect(clean).not.toContain(secret);
+    expect(clean).toMatch(marker);
+    expect(redactor.text(clean)).toBe(clean);
+    const split = source.indexOf('=') + 3;
+    expect(
+      redactor
+        .textBlockValues([source.slice(0, split), source.slice(split)])
+        .join(''),
+    ).toBe(clean);
+  });
+  test.each([' ', '; '])(
+    'keeps an independent credential after parameterized authentication separated by %j',
+    (separator) => {
+      const redactor = new CredentialRedactor('independent-auth-parameter');
+      const clean = redactor.text(
+        `Authorization: SCRAM-SHA-256 sid=bound-session${separator}currentApiKey=bound-next count=4`,
+      );
+      expect(clean).not.toContain('bound-session');
+      expect(clean).not.toContain('bound-next');
+      expect(clean).toContain('currentApiKey=');
+      expect(clean).toContain('count=4');
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(2);
+    },
+  );
+  test.each([
+    'Negotiate opaque-payload==',
+    'Negotiate token==',
+    'CustomAuth opaque-payload',
+  ])('keeps ordinary fields after a non-parameterized value %s', (value) => {
+    const clean = new CredentialRedactor('opaque-auth-scheme').text(
+      `Authorization: ${value} count=4 path=/tmp/cache`,
+    );
+    expect(clean).not.toContain(value.split(' ')[1]);
+    expect(clean).toContain('count=4 path=/tmp/cache');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a bare authentication value keeps the following independent credential', () => {
+    const clean = new CredentialRedactor('bare-auth-value').text(
+      'Authorization: raw-value currentApiKey=bound-next count=4',
+    );
+    expect(clean).not.toContain('raw-value');
+    expect(clean).not.toContain('bound-next');
+    expect(clean).toContain('currentApiKey=');
+    expect(clean).toContain('count=4');
+    expect(
+      new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+    ).toBe(2);
+  });
+  test('an outer quoted authentication value retains assignment-looking text as one value', () => {
+    const clean = new CredentialRedactor('quoted-parameterized-auth').text(
+      'Authorization: "SCRAM-SHA-256 sid=quoted-session currentApiKey=part-of-header" count=4',
+    );
+    expect(clean).not.toContain('quoted-session');
+    expect(clean).not.toContain('part-of-header');
+    expect(clean).toContain('count=4');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a growing parameter list is completely protected without repeated suffix work', () => {
+    const measure = (count: number) => {
+      const source = `Authorization: CustomAuth ${Array.from({ length: count }, (_, index) => `p${String(index)}=x`).join(', ')} last=tail-secret`;
+      const start = performance.now();
+      const clean = new CredentialRedactor('parameter-list-growth').text(
+        source,
+      );
+      return { ms: performance.now() - start, clean };
+    };
+    measure(256);
+    const small = Array.from({ length: 3 }, () => measure(2_000));
+    const large = Array.from({ length: 3 }, () => measure(8_000));
+    expect(Math.min(...large.map((entry) => entry.ms))).toBeLessThan(
+      Math.min(...small.map((entry) => entry.ms)) * 8 + 20,
+    );
+    for (const { clean } of large) {
+      expect(clean).not.toContain('tail-secret');
+      expect(
+        clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+      ).toHaveLength(1);
+    }
+  });
+  test('a Digest value with internal assignments remains one authentication value', () => {
+    const clean = new CredentialRedactor('digest-adjacent').text(
+      'Authorization: Digest username=member-value nonce=nonce-value',
+    );
+    expect(clean).toContain('Authorization: Digest ');
+    expect(clean).not.toContain('member-value');
+    expect(clean).not.toContain('nonce-value');
+    expect(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).toHaveLength(
+      1,
+    );
+  });
+  test('a scheme without a payload does not consume the next line credential field', () => {
+    const clean = new CredentialRedactor('separate-auth-line').text(
+      'Authorization: Bearer\ncurrentApiKey=separate-line-value',
+    );
+    expect(clean).toContain('\ncurrentApiKey=');
+    expect(clean).not.toContain('separate-line-value');
   });
 });

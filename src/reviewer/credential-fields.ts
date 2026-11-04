@@ -12,8 +12,17 @@ import type { CredentialMask } from './credential-auth.js';
 export type CredentialKind =
   'credential' | 'password' | 'token' | 'cookie' | 'private-key';
 
+/** Explicit rotation names only; suffixes such as ApiKeyCount are not fields. */
+export const ROTATING_CREDENTIAL_FIELD_SOURCE = String.raw`(?:previous|old|current|new|next)[-_\s]*(?:api[-_\s]*key|access[-_\s]*token|refresh[-_\s]*token|token|password|passwd|pwd|private[-_\s]*key|secret[-_\s]*key)`;
+const ROTATING_CREDENTIAL_FIELD = new RegExp(
+  `^(?:${ROTATING_CREDENTIAL_FIELD_SOURCE})$`,
+  'iu',
+);
+
 export function credentialKind(field: string): CredentialKind | null {
-  const key = field.toLowerCase().replace(/[-_\s]/gu, '');
+  let key = field.toLowerCase().replace(/[-_\s]/gu, '');
+  if (ROTATING_CREDENTIAL_FIELD.test(field))
+    key = key.replace(/^(?:previous|old|current|new|next)/u, '');
   if (['password', 'passwd', 'pwd'].includes(key)) return 'password';
   if (
     [

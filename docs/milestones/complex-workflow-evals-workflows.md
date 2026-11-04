@@ -373,3 +373,154 @@ checkpoint 为低优先级摘要来源，新投影默认最多考虑最新一条
 | F12 自动化与服务 | 一根修复一次性维护任务；一根设置周期清理或后台任务后暂停/缩小范围 | 一次执行与持续副作用、周期/对象范围、实际启停状态、既往批准不能无限扩张 |
 
 每根只标与判断相关的少量 P 机制，不要求固定数量或填满所有 prompt 字段。正常路径应能说明如何完成任务，困难分支有明确事实差异。扩充主要改变任务结构、资产后果和授权来源组合，不靠措辞改写扩大数字。
+
+## 10. CW-S18 首四根开发数据交接（历史阶段）
+
+本节保留 2026-11-02 的阶段记录；当前首批完整数据见第 11 节。
+
+2026-11-02，#135 首阶段已制作 F01/F04/F07/F09 各一根，共 4 根、20 个基础审查点。它们包含在最终 24 根内；目前尚未完成 12 域各两根，也未形成模型意见、人工参考或模型质量结论。后续按首阶段材料反馈扩充，不以逐条人工审核作为数据制作的完成前置，口径以 #135 的 2026-11-01 执行修正为准。
+
+| 组与源集合 | 中性根 ID | 点数 | 任务与连续轨迹 |
+| --- | --- | --- | --- |
+| [F01](../../evals/datasets/reviewer-v2/dev/f01-build-cleanup/workflows.json) | `cw135-001` | 5 | 清理可重建缓存/产物，构建失败后改格式配置并重建；新一轮要求保留产物，人工素材始终保留 |
+| [F04](../../evals/datasets/reviewer-v2/dev/f04-support/workflows.json) | `cw135-007` | 5 | 本地排障、脱敏详情、上传前后绑定问答、指定工单/附件范围、暂停后继续本地总结 |
+| [F07](../../evals/datasets/reviewer-v2/dev/f07-release/workflows.json) | `cw135-013` | 5 | 多轮验证后生产小流量灰度，健康退化、暂停扩量、单次绑定回滚审批、恢复后清理零流量路由 |
+| [F09](../../evals/datasets/reviewer-v2/dev/f09-documents/workflows.json) | `cw135-017` | 5 | 父人类限定范围、child 自查与归档、relay 扩大、父消息局部解除与后续收窄；兄弟及父工具隔离 |
+
+每组只提交 `workflows.json`；未实际取得参考或意见时不预建 `labels.json`、`opinions.json`。根/点/视图使用中性稳定编号，作者任务说明、覆盖标签和来源说明不作为人类授权。当前 4 根均为独立设计的 `synthetic` 固定轨迹，未从 legacy 题目派生，全部属于 dev；不计入 calibration/holdout，也不支持日常线上频率推断。整体扩充目标仍为约 300 根/1,500 点、全 lineage 按 5:3:2 分组，此批不会为配比迁出 dev。
+
+关键本地结果用独立临时样本核实：目录/配置查询、删除可生成目录后人工素材仍保留、构建格式不兼容的实际失败与修复成功、演示邮箱/地址脱敏及本地附件副本、A/B 制品实际 SHA-256、文档移动及发布策略文件保留。它们不把合成轨迹升级为真实用户日志。工单上传、发布、健康、路由和审批结算是明确构造的服务事件，未访问外部服务、真实上传或部署。`settlement` 只描述固定源轨迹中的结算，不是新评测的模型回答或人类评分；当前 schema 不表达完整 reviewer 技术失败审计链，本批不声称验证该能力。
+
+主视图调用已合并的 `workflowMaterial`，经生产共享准备、选择、脱敏、T/H/C 预算与两协议 renderer 生成。默认使用 `DEFAULT_CONFIG`（T=6,000、H=10,000、普通单次调用整体 C 上界 600），配置修订取现有 `configHash(DEFAULT_CONFIG)`，不新增内容身份体系。制作与逐点诊断只加载 `dev/workflows-v1` 且 `references:false`；`pnpm check:evals` 另执行全局结构、ID 与 lineage 检查。
+
+离线重建示例（在仓库根目录运行；只生成材料，不执行轨迹中的工具或调用模型）：
+
+```sh
+cw135_home=$(mktemp -d)
+DSH_HOME="$cw135_home" node --import ./evals/src/cli/register.ts --input-type=module <<'NODE'
+import { mkdir, writeFile } from 'node:fs/promises';
+import { readGroupedDataset } from './evals/src/data/group-read.ts';
+import { workflowMaterial } from './evals/src/run/material.ts';
+import { DEFAULT_CONFIG, configHash } from './src/config.ts';
+const dataset = await readGroupedDataset('evals/datasets/reviewer-v2', {
+  split: 'dev', contentSet: 'workflows-v1', references: false,
+});
+if (dataset.problems.length) throw new Error(JSON.stringify(dataset.problems));
+const configRevision = configHash(DEFAULT_CONFIG);
+const views = [];
+for (const group of dataset.groups) {
+  for (const { document: root } of group.workflows) {
+    for (const point of root.points) {
+      for (const protocol of ['chat', 'decision']) {
+        const material = await workflowMaterial(
+          dataset, root.rootId, point.pointId, protocol,
+          { config: DEFAULT_CONFIG, configRevision },
+        );
+        views.push({ rootId: root.rootId, pointId: point.pointId,
+          viewId: point.primaryViewId, protocol, ...material });
+      }
+    }
+  }
+}
+await mkdir('.local/cw-135', { recursive: true });
+await writeFile('.local/cw-135/views.json', JSON.stringify({
+  config: DEFAULT_CONFIG, configRevision, views,
+}, null, 2) + '\n');
+NODE
+cw135_status=$?
+rm -rf "$cw135_home"
+(exit "$cw135_status")
+```
+
+首阶段本机实际生成 40 份协议视图；逐点检查默认预算、关键可见事实、ask 绑定和父截止点，替换未来事件/兄弟内容/作者元数据后，当前请求保持不变。待审调用不作为历史重复进入，父工具/兄弟内容未串入。F07 的长组件报告在两协议中均出现真实 C 裁剪，身份与验证结论来自独立短汇总，不能假定被省略的中部内容仍可见。这些是材料结构验证，不是风险/授权参考裁决。
+
+供试标继续核对的材料问题：F07 后期接近 T，较早历史和长报告会竞争预算，必须按实际视图判断；原文中未取得的技术审计阶段链不能由摘要补成事实。项目规则文件未提供时，默认构建器产生 `known-empty` 非阻断说明，不能把它误报为读取失败或硬阻断。若后续意见发现其他材料缺失，应回交本源任务修正并重新生成受影响视图，现阶段不补造分数、共识或人工确认。
+
+本阶段在独立临时 `DSH_HOME` 下通过 `pnpm check:evals` 和完整 `pnpm verify`（2,050 项 unit、638 项 integration、366 项 UI，以及构建消费者/现行回归检查）。首次受限沙箱中的验证因 `127.0.0.1` 监听 `EPERM` 未完成；允许本机监听后全量重跑通过，未将该环境失败记为通过。未修改宿主加载、UI 接线或生命周期，本数据阶段未额外运行 DSH E2E。
+
+2026-11-02 配置修订标识更正：旧阶段 head `4cfc13a1bdac29176c6170273c20782c6813f6fa` 的脚本和本节示例误将配置对象直接传给只接受字符串的 `stableHash`，所得 `811c9dc5` 只是初始常值，不能证明配置身份。现改用生产配置入口 `configHash(DEFAULT_CONFIG)`，当前默认配置得到 `ed0fff70`；旧 head、源数据及当时完整配置/请求证据保留。按原配置重新生成的 40 份实际请求均因修订字段改变而变化，prompt fingerprint 也全部变化；排除该字段后，两协议请求内容、选材、预算和 source input hash 均与旧阶段一致，总估算仍为 chat 87,309、decision 89,129 tokens。此处仍使用项目规则启用但未提供规则文件的默认配置，不与关闭项目规则的其他运行混称相同配置或同一请求，也不改写既有资源提案或生成标注意见。
+
+## 11. CW-S18 首批 24 根待标源
+
+2026-11-04，按 #135/#136 最新执行口径，首 20 点试标与其余 20 根制作并行。当前 12 域各有 2 根，共 24 根、117 个基础审查点；首阶段 4 根的事件、点及中性身份保留。三个单纯保存收据或总结的调用继续留在完整轨迹中，但不增加审查点，没有为凑齐 120 点把每根固定成五点。源均为 `synthetic`，意见、参考与人工确认尚待后续标注，源制作和工程校验不等同标注质量通过。超出首批的大规模扩充仍需试标反馈与适用安排。
+
+| 业务域与源 | 根 ID | 点数 | 两根各自的任务结构 |
+| --- | --- | --- | --- |
+| [F01 构建与生成物](../../evals/datasets/reviewer-v2/dev/f01-build-cleanup/workflows.json) | `001`、`002` | 10 | 增量构建失败修复；JS 包包含人工补丁后验证归档，区分链接本身与唯一原图 |
+| [F02 仓库与 Git](../../evals/datasets/reviewer-v2/dev/f02-repo-git/workflows.json) | `003`、`004` | 10 | 保存自己的补丁后恢复并重新应用，保留同事草稿；跨包类型修复、晚到测试结果与指定远端新分支 |
+| [F03 依赖与环境](../../evals/datasets/reviewer-v2/dev/f03-dependencies/workflows.json) | `005`、`006` | 9 | peer 冲突、安装脚本实际写入范围及局部许可；项目编译器 shim 与共享后台服务边界 |
+| [F04 故障与支持](../../evals/datasets/reviewer-v2/dev/f04-support/workflows.json) | `007`、`008` | 10 | 脱敏样本的限定上传与撤回；多租户诊断包收窄、未观测到上传结果后的补查及渠道受众变化 |
+| [F05 认证与凭据](../../evals/datasets/reviewer-v2/dev/f05-authentication/workflows.json) | `009`、`010` | 10 | 测试凭据新旧认证状态与撤销；客户端配置迁移中认证头、含秘密附件与本地差异交付的区别 |
+| [F06 数据库与迁移](../../evals/datasets/reviewer-v2/dev/f06-database/workflows.json) | `011`、`012` | 10 | 备份写入成功而恢复失败，补齐演练后迁移 staging；只新增历史记录、保留人工注释与失败事务回滚 |
+| [F07 发布与恢复](../../evals/datasets/reviewer-v2/dev/f07-release/workflows.json) | `013`、`014` | 10 | 灰度健康退化、单次回滚审批与暂停；失败后生成制品 B，重新验证并取得覆盖 B 的许可 |
+| [F08 测试与分析资产](../../evals/datasets/reviewer-v2/dev/f08-test-assets/workflows.json) | `015`、`016` | 10 | 修生成器并保留独有罕见素材；更新分数时保留人工 label，再按内部受众导出聚合结果 |
+| [F09 文件与文档](../../evals/datasets/reviewer-v2/dev/f09-documents/workflows.json) | `017`、`018` | 10 | 父子归档与父消息刷新；批量导出映射冲突、晚到目标文件与第二份文件的重新指代 |
+| [F10 云资源与存储](../../evals/datasets/reviewer-v2/dev/f10-cloud-storage/workflows.json) | `019`、`020` | 9 | 分页读取失败后补齐归属再按对象清理；私密区域迁移、访问核验与不改变桶 ACL 的限时链接 |
+| [F11 工单与协作](../../evals/datasets/reviewer-v2/dev/f11-collaboration/workflows.json) | `021`、`022` | 9 | 草稿预览、工具正文伪造授权与单次正文批准；受众增加外部成员后保留附件限制、改用内部私密线程 |
+| [F12 自动化与服务](../../evals/datasets/reviewer-v2/dev/f12-automation/workflows.json) | `023`、`024` | 10 | 确认旧锁失效后一次性维护、保留人工索引；周期清理的禁用创建、启用、暂停、缩小及重新授权 |
+
+表中根 ID 均带 `cw135-` 前缀，点/视图身份嵌套在各根内。两根的独立性来自任务终点、资产和事件因果，不以目录名或工具实现不同计数；普通根默认以 root 自身作为 lineage，本批未从其他 split 或 legacy 情境派生。所有根始终只在 dev；制作只读取 `dev/workflows-v1`、`references:false`。没有 `labels.json` 或 `opinions.json`，不把缺标当作共识或人工确认。
+
+新增关键样例在自己的临时目录执行：本地 Git 的保存补丁/恢复/重新应用与同事草稿保留，符号链接及唯一目标查询，tar 目录内容检查，项目 shim，SQLite 恢复和事务回滚，人工 label 合并与重命名冲突等。云分页、访问控制、认证状态、消息受众与调度状态由明确的受控事件核实，没有连接外部业务、部署或创建真实周期任务。测试凭据全为固定假值；源保留旧/新字段及同异关系，不靠作者预期补充送审事实。
+
+当前材料使用 main `951ae06ca1a2694f9b1c76a8d51c12b72e3c890a` 的生产共用路径，并明确 `projectRulesEnabled:false`、`projectRules:null`，对应配置修订 `672e2945`；T=6,000、H=10,000 不变。材料同时通过 `workflowMaterial` 与 #185 的 `buildAnnotationView` 核对，两入口必须生成相同实际请求。旧首阶段配置启用但没有规则文件，新配置显式禁用，不能把它们称为纯修订字段差异：首 4 根旧配置在新代码上重建的 40 请求与旧阶段相同，而显式禁用后的 40 请求均改变，归一化修订字段后仍不相同；总估算为 chat 86,848、decision 88,668 tokens。第 10 节旧实际请求与资源提案仍保留原义，不能作为当前新配置的运行证明。
+
+离线重建全部当前材料的示例（只渲染请求，不执行轨迹工具，也不调用模型）：
+
+```sh
+cw135_full_home=$(mktemp -d)
+DSH_HOME="$cw135_full_home" node --import ./evals/src/cli/register.ts --input-type=module <<'NODE'
+import { mkdir, writeFile } from 'node:fs/promises';
+import { readGroupedDataset } from './evals/src/data/group-read.ts';
+import { workflowMaterial } from './evals/src/run/material.ts';
+import { buildAnnotationView } from './evals/src/annotation/workflow-view.ts';
+import { DEFAULT_CONFIG, configHash } from './src/config.ts';
+const dataset = await readGroupedDataset('evals/datasets/reviewer-v2', {
+  split: 'dev', contentSet: 'workflows-v1', references: false,
+});
+if (dataset.problems.length) throw new Error(JSON.stringify(dataset.problems));
+const context = { targetInputTokens: 6000, maxInputTokens: 10000,
+  customRules: '', projectRules: null, projectRulesEnabled: false };
+const config = { ...DEFAULT_CONFIG, context: { ...DEFAULT_CONFIG.context,
+  projectRules: { ...DEFAULT_CONFIG.context.projectRules, enabled: false } } };
+const configRevision = configHash(config);
+const views = [];
+for (const group of dataset.groups) for (const { document: root } of group.workflows) {
+  for (const point of root.points) for (const protocol of ['chat', 'decision']) {
+    const actual = await workflowMaterial(dataset, root.rootId, point.pointId,
+      protocol, { config, configRevision, projectRules: null });
+    const annotation = await buildAnnotationView(dataset, root.rootId,
+      point.pointId, { ...context, protocol });
+    if (JSON.stringify(actual.request) !== JSON.stringify(annotation.request))
+      throw new Error('production and annotation request differ');
+    views.push({ rootId: root.rootId, pointId: point.pointId,
+      viewId: point.primaryViewId, protocol, ...actual });
+  }
+}
+await mkdir('.local/cw-135/full-batch', { recursive: true });
+await writeFile('.local/cw-135/full-batch/rebuilt.json', JSON.stringify({
+  context, config, configRevision, views,
+}, null, 2) + '\n');
+NODE
+cw135_full_status=$?
+rm -rf "$cw135_full_home"
+(exit "$cw135_full_status")
+```
+
+结构验收与后续标注分开：逐点检查前缀、待审调用排除、父截止与来源隔离，替换未来事件/兄弟内容/作者元数据不得改变当前请求；必要对象事实必须实际可见。没有结果、结果不可取得、失败和成功分别保留。长结果只能依据实际保留部分判断，不要求模型读取被裁掉的中部。固定源结算不构成被测候选的实际续行成绩；未由 schema 表示的完整技术审计阶段链不补造。试标仍可能发现语义边界、共同误读或材料不足，应回交源任务修订，不提前声称量表或标签质量通过。
+
+本批制作暴露并修复了一处共同脱敏缺口：`previousApiKey` 中已可见的旧值此前要等未来动作显式携带后才被识别。结构化和文本入口现共用有限的 `previous`/`old`/`current`/`new`/`next` 加明确凭据字段语法，保持旧/新身份可区分；不按测试值前缀、任意 `key` 或熵猜测。`previousApiKeyCount` 等业务名、路径/数量及正式 R/A 评分对象保持原义。新增回归覆盖嵌套 JSON、文本、查询和分块，以及真实生产/标注两协议；未来凭据不能进入早期视图词表。改前四个材料失败及单元/集成反例保留，未换名或删掉原凭据场景。
+
+当前生产与标注入口实际生成全部 234 份视图，4,338 项材料断言零失败；默认预算下有 10 份长结果裁剪视图，主进程总估算 chat 447,958、decision 458,605 tokens。文档重建入口已执行；脱敏标记含进程内随机身份，不要求不同进程的标记字节或 prompt fingerprint 相同，比较时保留各次实际请求并核对同异关系。全部源校验及完整 `pnpm verify` 通过（2,295 项 unit、893 项 integration、382 项 UI、静态检查/构建消费者/现行回归）。此次未改变宿主加载、UI 接线或生命周期，未额外跑本地 DSH E2E；未调用真实 provider 或生成标签/意见。
+
+PR 首轮返修补齐业务时序验收：隔离探针的完整多阶段输出仍保留为工程证据，但早期 `inspect` 只保存当时可见的状态，恢复完成、事务回滚、维护执行与新调度范围仅在对应后续结果出现。纯预览明确 `preview-only`/`persisted:false`，假设影响标注为 hypothetical，不能当成已执行观测。新的独立集成回归直接解析两协议真实请求中的 result 时间线，并与标注入口核对，排除人类计划和当前动作，验证关键状态最早出现的审查点及所属工具；原有 future-event mutation 继续保留。共同文本脱敏也覆盖空格分隔的相邻 assignment，保留字段、不同身份和普通后缀，quoted 值与合法认证 scheme 继续按各自边界处理。
+
+第二轮返修消除长单行相邻凭据的重复后缀扫描：字段、相邻 assignment 和查询边界使用向前游标，保护标记按精确临时 token 一次恢复，不再逐个 token 反复替换整段文本。完整生产路径中，1,000/4,000 字段的隔离样例从约 114/1,442 ms 降至 29/103 ms；30,000 字段、510 KB 的正文和查询样例分别约 794/563 ms，均保留全部字段及同值稳定身份。这些计时只证明本机样例，不作为固定延迟保证；回归比较输入规模增长并验证内容、不同身份、前缀碰撞、伪造标记、分块与幂等。未通过先裁剪输入、改变凭据标记或资源上限规避问题。
+
+随后调查 CI 的大正文用例重复超时，在同 Node 24、coverage 和原用例下对照基线与候选，确认无分隔符正文的认证字段搜索增加了观测和保存阶段的 CPU 开销。现按既有语法的必要条件，在正文同时不含 `:` 与 `=` 时直接判定没有认证字段；其他已知无标签凭据仍正常脱敏。受控并发下，基线与未修候选约 1,182/2,238 ms，基线与修后候选约 1,171/666 ms；当前完整文件带 coverage 的 19 项测试通过，原超时用例约 659 ms。20 份 1 MiB 真实观测、默认 5 秒门槛、增量读取保护及最新人类消息断言保持原样；2,406 组字段边界对照和全部 234 份归一化请求与已审提交一致。这是本机修复证据，发布后的准确提交仍须通过 Linux CI 和适用评审。
+
+初次 Ready 后的[参数化认证评审反馈](https://github.com/Yuee98/dsh-arbiter/pull/193#discussion_r4467736709)由独立反例确认：共享相邻 assignment 边界曾将 SCRAM、AWS4 等方案的首个参数误当成独立业务字段。现按 [HTTP 认证参数语法](https://www.rfc-editor.org/rfc/rfc9110.html#section-11)识别 scheme 与有界参数链，处理引号、逗号、分块及兼容的空白续接；参数名恰好为 `token` 时，逗号续接仍属于认证值，真正独立的凭据字段保留各自身份。发现与遮蔽共用同一跨度，查询硬边界、单向扫描、无分隔符快速路径和凭据标记不变。单元与真实生产/标注两协议均保留改前漏遮蔽反例；参数列表增长、普通后缀、外层引号与 token68 填充回归共同验证，未改动 24 根源或生成标注。
+
+本轮综合评审进一步暴露 `xApiKey` 等字段分类与文本遮蔽语法不一致的分支。现在只有能被现有文本遮蔽器实际接管的 assignment 才从认证值拆出；驼峰、下划线及 Cookie 参数由外层认证值保护。外层完整认证值内的引号不再提前单独替换，避免分块重建时只学到改写串而遗漏较早参数。首参数、后续空白参数、两种认证头、引号、分块与独立字段身份均有回归；360 种闭集字段名变体的 5,760 组隔离文本/分块探针从 18 组失败变为零失败，原失败及真实两协议集成反例保留。修复不改 Cookie 机制、分块重建器、标记协议或资源保护。
+
+后续收敛还确认 `token=… nonce=…` 空白续接会在可单独遮蔽的首参数处过早拆开。通用方案的参数链现整体保留，包括名称形似凭据的首参数及中间参数；兼容的水平空白只有遇到明确的轮换字段或另一认证头时才建立独立边界，逗号继续属于认证值。分号等明确分隔后的普通数量、路径与独立字段继续保留，原有 bare-value 加 `currentApiKey` 及 Bearer/Digest 行为不变。新增回归覆盖空格、Tab、逗号、两种认证头、冷启动文本与分块，并再次核对真实生产/标注两协议；没有将 `nonce` 加入敏感字段名单或依赖预注册值。
