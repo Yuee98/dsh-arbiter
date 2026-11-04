@@ -271,11 +271,8 @@ function groupsFor(
 /**
  * Build layer three.
  *
- * `projection` is true when no cell ran through the host chain. The figures are then
- * what the shared settlement rule would instruct for these reviews, not what a host
- * observed: the runner calls the production service directly, so it has no approval
- * channel to consult. Saying so is the difference between evidence about the reviewer
- * and a claim about the host.
+ * These counts apply the shared rule, rather than reading actual approval or execution
+ * observations. A host-chain entry label alone cannot establish those observations.
  */
 export function settlementSection(parts: {
   readonly cells: readonly CellFacts[];
@@ -291,17 +288,6 @@ export function settlementSection(parts: {
     overall: settlementCountsOf(parts.cells, settings),
     byGroup: AXES.flatMap((axis) => groupsFor(axis, parts.cells, settings)),
   };
-}
-
-/**
- * Whether any cell ran through the host chain.
- *
- * Only a `host-chain` entry point has a real approval channel behind it. The runner
- * assembles material from the case and calls the service directly, so a settlement
- * computed from its records is a projection by construction.
- */
-export function isProjection(cells: readonly CellFacts[]): boolean {
-  return !cells.some((cell) => cell.record?.entryPoint.kind === 'host-chain');
 }
 
 /**

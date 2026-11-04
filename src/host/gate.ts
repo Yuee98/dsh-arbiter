@@ -36,6 +36,7 @@ import { deny, isAborted, sessionKindOf } from './common.js';
 import type { DecisionHistory } from './history.js';
 import type { PermissionLifecycle } from './permissions.js';
 import { releaseRuntime } from './runtime.js';
+import { ToolResultObserver } from './tool-result-observer.js';
 import type { CallSettlement } from './settlement.js';
 import type {
   AuditExtras,
@@ -116,6 +117,7 @@ export class CallGate {
   private readonly permissions: PermissionLifecycle;
   private readonly history: DecisionHistory;
   private readonly settlement: CallSettlement;
+  private readonly results: ToolResultObserver;
   constructor(
     host: HostEnvironment,
     permissions: PermissionLifecycle,
@@ -126,18 +128,22 @@ export class CallGate {
     this.permissions = permissions;
     this.history = history;
     this.settlement = settlement;
+    this.results = new ToolResultObserver(host, permissions.admissions);
   }
 
   register(): void {
     this.host.ctx.on(
       'tools/pre-execute',
-      (exec: ToolExecutionLike, next: () => Promise<PreToolDecision>) =>
-        this.handle(exec, next),
+      (exec: ToolExecutionLike, next: () => Promise<PreToolDecision>) => {
+        this.results.begin(exec);
+        return this.handle(exec, next);
+      },
       { prepend: true },
     );
     this.host.ctx.on(
       'tools/result',
       (exec: ToolExecutionLike, result: ToolResultLike) => {
+        this.results.observe(exec, result);
         // The pending map only holds approved-but-unfinished calls; a result for
         // a call that never entered it is not this map's business.
         if (!this.host.runtime.pending.has(exec.callId)) return;
@@ -146,7 +152,11 @@ export class CallGate {
           .currentAudit()
           ?.updateExecution(
             exec.callId,
-            result.isError === true ? 'failed' : 'success',
+            result.isError === true
+              ? 'failed'
+              : result.isError === false
+                ? 'success'
+                : 'unknown',
           );
         // A terminal result ends a pending entry; unresolved entries are reaped
         // by the bounded sweep so an observed-but-abandoned call cannot grow the
@@ -359,6 +369,7 @@ export class CallGate {
     } catch {
       /* Keep process cwd; the snapshot records the actual value. */
     }
+    this.results.prepared(exec, cwd);
     // Capture the configuration *after* the await: rules, mode and the recorded
     // revision must all describe the moment the evaluation actually runs, not
     // the moment the call entered the gate.

@@ -53,6 +53,7 @@ export interface PluginRecordLike {
   readonly data: unknown;
 }
 
+import { realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -115,12 +116,23 @@ export function hostInstallationRoot(
   return undefined;
 }
 
+/** A launcher symlink preserves argv; use its real CLI only as a fallback anchor. */
+async function linkedHostInstallationRoot(): Promise<string | undefined> {
+  const entry = process.argv[1];
+  if (entry === undefined) return undefined;
+  try {
+    return hostInstallationRoot([await realpath(entry)]);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Import the session module, preferring plain resolution. */
 async function importSessionModule(): Promise<unknown> {
   try {
     return await import('@deepseek-ai/dsh-session');
   } catch (primary: unknown) {
-    const root = hostInstallationRoot();
+    const root = hostInstallationRoot() ?? (await linkedHostInstallationRoot());
     if (root === undefined) throw primary;
     // Anchor Node's resolver at the host installation, so the package's own
     // `exports` map and dependencies apply exactly as they do for the host.

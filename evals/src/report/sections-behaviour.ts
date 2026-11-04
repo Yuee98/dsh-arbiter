@@ -39,7 +39,7 @@ export function countRows(counts: BehaviourCounts): readonly string[] {
   return [
     row(['格子', String(counts.cells)]),
     row(['已判定', String(counts.judged)]),
-    row(['有金标参考', String(counts.referenceKnown)]),
+    row(['有适用行为参考', String(counts.referenceKnown)]),
     row(['**参与比较的分母**', `**${String(counts.compared)}**`]),
     ...CLASS_LABELS.map((entry) =>
       row([entry.label, String(counts.byClass[entry.key])]),
@@ -116,7 +116,7 @@ export function behaviourSection(report: EvaluationReport): string {
   return [
     heading(2, '第一层：主要自动行为指标'),
     '',
-    '分母只包含「引擎给出了对本次调用的判定」且「案例有可计入金标的参考」的格子。技术失败、缺记录与派发前已决定的格子都在分母之外，各自单独列出：把技术失败算成拒绝，会让一个坏掉的传输读起来像一个谨慎的审查者。',
+    '分母只包含「引擎给出了对本次调用的判定」且「有适用行为参考」的格子。技术失败、缺记录与派发前状态另列，并保留在全计划覆盖与适用负担分母中。',
     '',
     row(['指标', '值']),
     separator(2),

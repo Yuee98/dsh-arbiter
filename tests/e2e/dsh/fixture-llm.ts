@@ -67,6 +67,24 @@ function textOfBlocks(content: unknown): string {
     .join('\n');
 }
 
+/** Explicit deterministic tool-output cases, used only by the result suite. */
+function scriptedCall(command: string) {
+  if (command.startsWith('RESULTPTC:'))
+    return {
+      name: 'run_code',
+      arguments: {
+        code: `return await tools.result_probe({case:${JSON.stringify(command.slice('RESULTPTC:'.length))}});`,
+        description: 'fixture PTC result',
+      },
+    };
+  return command.startsWith('RESULT:')
+    ? {
+        name: 'result_probe',
+        arguments: { case: command.slice('RESULT:'.length) },
+      }
+    : { name: 'bash', arguments: { command, description: 'fixture call' } };
+}
+
 interface RequestedTurn {
   readonly text: string;
   /** The `RUN <command>` marker of this turn, when present. */
@@ -319,23 +337,26 @@ class FixtureAdapter {
       };
       for (const [offset, entry] of issuing.entries()) {
         const id = `fx-${String(Date.now())}-${String(offset)}-${String(Math.trunc(Math.random() * 1e6))}`;
-        const args = JSON.stringify({
-          command: entry,
-          description: 'fixture call',
-        });
+        const scripted = scriptedCall(entry);
+        const args = JSON.stringify(scripted.arguments);
         const index = offset + 1;
         yield { type: 'block-start', index, blockType: 'tool-call' };
         yield {
           type: 'tool-call-delta',
           index,
           id,
-          name: 'bash',
+          name: scripted.name,
           argumentsDelta: args,
         };
         yield {
           type: 'block-end',
           index,
-          block: { type: 'tool-call', id, name: 'bash', arguments: args },
+          block: {
+            type: 'tool-call',
+            id,
+            name: scripted.name,
+            arguments: args,
+          },
         };
       }
     } else if (ask !== null && !alreadyCalled(messages, text)) {
@@ -406,7 +427,8 @@ class FixtureAdapter {
       };
     } else if (command !== null && !alreadyCalled(messages, text)) {
       const id = `fx-${String(Date.now())}-${String(Math.trunc(Math.random() * 1e6))}`;
-      const args = JSON.stringify({ command, description: 'fixture call' });
+      const scripted = scriptedCall(command);
+      const args = JSON.stringify(scripted.arguments);
       yield { type: 'block-start', index: 0, blockType: 'text' };
       yield {
         type: 'text-delta',
@@ -423,13 +445,13 @@ class FixtureAdapter {
         type: 'tool-call-delta',
         index: 1,
         id,
-        name: 'bash',
+        name: scripted.name,
         argumentsDelta: args,
       };
       yield {
         type: 'block-end',
         index: 1,
-        block: { type: 'tool-call', id, name: 'bash', arguments: args },
+        block: { type: 'tool-call', id, name: scripted.name, arguments: args },
       };
     } else {
       const reply = 'FIXTURE-DONE';

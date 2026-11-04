@@ -15,6 +15,12 @@ import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import {
+  boundaryRootsRow,
+  createBoundaryProbe,
+  disposeBoundaryCase,
+  type BoundaryProbe,
+} from './dsh/boundary-probe.js';
 import { createCaseHost, type CaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
 import {
@@ -164,6 +170,46 @@ function callsAfter(session: LoggedSession, marker: string): readonly string[] {
     if (typeof callId === 'string') ids.push(callId);
   }
   return ids;
+}
+
+/** Wait for the result and terminal turn of this marker's own call. */
+function settledCallAfter(session: LoggedSession, marker: string): boolean {
+  const events = session.events;
+  const markerIndex = events.findLastIndex(
+    (event) =>
+      event.type === 'user/message' &&
+      JSON.stringify(event.data).includes(marker),
+  );
+  if (markerIndex < 0) return false;
+  const callIndex = events.findIndex(
+    (event, index) => index > markerIndex && event.type === 'tool/call',
+  );
+  const call = events[callIndex];
+  if (call === undefined) return false;
+  const callId = asRecord(call.data)?.['callId'];
+  if (typeof callId !== 'string') return false;
+  const turnStart = events
+    .slice(0, callIndex)
+    .findLast((event) => event.type === 'turn/start');
+  const turn = asRecord(turnStart?.data)?.['turn'];
+  if (typeof turn !== 'number') return false;
+  const resultIndex = events.findIndex(
+    (event, index) =>
+      index > callIndex &&
+      event.type === 'tool/result' &&
+      asRecord(asRecord(asRecord(event.data)?.['message'])?.['source'])?.[
+        'callId'
+      ] === callId,
+  );
+  return (
+    resultIndex > callIndex &&
+    events.some(
+      (event, index) =>
+        index > resultIndex &&
+        event.type === 'turn/end' &&
+        asRecord(event.data)?.['turn'] === turn,
+    )
+  );
 }
 
 /** Decisions Arbiter recorded for those exact calls. */
@@ -612,15 +658,18 @@ test.describe('session admission', () => {
   test('a trusted session writes outside the workspace and unload narrows it', async ({
     page,
   }, testInfo) => {
-    const outside = join(testInfo.outputPath('dsh-trusted'), 'outside.txt');
-    await mkdir(join(testInfo.outputPath('dsh-trusted')), { recursive: true });
-    const caseHost = await createCaseHost(testInfo.outputPath('dsh-trusted'), {
+    const artifacts = testInfo.outputPath('dsh-trusted');
+    const caseHost = await createCaseHost(artifacts, {
+      extraRows: [boundaryRootsRow(artifacts)],
       // Before policy: the call reaches review, and the deterministic reviewer
       // allows it. The effect is still the host's own sandbox decision.
       arbiterRowConfig: { boundary: 'trusted' },
     });
+    let probe: BoundaryProbe | undefined;
     try {
       const host = caseHost.current();
+      probe = await createBoundaryProbe(artifacts, host.workspace);
+      const outside = join(probe.directory, 'outside.txt');
       const session = await runOneCall(
         page,
         host,
@@ -631,7 +680,7 @@ test.describe('session admission', () => {
         sessionId: session.sessionId,
         action: 'enable',
       });
-      expect(enabled.status).toBe(200);
+      expect(enabled.status, JSON.stringify(enabled.body)).toBe(200);
       expect(admissionOf(enabled.body)['boundary']).toBe('trusted');
       // The plugin applied the trusted bundle to the enabled session.
       const afterEnable = await waitForSession(
@@ -676,9 +725,13 @@ test.describe('session admission', () => {
       });
 
       // The narrowed boundary now blocks the same write outside the workspace.
-      const second = join(testInfo.outputPath('dsh-trusted'), 'outside-2.txt');
+      const second = join(probe.directory, 'outside-2.txt');
+      const tempControl = join(artifacts, 'allowed-temp.txt');
       await openHost(page, host);
-      await sendPrompt(page, `ADM-TRUSTED-WRITE-2 RUN printf 'ok' > ${second}`);
+      await sendPrompt(
+        page,
+        `ADM-TRUSTED-WRITE-2 RUN printf 'temp-ok' > ${tempControl} && printf 'ok' > ${second}`,
+      );
       const blocked = await waitForSession(
         host.home,
         (candidate) =>
@@ -688,9 +741,12 @@ test.describe('session admission', () => {
         90_000,
       );
       if (blocked === null) throw new Error('the narrowed write never settled');
-      await expect(readFile(second, 'utf8')).rejects.toThrow();
+      expect(await readFile(tempControl, 'utf8')).toBe('temp-ok');
+      await expect(readFile(second, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
     } finally {
-      await caseHost.dispose();
+      await disposeBoundaryCase(caseHost, probe, artifacts);
     }
   });
 
@@ -796,7 +852,7 @@ test.describe('session admission', () => {
         sessionId: session.sessionId,
         action: 'enable',
       });
-      expect(enabled.status).toBe(200);
+      expect(enabled.status, JSON.stringify(enabled.body)).toBe(200);
 
       await openHost(page, host);
       await sendPrompt(page, '/permission read-only');
@@ -868,16 +924,19 @@ test.describe('plugin-manager disable with a call in flight', () => {
     const tracePath = join(artifacts, 'trace.jsonl');
     const barrierDir = join(artifacts, 'barrier');
     await mkdir(artifacts, { recursive: true });
-    const outside = join(artifacts, 'late-outside.txt');
     const caseHost = await createCaseHost(artifacts, {
+      extraRows: [boundaryRootsRow(artifacts)],
       arbiterRowConfig: { boundary: 'trusted' },
       tracePath,
       barrierDir,
       // The barrier keys off the pending action text, not the user message.
       holdMatch: 'drain-hold.txt',
     });
+    let probe: BoundaryProbe | undefined;
     try {
       const host = caseHost.current();
+      probe = await createBoundaryProbe(artifacts, host.workspace);
+      const outside = join(probe.directory, 'late-outside.txt');
       // Two trusted sessions: one holds a review open for the whole drain
       // window, the other sends the call that arrives inside it.
       const held = await runOneCall(page, host, 'DRAIN-HELD-WARM', 'echo held');
@@ -930,12 +989,7 @@ test.describe('plugin-manager disable with a call in flight', () => {
         host.home,
         (candidate) =>
           candidate.sessionId === lateSessionId &&
-          candidate.events.some(
-            (event) =>
-              event.type === 'user/message' &&
-              JSON.stringify(event.data).includes('DRAIN-LATECALL'),
-          ) &&
-          candidate.events.some((event) => event.type === 'tool/result'),
+          settledCallAfter(candidate, 'DRAIN-LATECALL'),
         60_000,
       );
       expect(late).not.toBeNull();
@@ -948,7 +1002,9 @@ test.describe('plugin-manager disable with a call in flight', () => {
       expect(decisionsFor(late, lateCalls)).toHaveLength(0);
       // The host sandbox is the evidence that matters, and it is the outcome
       // that cannot be stale: the write outside the workspace did not happen.
-      await expect(readFile(outside, 'utf8')).rejects.toThrow();
+      await expect(readFile(outside, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
       // The rollback the trace recorded landed in this session's own log too.
       const narrowed = await waitForSession(
         host.home,
@@ -1002,8 +1058,11 @@ test.describe('plugin-manager disable with a call in flight', () => {
       await latePage.close();
     } finally {
       // Release the held review so the process can exit cleanly.
-      await releaseBarrier(barrierDir);
-      await caseHost.dispose();
+      try {
+        await releaseBarrier(barrierDir);
+      } finally {
+        await disposeBoundaryCase(caseHost, probe, artifacts);
+      }
     }
   });
 });

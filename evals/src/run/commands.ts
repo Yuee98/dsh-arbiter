@@ -1,3 +1,10 @@
+import { sourceKeys } from './workflow-types.js';
+import { resourceAttemptLimit } from './resource.js';
+import {
+  loadWorkflowSources,
+  resolveWorkflowPlan,
+  sourceMaterial,
+} from './source.js';
 /**
  * The run subcommands: plan, run, resume and inspect.
  *
@@ -23,7 +30,7 @@ import { USAGE_MAPPING_VERSION } from '../../../src/reviewer/usage.js';
 import { findingOrigin, inspectDataset } from '../data/inspect.js';
 import { readDataset } from '../data/read.js';
 import { compileCheckers } from '../data/schemas.js';
-import type { ReviewCase } from '../data/types.js';
+import type { RunSource } from './source.js';
 
 import { digestOf } from '../data/hash.js';
 import {
@@ -37,9 +44,10 @@ import {
 } from './artifact.js';
 import { chatRouteProblems } from './chat-service.js';
 import { candidateOf, candidateSummary } from './candidate.js';
-import { createRun, readExisting, resumeRun } from './lifecycle.js';
+import { createRun, readExisting, resumeRun, spendOf } from './lifecycle.js';
 import {
   cellGrid,
+  attemptCeilingOf,
   credentialRefOf,
   effectivePlan,
   planProblems,
@@ -51,6 +59,8 @@ import { RUNNER_IMPLEMENTATION_VERSION, RUN_PLAN_VERSION } from './types.js';
 
 /** Where one command writes its human-readable output. */
 export interface RunIo {
+  /** CLI-owned offline publication, only after this invocation entered execution. */
+  readonly completed?: (directory: string) => Promise<number>;
   readonly root: string;
   readonly out: (line: string) => void;
   readonly err: (line: string) => void;
@@ -96,7 +106,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** One dataset's cases and digest, checked before a plan is resolved against it. */
 interface LoadedDataset {
-  readonly cases: readonly ReviewCase[];
+  readonly cases: readonly RunSource[];
   readonly digest: string;
   readonly datasetId: string;
   /** Problems with this dataset's labels, which a run reports but does not obey. */
@@ -114,14 +124,24 @@ interface LoadedDataset {
 async function loadDataset(
   io: RunIo,
   datasetPath: string,
-  selection: {
-    readonly split?: RunPlan['split'];
-    readonly caseIds?: readonly string[];
-  } = {},
+  selection: RunPlan,
 ): Promise<
   | { readonly ok: true; readonly dataset: LoadedDataset }
   | { readonly ok: false; readonly problems: readonly string[] }
 > {
+  if (selection.workflow !== undefined) {
+    try {
+      return {
+        ok: true,
+        dataset: await loadWorkflowSources(io.root, selection),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        problems: [error instanceof Error ? error.message : String(error)],
+      };
+    }
+  }
   const checkers = await compileCheckers();
   let rubric: unknown;
   try {
@@ -254,9 +274,9 @@ async function readPlan(
  */
 export function unknownCaseIds(
   plan: RunPlan,
-  cases: readonly ReviewCase[],
+  cases: readonly RunSource[],
 ): readonly string[] {
-  const named = plan.caseIds ?? [];
+  const named = sourceKeys(plan);
   if (named.length === 0) return [];
   const published = new Set(cases.map((entry) => entry.caseId));
   return named.filter((caseId) => !published.has(caseId));
@@ -276,9 +296,9 @@ export function unknownCaseIds(
  */
 export function resolveCases(
   plan: RunPlan,
-  cases: readonly ReviewCase[],
-): readonly ReviewCase[] {
-  const named = plan.caseIds ?? [];
+  cases: readonly RunSource[],
+): readonly RunSource[] {
+  const named = sourceKeys(plan);
   if (named.length > 0) {
     const byId = new Map(cases.map((entry) => [entry.caseId, entry] as const));
     return named.flatMap((caseId) => {
@@ -358,8 +378,13 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
   const resolvedPlan = withResolvedCases(plan, resolvedCases);
   const grid = cellGrid(resolvedPlan);
   io.out(
-    `plan ${plan.datasetId} split ${plan.split}: ${String(resolvedPlan.caseIds?.length ?? 0)} cases`,
+    `plan ${plan.datasetId} split ${plan.split}: ${String(sourceKeys(resolvedPlan).length)} ${resolvedPlan.workflow === undefined ? 'cases' : 'workflow views'}`,
   );
+  if (resolvedPlan.workflow !== undefined) {
+    io.out(
+      `workflow roots ${String(new Set(resolvedPlan.workflow.points.map((p) => p.rootId)).size)}, lineages ${String(new Set(resolvedPlan.workflow.points.map((p) => p.lineageId)).size)}`,
+    );
+  }
   io.out(
     `targets ${String(plan.targets.length)}, protocols ${plan.protocols.join('+')}, repeats ${String(plan.repeats)}`,
   );
@@ -373,6 +398,7 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
   // Which package the cells render and read with, before anything is sent. A comparison
   // whose plan does not say this cannot be told apart from a baseline run afterwards.
   io.out(`package ${candidateSummary(candidateOf(resolvedPlan))}`);
+  let planningFixture: RunFixture | null = null;
   if (plan.fixture !== null) {
     const fixture = await readFixture(
       fixturePathOf(resolve(io.root, command.planPath), plan.fixture),
@@ -382,6 +408,7 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
       io.err(`problem ${fixture.message}`);
       return 1;
     }
+    planningFixture = fixture.fixture;
     const scripted = fixture.fixture.cells;
     for (const cell of grid.cells) {
       if (!cell.supported) continue;
@@ -389,6 +416,15 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
       if (entry === undefined) {
         io.err(
           `problem fixture has no entry for ${cell.cellId}; a cell without a script cannot be replayed`,
+        );
+        return 1;
+      }
+      if (
+        plan.workflow !== undefined &&
+        (entry[cell.protocol]?.length ?? 0) === 0
+      ) {
+        io.err(
+          `problem fixture has no ${cell.protocol} response for ${cell.cellId}`,
         );
         return 1;
       }
@@ -436,6 +472,67 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
       }
     }
   }
+  if (resolvedPlan.workflow !== undefined) {
+    let input = 0;
+    let attempts = 0;
+    const byId = new Map(resolvedCases.map((entry) => [entry.caseId, entry]));
+    for (const cell of grid.cells) {
+      const point = resolvedPlan.workflow.points.find(
+        (p) => p.viewId === cell.caseId,
+      );
+      if (point === undefined || point.lineageId === undefined) {
+        io.err('problem workflow identity is unresolved');
+        return 1;
+      }
+      io.out(
+        `workflow ${point.group}/${point.rootId}/${point.lineageId}/${point.pointId}/${point.viewId} ${cell.protocol} supported=${String(cell.supported)}`,
+      );
+      if (!cell.supported) continue;
+      const target = resolvedPlan.targets.find(
+        (entry) => entry.targetId === cell.targetId,
+      );
+      if (target === undefined) return 1;
+      attempts += attemptCeilingOf(
+        target,
+        cell.protocol,
+        planningFixture === null
+          ? {}
+          : {
+              scripted:
+                planningFixture.cells[cell.cellId]?.[cell.protocol]?.length ??
+                0,
+            },
+      );
+      const source = byId.get(cell.caseId);
+      if (source === undefined) return 1;
+      try {
+        const built = await sourceMaterial(source, cell.protocol, resolvedPlan);
+        io.out(
+          `input ${cell.cellId} ${String(built.material.estimatedInputTokens)} trims=${built.material.truncatedSegments.join(',')} gaps=${JSON.stringify(built.material.blockingGaps)}`,
+        );
+        if (
+          built.material.estimatedInputTokens >
+          Math.min(
+            resolvedPlan.context.maxInputTokens,
+            resolvedPlan.bounds.maxInputTokens,
+          )
+        )
+          throw new Error('workflow request exceeds H');
+        input += built.material.estimatedInputTokens;
+      } catch (error) {
+        io.err(
+          `problem ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return 1;
+      }
+    }
+    io.out(
+      `workflow planned attempt ceiling ${String(attempts)}; resource attempt cap ${String(resourceAttemptLimit(resolvedPlan))}; conservative request ceiling ${String(Math.min(attempts, resourceAttemptLimit(resolvedPlan)))}`,
+    );
+    io.out(
+      `workflow estimated initial input ${String(input)}; cumulative allowance ${String(resolvedPlan.resource?.maxEstimatedInputTokens)}; provider billed/output tokens unknown`,
+    );
+  }
   io.out(`planHash ${planDigest(resolvedPlan)}`);
   for (const cell of grid.cells) {
     if (cell.supported) continue;
@@ -447,8 +544,9 @@ export async function planRun(io: RunIo, command: RunCommand): Promise<number> {
 /** The plan with its cases resolved, which is what a run freezes and hashes. */
 function withResolvedCases(
   plan: RunPlan,
-  cases: readonly ReviewCase[],
+  cases: readonly RunSource[],
 ): RunPlan {
+  if (plan.workflow !== undefined) return resolveWorkflowPlan(plan, cases);
   return effectivePlan(
     plan,
     cases.map((entry) => entry.caseId),
@@ -533,6 +631,7 @@ export async function executeRun(
   const directory = resolve(
     io.root,
     command.directory ??
+      resolvedPlan.resource?.runDirectory ??
       defaultRunDirectory(resolvedPlan.datasetId, command.planPath),
   );
   const versions = versionsFor(resolvedPlan);
@@ -550,7 +649,11 @@ export async function executeRun(
       for (const problem of existing.problems) io.err(`problem ${problem}`);
       return 1;
     }
+    const execution = { started: false };
     const outcome = await guardedResume(io, {
+      onExecutionStarted: () => {
+        execution.started = true;
+      },
       directory,
       existing: existing.existing,
       cases,
@@ -569,9 +672,14 @@ export async function executeRun(
       continuation: true,
       now,
     });
-    if (outcome === null) return 1;
+    if (outcome === null)
+      return execution.started ? completeInvocation(io, directory, 1) : 1;
     reportRun(io, directory, outcome.index.status, outcome.index.spent);
-    return outcome.index.status === 'complete' ? 0 : 1;
+    return completeInvocation(
+      io,
+      directory,
+      outcome.index.status === 'complete' ? 0 : 1,
+    );
   }
   // An occupied destination is refused before either document is published. Continuing
   // an experiment is `--resume`, which checks the plan hash; a second `run` into the same
@@ -607,7 +715,11 @@ export async function executeRun(
     for (const problem of created.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  const execution = { started: false };
   const outcome = await guardedResume(io, {
+    onExecutionStarted: () => {
+      execution.started = true;
+    },
     directory,
     existing: { index: created.index, records: [] },
     cases,
@@ -625,9 +737,30 @@ export async function executeRun(
     continuation: false,
     now,
   });
-  if (outcome === null) return 1;
+  if (outcome === null)
+    return execution.started ? completeInvocation(io, directory, 1) : 1;
   reportRun(io, directory, outcome.index.status, outcome.index.spent);
-  return outcome.index.status === 'complete' ? 0 : 1;
+  return completeInvocation(
+    io,
+    directory,
+    outcome.index.status === 'complete' ? 0 : 1,
+  );
+}
+
+async function completeInvocation(
+  io: RunIo,
+  directory: string,
+  runExit: number,
+): Promise<number> {
+  try {
+    const reportExit = (await io.completed?.(directory)) ?? 0;
+    return runExit === 0 ? reportExit : runExit;
+  } catch (error) {
+    io.err(
+      `report generation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
 }
 
 /**
@@ -834,6 +967,7 @@ export async function inspectResume(
   const directory = resolve(
     io.root,
     command.directory ??
+      resolvedPlan.resource?.runDirectory ??
       defaultRunDirectory(resolvedPlan.datasetId, command.planPath),
   );
   // A read-only inspection still loads the fixture, because its contents are part of what
@@ -862,6 +996,24 @@ export async function inspectResume(
     for (const problem of existing.problems) io.err(`problem ${problem}`);
     return 1;
   }
+  if (resolvedPlan.workflow !== undefined) {
+    const integrity = await readRun(directory, checkers, {
+      allowWorkflow: true,
+    });
+    if (!integrity.ok || integrity.artifact.missing.length > 0) {
+      io.err(
+        'problem workflow records are missing or invalid; consumption is unknown',
+      );
+      return 1;
+    }
+    const spent = spendOf(
+      existing.existing.records,
+      integrity.artifact.index.cells.length,
+    );
+    io.out(
+      `workflow observed conservative spent ${String(spent.attempts)} attempts; nominal cap ${String(resourceAttemptLimit(resolvedPlan))}; dispatch still requires a held scope recheck`,
+    );
+  }
   const done = new Set(
     existing.existing.records.map((record) => record.cellId),
   );
@@ -886,7 +1038,9 @@ export async function inspectResume(
  */
 export async function showRun(io: RunIo, directory: string): Promise<number> {
   const checkers = await compileRunCheckers();
-  const read = await readRun(resolve(io.root, directory), checkers);
+  const read = await readRun(resolve(io.root, directory), checkers, {
+    allowWorkflow: true,
+  });
   if (!read.ok) {
     for (const problem of read.problems) {
       io.err(`problem ${problem.path}: ${problem.message}`);
@@ -896,7 +1050,7 @@ export async function showRun(io: RunIo, directory: string): Promise<number> {
   const { index, records, missing } = read.artifact;
   io.out(`run ${index.runId} (${index.status}) plan ${index.planHash}`);
   io.out(
-    `dataset ${index.dataset.datasetId} ${index.dataset.digest} — ${String(index.dataset.caseCount)} cases`,
+    `dataset ${index.dataset.datasetId} ${index.dataset.digest} — ${String(index.dataset.caseCount)} ${index.plan.workflow === undefined ? 'cases' : 'workflow views'}`,
   );
   io.out(
     `versions contract ${index.versions.contract}, prompt ${index.versions.prompt}, usage ${index.versions.usageMapping}`,

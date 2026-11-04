@@ -4,9 +4,8 @@
  * The HTML variant exists for reading away from a terminal: it is the same document as
  * the Markdown, with the same figures and the same warnings, presented so the three
  * layers can be compared side by side. It is deliberately one self-contained file with
- * no script and no external stylesheet, because a report gets archived, mailed and
- * opened from a path that may not have network access — and because a report that ran
- * code would be a much larger security surface than a document needs.
+ * a fixed offline filter script and no external stylesheet, because a report gets archived, mailed and
+ * opened from a path that may not have network access — with no untrusted data embedded in executable code.
  *
  * Every piece of text that came from the artifact is escaped. Case ids, model names,
  * adjudication rationales and provider reasons are user-supplied strings; a rationale
@@ -20,7 +19,6 @@ import type {
   AttemptUsageRow,
   BehaviourCounts,
   BehaviourGroup,
-  CellView,
   DifferenceRow,
   EvaluationReport,
   FieldErrorStats,
@@ -32,16 +30,14 @@ import type {
 import type { BehaviourClass } from '../metrics/types.js';
 import { humanCostOf } from '../metrics/settlement.js';
 import { fraction, num, pct, rateText } from './format.js';
+import { qualitySection } from './sections-quality.js';
+import { publicationSection } from './sections-publication.js';
+import { versionComparisonSection } from './sections-version-comparison.js';
+import type { PublishedReport } from './publication-types.js';
 
-/** Escape one value for HTML text or an attribute. */
-function escape(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+import { escape } from './html-format.js';
+import { examples, EXAMPLES_STYLE } from './html-examples.js';
+import { HTML_BROWSER_SCRIPT } from './html-browser.js';
 
 /** A heading element. */
 function h(level: number, text: string): string {
@@ -122,10 +118,14 @@ function header(report: EvaluationReport): string {
   const warnings: string[] = [];
   if (report.setup.settlementProjection) {
     warnings.push(
-      '第三层是按共享 settle() 规则推演的结果，不是宿主实际观察到的行为：本次运行没有格子经过宿主链。',
+      '第三层按共享 settle() 规则推演。入口标签本身不证明发生过宿主批准、执行或实际续行。',
     );
   }
-  if (report.diagnostics.labels.gold === 0) {
+  if (
+    report.behaviour.overall.referenceKnown === 0 &&
+    report.diagnostics.risk.comparable === 0 &&
+    report.diagnostics.authorization.comparable === 0
+  ) {
     warnings.push(
       '当前没有可计入金标的人类参考，因此第一层的比较分母和第二层都为 0，显示为 n/a。这是等待用户裁决的正常状态，不是 0% 通过率。',
     );
@@ -259,7 +259,7 @@ function behaviourCounts(counts: BehaviourCounts): string {
   const entries: (readonly [string, string])[] = [
     ['格子', String(counts.cells)],
     ['已判定', String(counts.judged)],
-    ['有金标参考', String(counts.referenceKnown)],
+    ['有适用行为参考', String(counts.referenceKnown)],
     ['参与比较的分母', String(counts.compared)],
     ...CLASS_LABELS.map((entry): readonly [string, string] => [
       entry.label,
@@ -334,7 +334,7 @@ function behaviour(report: EvaluationReport): string {
   return [
     h(2, '第一层：主要自动行为指标'),
     p(
-      '分母只包含「引擎给出了对本次调用的判定」且「案例有可计入金标的参考」的格子。技术失败、缺记录与派发前已决定的格子都在分母之外，各自单列：把技术失败算成拒绝，会让一个坏掉的传输读起来像一个谨慎的审查者。',
+      '分母只包含「引擎给出了对本次调用的判定」且「有适用行为参考」的格子。技术失败、缺记录与派发前状态另列，并保留在全计划覆盖与适用负担分母中。',
     ),
     behaviourCounts(report.behaviour.overall),
     h(2, '分组（第一层）'),
@@ -445,8 +445,11 @@ function diagnostics(report: EvaluationReport): string {
     p(
       '这一层只解释第一层的判定，不参与判定。两个字段分别测量、从不合并成一个「评分质量」数字：偏差方向决定修复方式，单一数字会把方向抹掉。只有裁决者把某个字段钉为唯一值的案例才进入该字段的分母。',
     ),
-    gold === 0
-      ? `<div class="note">${escape('当前没有金标标签，因此本层所有比值都没有分母，显示为 n/a。这是等待用户裁决的正常状态，不是 0% 通过率。')}</div>`
+    gold === 0 &&
+    section.risk.comparable === 0 &&
+    section.authorization.comparable === 0 &&
+    pairsStats.labeled === 0
+      ? `<div class="note">${escape('当前没有金标标签或其他适用评分参考，参考评分误差与配对比值没有分母；实际输出分布仍按观测展示。')}</div>`
       : '',
     labels(section.labels),
     fieldTable(section.risk, section.authorization),
@@ -987,63 +990,10 @@ function differences(report: EvaluationReport): string {
           escape(entry.caseId === '' ? '（数据集）' : entry.caseId),
           escape(entry.observed),
           escape(entry.expected),
-          escape(entry.detail),
+          `<details><summary>差异说明</summary><pre class="evidence-text" tabindex="0">${escape(entry.detail)}</pre></details>`,
         ]),
       ),
     ),
-  ].join('');
-}
-
-/** One per-example row. */
-function exampleRow(example: CellView): string {
-  return tr(
-    [
-      example.cellId,
-      example.caseId,
-      example.familyId,
-      example.protocol,
-      `r${String(example.repeat)}`,
-      example.classification,
-      example.engine.word === null
-        ? '（无判定）'
-        : example.engine.risk === null
-          ? example.engine.word
-          : `${example.engine.word} ${String(example.engine.risk)}/${String(example.engine.authorization)}`,
-      example.reference ?? '（无参考）',
-      example.settlement,
-      example.inputHash === '' ? '（无记录）' : example.inputHash,
-      example.casePath ?? '（未读到）',
-      example.labelPath ?? '（无标签）',
-      example.rationale ?? '',
-    ].map(escape),
-  );
-}
-
-/** The per-example evidence. */
-function examples(report: EvaluationReport): string {
-  return [
-    h(2, '逐例证据'),
-    p(
-      '每一行对应一个计划格子，包括从未运行的格子；把未运行的格子移出表格，会让一个小分母看起来像完整覆盖。输入指纹是标签审批所用的同一摘要，案例与标签路径相对数据集目录。引擎答案与人类参考分列，从不合并成一列。',
-    ),
-    `<table><caption>${escape('逐例证据')}</caption><thead>${tr(
-      [
-        'cell',
-        '案例',
-        '家族',
-        '协议',
-        '重复',
-        '分类',
-        '引擎',
-        '参考',
-        '结算',
-        '输入指纹',
-        '案例文件',
-        '标签文件',
-        '裁决理由',
-      ].map(escape),
-      true,
-    )}</thead><tbody>${report.examples.map(exampleRow).join('')}</tbody></table>`,
   ].join('');
 }
 
@@ -1075,7 +1025,7 @@ function closing(report: EvaluationReport): string {
  * guessed would render it as mojibake; the doctype is before that because a standards
  * mode document is what keeps the table layout predictable across browsers.
  */
-export function renderHtml(report: EvaluationReport): string {
+export function renderHtml(report: PublishedReport): string {
   return [
     '<!doctype html>',
     '<html lang="zh-CN">',
@@ -1083,12 +1033,18 @@ export function renderHtml(report: EvaluationReport): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>评测报告 ${escape(report.run.runId)}</title>`,
-    `<style>${STYLE}</style>`,
+    `<style>${STYLE}${EXAMPLES_STYLE}</style>`,
     '</head>',
     '<body>',
     header(report),
+    report.publication === undefined
+      ? ''
+      : `<section>${h(2, '被测来源与归档')}<pre>${escape(publicationSection(report))}</pre></section>`,
     identity(report),
     coverage(report),
+    report.quality === undefined
+      ? ''
+      : `<section>${h(2, '核心分母与多来源参考')}<pre>${escape(qualitySection(report))}</pre></section>`,
     behaviour(report),
     diagnostics(report),
     settlement(report),
@@ -1096,9 +1052,11 @@ export function renderHtml(report: EvaluationReport): string {
     stability(report),
     efficiency(report),
     comparison(report),
+    versionComparisonSection(report, 'html'),
     differences(report),
     examples(report),
     closing(report),
+    `<script>${HTML_BROWSER_SCRIPT}</script>`,
     '</body>',
     '</html>',
   ].join('\n');

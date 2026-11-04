@@ -212,7 +212,7 @@ describe('no evidence is overwritten', () => {
     });
   });
 
-  it('writing inside the run directory adds the three files and changes nothing else', async () => {
+  it('writing inside the run directory adds the complete report and grouped details without changing evidence', async () => {
     await withArea(async (created) => {
       const directory = await twoCaseRun(created);
       const before = await inventory(directory);
@@ -228,10 +228,17 @@ describe('no evidence is overwritten', () => {
         (entry) => !before.some((previous) => previous.path === entry.path),
       );
       expect(added.map((entry) => entry.path).sort()).toEqual([
+        'report.details/%5B%22dev%22%2C%22legacy-v1%22%5D.md',
         'report.html',
         'report.json',
         'report.md',
       ]);
+      const details = await readFile(
+        join(directory, 'report.details/%5B%22dev%22%2C%22legacy-v1%22%5D.md'),
+        'utf8',
+      );
+      for (const example of build.report.examples)
+        expect(details).toContain(example.cellId);
       // Every file that was there is unchanged, byte for byte.
       for (const previous of before) {
         expect(after.find((entry) => entry.path === previous.path)).toEqual(

@@ -93,6 +93,8 @@ export function RuleTest(props: {
   readonly draft: Draft;
   readonly focusedRule: DraftRule | null;
   readonly focusRequest: number;
+  readonly handledFocusRequest?: number | undefined;
+  readonly onFocusRequestHandled?: ((request: number) => void) | undefined;
   readonly renderTrigger?: boolean | undefined;
   readonly openerRef?: React.RefObject<HTMLElement | null> | undefined;
   readonly onLocateIssue?: (target: IssueTarget) => void;
@@ -107,13 +109,15 @@ export function RuleTest(props: {
 
   const [handled, setHandled] = useState(0);
 
+  const { focusRequest, handledFocusRequest, onFocusRequestHandled } = props;
   const [pendingFocus, setPendingFocus] = useState(false);
   useEffect(() => {
-    if (props.focusRequest === handled) return;
-    setHandled(props.focusRequest);
+    if (focusRequest <= Math.max(handled, handledFocusRequest ?? 0)) return;
+    setHandled(focusRequest);
     setOpen(true);
     setPendingFocus(true);
-  }, [props.focusRequest, handled]);
+    onFocusRequestHandled?.(focusRequest);
+  }, [focusRequest, handledFocusRequest, onFocusRequestHandled, handled]);
 
   useEffect(() => {
     if (!pendingFocus || !open) return;

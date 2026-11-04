@@ -680,11 +680,12 @@ describe('a reference that is not a behaviour is its own class', () => {
         'read-named-source-file': chatAnswer(1, 10),
       });
       const report = await buildFor(directory, dataset);
-      // The label records that it could not be scored, so it is excluded from gold with
-      // its own reason rather than being read as a decision about the call.
+      // No score excludes scoring gold, but its explicit M0 reference remains comparable.
       expect(report.diagnostics.labels.excludedByReason['no-score']).toBe(1);
       expect(report.diagnostics.labels.gold).toBe(0);
-      expect(report.behaviour.overall.compared).toBe(0);
+      expect(report.behaviour.overall.compared).toBe(1);
+      expect(report.behaviour.overall.materialUnavailableButScored).toBe(1);
+      expect(report.diagnostics.pairs.labeled).toBe(0);
     });
   });
 });

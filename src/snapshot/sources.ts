@@ -7,19 +7,24 @@ import {
   projectRulesCopy,
   type ProjectRulesResult,
 } from './guidance.js';
-import type { ReviewEventSources } from '../types.js';
+import type { ReviewEventSource, ReviewEventSources } from '../types.js';
 import {
   beforePending,
   boundSourceLog,
   hostEventSource,
+  initialDelegation,
+  type InitialDelegation,
 } from './host-events.js';
 import { boundEventSources } from './source-guard.js';
 import { resultContent } from './event-content.js';
 import { currentTurnOf } from './window.js';
 import { redactEventSources } from './prefix-redaction.js';
 import { discoverLog, redactLog } from './source-redaction.js';
+import { prepareToolResultLog, enrichToolResults } from './tool-results.js';
 
 export interface SnapshotSources {
+  readonly delegation: InitialDelegation | null;
+  readonly parentDelegation: InitialDelegation | null;
   readonly eventSources?: ReviewEventSources;
   readonly turn: number | null;
   readonly log: SessionLog;
@@ -27,26 +32,94 @@ export interface SnapshotSources {
   readonly project: ProjectRulesResult;
   readonly createdAt: number;
 }
-function captureParentLog(options: SnapshotOptions): SessionLog | undefined {
+function captureParentLog(options: SnapshotOptions) {
   const parentId = options.agent.session.header?.parentSession;
   const parent =
     parentId === undefined ? undefined : options.sessions?.get?.(parentId);
-  const parentObserved =
-    parent === undefined
+  if (parent === undefined) return undefined;
+  const captured = readSessionLog(
+    parent,
+    `parent session "${parent.id ?? 'unknown'}"`,
+  );
+  const delegation = initialDelegation(
+    captured,
+    parent.header,
+    parent.inheritedEventCount,
+  );
+  const observed = boundSourceLog(
+    captured,
+    parent.id ?? parentId ?? 'unknown',
+    undefined,
+    true,
+    delegation,
+  );
+  return {
+    delegation,
+    log: {
+      ...observed,
+      events: structuredClone(observed.own),
+      own: structuredClone(observed.own),
+      turnOf: [...observed.turnOf],
+    },
+  };
+}
+function capturedEvents(
+  options: SnapshotOptions,
+  log: SessionLog,
+  parentLog: SessionLog | undefined,
+  reader: SnapshotOptions['toolResults'],
+  delegation: InitialDelegation | null,
+  parentDelegation: InitialDelegation | null,
+) {
+  const sessionId = options.agent.session.id ?? 'unknown';
+  const eventSources =
+    options.eventSources ??
+    (reader === undefined
       ? undefined
-      : boundSourceLog(
-          readSessionLog(parent, `parent session "${parent.id ?? 'unknown'}"`),
-          parent.id ?? parentId ?? 'unknown',
-          undefined,
-          true,
-        );
-  return parentObserved === undefined
-    ? undefined
+      : {
+          local: enrichToolResults(
+            hostEventSource(
+              log,
+              sessionId,
+              options.agent.session.header?.parentSession,
+              false,
+              delegation,
+            ),
+            log,
+            reader,
+          ),
+          parent:
+            parentLog === undefined
+              ? unavailableParent(options.agent.session.header?.parentSession)
+              : hostEventSource(
+                  parentLog,
+                  options.agent.session.header?.parentSession ?? 'unknown',
+                  undefined,
+                  true,
+                  parentDelegation,
+                ),
+        });
+  const frozenEvents =
+    eventSources === undefined
+      ? undefined
+      : structuredClone(boundEventSources(eventSources));
+  return frozenEvents;
+}
+function unavailableParent(
+  parentId: string | undefined,
+): ReviewEventSource | null {
+  return parentId === undefined
+    ? null
     : {
-        ...parentObserved,
-        events: structuredClone(parentObserved.own),
-        own: structuredClone(parentObserved.own),
-        turnOf: [...parentObserved.turnOf],
+        status: {
+          sessionId: parentId,
+          status: 'unavailable',
+          cutoff: null,
+          fromSeq: null,
+          reason: 'direct parent session is unavailable',
+          access: 'snapshot',
+        },
+        events: [],
       };
 }
 export async function captureSnapshotSources(
@@ -58,14 +131,39 @@ export async function captureSnapshotSources(
     options.callId,
     options.turn ?? null,
   ).turn;
+  const prefix = beforePending(captured, options.callId);
+  const delegation = initialDelegation(
+    prefix,
+    options.agent.session.header,
+    options.agent.session.inheritedEventCount,
+  );
+  const reader =
+    options.eventSources === undefined ? options.toolResults : undefined;
+  const sessionId = options.agent.session.id ?? 'unknown';
+  const prepared =
+    reader === undefined
+      ? prefix
+      : prepareToolResultLog(prefix, sessionId, reader);
   const observed = boundSourceLog(
-    beforePending(captured, options.callId),
+    prepared,
     options.agent.session.id ?? 'unknown',
     options.agent.session.header?.parentSession,
+    false,
+    delegation,
   );
   const own = structuredClone(observed.own);
   const log = { ...observed, events: own, own, turnOf: [...observed.turnOf] };
-  const parentLog = captureParentLog(options);
+  const parent = captureParentLog(options);
+  const parentLog = parent?.log;
+  const parentDelegation = parent?.delegation ?? null;
+  const frozenEvents = capturedEvents(
+    options,
+    log,
+    parentLog,
+    reader,
+    delegation,
+    parentDelegation,
+  );
   const project =
     options.projectRulesMaterial ??
     (await readProjectRulesSource(
@@ -73,13 +171,13 @@ export async function captureSnapshotSources(
       options.config.context.projectRules,
     ));
   return {
+    delegation,
+    parentDelegation,
     turn,
-    ...(options.eventSources === undefined
+    ...(frozenEvents === undefined
       ? {}
       : {
-          eventSources: structuredClone(
-            boundEventSources(options.eventSources),
-          ),
+          eventSources: frozenEvents,
         }),
     log,
     ...(parentLog === undefined ? {} : { parentLog }),
@@ -96,14 +194,20 @@ function redactCapturedLog(
   sessionId: string,
   parentId?: string,
   parent = false,
+  delegation: InitialDelegation | null = null,
 ): SessionLog {
   const ordinaryResults = new Set(
-    hostEventSource(log, sessionId, parentId, parent).events.flatMap((event) =>
-      event.kind === 'result' ? [event.seq] : [],
-    ),
+    hostEventSource(
+      log,
+      sessionId,
+      parentId,
+      parent,
+      delegation,
+    ).events.flatMap((event) => (event.kind === 'result' ? [event.seq] : [])),
   );
   return redactLog(log, redactor, (event, content) =>
-    event.type === 'tool/result' && ordinaryResults.has(event.seq)
+    (event.type === 'tool/result' || event.type === 'tool/ptc-dispatch') &&
+    ordinaryResults.has(event.seq)
       ? resultContent(content)
       : content,
   );
@@ -130,6 +234,8 @@ export function redactSnapshotSources(
     options.hint,
   ]);
   return {
+    delegation: source.delegation,
+    parentDelegation: source.parentDelegation,
     turn: source.turn,
     ...(source.eventSources === undefined
       ? {}
@@ -139,6 +245,8 @@ export function redactSnapshotSources(
       redactor,
       options.agent.session.id ?? 'unknown',
       options.agent.session.header?.parentSession,
+      false,
+      source.delegation,
     ),
     ...(source.parentLog === undefined
       ? {}
@@ -149,6 +257,7 @@ export function redactSnapshotSources(
             options.agent.session.header?.parentSession ?? 'unknown',
             undefined,
             true,
+            source.parentDelegation,
           ),
         }),
     project: projectRulesCopy(source.project, redactor),

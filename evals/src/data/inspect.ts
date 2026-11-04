@@ -17,10 +17,10 @@ import type { GoldStatus, LabelAssessment } from './eligibility.js';
 import {
   hasUnscoredField,
   inputHashOf,
-  isIndeterminate,
   legalPairs,
   matrixBehaviours,
   mixesProhibition,
+  unreachedBehaviour,
 } from './eligibility.js';
 import { documentName } from './read.js';
 import type { RawDataset, Sourced } from './read.js';
@@ -266,7 +266,7 @@ function labelCoherence(label: ReviewLabel, path: string): readonly Finding[] {
   return problems;
 }
 
-/** Every pair has to sit inside both sets, and the recorded stage has to be reachable. */
+/** Pair membership is structural; independent behaviour is not a matrix constraint. */
 function pairProblems(
   label: ReviewLabel,
   pairs: readonly ScorePair[],
@@ -283,16 +283,26 @@ function pairProblems(
       });
     }
   }
-  const reference = label.target.behaviourReference;
-  if (reference === null || isIndeterminate(label)) return problems;
-  const behaviours = matrixBehaviours(pairs).map((entry) => entry.behaviour);
-  if (!behaviours.includes(reference)) {
-    problems.push({
-      path,
-      message: `behaviour reference ${reference} is not reachable from the legal pairs (${[...new Set(behaviours)].join(', ')})`,
-    });
-  }
   return problems;
+}
+
+/** A policy disagreement is evidence to inspect, never grounds to delete a reference. */
+function matrixFindings(
+  labels: readonly Sourced<ReviewLabel>[],
+): readonly Finding[] {
+  return labels.flatMap(({ document: label, path }) => {
+    if (label.target.status !== 'approved' || !unreachedBehaviour(label))
+      return [];
+    const reached = matrixBehaviours(legalPairs(label) ?? []).map(
+      (entry) => entry.behaviour,
+    );
+    return [
+      {
+        path,
+        message: `behaviour reference ${String(label.target.behaviourReference)} is not reachable from the legal pairs (${[...new Set(reached)].join(', ')}); retained as an independent reference`,
+      },
+    ];
+  });
 }
 
 /** Check every review file against the case and label it names. */
@@ -534,6 +544,9 @@ export function inspectDataset(
 
   const labelStatus = assessLabels(cases, labels, manifest);
   problems.push(...staleLabels(labelStatus));
-  const findings = disagreements(labelStatus.gold, reviews);
+  const findings = [
+    ...matrixFindings(labels),
+    ...disagreements(labelStatus.gold, reviews),
+  ];
   return { problems, findings, manifest, labels: labelStatus, cases, reviews };
 }

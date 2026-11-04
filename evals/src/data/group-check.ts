@@ -10,6 +10,8 @@ import type {
 } from './group-types.js';
 import type { CaseReviews, ReviewLabel, DatasetManifest } from './types.js';
 import { checkWorkflow } from './workflow-check.js';
+import { sameAnnotationView } from './annotation-binding.js';
+import { canonicalJson } from './hash.js';
 
 function legacyProblems(
   group: DataGroup,
@@ -114,6 +116,49 @@ function opinionProblems(
     });
   if ((model.version === null) !== (model.versionSource === 'unknown'))
     problems.push({ path, message: 'model version and its source disagree' });
+  const annotation = value.annotation;
+  if (annotation !== undefined) {
+    if (
+      annotation.complete &&
+      (annotation.pairs === null ||
+        annotation.rawResponse === null ||
+        value.independentBehaviour === null ||
+        annotation.problems.length > 0)
+    )
+      problems.push({
+        path,
+        message:
+          'complete annotation lacks its answer, raw response, or valid evidence',
+      });
+    if (
+      annotation.registration &&
+      (value.outcome !== 'missing' || annotation.rawResponse !== null)
+    )
+      problems.push({
+        path,
+        message: 'registration is a missing opinion, never a fabricated reply',
+      });
+    if (
+      annotation.rawResponse !== null &&
+      value.responseRef !==
+        `opinion:${value.opinion.reviewId}#annotation/rawResponse`
+    )
+      problems.push({
+        path,
+        message: 'raw response reference does not resolve to this opinion',
+      });
+    const pair =
+      annotation.pairs?.length === 1 ? annotation.pairs[0] : undefined;
+    if (
+      annotation.complete &&
+      pair !== undefined &&
+      (pair[0] !== risk || pair[1] !== authorization)
+    )
+      problems.push({
+        path,
+        message: 'opinion scores differ from the retained complete pair',
+      });
+  }
   return problems;
 }
 
@@ -167,7 +212,13 @@ function referenceProblems(group: DataGroup): readonly Finding[] {
           (support.rootId !== value.rootId ||
             support.pointId !== value.pointId ||
             support.viewId !== value.viewId ||
-            support.batchId !== value.batchId)
+            (value.annotation === undefined
+              ? support.batchId !== value.batchId
+              : support.annotation === undefined ||
+                !sameAnnotationView(
+                  value.annotation.binding,
+                  support.annotation.binding,
+                )))
         )
           problems.push({
             path: entry.path,
@@ -185,6 +236,63 @@ function labelProblems(
   opinions: ReadonlySet<string>,
 ): readonly Finding[] {
   const problems: Finding[] = [];
+  const humanState = value.annotation?.humanState;
+  if (
+    value.annotation !== undefined &&
+    canonicalJson(value.versions) !==
+      canonicalJson(value.annotation.binding.versions)
+  )
+    problems.push({
+      path,
+      message: 'label and annotation binding versions disagree',
+    });
+  if (
+    humanState !== undefined &&
+    humanState !== 'draft' &&
+    (value.target.decidedBy.trim() === '' ||
+      value.target.rationale.trim() === '' ||
+      value.target.decidedAt === null)
+  )
+    problems.push({
+      path,
+      message: 'explicit human annotation requires author, date and rationale',
+    });
+  if (
+    humanState !== undefined &&
+    !['human', 'human-inherited'].includes(value.source)
+  )
+    problems.push({
+      path,
+      message: 'human annotation state requires a human source',
+    });
+  if (
+    humanState === 'confirmed' &&
+    (!value.humanConfirmed || value.target.status !== 'approved')
+  )
+    problems.push({
+      path,
+      message: 'confirmed annotation requires an approved human reference',
+    });
+  if (
+    humanState !== undefined &&
+    humanState !== 'confirmed' &&
+    (value.humanConfirmed || value.scoringEligible)
+  )
+    problems.push({
+      path,
+      message:
+        'draft or explicit human pending state is not confirmed/scoring eligible',
+    });
+  if (
+    value.source === 'human-inherited' &&
+    value.annotation !== undefined &&
+    (value.annotation.inheritedFrom === undefined ||
+      value.annotation.inheritedFrom.trim() === '')
+  )
+    problems.push({
+      path,
+      message: 'human inherited annotation needs its explicit origin',
+    });
   if (
     value.humanConfirmed &&
     (!['human', 'human-inherited'].includes(value.source) ||

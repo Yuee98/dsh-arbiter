@@ -1,0 +1,182 @@
+{
+  "planVersion": "eval-run-plan-v1",
+  "datasetId": "reviewer-v2",
+  "datasetPath": "/private/tmp/dsh-arbiter-cw-135/evals/datasets/reviewer-v2",
+  "transport": "live",
+  "protocols": ["decision"],
+  "targets": [
+    {
+      "targetId": "clef-local",
+      "provider": "clef-local",
+      "model": "clef",
+      "modelVersion": null,
+      "chat": null,
+      "decision": {
+        "url": "http://127.0.0.1:8000/client/v4/accounts/local/ai/run",
+        "model": "clef",
+        "apiKeyRef": "",
+        "timeoutMs": 60000,
+        "costTier": "free"
+      },
+      "credentialRef": ""
+    }
+  ],
+  "context": {
+    "targetInputTokens": 6000,
+    "maxInputTokens": 10000
+  },
+  "fixture": null,
+  "split": "dev",
+  "repeats": 1,
+  "bounds": {
+    "concurrency": 1,
+    "timeoutMs": 60000,
+    "maxAttempts": 20,
+    "maxInputTokens": 10000
+  },
+  "notes": [
+    "仅发布资源方案；未授权真实标注转交或 S2 运行，不沿用 S1 额度，不得派发真实请求。",
+    "外部首四根固定源 feat/cw-135@1f191bae66e5dd08172d51f26afdca94abbfa712，尚未合入 main；缺源时拒绝，不复制数据集进入此 PR。",
+    "采用已合并 #176 的正式 workflow.points/resource 结构；plan/run --dry-run 仅离线核验，不证明目标可用、费用或授权。",
+    "实际标注转交和参考评价前须完成 #185 的显式输入状态对齐，并重跑20点匹配核验；当前标注构建器与此disabled S2的binding为0/20匹配，不得把现有题本用于本S2参考。",
+    "本次受控评测明确禁用项目规则，customRules 为空；不同于历史默认 enabled/no-file 预演，须使用当前重算材料与配置身份。",
+    "costTier free 仅保留旧配置路由值；实际费用未知，非零费用承诺。",
+    "累计最多 20 attempts，每个预留 10000 估计输入 tokens，范围上限 200000；输出及 provider 总计费 tokens/金额无可验证硬上限。"
+  ],
+  "workflow": {
+    "contentSet": "workflows-v1",
+    "points": [
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p01",
+        "viewId": "cw135-001-p01-main"
+      },
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p02",
+        "viewId": "cw135-001-p02-main"
+      },
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p03",
+        "viewId": "cw135-001-p03-main"
+      },
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p04",
+        "viewId": "cw135-001-p04-main"
+      },
+      {
+        "group": "f01-build-cleanup",
+        "rootId": "cw135-001",
+        "pointId": "cw135-001-p05",
+        "viewId": "cw135-001-p05-main"
+      },
+      {
+        "group": "f04-support",
+        "rootId": "cw135-007",
+        "pointId": "cw135-007-p01",
+        "viewId": "cw135-007-p01-main"
+      },
+      {
+        "group": "f04-support",
+        "rootId": "cw135-007",
+        "pointId": "cw135-007-p02",
+        "viewId": "cw135-007-p02-main"
+      },
+      {
+        "group": "f04-support",
+        "rootId": "cw135-007",
+        "pointId": "cw135-007-p03",
+        "viewId": "cw135-007-p03-main"
+      },
+      {
+        "group": "f04-support",
+        "rootId": "cw135-007",
+        "pointId": "cw135-007-p04",
+        "viewId": "cw135-007-p04-main"
+      },
+      {
+        "group": "f04-support",
+        "rootId": "cw135-007",
+        "pointId": "cw135-007-p05",
+        "viewId": "cw135-007-p05-main"
+      },
+      {
+        "group": "f07-release",
+        "rootId": "cw135-013",
+        "pointId": "cw135-013-p01",
+        "viewId": "cw135-013-p01-main"
+      },
+      {
+        "group": "f07-release",
+        "rootId": "cw135-013",
+        "pointId": "cw135-013-p02",
+        "viewId": "cw135-013-p02-main"
+      },
+      {
+        "group": "f07-release",
+        "rootId": "cw135-013",
+        "pointId": "cw135-013-p03",
+        "viewId": "cw135-013-p03-main"
+      },
+      {
+        "group": "f07-release",
+        "rootId": "cw135-013",
+        "pointId": "cw135-013-p04",
+        "viewId": "cw135-013-p04-main"
+      },
+      {
+        "group": "f07-release",
+        "rootId": "cw135-013",
+        "pointId": "cw135-013-p05",
+        "viewId": "cw135-013-p05-main"
+      },
+      {
+        "group": "f09-documents",
+        "rootId": "cw135-017",
+        "pointId": "cw135-017-p01",
+        "viewId": "cw135-017-p01-main"
+      },
+      {
+        "group": "f09-documents",
+        "rootId": "cw135-017",
+        "pointId": "cw135-017-p02",
+        "viewId": "cw135-017-p02-main"
+      },
+      {
+        "group": "f09-documents",
+        "rootId": "cw135-017",
+        "pointId": "cw135-017-p03",
+        "viewId": "cw135-017-p03-main"
+      },
+      {
+        "group": "f09-documents",
+        "rootId": "cw135-017",
+        "pointId": "cw135-017-p04",
+        "viewId": "cw135-017-p04-main"
+      },
+      {
+        "group": "f09-documents",
+        "rootId": "cw135-017",
+        "pointId": "cw135-017-p05",
+        "viewId": "cw135-017-p05-main"
+      }
+    ],
+    "input": {
+      "customRules": "",
+      "projectRules": {
+        "kind": "disabled"
+      }
+    }
+  },
+  "resource": {
+    "runDirectory": "/private/tmp/dsh-arbiter-cw-134/.local/evals/runs/cw134-first-four",
+    "maxAttempts": 20,
+    "maxEstimatedInputTokens": 200000
+  }
+}

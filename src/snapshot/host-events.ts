@@ -6,7 +6,7 @@ import type {
   ReviewSourceStatus,
 } from '../types.js';
 import type { SessionLog } from './log.js';
-import type { SessionEventLike } from './types.js';
+import type { SessionEventLike, SessionHeaderLike } from './types.js';
 import {
   eventJson,
   eventRecord,
@@ -15,9 +15,52 @@ import {
 } from './event-content.js';
 
 import { SOURCE_BYTE_LIMIT, sourceBytes as bytes } from './source-guard.js';
+import { resultReference } from './tool-result-reference.js';
+import { referenceEvent } from './tool-results.js';
 
 function dataOf(event: SessionEventLike): Record<string, unknown> {
   return eventRecord(event.data) ? event.data : {};
+}
+
+export interface InitialDelegation {
+  readonly seq: number;
+  readonly parentId: string;
+}
+
+/** The pinned host starts a spawned subagent with its parent's tool prompt. */
+export function initialDelegation(
+  log: SessionLog,
+  header: SessionHeaderLike | undefined,
+  ownStart = log.inherited,
+): InitialDelegation | null {
+  if (
+    !log.readable ||
+    header?.origin !== 'subagent' ||
+    typeof header.parentSession !== 'string' ||
+    log.own[0]?.seq !== ownStart ||
+    (log.coverage?.fromSeq ?? ownStart) !== ownStart
+  )
+    return null;
+  const at = log.own.findIndex((event) => {
+    const source = messageOf(event)['source'];
+    return (
+      event.type === 'user/message' &&
+      eventRecord(source) &&
+      source['kind'] === 'user'
+    );
+  });
+  const event = log.own[at];
+  if (
+    event === undefined ||
+    !log.own
+      .slice(0, at + 1)
+      .every((entry, index) => entry.seq === ownStart + index)
+  )
+    return null;
+  const source = messageOf(event)['source'];
+  // A real entry-point human message retains its explicit transport identity.
+  if (eventRecord(source) && typeof source['rpcId'] === 'string') return null;
+  return { seq: event.seq, parentId: header.parentSession };
 }
 
 function messageOf(event: SessionEventLike): Record<string, unknown> {
@@ -27,6 +70,12 @@ function messageOf(event: SessionEventLike): Record<string, unknown> {
 
 function callOf(event: SessionEventLike): string | null {
   const data = dataOf(event);
+  if (
+    (event.type === 'tool/ptc-dispatch-start' ||
+      event.type === 'tool/ptc-dispatch') &&
+    typeof data['subCallId'] === 'string'
+  )
+    return data['subCallId'];
   if (typeof data['callId'] === 'string') return data['callId'];
   const message = messageOf(event);
   const source = message['source'];
@@ -267,11 +316,16 @@ function ordinaryOf(
 ): ReviewEvent | null {
   const visible = messageEvent(event, base, parentId);
   if (visible !== null) return visible;
+  const reference = resultReference(event, base.sessionId);
+  if (reference !== null) return referenceEvent(reference, base);
   const data = dataOf(event);
   const message = messageOf(event);
   const callId = callOf(event);
   if (callId === null) return null;
-  if (event.type === 'tool/call' && typeof data['name'] === 'string')
+  if (
+    (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') &&
+    typeof data['name'] === 'string'
+  )
     return {
       ...base,
       kind: 'call',
@@ -280,7 +334,8 @@ function ordinaryOf(
       arguments: structuredClone(data['arguments'] ?? {}),
       ...(typeof data['cwd'] === 'string' ? { cwd: data['cwd'] } : {}),
     };
-  if (event.type !== 'tool/result') return null;
+  if (event.type !== 'tool/result' && event.type !== 'tool/ptc-dispatch')
+    return null;
   const status =
     message['isError'] === true
       ? 'failure'
@@ -302,7 +357,10 @@ function ordinaryOf(
 /** Freeze the local call cutoff before redaction or any source selection. */
 export function beforePending(log: SessionLog, callId: string): SessionLog {
   const at = log.own.findIndex(
-    (event) => event.type === 'tool/call' && callOf(event) === callId,
+    (event) =>
+      (event.type === 'tool/call' ||
+        event.type === 'tool/ptc-dispatch-start') &&
+      callOf(event) === callId,
   );
   if (at < 0) return log;
   const own = log.own.slice(0, at);
@@ -310,6 +368,7 @@ export function beforePending(log: SessionLog, callId: string): SessionLog {
 }
 
 interface SourceContext {
+  readonly delegation: InitialDelegation | null;
   readonly parent: boolean;
   readonly log: SessionLog;
   readonly identities: readonly ReviewEventIdentity[];
@@ -322,6 +381,7 @@ function sourceContext(
   log: SessionLog,
   sessionId: string,
   parent: boolean,
+  delegation: InitialDelegation | null,
 ): SourceContext {
   const asks = new Map<string, ReviewEvent>();
   const identities = log.own.map((event, at) =>
@@ -339,8 +399,8 @@ function sourceContext(
     const question = questionOf(event, base);
     if (question?.kind === 'question') asks.set(question.askId, question);
   });
-  const priority = latestHuman(log, identities, parent, asks);
-  return { log, asks, identities, parent, ...priority };
+  const priority = latestHuman(log, identities, parent, asks, delegation);
+  return { log, asks, identities, parent, delegation, ...priority };
 }
 
 function latestHuman(
@@ -348,6 +408,7 @@ function latestHuman(
   identities: readonly ReviewEventIdentity[],
   parent: boolean,
   asks: ReadonlyMap<string, ReviewEvent>,
+  delegation: InitialDelegation | null,
 ) {
   const humans: (ReviewEvent | null)[] = Array.from(
     { length: log.own.length },
@@ -359,6 +420,7 @@ function latestHuman(
     if (
       event === undefined ||
       base === undefined ||
+      event.seq === delegation?.seq ||
       humanChannel(event, asks) === null
     )
       continue;
@@ -395,6 +457,22 @@ function reservedHuman(context: SourceContext): {
   };
 }
 
+function delegationOf(
+  event: SessionEventLike,
+  base: ReviewEventIdentity,
+  delegation: InitialDelegation | null,
+): ReviewEvent | null {
+  return event.seq !== delegation?.seq
+    ? null
+    : {
+        ...base,
+        kind: 'relay',
+        source: 'parent-relay',
+        senderSessionId: delegation.parentId,
+        text: eventText(messageOf(event)['content']),
+      };
+}
+
 function scanEvents(
   context: SourceContext,
   reserved: readonly ReviewEvent[],
@@ -410,7 +488,8 @@ function scanEvents(
     if (
       event === undefined ||
       base === undefined ||
-      reservedIds.has(base.eventId)
+      reservedIds.has(base.eventId) ||
+      context.log.redundantToolResults?.has(event.seq) === true
     )
       continue;
     total += bytes(event.data, SOURCE_BYTE_LIMIT - total);
@@ -419,6 +498,7 @@ function scanEvents(
       break;
     }
     const normalized =
+      delegationOf(event, base, context.delegation) ??
       context.humans[at] ??
       humanOf(event, base, context.parent, context.asks) ??
       questionOf(event, base) ??
@@ -458,27 +538,33 @@ function sourceReason(log: SessionLog, stopped: boolean): string | null {
     : null;
 }
 
+function cutoffOf(context: SourceContext) {
+  const last = context.identities.at(-1);
+  return (
+    context.log.coverage?.cutoff ??
+    (last === undefined ? null : { eventId: last.eventId, seq: last.seq })
+  );
+}
+
 /** Normalize bounded captured source, locating the latest human before ordinary bodies. */
 export function hostEventSource(
   log: SessionLog,
   sessionId: string,
   parentId: string | undefined,
   parent = false,
+  delegation: InitialDelegation | null = null,
 ): ReviewEventSource {
-  const context = sourceContext(log, sessionId, parent);
+  const context = sourceContext(log, sessionId, parent, delegation);
   const reserved = reservedHuman(context);
   const scanned = scanEvents(context, reserved.events, parentId);
   const missing = reserved.missing ?? log.coverage?.protectedOriginalMissing;
   const stopped = scanned.stopped || missing !== undefined;
-  const last = context.identities.at(-1);
   return {
     events: scanned.events,
     status: {
       sessionId,
       status: statusOf(log, stopped, scanned.events.length),
-      cutoff:
-        log.coverage?.cutoff ??
-        (last === undefined ? null : { eventId: last.eventId, seq: last.seq }),
+      cutoff: cutoffOf(context),
       fromSeq: log.coverage?.fromSeq ?? log.own[0]?.seq ?? null,
       reason: sourceReason(log, stopped),
       access: log.coverage?.access ?? 'snapshot',
@@ -494,8 +580,9 @@ export function boundSourceLog(
   sessionId: string,
   parentId: string | undefined,
   parent = false,
+  delegation: InitialDelegation | null = null,
 ): SessionLog {
-  const source = hostEventSource(log, sessionId, parentId, parent);
+  const source = hostEventSource(log, sessionId, parentId, parent, delegation);
   const kept = new Set(source.events.map((event) => event.seq));
   const own: SessionEventLike[] = [];
   const turnOf: (number | null)[] = [];

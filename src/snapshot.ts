@@ -51,6 +51,7 @@ import {
 import { redactSnapshot, bindSnapshotRedactor } from './snapshot/redaction.js';
 import { workflowRedactor } from './snapshot/workflow.js';
 import type { CredentialRedactor } from './reviewer/credential-redactor.js';
+import type { ToolResultSourceReader } from './snapshot/tool-results.js';
 import { truncateSnapshot } from './snapshot/budget.js';
 import type { BudgetRenderers } from './snapshot/budget-measure.js';
 import { redactCompletenessInput } from './snapshot/material-redaction.js';
@@ -67,6 +68,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface SnapshotOptions {
+  readonly toolResults?: ToolResultSourceReader;
   readonly budgetRenderers?: BudgetRenderers;
   /** A captured, allowlisted source adapter (workflow evals); host calls omit it. */
   readonly eventSources?: ReviewEventSources;
@@ -203,7 +205,13 @@ function captureEventSources(
   const identity = { turn: captured.turn };
   const parentLog = captured.parentLog ?? null;
   const sources: ReviewEventSources = captured.eventSources ?? {
-    local: hostEventSource(log, session.id ?? 'unknown', parentId),
+    local: hostEventSource(
+      log,
+      session.id ?? 'unknown',
+      parentId,
+      false,
+      captured.delegation,
+    ),
     parent:
       parentId === undefined
         ? null
@@ -219,7 +227,13 @@ function captureEventSources(
               },
               events: [],
             }
-          : hostEventSource(parentLog, parentId, undefined, true),
+          : hostEventSource(
+              parentLog,
+              parentId,
+              undefined,
+              true,
+              captured.parentDelegation,
+            ),
   };
   return {
     sources,

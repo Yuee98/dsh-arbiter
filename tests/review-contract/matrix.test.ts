@@ -17,6 +17,7 @@ import {
   settle,
   verdictFor,
   requiredAuthorizationFor,
+  matrixPolicy,
 } from '../../src/review-contract/index.js';
 import type { ReviewStage } from '../../src/review-contract/index.js';
 import { letters, score } from '../helpers/score.js';
@@ -87,6 +88,14 @@ describe('the shared matrix across all one hundred cells', () => {
       }
       // One assertion per row keeps the failure readable as the whole row.
       expect(observed.join('')).toBe(row);
+      const explicit = matrixPolicy([2, 2, 8, 8, 9, 9, 10, 10, 10, 10]);
+      expect(
+        Array.from(
+          { length: 10 },
+          (_, index) =>
+            VERDICT_LETTER[verdictFor(score(risk), score(index + 1), explicit)],
+        ).join(''),
+      ).toBe(row);
     },
   );
 

@@ -230,7 +230,8 @@ export async function startDshHost(
           isolatedHome: profile.home,
           plugin: await realpath(repoRoot),
           fingerprint,
-          modelRequests: 'none: UI smoke only',
+          modelRequests:
+            'case-specific: inspect native logs and captured requests',
         },
         null,
         2,

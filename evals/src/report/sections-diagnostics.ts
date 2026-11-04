@@ -260,9 +260,12 @@ export function diagnosticsSection(report: EvaluationReport): string {
     '',
     '这一层只解释第一层的判定，不参与判定。两个字段分别测量、从不合并成一个「评分质量」数字：偏差方向决定修复方式，单一数字会把方向抹掉。',
     '',
-    ...(gold === 0
+    ...(gold === 0 &&
+    report.diagnostics.risk.comparable === 0 &&
+    report.diagnostics.authorization.comparable === 0 &&
+    report.diagnostics.pairs.labeled === 0
       ? [
-          '**当前没有金标标签**，因此本层所有比值都没有分母，显示为 n/a。这是等待用户裁决的正常中间状态，不是 0% 通过率。',
+          '**当前没有金标标签**或其他适用评分参考，参考评分误差与配对比值没有分母；实际输出分布仍按观测展示。',
           '',
         ]
       : []),

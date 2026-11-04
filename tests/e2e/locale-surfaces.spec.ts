@@ -16,7 +16,7 @@
  */
 import { join } from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { createCaseHost } from './dsh/case-host.js';
 import type { DshHost } from './dsh/host.js';
@@ -346,6 +346,26 @@ async function verdictText(page: Page, regionName: string): Promise<string> {
     'the recorded verdict reason is empty; the comparison would be vacuous',
   ).toBeGreaterThan(0);
   return text;
+}
+
+/** Raw audit/model payloads are checked for exact preservation separately. */
+async function interfaceText(root: Locator): Promise<string> {
+  return root.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const parts: string[] = [];
+    let node = walker.nextNode();
+    while (node !== null) {
+      const parent = node.parentElement;
+      if (
+        parent !== null &&
+        parent.closest('pre, code') === null &&
+        parent.checkVisibility()
+      )
+        parts.push(node.textContent ?? '');
+      node = walker.nextNode();
+    }
+    return parts.join(' ');
+  });
 }
 
 /** No raw key, no unresolved placeholder and no `undefined` in the given text. */
@@ -810,7 +830,7 @@ test('every plugin surface switches between the released Chinese and English cop
     // The record is unchanged; this proves the panel still renders the same
     // payload values, which a rendering-only change could otherwise slip past.
     expect(await renderedAttemptBlocks(page)).toEqual(baselineRendered);
-    expectNoLeak(await page.locator('[data-arbiter-root]').innerText());
+    expectNoLeak(await interfaceText(page.locator('[data-arbiter-root]')));
     await page
       .locator('[data-call-detail-panel]')
       .getByRole('button', { name: /^(关闭|Close)/ })

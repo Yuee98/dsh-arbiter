@@ -156,7 +156,9 @@ export async function readSource(parts: {
   readonly duringRead?: () => Promise<void>;
 }): Promise<SourceRead> {
   const checkers = await compileRunCheckers();
-  const read = await readRun(parts.directory, checkers);
+  const read = await readRun(parts.directory, checkers, {
+    allowWorkflow: true,
+  });
   if (!read.ok) {
     return {
       ok: false,
@@ -166,6 +168,17 @@ export async function readSource(parts: {
     };
   }
   const artifact = read.artifact;
+  if (
+    artifact.plan.workflow === undefined &&
+    artifact.records.some((record) => record.workflow !== undefined)
+  ) {
+    return {
+      ok: false,
+      problems: [
+        'workflow records require their frozen workflow plan; compatibility keys cannot be replayed as legacy cases',
+      ],
+    };
+  }
   const files: SourceFile[] = [];
   const record = async (path: string): Promise<Buffer | null> => {
     const bytes = await bytesOrNull(join(parts.directory, path));

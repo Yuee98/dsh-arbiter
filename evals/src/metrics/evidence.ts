@@ -23,6 +23,8 @@
 import type { CellFacts } from './cell.js';
 import { classifyCell, isError } from './behaviour.js';
 import { hasGoldReference } from './cell.js';
+import { referenceOfCell, scoringTargetOf } from './references.js';
+import { sourceOf } from './source.js';
 import { settlementOf } from './settlement.js';
 import { compareText } from './support.js';
 import type { AskPolicy } from '../../../src/review-contract/matrix.js';
@@ -43,7 +45,7 @@ function detailOf(cell: CellFacts, classification: BehaviourClass): string {
     return `该格子在派发前就已决定为 ${cell.indexStatus}，从未发出请求。`;
   }
   if (classification === 'uncompared') {
-    return `引擎给出 ${observed}，但该案例没有可计入金标的参考。`;
+    return `引擎给出 ${observed}，但该案例没有适用的行为参考。`;
   }
   return `引擎给出 ${observed}，参考要求 ${expected}。`;
 }
@@ -57,6 +59,8 @@ export function cellViewOf(parts: {
   const cell = parts.cell;
   const classification = classifyCell(cell);
   return {
+    source: sourceOf(cell),
+    evaluationReference: referenceOfCell(cell),
     cellId: cell.cellId,
     caseId: cell.caseId,
     familyId: cell.caseFacts?.familyId ?? 'unknown',
@@ -90,7 +94,7 @@ export function cellViewOf(parts: {
     caseFactsConflict: cell.caseFacts?.conflictsWithDataset ?? false,
     labelPath: cell.label?.path ?? null,
     reason: cell.engine.reason,
-    rationale: cell.label?.label.target.rationale ?? null,
+    rationale: referenceOfCell(cell).target?.rationale ?? null,
     attempts: cell.record?.attempts.length ?? 0,
     durationMs: cell.durationMs,
     tokens: cell.tokens,
@@ -142,8 +146,9 @@ function behaviourDifferences(
  * working on.
  */
 function scoreDifferences(cell: CellFacts): readonly DifferenceRow[] {
-  if (!cell.judged || cell.label === null || !hasGoldReference(cell)) return [];
-  const reference = cell.label.label.target.allowed;
+  const target = scoringTargetOf(cell);
+  if (!cell.judged || target === null) return [];
+  const reference = target.allowed;
   const rows: DifferenceRow[] = [];
   const fields = [
     { name: 'risk', observed: cell.engine.risk, allowed: reference.risk },

@@ -83,6 +83,26 @@ export type ReviewEvent = ReviewEventIdentity &
         readonly callId: string;
         readonly status: 'success' | 'failure' | 'unknown';
         readonly body: ReviewResultBody;
+        /** Independently observed collection, storage and content states. */
+        readonly collection?: {
+          readonly save:
+            | 'saved'
+            | 'already-recorded'
+            | 'failed'
+            | 'stale'
+            | 'expired'
+            | 'unavailable';
+          readonly content:
+            'available' | 'empty' | 'no-result' | 'unsupported' | 'unavailable';
+          readonly read?:
+            | 'found'
+            | 'absent'
+            | 'cleared'
+            | 'unavailable'
+            | 'storage-failed'
+            | 'missing-file'
+            | 'unreadable';
+        };
         readonly exitCode?: number;
         readonly callUnavailable?: 'not-observed';
         /** Missing call information is explicit, never reconstructed from text. */

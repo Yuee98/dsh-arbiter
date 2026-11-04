@@ -23,10 +23,11 @@
 import { verdictFor } from '../../../src/review-contract/matrix.js';
 import { isPublicScore } from '../../../src/review-contract/rubrics.js';
 
-import { hasGoldReference } from './cell.js';
+import { scoringTargetOf } from './references.js';
+import { conditionKeyOf, viewKeyOf } from './source.js';
 import type { CellFacts } from './cell.js';
 import { legalPairs } from '../data/eligibility.js';
-import type { ReviewLabel } from '../data/types.js';
+import type { LabelTarget } from '../data/types.js';
 import {
   compareText,
   fixed,
@@ -53,6 +54,7 @@ import type {
  * models is for.
  */
 interface FieldObservation {
+  readonly viewKey: string;
   readonly caseId: string;
   readonly targetId: string;
   readonly modelKey: string;
@@ -71,26 +73,15 @@ interface FieldObservation {
  * `provider/model` would let whichever target sorted first decide the headline figure — the
  * same defect the model-aware key was introduced to fix, one level further out.
  */
-function conditionOf(parts: {
-  readonly caseId: string;
-  readonly targetId: string;
-  readonly protocol: string;
-}): string {
-  // Deliberately without the repeat: a repeat is the same condition observed again, so it must
-  // collapse. The caller sorts by ascending repeat first, so the value kept for a condition is
-  // its lowest repeat and the choice is reproducible from the artifact.
-  return [parts.caseId, parts.targetId, parts.protocol].join('~');
-}
-
 /** The ten public levels, as strings, in ascending order. */
 const LEVELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
 
 /** A gold label's single legal value for one field, or null when it does not pin one. */
 function pinnedValue(
-  label: ReviewLabel,
+  label: LabelTarget,
   field: 'risk' | 'authorization',
 ): number | null {
-  const values = label.target.allowed[field];
+  const values = label.allowed[field];
   if (values === null || values.length !== 1) return null;
   return values[0] ?? null;
 }
@@ -113,19 +104,20 @@ function observationsOf(
     (left, right) =>
       compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
   )) {
-    if (!cell.judged || cell.label === null || !hasGoldReference(cell))
-      continue;
+    const target = scoringTargetOf(cell);
+    if (!cell.judged || target === null) continue;
     const observed =
       field === 'risk' ? cell.engine.risk : cell.engine.authorization;
     if (observed === null) continue;
-    const reference = pinnedValue(cell.label.label, field);
+    const reference = pinnedValue(target, field);
     if (reference === null) continue;
     // The key is the cell identity without repeats: one (case, target, protocol) condition,
     // lowest repeat kept. A target's settings live in its identity, so two configurations of
     // one model stay separate observations.
-    const key = conditionOf(cell);
+    const key = conditionKeyOf(cell);
     if (kept.has(key)) continue;
     kept.set(key, {
+      viewKey: viewKeyOf(cell),
       caseId: cell.caseId,
       targetId: cell.targetId,
       modelKey: cell.modelKey,
@@ -163,9 +155,10 @@ function observationsAnyReference(
     const observed =
       field === 'risk' ? cell.engine.risk : cell.engine.authorization;
     if (observed === null) continue;
-    const key = conditionOf(cell);
+    const key = conditionKeyOf(cell);
     if (kept.has(key)) continue;
     kept.set(key, {
+      viewKey: viewKeyOf(cell),
       caseId: cell.caseId,
       targetId: cell.targetId,
       modelKey: cell.modelKey,
@@ -239,15 +232,15 @@ export function pairStats(cells: readonly CellFacts[]): PairStats {
     (left, right) =>
       compareText(left.caseId, right.caseId) || left.repeat - right.repeat,
   )) {
-    if (!cell.judged || cell.label === null || !hasGoldReference(cell))
-      continue;
+    const target = scoringTargetOf(cell);
+    if (!cell.judged || target === null) continue;
     const risk = cell.engine.risk;
     const authorization = cell.engine.authorization;
     if (risk === null || authorization === null) continue;
-    const key = conditionOf(cell);
+    const key = conditionKeyOf(cell);
     if (seen.has(key)) continue;
     seen.add(key);
-    const pairs = legalPairs(cell.label.label);
+    const pairs = legalPairs({ target });
     if (pairs === null) continue;
     labeled += 1;
     const observed: readonly [number, number] = [risk, authorization];
@@ -392,8 +385,8 @@ export function shapeStats(
   // shape rather than of the adjudication.
   const referenceValues = new Map<string, number>();
   for (const entry of observationsOf(cells, field)) {
-    if (!referenceValues.has(entry.caseId)) {
-      referenceValues.set(entry.caseId, entry.reference);
+    if (!referenceValues.has(entry.viewKey)) {
+      referenceValues.set(entry.viewKey, entry.reference);
     }
   }
   const observed = levelCounts(observedValues);
