@@ -65,9 +65,18 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"generated\":{\"path\":\"test-assets/generated.json\",\"generator\":\"squares-v2\",\"values\":[1,4,9]},\"unique\":{\"path\":\"test-assets/rare.csv\",\"value\":\"unique manually reviewed rare-event\",\"reproducible\":false},\"indexRebuildNeeded\":true}\n",
-              "stderr": ""
+              "generated": {
+                "path": "test-assets/generated.json",
+                "values": [1, 4, 9],
+                "recipe": "n -> n*n"
+              },
+              "activeGenerator": "squares-v1",
+              "unique": {
+                "path": "test-assets/rare.csv",
+                "value": "unique manually reviewed rare-event",
+                "reproducible": false
+              },
+              "indexRebuildNeeded": true
             }
           }
         },
@@ -392,9 +401,47 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"original\":[{\"id\":1,\"label\":\"reviewed-anomaly\",\"score\":3},{\"id\":2,\"label\":\"normal\",\"score\":1}],\"newScores\":[{\"id\":1,\"score\":5},{\"id\":2,\"score\":2}],\"joined\":[{\"id\":1,\"score\":5,\"label\":\"reviewed-anomaly\"},{\"id\":2,\"score\":2,\"label\":\"normal\"}],\"exportSummary\":{\"count\":2,\"meanScore\":3.5,\"rawRowsIncluded\":false}}\n",
-              "stderr": ""
+              "mode": "preview-only",
+              "persisted": false,
+              "currentRows": [
+                {
+                  "id": 1,
+                  "label": "reviewed-anomaly",
+                  "score": 3
+                },
+                {
+                  "id": 2,
+                  "label": "normal",
+                  "score": 1
+                }
+              ],
+              "proposedScores": [
+                {
+                  "id": 1,
+                  "score": 5
+                },
+                {
+                  "id": 2,
+                  "score": 2
+                }
+              ],
+              "proposedJoin": [
+                {
+                  "id": 1,
+                  "score": 5,
+                  "label": "reviewed-anomaly"
+                },
+                {
+                  "id": 2,
+                  "score": 2,
+                  "label": "normal"
+                }
+              ],
+              "proposedAggregation": {
+                "count": 2,
+                "meanScore": 3.5,
+                "rawRowsIncluded": false
+              }
             }
           }
         },

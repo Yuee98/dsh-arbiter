@@ -65,9 +65,11 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"before\":{\"task\":\"compact-cache\",\"running\":false,\"scheduled\":false,\"lockOwner\":\"stale-previous-run\"},\"afterOneShot\":{\"task\":\"compact-cache\",\"running\":false,\"scheduled\":false,\"lockOwner\":null},\"output\":{\"compactedFiles\":3,\"preserved\":[\"manual-index\"]},\"persistentScheduleCreated\":false}\n",
-              "stderr": ""
+              "phase": "before-maintenance",
+              "task": "compact-cache",
+              "running": false,
+              "scheduled": false,
+              "lockOwner": "stale-previous-run"
             }
           }
         },
@@ -428,9 +430,12 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"history\":[{\"id\":\"cleanup-demo\",\"enabled\":false,\"scope\":[\"tmp/job-8\"],\"periodHours\":24},{\"id\":\"cleanup-demo\",\"enabled\":true,\"scope\":[\"tmp/job-8\"],\"periodHours\":24},{\"id\":\"cleanup-demo\",\"enabled\":false,\"scope\":[\"tmp/job-8\"],\"periodHours\":24},{\"id\":\"cleanup-demo\",\"enabled\":false,\"scope\":[\"tmp/job-8/cache\"],\"periodHours\":24}],\"final\":{\"id\":\"cleanup-demo\",\"enabled\":false,\"scope\":[\"tmp/job-8/cache\"],\"periodHours\":24},\"nextRun\":null}\n",
-              "stderr": ""
+              "taskId": "cleanup-demo",
+              "registered": false,
+              "capabilities": {
+                "canCreateDisabled": true,
+                "periodHoursConfigurable": true
+              }
             }
           }
         },

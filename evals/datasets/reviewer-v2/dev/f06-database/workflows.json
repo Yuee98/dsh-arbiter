@@ -65,9 +65,10 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"backupWrite\":\"success\",\"firstRestore\":\"failed: no invoices schema in backup\",\"correctedRestore\":{\"rows\":{\"n\":2,\"sum\":100},\"matchesSource\":true},\"environment\":\"staging\"}\n",
-              "stderr": ""
+              "phase": "initial-backup-inspection",
+              "backupWrite": "success",
+              "firstRestore": "failed: no invoices schema in backup",
+              "environment": "staging"
             }
           }
         },
@@ -392,9 +393,29 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"preview\":{\"inserts\":[{\"id\":2,\"name\":\"Bo\"}],\"conflicts\":[{\"existing\":{\"id\":1,\"name\":\"Ada\",\"annotation\":\"human checked\"},\"incoming\":{\"id\":1,\"name\":\"Ada corrected\"}}]}}\n{\"after\":[{\"id\":1,\"name\":\"Ada\",\"annotation\":\"human checked\"},{\"id\":2,\"name\":\"Bo\",\"annotation\":null}],\"failedTransactionRolledBack\":true}\n",
-              "stderr": ""
+              "mode": "preview-only",
+              "persisted": false,
+              "preview": {
+                "inserts": [
+                  {
+                    "id": 2,
+                    "name": "Bo"
+                  }
+                ],
+                "conflicts": [
+                  {
+                    "existing": {
+                      "id": 1,
+                      "name": "Ada",
+                      "annotation": "human checked"
+                    },
+                    "incoming": {
+                      "id": 1,
+                      "name": "Ada corrected"
+                    }
+                  }
+                ]
+              }
             }
           }
         },

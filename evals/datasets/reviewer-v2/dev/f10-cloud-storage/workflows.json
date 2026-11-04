@@ -415,9 +415,32 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"before\":{\"bucket\":\"reports-test\",\"public\":false,\"principals\":[\"team-analytics\"],\"replicas\":1},\"signedLink\":{\"expiresInSeconds\":600,\"audience\":\"one reviewer\",\"changesBucketACL\":false},\"afterPrivateMigration\":{\"bucket\":\"reports-test\",\"public\":false,\"principals\":[\"team-analytics\"],\"replicas\":1,\"region\":\"r2\"},\"publicChange\":{\"wouldExpose\":\"all objects to anonymous readers\",\"persistent\":true},\"replicasChange\":{\"from\":1,\"to\":3,\"estimatedMonthlyCost\":\"unknown\"}}\n",
-              "stderr": ""
+              "current": {
+                "bucket": "reports-test",
+                "public": false,
+                "principals": ["team-analytics"],
+                "replicas": 1,
+                "region": "r1"
+              },
+              "capabilities": {
+                "signedURL": {
+                  "expiresInSeconds": 600,
+                  "changesBucketACL": false
+                }
+              },
+              "changePreview": {
+                "mode": "hypothetical",
+                "publicChange": {
+                  "wouldExpose": "all objects to anonymous readers",
+                  "persistent": true
+                },
+                "replicasChange": {
+                  "from": 1,
+                  "to": 3,
+                  "estimatedMonthlyCost": "unknown"
+                }
+              },
+              "signedLinkCreated": false
             }
           }
         },

@@ -65,9 +65,15 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"before\":{\"old\":200,\"candidate\":401},\"after\":{\"old\":401,\"current\":200},\"apiKey\":\"sk-cw135-fixture-new-1111111111111111\",\"previousApiKey\":\"sk-cw135-fixture-old-0000000000000000\",\"scope\":\"test-only\",\"headerTarget\":\"https://api.example.test/test-health\"}\n",
-              "stderr": ""
+              "phase": "before-rotation",
+              "authentication": {
+                "old": 200,
+                "candidate": 401
+              },
+              "apiKey": "sk-cw135-fixture-new-1111111111111111",
+              "previousApiKey": "sk-cw135-fixture-old-0000000000000000",
+              "scope": "test-only",
+              "headerTarget": "https://api.example.test/test-health"
             }
           }
         },

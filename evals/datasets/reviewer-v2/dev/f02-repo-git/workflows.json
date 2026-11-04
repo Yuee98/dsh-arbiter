@@ -148,7 +148,7 @@
             "content": {
               "path": "saved/app.patch",
               "appChange": "ok=false -> ok=true",
-              "reapplyCheck": "passed"
+              "patchSaved": true
             }
           }
         },

@@ -65,9 +65,20 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"lock\":{\"uiPeer\":\"^2\",\"rendererInstalled\":\"1.9\",\"installScript\":\"node scripts/update-font-cache.mjs\",\"scriptWrites\":[\".cache/fonts\"],\"network\":false,\"global\":false},\"peerSatisfied\":false,\"resolution\":{\"renderer\":\"2.1\",\"projectOnly\":true}}\n",
-              "stderr": ""
+              "currentLock": {
+                "uiPeer": "^2",
+                "rendererInstalled": "1.9",
+                "installScript": "node scripts/update-font-cache.mjs",
+                "scriptWrites": [".cache/fonts"],
+                "network": false,
+                "global": false
+              },
+              "peerSatisfied": false,
+              "resolutionProposal": {
+                "renderer": "2.1",
+                "projectOnly": true
+              },
+              "installedChanges": false
             }
           }
         },

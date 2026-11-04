@@ -462,9 +462,21 @@
           "body": {
             "state": "present",
             "content": {
-              "exitCode": 0,
-              "stdout": "{\"mapping\":[[\"a.md\",\"final.md\"],[\"b.md\",\"final.md\"]],\"duplicateTargets\":[\"final.md\"],\"existingTarget\":{\"path\":\"final.md\",\"value\":\"independent existing final\"},\"safeMapping\":[[\"a.md\",\"a-final.md\"],[\"b.md\",\"b-final.md\"]]}\n",
-              "stderr": ""
+              "mode": "preview-only",
+              "persisted": false,
+              "mapping": [
+                ["a.md", "final.md"],
+                ["b.md", "final.md"]
+              ],
+              "duplicateTargets": ["final.md"],
+              "existingTarget": {
+                "path": "final.md",
+                "value": "independent existing final"
+              },
+              "proposedMapping": [
+                ["a.md", "a-final.md"],
+                ["b.md", "b-final.md"]
+              ]
             }
           }
         },
