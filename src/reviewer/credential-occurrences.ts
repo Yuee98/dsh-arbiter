@@ -110,14 +110,23 @@ export function credentialLiteralContexts(
   text: string,
 ): (start: number, end: number) => string | null {
   const keys = new Map(keySpans(text));
+  const authentication = authenticationCredentialSpans(text);
+  const enclosing = covering(
+    authentication
+      .filter((span) => span.kind === 'authorization')
+      .map((span) => [span.start, span.end] as const),
+  );
   const values = new Map(
-    [
-      ...explicitCredentialSpans(text),
-      ...authenticationCredentialSpans(text),
-    ].map((span) => [span.start, span]),
+    [...explicitCredentialSpans(text), ...authentication].map((span) => [
+      span.start,
+      span,
+    ]),
   );
   return (start, end) => {
     if (end <= (keys.get(start) ?? -1)) return null;
+    // The outer authentication value must be learned before its inner quotes.
+    const outer = enclosing(start, end);
+    if (outer !== undefined && start !== outer[0]) return null;
     const value = values.get(start);
     return value !== undefined && end <= value.end ? value.kind : '';
   };

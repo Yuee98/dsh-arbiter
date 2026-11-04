@@ -438,6 +438,55 @@ describe('adjacent unquoted credential assignments', () => {
 
 describe('authentication headers keep their own value framing', () => {
   test.each([
+    'xApiKey',
+    'xGoogApiKey',
+    'proxyAuthorization',
+    'x_api_key',
+    'x_goog_api_key',
+    'proxy_authorization',
+    'cookie',
+    'setCookie',
+    'set-cookie',
+  ])('protects cold authentication parameters named %s', (name) => {
+    for (const header of ['Authorization', 'Proxy-Authorization'])
+      for (const prefix of ['', 'sid=visible-session '])
+        for (const value of ['cold-alias-secret', '"cold-alias-secret"']) {
+          const source = `${header}: CustomAuth ${prefix}${name}=${value}; count=4`;
+          const redactor = new CredentialRedactor('cold-auth-parameter');
+          const clean = redactor.text(source);
+          expect(clean).not.toContain('cold-alias-secret');
+          expect(clean).not.toContain('visible-session');
+          expect(clean).toContain('count=4');
+          expect(
+            clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu),
+          ).toHaveLength(1);
+          expect(redactor.text(clean)).toBe(clean);
+          const split = source.indexOf(name) + 3;
+          const blocks = new CredentialRedactor('cold-auth-parameter')
+            .textBlockValues([source.slice(0, split), source.slice(split)])
+            .join('');
+          expect(blocks).not.toContain('cold-alias-secret');
+          expect(blocks).not.toContain('visible-session');
+          expect(blocks).toContain('count=4');
+          expect(blocks).toMatch(marker);
+        }
+  });
+  test.each(['password', 'token', 'privateKey', 'x-api-key', 'currentApiKey'])(
+    'preserves an independently recognized text credential %s',
+    (name) => {
+      const clean = new CredentialRedactor('independent-text-credential').text(
+        `Authorization: raw-value ${name}=independent-secret count=4`,
+      );
+      expect(clean).not.toContain('raw-value');
+      expect(clean).not.toContain('independent-secret');
+      expect(clean).toContain(`${name}=`);
+      expect(clean).toContain('count=4');
+      expect(
+        new Set(clean.match(/\[redacted:v1:[a-z-]+:[a-f0-9]{64}\]/gu)).size,
+      ).toBe(2);
+    },
+  );
+  test.each([
     ['Authorization: SCRAM-SHA-256 sid=session-secret', ['session-secret']],
     [
       'Authorization: SCRAM-SHA-256 sid=session-secret data=proof-secret',
