@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Locked public DSH CLI for isolated hosted E2E only",
   "dependencies": {
-    "@deepseek-ai/dsh": "0.2.1-rc.3"
+    "@deepseek-ai/dsh": "0.2.1-rc.4"
   },
   "allowScripts": {
     "@deepseek-ai/dsh-subprocess-local": true,
