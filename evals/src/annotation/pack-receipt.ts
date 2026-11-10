@@ -10,6 +10,7 @@ export interface TaskReceipt {
   readonly directory: string;
   readonly channel: 'file' | 'web';
   readonly origin?: {
+    readonly receipt: string;
     readonly responseId: string;
     readonly attempt: string;
     readonly channel: 'file' | 'web';
@@ -42,8 +43,9 @@ export async function readTaskReceipt(path: string): Promise<TaskReceipt> {
         origin: {
           type: 'object',
           additionalProperties: false,
-          required: ['responseId', 'attempt', 'channel'],
+          required: ['receipt', 'responseId', 'attempt', 'channel'],
           properties: {
+            receipt: { type: 'string' },
             responseId: idSchema,
             attempt: idSchema,
             channel: { enum: ['file', 'web'] },

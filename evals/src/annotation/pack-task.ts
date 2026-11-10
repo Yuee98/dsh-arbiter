@@ -1,16 +1,22 @@
 import { publishNewDirectory } from './pack-files.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, realpath, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { TaskReceipt } from './pack-receipt.js';
 import { readTaskReceipt } from './pack-receipt.js';
 import { canonicalJson } from '../data/hash.js';
 import { readRegular } from './pack-files.js';
 import { validatedPackBatch } from './pack-material.js';
 import { independentQuestion } from './workflow-view.js';
-import { exclusiveJson } from './pack-files.js';
+import { artifactPath, exclusiveJson } from './pack-files.js';
 import { taskInstructions } from './pack-instructions.js';
 import { newPackDestination } from './pack-prepare.js';
+import {
+  adoptionPath,
+  collectedNeutralOrigin,
+  existingAdoption,
+  validateAdoption,
+} from './pack-origin.js';
 
 export async function createPackTask(options: {
   readonly origin?: string;
@@ -43,26 +49,57 @@ export async function createPackTask(options: {
     throw new Error('task model must be actually registered');
   let origin: TaskReceipt['origin'];
   let originalRaw: string | undefined;
+  let claimPath: string | undefined;
   if (options.origin !== undefined) {
     if (model === undefined)
       throw new Error('origin adoption requires an actual registered model');
-    const old = await readTaskReceipt(options.origin);
-    if (old.modelKey !== null || old.questionId !== point.questionId)
-      throw new Error('origin is not the matching neutral handoff');
-    const oldQuestion = JSON.parse(
-      await readRegular(join(old.directory, 'question.json')),
-    ) as unknown;
-    if (
-      canonicalJson(oldQuestion) !==
-      canonicalJson(independentQuestion(point.questionId, point.request))
-    )
-      throw new Error('origin question differs');
-    originalRaw = await readRegular(join(old.directory, 'answer.txt'));
+    const saved = await collectedNeutralOrigin(options.origin, point);
+    const old = saved.receipt;
+    originalRaw = saved.rawResponse;
     origin = {
+      receipt: resolve(options.origin),
       responseId: old.responseId,
       attempt: old.attempt,
       channel: old.channel,
     };
+    claimPath = adoptionPath(options.origin, old.responseId);
+    const existing = await existingAdoption(claimPath);
+    if (existing !== null) {
+      const directory = await artifactPath(options.root, options.out);
+      if (
+        existing.batchId !== batch.batchId ||
+        existing.modelKey !== model.modelKey ||
+        existing.questionId !== point.questionId ||
+        existing.attempt !== options.attempt ||
+        existing.channel !== options.channel ||
+        existing.directory !== directory ||
+        canonicalJson(existing.origin) !== canonicalJson(origin)
+      )
+        throw new Error('neutral origin already adopted by another task');
+      const receipt = join(
+        dirname(await realpath(options.batch)),
+        'attempts',
+        `${existing.responseId}.json`,
+      );
+      if (
+        canonicalJson(await readTaskReceipt(receipt)) !==
+        canonicalJson(existing)
+      )
+        throw new Error('retained adoption receipt differs');
+      await validateAdoption(
+        existing,
+        point,
+        await readRegular(join(directory, 'answer.txt')),
+        null,
+      );
+      return {
+        directory,
+        receipt,
+        result: join(directory, 'answer.txt'),
+        modelKey: existing.modelKey,
+        responseId: existing.responseId,
+      };
+    }
   }
   const directory = await newPackDestination(
     options.root,
@@ -86,6 +123,8 @@ export async function createPackTask(options: {
     'attempts',
     `${responseId}.json`,
   );
+  // A failed publication retains the claim; it must never create a second vote.
+  if (claimPath !== undefined) await exclusiveJson(claimPath, receipt);
   const stage = await mkdtemp(join(dirname(directory), '.task-'));
   await writeFile(
     join(stage, 'question.json'),

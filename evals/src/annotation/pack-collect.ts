@@ -7,6 +7,7 @@ import { validatedPackBatch } from './pack-material.js';
 import { independentQuestion } from './workflow-view.js';
 import { canonicalJson } from '../data/hash.js';
 import { importWorkflowOpinions } from './workflow-service.js';
+import { validateAdoption } from './pack-origin.js';
 
 export async function collectPackTask(options: {
   readonly dataset: string;
@@ -59,15 +60,25 @@ export async function collectPackTask(options: {
   let rawResponse: string | null = null;
   if (explicitFailure) await absent(resultPath);
   else rawResponse = await readRegular(resultPath);
-  const error =
-    options.missing === true
-      ? 'operator recorded no return at collection cutoff'
-      : (options.error ?? null);
+  const error = options.error ?? null;
+  if (receipt.origin !== undefined)
+    await validateAdoption(receipt, point, rawResponse, error);
   const metadata = {
     attempt: receipt.attempt,
     channel: receipt.channel,
     createdAt: receipt.createdAt,
-    ...(receipt.origin === undefined ? {} : { origin: receipt.origin }),
+    ...(options.missing === true
+      ? { note: 'operator recorded no return at collection cutoff' }
+      : {}),
+    ...(receipt.origin === undefined
+      ? {}
+      : {
+          origin: {
+            responseId: receipt.origin.responseId,
+            attempt: receipt.origin.attempt,
+            channel: receipt.origin.channel,
+          },
+        }),
     state:
       options.missing === true
         ? 'missing'
