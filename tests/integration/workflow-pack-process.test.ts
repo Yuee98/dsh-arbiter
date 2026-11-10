@@ -3,8 +3,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, rm, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterAll, expect, test } from 'vitest';
-const home = await mkdtemp('/private/tmp/pack-process-home-');
+const home = await mkdtemp(join(tmpdir(), 'pack-process-home-'));
 process.env['DSH_HOME'] = home;
 const { withDataset, REPOSITORY_ROOT } =
   await import('../evals/helpers/dataset.js');

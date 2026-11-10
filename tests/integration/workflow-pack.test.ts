@@ -8,8 +8,9 @@ import {
   symlink,
 } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterAll, describe, expect, test } from 'vitest';
-const home = await mkdtemp('/private/tmp/arbiter-pack-home-');
+const home = await mkdtemp(join(tmpdir(), 'arbiter-pack-home-'));
 process.env['DSH_HOME'] = home;
 const { withDataset } = await import('../evals/helpers/dataset.js');
 const { collectionOf, workflow } =

@@ -1,8 +1,9 @@
 /** End-to-end CLI against synthetic temporary datasets; no external annotation. */
 import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterAll, expect, test } from 'vitest';
-const home = await mkdtemp('/private/tmp/pack-collection-home-');
+const home = await mkdtemp(join(tmpdir(), 'pack-collection-home-'));
 process.env['DSH_HOME'] = home;
 const { withDataset } = await import('../evals/helpers/dataset.js');
 const { collectionOf, workflow } =

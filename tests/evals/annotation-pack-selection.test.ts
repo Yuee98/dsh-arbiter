@@ -1,7 +1,8 @@
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterAll, describe, expect, test } from 'vitest';
-const home = await mkdtemp('/private/tmp/pack-selection-home-');
+const home = await mkdtemp(join(tmpdir(), 'pack-selection-home-'));
 process.env['DSH_HOME'] = home;
 const { packSelection, selectedSources } =
   await import('../../evals/src/annotation/pack-selection.js');
