@@ -585,3 +585,9 @@ legacy 数据集使用当前 `--dataset` 的标签作共同新参考；`--baseli
 省略 `projectRulesEnabled` 或设置为 `true` 均保留旧的启用语义：`projectRules` 为字符串时提供该文本，为 `null` 时表示没有可用规则文件；旧 `null` 不表示禁用。明确 `false` 时必须配合 `projectRules: null`，包括空字符串在内的规则文本均会作为矛盾输入拒绝。对应 runner 的 `provided` 时使用相同文本及启用状态，协议、T/H 与自定义规则也应对齐。
 
 显式状态随导出批次、意见与参考快照保存，网页使用同一启动 context 恢复私有草稿。旧 context 不补写新字段，历史批次和快照仍可读。是否可复用参考继续由实际生产视图 binding 判断；改动规则状态或文本后，失配意见不能按 point ID 强行复用。此能力只支持离线材料对齐，不授权真实模型调用、费用或人工意见。
+
+## 模型中性工作流题本与回收任务包
+
+`workflow-prepare` 按精确 group/root/point/view 选集生成零模型、零意见的单题题本，`workflow-task` 为每次文件或网页转交指定独立的新结果位置。实际参与者明确后用 `workflow-register` 登记，`workflow-collect` 保留原文并先预览再显式保存，复用既有绑定、意见解析和共识规则。中性回传不会提前计入 N；旧 `workflow-export` 的登记行为保持原样。
+
+首轮 `evals/plans/cw-136-pilot-points.json` 精确复用首四根 20 点；`cw-136-remainder-points.json` 为当前 117 点其余 97 点，两者不重叠。实际 context 独立保存在 `cw-136-annotation-context.json`，不沿用历史运行计划的路径或调用授权。完整命令、私有基线分离、文件/网页同义指令、回收与重试说明见[工作流标注操作](../docs/workflow-annotation.md)。这些离线操作不发模型请求，题本准备不代表真实试标或人工确认完成。

@@ -105,3 +105,88 @@ pnpm evals workflow-reference <数据集目录> --split dev --group f01-build-cl
 查询按当前实际视图重新选择人工、模型或 unresolved，并给出 N/K、返回/有效/缺答/失败数、支撑意见、身份、采用分支、偏差和原因。输入、预算选取或契约变化会触发复核；未展示的普通工具正文变化、作者注释和源文件格式化不会仅因源提交/前置 hash 不同而失效。含凭据占位符的视图会额外保守核对源输入，跨进程只忽略占位符随机签名，保留同值/异值关系。
 
 `--out` 只创建新快照，不覆盖已有文件。所有候选共用同一份已固定参考；新增意见或人工修订只改变当前参考，旧快照和运行不会被改写。此服务为后续 grouped runner/report 提供可序列化接口，本 PR 不重写历史 case runner。快照和模型原文是否归档、何种参考有正式资格，仍须由具体运行/复核计划声明；生成快照不等于质量通过。
+
+## 模型中性精确选集与回收任务包（#136）
+
+本流程先离线准备模型中性题本，再由操作者明确参与模型、逐题转交并回收原文。准备不登记模型、不写意见/标签，不改变共识分母。模型名单、真实调用与费用、人类复核分别按适用授权执行；这些命令不请求 provider，也不自动发送题目。
+
+### 固定评分内容
+
+每题 JSON 由 `buildAnnotationView` 与共享 `independentQuestion` 生成，包含同一套 `annotationInstructions`、当时实际可见的 `productionRequest`、`answerFormat` 与字段说明。文件 agent 和网页模型使用完全相同的 JSON，渠道说明只规定输入、输出位置和交接方式。生产评分 prompt 不因此改变。
+
+每题使用全新独立上下文；同根不同点也不能共用作答上下文。不向模型转交整个题本、`private/`、作者预期、其他模型答案或私有批次控制文件。只判断待审动作，不执行它。保留合理的多个 `[risk,authorization]` 配对；无法评分时用 `null`，不保留空白模板的 `pairs: []`。`behaviourReference` 独立判断，不从矩阵反推。理由、逐字证据及冲突按原答案契约保留。
+
+### 精确准备首轮与后续范围
+
+在本版本仓库根目录使用外部临时 `DSH_HOME` 执行生产材料相关命令。首轮配置只复用 `cw-134-first-four.json` 的 20 个 `workflow.points` 身份，不沿用该历史 plan 的数据路径、端点或费用说明：
+
+```sh
+export DSH_HOME="$(mktemp -d)"
+pnpm evals workflow-prepare evals/datasets/reviewer-v2 \
+  --selection evals/plans/cw-136-pilot-points.json \
+  --context evals/plans/cw-136-annotation-context.json \
+  --out .local/evals/workflow-annotation/pilot-20
+```
+
+选集严格校验 group/root/point/primary view、重复项和 split。首轮只含 001、007、013、017 四根各 5 点。当前 24 根共 117 点；后续 `cw-136-remainder-points.json` 明确其余 97 点，不含首 20 点，不假设每根都恰好 5 点。后续准备使用相同命令、更换 selection 与新的 `remainder-97` 输出目录；准备完成不表示已经标注。
+
+输出目录必须新建；已有目录不覆盖。构建先完成全部所选材料，再通过独立暂存目录发布；失败报告保留 stage 的位置，不把少于 20 题当作首轮成功。排查失败后选择新的输出目录重试，保留旧工件，不通过清空既有答案恢复。
+
+```text
+pilot-20/
+  README.txt
+  questions/<group>/<questionId>/question.json
+  questions/<group>/<questionId>/TASK.txt
+  private/<group>.json
+```
+
+`questions/` 每个单题目录已预留一次 initial 中性任务，其指定 answer.txt 尚不存在；准备命令返回对应私有 receipt，可直接交给一个参与者一次。新的模型或尝试必须先创建新任务目录。`private/` 为本地控制基线和 receipt，权限受限。两者不能一起转交。私有基线使用既有 `workflow-annotation-v1` 的 `prepared` 状态，models/opinions/registrations 为空，不能直接导入模型或人工意见。生产来源、context 与绑定随基线保留，重新登记、创建任务及回收时均重建实际材料校验；保存的 request 和公开题目即使被一起改动，也不能借用原 binding。
+
+### 每次转交建立独立结果位置
+
+即使尚未决定模型名单，也可以从 prepared 基线建立单题任务。以下 `<group>`、`<questionId>` 按准备命令输出及单题目录选择；`--attempt` 是本地安全名称，不是新增投票者：
+
+```sh
+pnpm evals workflow-task evals/datasets/reviewer-v2 \
+  --batch .local/evals/workflow-annotation/pilot-20/private/<group>.json \
+  --question <questionId> --attempt initial \
+  --channel file --out .local/annotation-tasks/<questionId>/initial
+```
+
+命令返回该次专属 `directory`、`result` 和私有 `receipt` 路径。只向文件 agent 提供这个单题目录的 `TASK.txt` 与 `question.json`，让它只新建指定 `answer.txt`。网页模型读取同一 JSON，只返回答案 JSON 原文；操作者按 `--channel web` 创建另一独立任务，并将回传原文新建保存到该任务的 `answer.txt`。不要为网页渠道修改评分指令或重写回答。
+
+每个模型、每次尝试均先创建新的任务目录；同一题的重试也不能共写旧 `answer.txt`。结果存在时拒绝覆盖。无模型任务的 receipt 中 `modelKey` 为 null；这只代表身份尚待确认的原文，不能算作意见或增加 N。可以使用 `workflow-collect` 不带 `--write` 先保留原文，其归档仍在本地私有目录。
+
+### 登记实际参与者
+
+参与模型明确后，由操作者提供符合既有 `RegisteredModel[]` 的 models JSON：真实 `modelKey`、`aliases`、provider/id、已知版本及其来源、参数。版本不明确使用 `version: null`、`versionSource: "unknown"`；不填写虚构版本、dummy 模型或凭据。同模型别名/代理/版本/重复尝试不得伪装为新的独立投票者。
+
+逐个业务组先预览，再显式登记：
+
+```sh
+pnpm evals workflow-register evals/datasets/reviewer-v2 \
+  --prepared .local/evals/workflow-annotation/pilot-20/private/<group>.json \
+  --models /path/to/actual-models.json \
+  --out .local/evals/workflow-annotation/pilot-20/private/registered/<group>-models.json
+# 核对参与者与范围后，使用同一命令加 --write。
+```
+
+登记后的普通基线保存在 prepared 的 `private/registered/` 内，使用新 batchId，保留题号和材料绑定；原中性题本不回写。只有实际 `--write` 登记才发布 missing registrations。若意见写入或 checkpoint 失败，保留返回的 ordinary baseline；按错误说明，用已有 `workflow-import` 配合该 batchId 的空 responses 恢复登记，不重新生成参与者或覆盖基线。
+
+已登记模型的新任务使用对应 ordinary baseline，并加 `--model <实际modelKey>`。如果先前已有同题中性任务的回传，可加 `--origin <原私有receipt>`：工具核验原题一致，将原文独占复制到新的已登记任务结果位置，并在新 receipt 中固定原 responseId、attempt、渠道。保留原文件与 receipt；这次复制是身份确认后的回收接线，不是一次新的模型作答。实际身份必须由操作者确认，工具不能从匿名文本推断模型。
+
+### 回收、预览、保存与失败
+
+```sh
+pnpm evals workflow-collect evals/datasets/reviewer-v2 \
+  --batch /path/to/registered-baseline.json --receipt /path/to/private-receipt.json
+# 核对预览后，同一命令加 --write。
+```
+
+工具核验批次/题号/实际参与者和生产材料，再读取该任务指定的常规 `answer.txt` 文件。符号链接、目录重定向、非预期位置或读取错误会拒绝；不会把私有文件误收为模型原文。私有 receipt 不放在模型可写目录内。
+
+原文先作为独立私有 attempt 归档，然后封装现有 batchId/questionId/modelKey/responseId，进入既有意见解析和导入服务。坏 JSON、schema 错误和不完整答案也保留原文及失败原因，不自动修答案。预览不写 dataset，`--write` 仍先执行预览；即使正式意见保存失败，已合法回收的原文仍保留。相同 receipt 的预览、保存和重试复用完整不可变 envelope；修改原文后重用同一身份会拒绝，不能通过重生成时间或 responseId 绕过冲突。
+
+没有文件本身是回收操作错误。仅在操作者明确记录模型报告失败或到截止仍无返回时，用互斥的 `--error "原始失败说明"` 或 `--missing`，且该任务不能已有 answer.txt。其 rawResponse 为 null；文件权限、坏路径或符号链接错误不能转换成模型判断。
+
+同模型多次尝试仍沿原共识规则，只保留一个参与者分母和既有首个完整有效意见选择，不挑最好答案；所有原始尝试保留。模型初版最多形成 model-consensus pending，不构成人工确认。人类独立初判、复核与裁决仍使用现有本地标注页。此离线工程子阶段不完成 #136 的真实试标和报告，也不关闭该 issue。
