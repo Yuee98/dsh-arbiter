@@ -173,7 +173,9 @@ pnpm evals workflow-register evals/datasets/reviewer-v2 \
 
 登记后的普通基线保存在 prepared 的 `private/registered/` 内，使用新 batchId，保留题号和材料绑定；原中性题本不回写。只有实际 `--write` 登记才发布 missing registrations。若意见写入或 checkpoint 失败，保留返回的 ordinary baseline；按错误说明，用已有 `workflow-import` 配合该 batchId 的空 responses 恢复登记，不重新生成参与者或覆盖基线。
 
-已登记模型的新任务使用对应 ordinary baseline，并加 `--model <实际modelKey>`。如果先前已有同题中性任务的回传，可加 `--origin <原私有receipt>`：工具核验原题一致，将原文独占复制到新的已登记任务结果位置，并在新 receipt 中固定原 responseId、attempt、渠道。保留原文件与 receipt；这次复制是身份确认后的回收接线，不是一次新的模型作答。实际身份必须由操作者确认，工具不能从匿名文本推断模型。
+已登记模型的新任务使用对应 ordinary baseline，并加 `--model <实际modelKey>`。如果先前已有同题中性任务的回传，先用原 prepared 基线与 receipt 执行 `workflow-collect`（不加 `--write`）完成私有原文归档，再加 `--origin <原私有receipt>` 创建已登记任务。工具核验原题、receipt 和归档身份，将不可变归档原文独占复制到新结果位置，并固定原 receipt、responseId、attempt、渠道；外部旧 answer.txt 后来改变或移除不影响此复制。
+
+每个中性 origin 只能绑定一个已登记任务，不能重复分配给其他模型、批次或尝试。完全相同的创建命令重试返回原任务，不增加意见；未完成的发布保留私有 claim 与文件供检查，不自动解除或另建投票。保留原文件与 receipt；这次复制是身份确认后的回收接线，不是一次新的模型作答。实际身份必须由操作者确认，工具不能从匿名文本推断模型。
 
 ### 回收、预览、保存与失败
 
@@ -187,6 +189,6 @@ pnpm evals workflow-collect evals/datasets/reviewer-v2 \
 
 原文先作为独立私有 attempt 归档，然后封装现有 batchId/questionId/modelKey/responseId，进入既有意见解析和导入服务。坏 JSON、schema 错误和不完整答案也保留原文及失败原因，不自动修答案。预览不写 dataset，`--write` 仍先执行预览；即使正式意见保存失败，已合法回收的原文仍保留。相同 receipt 的预览、保存和重试复用完整不可变 envelope；修改原文后重用同一身份会拒绝，不能通过重生成时间或 responseId 绕过冲突。
 
-没有文件本身是回收操作错误。仅在操作者明确记录模型报告失败或到截止仍无返回时，用互斥的 `--error "原始失败说明"` 或 `--missing`，且该任务不能已有 answer.txt。其 rawResponse 为 null；文件权限、坏路径或符号链接错误不能转换成模型判断。
+没有文件本身是回收操作错误。仅在操作者明确记录模型报告失败或到截止仍无返回时，用互斥的 `--error "原始失败说明"` 或 `--missing`，且该任务不能已有 answer.txt。其 rawResponse 为 null；`--missing` 保持 error 为 null、截止说明保存在 metadata，意见及共识统计记为 missing；`--error` 记为 failed。文件权限、坏路径或符号链接错误不能转换成模型判断。
 
 同模型多次尝试仍沿原共识规则，只保留一个参与者分母和既有首个完整有效意见选择，不挑最好答案；所有原始尝试保留。模型初版最多形成 model-consensus pending，不构成人工确认。人类独立初判、复核与裁决仍使用现有本地标注页。此离线工程子阶段不完成 #136 的真实试标和报告，也不关闭该 issue。
