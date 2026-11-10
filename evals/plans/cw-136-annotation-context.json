@@ -1,0 +1,8 @@
+{
+  "protocol": "decision",
+  "targetInputTokens": 6000,
+  "maxInputTokens": 10000,
+  "customRules": "",
+  "projectRules": null,
+  "projectRulesEnabled": false
+}

@@ -1,6 +1,7 @@
 /** Independent registration avoids the legacy export/import dispatch seam. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { runPackCli } from './pack-command.js';
 import { exportWorkflowBatch } from './workflow-export.js';
 import {
   importWorkflowHuman,
@@ -62,6 +63,8 @@ export async function runWorkflowAnnotationCli(
   argv: readonly string[],
   io: Io,
 ): Promise<number | null> {
+  const packCode = await runPackCli(argv, io);
+  if (packCode !== null) return packCode;
   if (['help', '--help', '-h'].includes(argv[0] ?? '')) {
     io.out(USAGE);
     return null;

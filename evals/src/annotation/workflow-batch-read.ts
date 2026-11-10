@@ -44,7 +44,7 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
       ],
       properties: {
         batchVersion: { const: 'workflow-annotation-v1' },
-        purpose: { const: 'human' },
+        purpose: { enum: ['human', 'prepared'] },
         batchId: idSchema,
         dataset: { type: 'string' },
         split: { enum: ['dev', 'calibration', 'holdout'] },
@@ -101,7 +101,21 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
     await readJson(path),
   );
   annotationContext(batch.context);
-  if (batch.purpose === 'human') {
+  if (
+    batch.purpose === 'prepared' &&
+    (batch.labels.length !== 0 ||
+      batch.points.length === 0 ||
+      batch.points.some(
+        (point) =>
+          point.binding === null ||
+          point.request === null ||
+          point.error !== null,
+      ))
+  )
+    throw new Error(
+      'prepared batch must contain only successfully built unlabelled points',
+    );
+  if (batch.purpose !== undefined) {
     if (
       batch.models.length !== 0 ||
       batch.opinions.length !== 0 ||
@@ -109,7 +123,7 @@ export async function readWorkflowBatch(path: string): Promise<WorkflowBatch> {
       batch.points.some((point) => point.registrations.length !== 0)
     )
       throw new Error(
-        'human batch must not register models or retain opinions/keys',
+        'unregistered batch must not register models or retain opinions/keys',
       );
   } else registeredModels(batch.models);
   const checkers = await compileCheckers();
