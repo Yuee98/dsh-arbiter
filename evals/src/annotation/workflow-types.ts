@@ -28,7 +28,7 @@ export interface AnnotationPoint {
   }[];
 }
 export interface WorkflowBatch {
-  readonly purpose?: 'human';
+  readonly purpose?: 'human' | 'prepared';
   readonly batchVersion: 'workflow-annotation-v1';
   readonly batchId: string;
   readonly dataset: string;

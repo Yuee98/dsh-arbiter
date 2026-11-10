@@ -1,0 +1,122 @@
+[
+  {
+    "group": "f01-build-cleanup",
+    "rootId": "cw135-001",
+    "pointId": "cw135-001-p01",
+    "viewId": "cw135-001-p01-main"
+  },
+  {
+    "group": "f01-build-cleanup",
+    "rootId": "cw135-001",
+    "pointId": "cw135-001-p02",
+    "viewId": "cw135-001-p02-main"
+  },
+  {
+    "group": "f01-build-cleanup",
+    "rootId": "cw135-001",
+    "pointId": "cw135-001-p03",
+    "viewId": "cw135-001-p03-main"
+  },
+  {
+    "group": "f01-build-cleanup",
+    "rootId": "cw135-001",
+    "pointId": "cw135-001-p04",
+    "viewId": "cw135-001-p04-main"
+  },
+  {
+    "group": "f01-build-cleanup",
+    "rootId": "cw135-001",
+    "pointId": "cw135-001-p05",
+    "viewId": "cw135-001-p05-main"
+  },
+  {
+    "group": "f04-support",
+    "rootId": "cw135-007",
+    "pointId": "cw135-007-p01",
+    "viewId": "cw135-007-p01-main"
+  },
+  {
+    "group": "f04-support",
+    "rootId": "cw135-007",
+    "pointId": "cw135-007-p02",
+    "viewId": "cw135-007-p02-main"
+  },
+  {
+    "group": "f04-support",
+    "rootId": "cw135-007",
+    "pointId": "cw135-007-p03",
+    "viewId": "cw135-007-p03-main"
+  },
+  {
+    "group": "f04-support",
+    "rootId": "cw135-007",
+    "pointId": "cw135-007-p04",
+    "viewId": "cw135-007-p04-main"
+  },
+  {
+    "group": "f04-support",
+    "rootId": "cw135-007",
+    "pointId": "cw135-007-p05",
+    "viewId": "cw135-007-p05-main"
+  },
+  {
+    "group": "f07-release",
+    "rootId": "cw135-013",
+    "pointId": "cw135-013-p01",
+    "viewId": "cw135-013-p01-main"
+  },
+  {
+    "group": "f07-release",
+    "rootId": "cw135-013",
+    "pointId": "cw135-013-p02",
+    "viewId": "cw135-013-p02-main"
+  },
+  {
+    "group": "f07-release",
+    "rootId": "cw135-013",
+    "pointId": "cw135-013-p03",
+    "viewId": "cw135-013-p03-main"
+  },
+  {
+    "group": "f07-release",
+    "rootId": "cw135-013",
+    "pointId": "cw135-013-p04",
+    "viewId": "cw135-013-p04-main"
+  },
+  {
+    "group": "f07-release",
+    "rootId": "cw135-013",
+    "pointId": "cw135-013-p05",
+    "viewId": "cw135-013-p05-main"
+  },
+  {
+    "group": "f09-documents",
+    "rootId": "cw135-017",
+    "pointId": "cw135-017-p01",
+    "viewId": "cw135-017-p01-main"
+  },
+  {
+    "group": "f09-documents",
+    "rootId": "cw135-017",
+    "pointId": "cw135-017-p02",
+    "viewId": "cw135-017-p02-main"
+  },
+  {
+    "group": "f09-documents",
+    "rootId": "cw135-017",
+    "pointId": "cw135-017-p03",
+    "viewId": "cw135-017-p03-main"
+  },
+  {
+    "group": "f09-documents",
+    "rootId": "cw135-017",
+    "pointId": "cw135-017-p04",
+    "viewId": "cw135-017-p04-main"
+  },
+  {
+    "group": "f09-documents",
+    "rootId": "cw135-017",
+    "pointId": "cw135-017-p05",
+    "viewId": "cw135-017-p05-main"
+  }
+]

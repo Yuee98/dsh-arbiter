@@ -144,7 +144,7 @@ export async function importWorkflowOpinions(options: {
     options.baseline,
     options.context,
   );
-  if (batch.purpose === 'human')
+  if (batch.purpose !== undefined)
     throw new Error('human-only batch cannot import model opinions');
   const returned = returnedBatch(options.returned);
   if (returned.batchId !== batch.batchId)
@@ -241,6 +241,8 @@ export async function importWorkflowHuman(options: {
   readonly write: boolean;
 }) {
   const baseline = await readWorkflowBatch(options.baseline);
+  if (baseline.purpose === 'prepared')
+    throw new Error('prepared batch cannot import human decisions');
   const fill = await humanBatchFill(options.fill);
   const questions = new Set(
     fill.decisions.map((decision) => decision.questionId),
