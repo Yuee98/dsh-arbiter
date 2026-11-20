@@ -11,6 +11,7 @@ export function useAnnotationEditor(
   const [point, setPoint] = useState<WebPoint | null>(null);
   const [newerDraft, setNewerDraft] = useState<WebPoint | null>(null);
   const [busy, setBusy] = useState(false),
+    [saving, setSaving] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
   const current = useRef<WebPoint | null>(null),
@@ -53,7 +54,7 @@ export function useAnnotationEditor(
       if (value === null || !dirty.current) return;
       if (blocked.current) throw new Error(copy.unknown);
       const before = generation.current;
-      setBusy(true);
+      setSaving(true);
       setMessage(copy.saving);
       try {
         const saved = await transport.save({
@@ -78,7 +79,7 @@ export function useAnnotationEditor(
         failure(error);
         throw error;
       } finally {
-        setBusy(false);
+        setSaving(false);
       }
     });
     queue.current = operation.catch(() => undefined);
@@ -281,14 +282,15 @@ export function useAnnotationEditor(
     [accept, failure, newerDraft, transport],
   );
   useEffect(() => {
-    if (!dirty.current || busy || blocked.current || failed.current) return;
+    if (!dirty.current || busy || saving || blocked.current || failed.current)
+      return;
     const timer = setTimeout(() => {
       save().catch(failure);
     }, 500);
     return () => {
       clearTimeout(timer);
     };
-  }, [point, busy, failure, save]);
+  }, [point, busy, saving, failure, save]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (dirty.current || blocked.current) event.preventDefault();
@@ -304,6 +306,7 @@ export function useAnnotationEditor(
     settle,
     point,
     busy,
+    saving,
     message,
     error,
     edit,

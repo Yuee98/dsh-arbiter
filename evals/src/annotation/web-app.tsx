@@ -69,7 +69,8 @@ export function AnnotationApp({
     assisted && point?.preparation === 'ready' ? point.token : null,
     point?.viewToken ?? null,
   );
-  const busy = editor.busy || opinions.pending;
+  const editingDisabled = editor.busy || opinions.pending;
+  const busy = editingDisabled || editor.saving;
   useEffect(() => {
     if (!assisted) return;
     let active = true;
@@ -206,8 +207,11 @@ export function AnnotationApp({
                 date={point.decisionDate}
                 sampled={point.sampled}
                 disabled={
-                  busy || point.preparation !== 'ready' || editor.blocked
+                  editingDisabled ||
+                  point.preparation !== 'ready' ||
+                  editor.blocked
                 }
+                confirmDisabled={editor.saving}
                 onChange={(form) => {
                   editor.edit(form);
                 }}

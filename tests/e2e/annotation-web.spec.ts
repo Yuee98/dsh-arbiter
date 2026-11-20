@@ -1,7 +1,7 @@
 /** Reproducible synthetic CLI/Chromium proof; no model call or real adjudication. */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import {
   cp,
   mkdtemp,
@@ -178,10 +178,42 @@ for (const explicitDisabled of [false, true]) {
         material.getByText('estimatedInputTokens', { exact: true }),
       ).toBeVisible();
       await material.getByText(copy.full, { exact: true }).click();
-      await page
-        .getByLabel(copy.rationale)
-        .fill('Synthetic browser draft, not a real human adjudication');
+      const rationale = page.getByLabel(copy.rationale);
+      const saveGate = new EventEmitter();
+      const saveAllowed = once(saveGate, 'release');
+      await page.route(
+        '**/api/save',
+        async (route) => {
+          await saveAllowed;
+          await route.continue();
+        },
+        { times: 1 },
+      );
+      try {
+        await Promise.all([
+          page.waitForRequest('**/api/save'),
+          rationale.fill('Synthetic browser draft, a real human adjudication'),
+        ]);
+        await expect(page.getByRole('status')).toHaveText(copy.saving);
+        await expect(rationale).toBeFocused();
+        await expect(rationale).toBeEnabled();
+        await rationale.evaluate((input: HTMLTextAreaElement) => {
+          input.setSelectionRange(25, 25);
+        });
+        await page.keyboard.insertText('not ');
+      } finally {
+        saveGate.emit('release');
+      }
       await expect(page.getByRole('status')).toHaveText(copy.saved);
+      await expect(rationale).toBeFocused();
+      await expect(rationale).toHaveValue(
+        'Synthetic browser draft, not a real human adjudication',
+      );
+      expect(
+        await rationale.evaluate(
+          (input: HTMLTextAreaElement) => input.selectionStart,
+        ),
+      ).toBe(29);
       await page.reload();
       await expect(page.getByLabel(copy.rationale)).toHaveValue(
         'Synthetic browser draft, not a real human adjudication',

@@ -6,6 +6,7 @@ export function LabelForm({
   date,
   sampled,
   disabled,
+  confirmDisabled,
   onChange,
   onSample,
   onConfirm,
@@ -15,12 +16,15 @@ export function LabelForm({
   readonly date: string | null;
   readonly sampled: boolean;
   readonly disabled: boolean;
+  readonly confirmDisabled: boolean;
   readonly onChange: (form: WebForm) => void;
   readonly onSample: (sampled: boolean) => void;
   readonly onConfirm: () => void;
   readonly onConfirmNext: () => void;
 }) {
-  const invalid =
+  const cannotConfirm =
+    disabled ||
+    confirmDisabled ||
     form.author.trim() === '' ||
     form.rationale.trim() === '' ||
     (form.state === 'confirmed' &&
@@ -31,7 +35,7 @@ export function LabelForm({
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        onConfirm();
+        if (!cannotConfirm) onConfirm();
       }}
     >
       <fieldset disabled={disabled}>
@@ -149,10 +153,14 @@ export function LabelForm({
           {copy.date} {date ?? copy.noDecisionDate}
         </p>
         <div className="actions">
-          <button type="submit" disabled={invalid}>
+          <button type="submit" disabled={cannotConfirm}>
             {copy.confirm}
           </button>
-          <button type="button" disabled={invalid} onClick={onConfirmNext}>
+          <button
+            type="button"
+            disabled={cannotConfirm}
+            onClick={onConfirmNext}
+          >
             {copy.confirmNext}
           </button>
         </div>
