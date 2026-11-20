@@ -93,7 +93,7 @@ pnpm evals workflow-import <数据集目录> --batch <本地基线.json> --answe
 
 ## 人工状态与固定参考
 
-`workflow-adjudicate <数据集> --batch <基线> --fill <人工填写.json> [--write]` 是 #128 可复用的共享文件导入服务；不会把模型回传自动转换成人工填写。填写格式为 `{batchId, decisions:[{questionId, state, target}]}`，target 沿用现有 LabelTarget。state 为 draft、confirmed、disputed、undecidable 或 needs-review。confirmed 必须有 approved target、明确裁决人和日期；独立行为即使与当前矩阵不符也可保存，评分 null 不用模型拼补。真实人工复核仍按已确认的网页流程进行；测试里的人工填写全部是 synthetic 工程样例。
+`workflow-adjudicate <数据集> --batch <基线> --fill <人工填写.json> [--write]` 是 #128 可复用的共享文件导入服务；不会把模型回传自动转换成人工填写。填写格式为 `{batchId, decisions:[{questionId, state, target}]}`，target 沿用现有 LabelTarget。state 为 draft、confirmed、disputed、undecidable 或 needs-review。confirmed 必须有 approved target、明确裁决人和日期。工作流标签可以只保存有效 R/A 配对，理由和证据选填。独立行为允许与当前矩阵不同，留空时该标签只用于评分指标。分数为 null 的确认须有明确的独立行为。真实人工复核仍按已确认的网页流程进行；测试里的人工填写全部是 synthetic 工程样例。
 
 草稿与确认分开，保存草稿不覆盖已有确认。无行为结论的明确待判使用合法 pending target 加 `annotation.humanState`，重载后仍阻止机器 fallback；普通未填 pending 不等于人工争议。适用的直接人工参考优先于明确继承参考，后者须有可追溯来源；本工具不自动推断语义等价继承。
 
