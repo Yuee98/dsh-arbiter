@@ -212,8 +212,14 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
       });
       const token = (await workspace.bootstrap()).points[0]?.token;
       if (token === undefined) throw new Error('fixture');
-      const point = await workspace.point(token);
+      const [summaries, point] = await Promise.all([
+        workspace.consensus(),
+        workspace.point(token),
+      ]);
+      expect(summaries).toContainEqual({ token, status: 'disagreed' });
+      expect(point.exposed).toBe(false);
       const missing = await workspace.opinions(token);
+      expect(missing.opinions).toHaveLength(3);
       expect(missing.consensus).toMatchObject({
         n: 3,
         k: 2,
@@ -234,6 +240,11 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
         draft: { pairs: '3,10', behaviour: 'allow', evidence: form.evidence },
       });
       expect(complete.viewToken).toBe(point.viewToken);
+      expect(complete.opinions).toHaveLength(3);
+      expect(await workspace.consensus()).toContainEqual({
+        token,
+        status: 'agreed',
+      });
       const now = workflowRecords(await workflowState(f.dataset, 'dev', 'f01'));
       const invalidEvidence = opinionReport(
         f.batch,

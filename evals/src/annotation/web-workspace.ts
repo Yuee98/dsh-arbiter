@@ -12,12 +12,14 @@ import type { WorkflowBatch } from './workflow-types.js';
 import type {
   WebPoint,
   WebBootstrap,
+  WebConsensusSummary,
   WebMutation,
   WebOpinionReport,
   WebPointSummary,
 } from './web-types.js';
 import { EMPTY_FORM } from './web-types.js';
 import { humanReferenceStatus } from './web-reference-status.js';
+import { workspaceConsensus } from './web-consensus.js';
 import { opinionReport } from './web-opinion-report.js';
 import { settleHumanIntent } from './web-settlement.js';
 import { annotationContext, buildAnnotationView } from './workflow-view.js';
@@ -211,12 +213,16 @@ export class AnnotationWorkspace {
     await atomicPrivateJson(this.path, state);
     this.observed = canonicalJson(state);
   }
-  private async load(acceptExternal = false): Promise<DraftWorkspace> {
+  private async readWorkspace(): Promise<DraftWorkspace> {
     const state = await loadDraft(this.path);
     if (state === null || state.scope !== this.identity)
       throw new Error('workspace disappeared or changed');
     if (this.membership(state) !== this.members)
       throw new Error('conflict: workspace membership changed');
+    return state;
+  }
+  private async load(acceptExternal = false): Promise<DraftWorkspace> {
+    const state = await this.readWorkspace();
     if (!acceptExternal && canonicalJson(state) !== this.observed)
       throw new Error('conflict: workspace changed externally');
     if (acceptExternal) this.observed = canonicalJson(state);
@@ -529,6 +535,12 @@ export class AnnotationWorkspace {
       }
       return this.projection(point);
     });
+  }
+  async consensus(): Promise<readonly WebConsensusSummary[]> {
+    if (this.scope.mode !== 'assisted')
+      throw new Error('blind mode does not load model opinions');
+    const state = await this.readWorkspace();
+    return workspaceConsensus(this.scope, state.points);
   }
   async opinions(token: string): Promise<WebOpinionReport> {
     if (this.scope.mode !== 'assisted')

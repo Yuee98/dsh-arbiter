@@ -1,5 +1,5 @@
 import type { WebForm } from './web-types.js';
-import { copy, stateLabels } from './web-copy.js';
+import { behaviourLabels, copy, stateLabels } from './web-copy.js';
 
 export function LabelForm({
   form,
@@ -77,17 +77,13 @@ export function LabelForm({
             }}
           >
             <option value="">{copy.choose}</option>
-            {[
-              'allow',
-              'deny',
-              'escalate',
-              'insufficient-material',
-              'review-failure',
-            ].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
+            {Object.entries(behaviourLabels)
+              .filter(([value]) => value !== '')
+              .map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
           </select>
         </label>
         <label>
@@ -152,12 +148,14 @@ export function LabelForm({
         <p>
           {copy.date} {date ?? copy.noDecisionDate}
         </p>
-        <button type="submit" disabled={invalid}>
-          {copy.confirm}
-        </button>
-        <button type="button" disabled={invalid} onClick={onConfirmNext}>
-          {copy.confirmNext}
-        </button>
+        <div className="actions">
+          <button type="submit" disabled={invalid}>
+            {copy.confirm}
+          </button>
+          <button type="button" disabled={invalid} onClick={onConfirmNext}>
+            {copy.confirmNext}
+          </button>
+        </div>
       </fieldset>
     </form>
   );

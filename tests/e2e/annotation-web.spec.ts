@@ -163,6 +163,21 @@ for (const explicitDisabled of [false, true]) {
       });
       service = await launch();
       await page.goto(service.url);
+      const material = page.getByRole('region', { name: copy.material });
+      await expect(
+        material.getByRole('region', { name: copy.action }),
+      ).toContainText('rm -rf build/');
+      await expect(material.locator('.timeline')).toContainText(
+        '可以清理生成目录 build/；保留 assets/。',
+      );
+      await expect(
+        material.getByText('estimatedInputTokens', { exact: true }),
+      ).toBeHidden();
+      await material.getByText(copy.full, { exact: true }).click();
+      await expect(
+        material.getByText('estimatedInputTokens', { exact: true }),
+      ).toBeVisible();
+      await material.getByText(copy.full, { exact: true }).click();
       await page
         .getByLabel(copy.rationale)
         .fill('Synthetic browser draft, not a real human adjudication');

@@ -268,11 +268,8 @@ describe('explicit rule state crosses real exchange boundaries', () => {
         const first = await web.point(token);
         expect(first.preparation).toBe('ready');
         const assisted = await web.opinions(token);
-        const returnedOpinions = assisted.opinions.filter(
-          (opinion) => opinion.rawResponse !== null,
-        );
-        expect(returnedOpinions).toHaveLength(3);
-        expect(returnedOpinions.every((opinion) => opinion.complete)).toBe(
+        expect(assisted.opinions).toHaveLength(3);
+        expect(assisted.opinions.every((opinion) => opinion.complete)).toBe(
           true,
         );
         expect(JSON.stringify(assisted)).not.toContain(

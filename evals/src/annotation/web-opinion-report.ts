@@ -2,7 +2,7 @@ import type { WorkflowBatch } from './workflow-types.js';
 import type { WorkflowOpinion } from '../data/group-types.js';
 import type { WebOpinion, WebOpinionReport } from './web-types.js';
 import { currentReference } from './reference.js';
-import { sameAnnotationView } from '../data/annotation-binding.js';
+import { opinionsForView } from './web-consensus.js';
 import { digestOf } from '../data/hash.js';
 
 export function opinionReport(
@@ -12,15 +12,10 @@ export function opinionReport(
   const point = batch.points[0];
   if (point?.binding === undefined || point.binding === null)
     throw new Error('unprepared opinion view');
-  const binding = point.binding;
-  const selected = opinions.filter(
-    (opinion) =>
-      opinion.pointId === point.pointId &&
-      opinion.rootId === point.rootId &&
-      opinion.viewId === point.viewId &&
-      opinion.annotation !== undefined &&
-      sameAnnotationView(opinion.annotation.binding, binding),
-  );
+  const selected = opinionsForView(opinions, {
+    ...point,
+    binding: point.binding,
+  });
   const current = currentReference(
     {
       rootId: point.rootId,
@@ -34,22 +29,39 @@ export function opinionReport(
     batch.batchId,
     point.request,
   );
-  const project = (opinion: WorkflowOpinion): WebOpinion => ({
+  const project = (
+    opinion: WorkflowOpinion,
+    complete: boolean,
+  ): WebOpinion => ({
     id: opinion.opinion.reviewId,
-    model: `${opinion.opinion.model.provider}/${opinion.opinion.model.id}`,
-    rawResponse: opinion.annotation?.rawResponse ?? null,
+    model: opinion.opinion.model.id,
     rationale: opinion.rationale,
     evidence: opinion.evidence.map((value) => value.ref).join('\n'),
     pairs:
       opinion.annotation?.pairs?.map((pair) => pair.join(',')).join('\n') ?? '',
     behaviour: opinion.independentBehaviour ?? '',
-    complete: opinion.annotation?.complete ?? false,
+    complete,
   });
   const reference = current.reference,
     consensus = current.consensus;
+  const byId = new Map(
+    selected.map((opinion) => [opinion.opinion.reviewId, opinion]),
+  );
   return {
     viewToken: digestOf(batch.batchId),
-    opinions: selected.map(project),
+    opinions: consensus.participants.flatMap((participant) => {
+      const complete = participant.selectedOpinionId !== null;
+      const opinion = byId.get(
+        participant.selectedOpinionId ??
+          participant.attempts.findLast(
+            (attempt) =>
+              byId.get(attempt.opinionId)?.annotation?.rawResponse != null,
+          )?.opinionId ??
+          participant.attempts[0]?.opinionId ??
+          '',
+      );
+      return opinion === undefined ? [] : [project(opinion, complete)];
+    }),
     consensus: {
       n: consensus.n,
       k: consensus.k,
@@ -63,7 +75,6 @@ export function opinionReport(
           : {
               id: 'model-consensus',
               model: 'model-consensus',
-              rawResponse: null,
               rationale: reference.target.rationale,
               evidence: [
                 ...new Set(

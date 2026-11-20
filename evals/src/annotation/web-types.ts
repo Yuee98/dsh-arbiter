@@ -50,7 +50,6 @@ export interface WebPoint extends WebPointSummary {
 export interface WebOpinion {
   readonly id: string;
   readonly model: string;
-  readonly rawResponse: string | null;
   readonly rationale: string | null;
   readonly evidence: string;
   readonly pairs: string;
@@ -69,6 +68,11 @@ export interface WebBootstrap {
     readonly score: number;
     readonly criterion: string;
   }[];
+}
+export type WebConsensusStatus = 'agreed' | 'disagreed' | 'unavailable';
+export interface WebConsensusSummary {
+  readonly token: string;
+  readonly status: WebConsensusStatus;
 }
 export interface WebOpinionReport {
   readonly viewToken: string;
@@ -91,6 +95,7 @@ export interface WebMutation {
 }
 export interface WebTransport {
   bootstrap(): Promise<WebBootstrap>;
+  consensus(): Promise<readonly WebConsensusSummary[]>;
   point(token: string): Promise<WebPoint>;
   reload(token: string): Promise<WebPoint>;
   settle(token: string, revision: number): Promise<WebPoint>;

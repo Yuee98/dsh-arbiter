@@ -84,6 +84,17 @@ export function useAnnotationEditor(
     queue.current = operation.catch(() => undefined);
     return operation;
   }, [accept, failure, transport]);
+  const readOpinions = useCallback(
+    (token: string) => {
+      const operation = queue.current.then(() => transport.opinions(token));
+      queue.current = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
+    },
+    [transport],
+  );
   const flush = useCallback(async () => {
     await queue.current;
     while (dirty.current) await save();
@@ -300,7 +311,7 @@ export function useAnnotationEditor(
     save,
     confirm,
     rebase,
-    flush,
+    readOpinions,
     failure,
     blocked: blocked.current,
   };

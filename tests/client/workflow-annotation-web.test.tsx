@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
 import { AnnotationApp } from '../../evals/src/annotation/web-app.js';
@@ -6,6 +6,7 @@ import { copy } from '../../evals/src/annotation/web-copy.js';
 import { EMPTY_FORM } from '../../evals/src/annotation/web-types.js';
 import type {
   WebBootstrap,
+  WebConsensusSummary,
   WebMutation,
   WebOpinionReport,
   WebPoint,
@@ -64,6 +65,12 @@ function fixture(
   };
   const transport = {
     bootstrap: vi.fn(() => Promise.resolve(data)),
+    consensus: vi.fn((): Promise<readonly WebConsensusSummary[]> =>
+      Promise.resolve([
+        { token: 'first', status: 'disagreed' },
+        { token: 'second', status: 'agreed' },
+      ]),
+    ),
     point: vi.fn((token: string) =>
       Promise.resolve(token === 'first' ? point : second),
     ),
@@ -95,8 +102,7 @@ function fixture(
           {
             id: 'm1',
             model: 'synthetic-model',
-            rawResponse: '<script>unsafe()</script>',
-            rationale: 'model rationale',
+            rationale: '<script>unsafe()</script>',
             evidence: 'VISIBLE_QUOTE',
             pairs: '3,10',
             behaviour: 'deny',
@@ -268,7 +274,7 @@ describe('standalone workflow annotation production React page', () => {
     );
     expect(transport.settle).toHaveBeenCalledWith('first', 0);
   });
-  test('shared consensus is selectable into a draft and the opinions can be hidden', async () => {
+  test('shared consensus is selectable into an unconfirmed draft', async () => {
     const user = userEvent.setup();
     const { transport } = fixture('assisted');
     const report = await transport.opinions(),
@@ -285,21 +291,16 @@ describe('standalone workflow annotation production React page', () => {
         missing: 0,
         failed: 0,
         reasons: [],
-        draft: { ...base, id: 'model-consensus', rawResponse: null },
+        draft: { ...base, id: 'model-consensus' },
       },
     });
     render(<AnnotationApp transport={transport} />);
     await screen.findByLabelText(copy.rationale);
-    await user.click(screen.getByRole('button', { name: copy.opinions }));
     await user.click(
       await screen.findByRole('button', { name: copy.consensusSelect }),
     );
     expect(screen.getByLabelText(copy.pairs)).toHaveValue('3,10');
     expect(transport.confirm).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: copy.hideOpinions }));
-    expect(
-      screen.queryByText('<script>unsafe()</script>'),
-    ).not.toBeInTheDocument();
   });
   test('rebase clears old-view opinions before the new material can use them', async () => {
     const user = userEvent.setup();
@@ -319,14 +320,11 @@ describe('standalone workflow annotation production React page', () => {
     });
     render(<AnnotationApp transport={transport} />);
     await screen.findByLabelText(copy.rationale);
-    await user.click(screen.getByRole('button', { name: copy.opinions }));
-    expect(
-      await screen.findByText('<script>unsafe()</script>'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('synthetic-model')).toBeVisible();
     await user.click(screen.getByText(copy.review, { selector: 'summary' }));
     await user.click(screen.getByRole('button', { name: copy.review }));
     expect(
-      await screen.findByText('NEW_AUTHORIZATION_FACT'),
+      await screen.findByText('NEW_AUTHORIZATION_FACT', { selector: 'p' }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('<script>unsafe()</script>'),
@@ -344,7 +342,7 @@ describe('standalone workflow annotation production React page', () => {
     await screen.findByLabelText(copy.rationale);
     expect(
       screen.getByRole('navigation', { name: copy.workflows }),
-    ).toHaveTextContent(`${copy.formalProgress}: 1 / 2`);
+    ).toHaveTextContent(`1 / 2`);
     expect(screen.getByLabelText(copy.rationale)).toHaveValue('');
   });
   test('restores a local draft, escapes current material and never requests opinions in blind mode', async () => {
@@ -355,13 +353,16 @@ describe('standalone workflow annotation production React page', () => {
     expect(await screen.findByLabelText(copy.rationale)).toHaveValue(
       'restored draft',
     );
-    expect(screen.getByText(/VISIBLE_QUOTE/u)).toBeInTheDocument();
+    expect(
+      screen.getByText(/VISIBLE_QUOTE/u, { selector: 'p' }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('FUTURE_FAILURE_SENTINEL');
     expect(
-      screen.queryByRole('button', { name: copy.opinions }),
+      screen.queryByRole('region', { name: copy.opinions }),
     ).not.toBeInTheDocument();
     expect(transport.opinions).not.toHaveBeenCalled();
+    expect(transport.consensus).not.toHaveBeenCalled();
     expect(transport.confirm).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: copy.confirm })).toBeDisabled();
   });
@@ -422,21 +423,49 @@ describe('standalone workflow annotation production React page', () => {
       );
     },
   );
-  test('assisted opinions load on explicit request, escape raw text and select into an unconfirmed draft', async () => {
+  test('assisted rows start collapsed next to the case and expand into a draft suggestion', async () => {
     const user = userEvent.setup();
     const { transport } = fixture('assisted');
     render(<AnnotationApp transport={transport} />);
-    await screen.findByLabelText(copy.rationale);
-    expect(transport.opinions).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: copy.opinions }));
+    const material = await screen.findByRole('region', { name: copy.material });
+    const panel = within(material).getByRole('region', { name: copy.opinions });
+    const name = await within(panel).findByText('synthetic-model');
+    expect(within(panel).getByText('R3 / A10')).toBeVisible();
     expect(
-      await screen.findByText('<script>unsafe()</script>'),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: copy.selectOpinion }));
+      within(panel).getByText('<script>unsafe()</script>'),
+    ).not.toBeVisible();
+    await user.click(name);
+    expect(within(panel).getByText('<script>unsafe()</script>')).toBeVisible();
+    expect(within(panel).getByText('VISIBLE_QUOTE')).toBeVisible();
+    await user.click(
+      within(panel).getByRole('button', { name: copy.selectOpinion }),
+    );
     expect(screen.getByLabelText(copy.pairs)).toHaveValue('3,10');
     expect(screen.getByLabelText(copy.behaviour)).toHaveValue('deny');
-    expect(screen.getByText(copy.exposed)).toBeInTheDocument();
+    expect(transport.opinions).toHaveBeenCalledTimes(1);
     expect(transport.confirm).not.toHaveBeenCalled();
+  });
+  test('consensus filter includes unopened points without opening their opinions', async () => {
+    const user = userEvent.setup();
+    const { transport } = fixture('assisted');
+    render(<AnnotationApp transport={transport} />);
+    await screen.findByRole('option', { name: `${copy.consensusAgreed} (1)` });
+    await user.selectOptions(screen.getByLabelText(copy.consensus), 'agreed');
+    const index = screen.getByRole('navigation', { name: copy.workflows });
+    expect(within(index).getByRole('button', { name: /点 2/u })).toBeVisible();
+    expect(
+      within(index).queryByRole('button', { name: /点 1/u }),
+    ).not.toBeInTheDocument();
+    expect(transport.opinions).toHaveBeenCalledExactlyOnceWith('first');
+
+    await user.selectOptions(
+      screen.getByLabelText(copy.consensus),
+      'disagreed',
+    );
+    expect(within(index).getByRole('button', { name: /点 1/u })).toBeVisible();
+    expect(
+      within(index).queryByRole('button', { name: /点 2/u }),
+    ).not.toBeInTheDocument();
   });
   test('preparation failures remain navigable, cannot confirm and preserve a restored draft', async () => {
     const user = userEvent.setup();
