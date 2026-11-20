@@ -128,6 +128,7 @@ describe('standalone workflow annotation production React page', () => {
     const user = userEvent.setup();
     const { transport } = fixture();
     render(<AnnotationApp transport={transport} />);
+    await user.click(await screen.findByText(copy.optionalDecision));
     await user.type(
       await screen.findByLabelText(copy.rationale),
       'Material cannot establish scores',
@@ -179,6 +180,7 @@ describe('standalone workflow annotation production React page', () => {
       expect(screen.getByLabelText(copy.rationale)).toHaveValue(
         fails ? 'reviewed' : '',
       );
+      expect(screen.getByLabelText(copy.author)).toHaveValue('tester');
     },
   );
   test.each([false, true])(
@@ -370,6 +372,7 @@ describe('standalone workflow annotation production React page', () => {
     const user = userEvent.setup();
     const { transport } = fixture();
     render(<AnnotationApp transport={transport} />);
+    await user.click(await screen.findByText(copy.optionalDecision));
     await user.type(
       await screen.findByLabelText(copy.rationale),
       'Human rationale',
@@ -404,6 +407,7 @@ describe('standalone workflow annotation production React page', () => {
       const { transport } = fixture();
       transport.save.mockRejectedValueOnce(new Error(message));
       render(<AnnotationApp transport={transport} />);
+      await user.click(await screen.findByText(copy.optionalDecision));
       await user.type(
         await screen.findByLabelText(copy.rationale),
         'retained input',
@@ -441,7 +445,8 @@ describe('standalone workflow annotation production React page', () => {
       within(panel).getByRole('button', { name: copy.selectOpinion }),
     );
     expect(screen.getByLabelText(copy.pairs)).toHaveValue('3,10');
-    expect(screen.getByLabelText(copy.behaviour)).toHaveValue('deny');
+    expect(screen.getByLabelText(copy.behaviour)).toHaveValue('');
+    expect(screen.getByText(`${copy.matrixResult} 允许`)).toBeVisible();
     expect(transport.opinions).toHaveBeenCalledTimes(1);
     expect(transport.confirm).not.toHaveBeenCalled();
   });
@@ -492,6 +497,7 @@ describe('standalone workflow annotation production React page', () => {
     const user = userEvent.setup();
     const { transport } = fixture();
     render(<AnnotationApp transport={transport} />);
+    await user.click(await screen.findByText(copy.optionalDecision));
     await user.type(
       await screen.findByLabelText(copy.rationale),
       'keyboard draft',

@@ -467,3 +467,11 @@ summary {
     max-height: none;
   }
 }
+.annotation-detail {
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+.decision .matrix-preview {
+  color: var(--accent);
+  font-weight: 650;
+}

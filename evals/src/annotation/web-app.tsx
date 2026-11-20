@@ -30,7 +30,10 @@ export function AnnotationApp({
   const [statusAttempt, setStatusAttempt] = useState(0);
   const [progress, setProgress] = useState('all');
   const [consensus, setConsensus] = useState('all');
+  const [reviewer, setReviewer] = useState<string | null>(null);
   const changed = useCallback((point: WebPoint) => {
+    const author = point.form.author.trim();
+    if (author !== '') setReviewer((previous) => previous ?? author);
     setData((value) =>
       value === null
         ? null
@@ -110,8 +113,12 @@ export function AnnotationApp({
     },
     [data, failure, open, point?.token, visible],
   );
+  const confirmCurrent = useCallback(
+    () => confirm(reviewer ?? ''),
+    [confirm, reviewer],
+  );
   const confirmNext = async () => {
-    if (await confirm()) navigate(1);
+    if (await confirmCurrent()) navigate(1);
   };
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
@@ -121,7 +128,7 @@ export function AnnotationApp({
         save().catch(failure);
       } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
-        confirm().catch(failure);
+        confirmCurrent().catch(failure);
       } else if (
         event.altKey &&
         ['ArrowLeft', 'ArrowRight'].includes(event.key)
@@ -134,16 +141,13 @@ export function AnnotationApp({
     return () => {
       window.removeEventListener('keydown', keyboard);
     };
-  }, [confirm, busy, failure, navigate, save]);
+  }, [confirmCurrent, busy, failure, navigate, save]);
   const selectOpinion = (opinion: WebOpinion) => {
     if (point !== null)
       editor.edit({
         ...point.form,
         noScores: false,
         pairs: opinion.pairs,
-        behaviour: opinion.behaviour,
-        rationale: opinion.rationale ?? '',
-        evidence: opinion.evidence,
       });
   };
   if (data === null)
@@ -204,6 +208,8 @@ export function AnnotationApp({
               <ScalePanel data={data} />
               <LabelForm
                 form={point.form}
+                reviewer={reviewer ?? ''}
+                onReviewer={setReviewer}
                 date={point.decisionDate}
                 sampled={point.sampled}
                 disabled={
@@ -219,7 +225,7 @@ export function AnnotationApp({
                   editor.edit(point.form, sampled);
                 }}
                 onConfirm={() => {
-                  confirm().catch(failure);
+                  confirmCurrent().catch(failure);
                 }}
                 onConfirmNext={() => {
                   confirmNext().catch(failure);

@@ -178,6 +178,7 @@ for (const explicitDisabled of [false, true]) {
         material.getByText('estimatedInputTokens', { exact: true }),
       ).toBeVisible();
       await material.getByText(copy.full, { exact: true }).click();
+      await page.getByText(copy.optionalDecision, { exact: true }).click();
       const rationale = page.getByLabel(copy.rationale);
       const saveGate = new EventEmitter();
       const saveAllowed = once(saveGate, 'release');
@@ -236,10 +237,21 @@ for (const explicitDisabled of [false, true]) {
       expect(baseline.context).toEqual(context);
       expect(baseline.points[0]?.request).not.toBeNull();
       await page.getByLabel(copy.pairs).fill('3,10\n4,9');
-      await page.getByLabel(copy.behaviour).selectOption('deny');
-      await page
-        .getByLabel(copy.evidence)
-        .fill('可以清理生成目录 build/；保留 assets/。');
+      await page.getByLabel(copy.author).fill('synthetic-reviewer');
+      const notes = page.getByText(copy.optionalDecision, { exact: true });
+      await notes.click();
+      if (explicitDisabled) {
+        await rationale.fill('');
+        await notes.click();
+      } else {
+        await page.getByLabel(copy.behaviour).selectOption('deny');
+        await page
+          .getByLabel(copy.evidence)
+          .fill('可以清理生成目录 build/；保留 assets/。');
+      }
+      await expect(
+        page.getByText(`${copy.matrixResult} 允许`, { exact: true }),
+      ).toBeVisible();
       await page
         .getByRole('button', { name: copy.confirm, exact: true })
         .click();
@@ -262,7 +274,9 @@ for (const explicitDisabled of [false, true]) {
                 [3, 10],
                 [4, 9],
               ],
-              behaviourReference: 'deny',
+              behaviourReference: explicitDisabled ? null : 'deny',
+              decidedBy: 'synthetic-reviewer',
+              ...(explicitDisabled ? { rationale: '', evidence: [] } : {}),
             },
           },
         ],
@@ -277,8 +291,11 @@ for (const explicitDisabled of [false, true]) {
       await page.clock.setFixedTime(new Date('2099-07-01T12:00:00Z'));
       await page.reload();
       await expect(page.getByLabel(copy.rationale)).toHaveValue(
-        'Synthetic browser draft, not a real human adjudication',
+        explicitDisabled
+          ? ''
+          : 'Synthetic browser draft, not a real human adjudication',
       );
+      await page.getByText(copy.optionalDecision, { exact: true }).click();
       await expect(
         page.getByText(`${copy.date} ${decisionDate}`, { exact: true }),
       ).toBeVisible();
@@ -287,6 +304,9 @@ for (const explicitDisabled of [false, true]) {
         .getByRole('button', { name: copy.confirmNext, exact: true })
         .click();
       await expect(page.getByLabel(copy.rationale)).toHaveValue('');
+      await expect(page.getByLabel(copy.author)).toHaveValue(
+        'synthetic-reviewer',
+      );
       const afterNext: unknown = JSON.parse(
         await readFile(join(dataset, 'dev/f01/labels.json'), 'utf8'),
       );
@@ -313,7 +333,8 @@ for (const explicitDisabled of [false, true]) {
               'SIGTERM closes server',
               'CLI restart restores draft',
               'explicit single-point confirmation',
-              'labels readback retains full pairs and independent behaviour',
+              'labels readback preserves full pairs with optional independent behaviour and rationale',
+              'confirm-and-next keeps the reviewer name',
               'no opinion requests or future/author sentinels',
               'persisted decision date survives changed browser clock and reload',
               'confirm-and-next navigates after current success without confirming the next point',

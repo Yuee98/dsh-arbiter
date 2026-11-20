@@ -249,13 +249,11 @@ function labelProblems(
   if (
     humanState !== undefined &&
     humanState !== 'draft' &&
-    (value.target.decidedBy.trim() === '' ||
-      value.target.rationale.trim() === '' ||
-      value.target.decidedAt === null)
+    (value.target.decidedBy.trim() === '' || value.target.decidedAt === null)
   )
     problems.push({
       path,
-      message: 'explicit human annotation requires author, date and rationale',
+      message: 'explicit human annotation requires author and date',
     });
   if (
     humanState !== undefined &&

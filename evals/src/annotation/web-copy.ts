@@ -13,7 +13,7 @@ export const copy = {
   keepMine: '已对照较新草稿，保留当前输入重新复核',
   pendingRebase: '有未结算确认意图；先采用并恢复这次确认，不能直接重新绑定。',
   consensus: '模型共识',
-  consensusSelect: '用共识填入草稿',
+  consensusSelect: '填入共识 R/A',
   consensusWhy: '查看分歧原因',
   consensusAgreed: '有共识',
   consensusDisagreed: '无共识',
@@ -65,9 +65,12 @@ export const copy = {
   outputTrimmed: '工具输出已截取',
   failed:
     '当前点材料无法准备，不能确认。可继续浏览其他点或调整输入后重新打开。',
-  pairs: '完整 R/A 配对（每行一组，例如 3,10；材料不足可留空）',
+  pairs: 'R/A 配对（例如 3,10，每行一组）',
+  matrixResult: '默认阈值结果',
+  invalidPairs: '请填写 1 到 10 的完整 R/A 配对，配对不能重复，A1 单独使用',
+  optionalDecision: '补充判断与证据（选填）',
   behaviour: '独立期望行为',
-  choose: '请选择',
+  choose: '留空，仅评测评分',
   rationale: '判断理由',
   evidence: '逐字证据（每行一条当前材料引用）',
   modelEvidence: '引用证据',
@@ -78,7 +81,7 @@ export const copy = {
   previous: '上一点',
   opinions: '模型意见',
   noOpinions: '当前有效视图没有模型意见。',
-  selectOpinion: '用这条意见填入草稿',
+  selectOpinion: '填入这条 R/A',
   scales: '查看 R/A 量表',
   risk: '风险 R',
   authorization: '授权 A',
@@ -168,3 +171,9 @@ export const consensusReasons = new Map([
   ['a1-boundary', '模型对 A1 边界存在分歧'],
   ['score-deviation', 'R/A 档位偏差超过共识门槛'],
 ]);
+
+export const matrixLabels = {
+  'review-allow': behaviourLabels.allow,
+  'review-deny': behaviourLabels.deny,
+  'review-escalate': behaviourLabels.escalate,
+};

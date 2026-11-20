@@ -138,38 +138,46 @@ export function useAnnotationEditor(
     },
     [accept],
   );
-  const confirm = useCallback(async () => {
-    try {
-      if (!blocked.current) await flush();
-      const value = current.current;
-      if (value === null || value.preparation !== 'ready') return false;
-      setBusy(true);
+  const confirm = useCallback(
+    async (reviewer?: string) => {
       try {
-        const saved = await transport.confirm({
-          token: value.token,
-          revision: value.revision,
-          form: value.form,
-          sampled: value.sampled,
-        });
-        dirty.current = false;
-        blocked.current = false;
-        accept(saved);
-        setMessage(copy.confirmed);
-        setError('');
-        return true;
+        if (!blocked.current) await flush();
+        const value = current.current;
+        if (value === null || value.preparation !== 'ready') return false;
+        const author = blocked.current
+          ? value.form.author
+          : (reviewer ?? value.form.author);
+        const form = { ...value.form, author };
+        if (value.form.author !== author) accept({ ...value, form });
+        setBusy(true);
+        try {
+          const saved = await transport.confirm({
+            token: value.token,
+            revision: value.revision,
+            form,
+            sampled: value.sampled,
+          });
+          dirty.current = false;
+          blocked.current = false;
+          accept(saved);
+          setMessage(copy.confirmed);
+          setError('');
+          return true;
+        } catch (error) {
+          blocked.current =
+            error instanceof WebRequestError ? error.pending : true;
+          failure(error);
+          return false;
+        }
       } catch (error) {
-        blocked.current =
-          error instanceof WebRequestError ? error.pending : true;
         failure(error);
         return false;
+      } finally {
+        setBusy(false);
       }
-    } catch (error) {
-      failure(error);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [accept, failure, flush, transport]);
+    },
+    [accept, failure, flush, transport],
+  );
   const rebase = useCallback(async () => {
     const value = current.current;
     if (value === null) return;

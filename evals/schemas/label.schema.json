@@ -17,7 +17,7 @@
       "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/versions"
     },
     "target": {
-      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/labelTarget"
+      "$ref": "https://dsh-arbiter.dev/schemas/evals/common.schema.json#/definitions/legacyLabelTarget"
     },
     "notes": { "type": "string" }
   }

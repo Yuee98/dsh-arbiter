@@ -441,19 +441,23 @@ export class AnnotationWorkspace {
       if (value.form.noScores === true && value.form.pairs.trim() !== '')
         throw new Error('explicit no-score decision cannot retain score pairs');
       const answer = independentAnswer(formAnswer(value.form));
-      if (value.form.author.trim() === '' || answer.rationale.trim() === '')
-        throw new Error('author and rationale are required');
+      if (value.form.author.trim() === '')
+        throw new Error('author is required');
       if (
         value.form.state === 'confirmed' &&
-        (answer.behaviourReference === null ||
-          (answer.pairs === null && value.form.noScores !== true) ||
-          (value.form.noScores !== true &&
-            !validEvidence(answer.evidence, batch.points[0]?.request, true)) ||
-          (answer.evidence.length > 0 &&
-            !validEvidence(answer.evidence, batch.points[0]?.request, true)))
+        answer.pairs === null &&
+        (value.form.noScores !== true || answer.behaviourReference === null)
       )
         throw new Error(
-          'confirmation requires complete pairs, independent behaviour and exact visible evidence',
+          'confirmation requires score pairs or an explicit no-score behaviour',
+        );
+      if (
+        value.form.state === 'confirmed' &&
+        answer.evidence.length > 0 &&
+        !validEvidence(answer.evidence, batch.points[0]?.request, true)
+      )
+        throw new Error(
+          'supplied evidence must quote the visible material exactly',
         );
       if (
         point.intent !== null &&
