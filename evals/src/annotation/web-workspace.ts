@@ -12,12 +12,14 @@ import type { WorkflowBatch } from './workflow-types.js';
 import type {
   WebPoint,
   WebBootstrap,
+  WebConsensusSummary,
   WebMutation,
   WebOpinionReport,
   WebPointSummary,
 } from './web-types.js';
 import { EMPTY_FORM } from './web-types.js';
 import { humanReferenceStatus } from './web-reference-status.js';
+import { workspaceConsensus } from './web-consensus.js';
 import { opinionReport } from './web-opinion-report.js';
 import { settleHumanIntent } from './web-settlement.js';
 import { annotationContext, buildAnnotationView } from './workflow-view.js';
@@ -211,12 +213,16 @@ export class AnnotationWorkspace {
     await atomicPrivateJson(this.path, state);
     this.observed = canonicalJson(state);
   }
-  private async load(acceptExternal = false): Promise<DraftWorkspace> {
+  private async readWorkspace(): Promise<DraftWorkspace> {
     const state = await loadDraft(this.path);
     if (state === null || state.scope !== this.identity)
       throw new Error('workspace disappeared or changed');
     if (this.membership(state) !== this.members)
       throw new Error('conflict: workspace membership changed');
+    return state;
+  }
+  private async load(acceptExternal = false): Promise<DraftWorkspace> {
+    const state = await this.readWorkspace();
     if (!acceptExternal && canonicalJson(state) !== this.observed)
       throw new Error('conflict: workspace changed externally');
     if (acceptExternal) this.observed = canonicalJson(state);
@@ -435,19 +441,23 @@ export class AnnotationWorkspace {
       if (value.form.noScores === true && value.form.pairs.trim() !== '')
         throw new Error('explicit no-score decision cannot retain score pairs');
       const answer = independentAnswer(formAnswer(value.form));
-      if (value.form.author.trim() === '' || answer.rationale.trim() === '')
-        throw new Error('author and rationale are required');
+      if (value.form.author.trim() === '')
+        throw new Error('author is required');
       if (
         value.form.state === 'confirmed' &&
-        (answer.behaviourReference === null ||
-          (answer.pairs === null && value.form.noScores !== true) ||
-          (value.form.noScores !== true &&
-            !validEvidence(answer.evidence, batch.points[0]?.request, true)) ||
-          (answer.evidence.length > 0 &&
-            !validEvidence(answer.evidence, batch.points[0]?.request, true)))
+        answer.pairs === null &&
+        (value.form.noScores !== true || answer.behaviourReference === null)
       )
         throw new Error(
-          'confirmation requires complete pairs, independent behaviour and exact visible evidence',
+          'confirmation requires score pairs or an explicit no-score behaviour',
+        );
+      if (
+        value.form.state === 'confirmed' &&
+        answer.evidence.length > 0 &&
+        !validEvidence(answer.evidence, batch.points[0]?.request, true)
+      )
+        throw new Error(
+          'supplied evidence must quote the visible material exactly',
         );
       if (
         point.intent !== null &&
@@ -529,6 +539,12 @@ export class AnnotationWorkspace {
       }
       return this.projection(point);
     });
+  }
+  async consensus(): Promise<readonly WebConsensusSummary[]> {
+    if (this.scope.mode !== 'assisted')
+      throw new Error('blind mode does not load model opinions');
+    const state = await this.readWorkspace();
+    return workspaceConsensus(this.scope, state.points);
   }
   async opinions(token: string): Promise<WebOpinionReport> {
     if (this.scope.mode !== 'assisted')

@@ -286,7 +286,7 @@
       ]
     },
     "labelTarget": {
-      "description": "The user's adjudication for one case. An approved or disputed target names a decision, its author, its date and the stage the review should reach; a pending target is the blank form handed out in an annotation pack. A null allowed field records that the material could not support a score for that field, which is different from an empty list. Whether the recorded stage agrees with the allowed scores is a cross-field rule checked where the label is read, because a schema cannot compare two properties like that.",
+      "description": "The user's adjudication for one case. A finalized workflow target identifies its author and date and carries either explicit score pairs or an independent expected behaviour. Workflow adjudication permits a blank rationale and optional evidence. A null behaviour reference is excluded from independent behaviour evaluation.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -381,18 +381,47 @@
                   }
                 }
               },
-              "behaviourReference": {
-                "$ref": "#/definitions/behaviourReference"
-              },
-              "rationale": {
-                "$ref": "#/definitions/text"
-              },
               "decidedBy": {
                 "$ref": "#/definitions/text"
               },
               "decidedAt": {
                 "$ref": "#/definitions/date"
               }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "behaviourReference": {
+                    "$ref": "#/definitions/behaviourReference"
+                  }
+                }
+              },
+              {
+                "required": ["allowedPairs"],
+                "properties": {
+                  "allowedPairs": { "type": "array", "minItems": 1 }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "legacyLabelTarget": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/definitions/labelTarget" },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "enum": ["approved", "disputed"] } }
+          },
+          "then": {
+            "properties": {
+              "behaviourReference": {
+                "$ref": "#/definitions/behaviourReference"
+              },
+              "rationale": { "$ref": "#/definitions/text" }
             }
           }
         }

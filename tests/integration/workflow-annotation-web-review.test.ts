@@ -15,7 +15,7 @@ const { workflowState, workflowRecords } =
   await import('../../evals/src/annotation/workflow-store.js');
 const { importWorkflowHuman, importWorkflowOpinions } =
   await import('../../evals/src/annotation/workflow-service.js');
-const { withWorkflowAnnotation, returns, models } =
+const { withWorkflowAnnotation, answer, returns, models } =
   await import('../evals/helpers/workflow-annotation.js');
 const { exportWorkflowBatch } =
   await import('../../evals/src/annotation/workflow-export.js');
@@ -212,8 +212,14 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
       });
       const token = (await workspace.bootstrap()).points[0]?.token;
       if (token === undefined) throw new Error('fixture');
-      const point = await workspace.point(token);
+      const [summaries, point] = await Promise.all([
+        workspace.consensus(),
+        workspace.point(token),
+      ]);
+      expect(summaries).toContainEqual({ token, status: 'disagreed' });
+      expect(point.exposed).toBe(false);
       const missing = await workspace.opinions(token);
+      expect(missing.opinions).toHaveLength(3);
       expect(missing.consensus).toMatchObject({
         n: 3,
         k: 2,
@@ -221,19 +227,48 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
         draft: null,
       });
       expect(missing.consensus.reasons).toContain('incomplete-opinions');
-      await importWorkflowOpinions({
+      const last = returns(f.batch, {}, keys.slice(2));
+      const { pairs, rationale, evidence, conflicts } = answer();
+      const scoreOnly = last.responses.map((response) => ({
+        ...response,
+        rawResponse: JSON.stringify({
+          pairs,
+          rationale,
+          evidence,
+          conflicts,
+          unresolvedConflicts: [],
+        }),
+      }));
+      const imported = await importWorkflowOpinions({
         ...f,
-        returned: returns(f.batch, {}, keys.slice(2)),
+        returned: { ...last, responses: scoreOnly },
         write: true,
+      });
+      const scoreOpinion = imported.opinions.find(
+        (opinion) => opinion.opinion.reviewId === scoreOnly[0]?.responseId,
+      );
+      expect(scoreOpinion).toMatchObject({
+        independentBehaviour: null,
+        outcome: 'answered',
+        annotation: { complete: true },
+      });
+      expect(imported.labels[0]).toMatchObject({
+        source: 'model-consensus',
+        target: { behaviourReference: null, allowedPairs: [[3, 10]] },
       });
       const complete = await workspace.opinions(token);
       expect(complete.consensus).toMatchObject({
         n: 3,
         k: 3,
         reasons: [],
-        draft: { pairs: '3,10', behaviour: 'allow', evidence: form.evidence },
+        draft: { pairs: '3,10', behaviour: '', evidence: form.evidence },
       });
       expect(complete.viewToken).toBe(point.viewToken);
+      expect(complete.opinions).toHaveLength(3);
+      expect(await workspace.consensus()).toContainEqual({
+        token,
+        status: 'agreed',
+      });
       const now = workflowRecords(await workflowState(f.dataset, 'dev', 'f01'));
       const invalidEvidence = opinionReport(
         f.batch,
@@ -269,13 +304,20 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
         dataset: f.dataset,
         baseline: fourth.baseline,
         returned: returns(fourth.batch, {
-          conflicts: ['Synthetic permission evidence conflict'],
+          conflicts: ['Synthetic superseded instruction'],
+          unresolvedConflicts: ['Synthetic permission evidence conflict'],
         }),
         write: true,
       });
       const conflict = await workspace.opinions(token);
       expect(conflict.consensus.draft).toBeNull();
       expect(conflict.consensus.reasons).toContain('key-evidence-conflict');
+      expect(conflict.opinions).toContainEqual(
+        expect.objectContaining({
+          conflicts: ['Synthetic superseded instruction'],
+          unresolvedConflicts: ['Synthetic permission evidence conflict'],
+        }),
+      );
       const rebased = await workspace.rebase(token, point.revision);
       expect(rebased.viewToken).not.toBe(complete.viewToken);
       expect((await workspace.opinions(token)).viewToken).toBe(

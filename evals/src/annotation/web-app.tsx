@@ -1,19 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   WebBootstrap,
   WebOpinion,
-  WebOpinionReport,
+  WebConsensusStatus,
   WebPoint,
   WebTransport,
 } from './web-types.js';
 import { useAnnotationEditor } from './web-use-editor.js';
 import { copy } from './web-copy.js';
-import { WorkflowList } from './web-workflow-list.js';
+import { WorkflowList, pointMatches } from './web-workflow-list.js';
 import { MaterialPane } from './web-material-pane.js';
 import { LabelForm } from './web-label-form.js';
 import { OpinionPanel } from './web-opinion-panel.js';
 import { ScalePanel } from './web-scale-panel.js';
 import { DraftConflict } from './web-draft-conflict.js';
+import { useWebOpinions } from './web-use-opinions.js';
 export function AnnotationApp({
   transport,
 }: {
@@ -21,27 +22,18 @@ export function AnnotationApp({
 }) {
   const [data, setData] = useState<WebBootstrap | null>(null),
     [initialError, setInitialError] = useState('');
-  const [seen, setSeen] = useState<ReadonlyMap<string, WebOpinionReport>>(
-    new Map(),
-  );
-  const [opinionLoading, setOpinionLoading] = useState(false);
-  const views = useRef(new Map<string, string | null>());
+  const [status, setStatus] = useState<ReadonlyMap<
+    string,
+    WebConsensusStatus
+  > | null>(null);
+  const [statusError, setStatusError] = useState(false);
+  const [statusAttempt, setStatusAttempt] = useState(0);
+  const [progress, setProgress] = useState('all');
+  const [consensus, setConsensus] = useState('all');
+  const [reviewer, setReviewer] = useState<string | null>(null);
   const changed = useCallback((point: WebPoint) => {
-    views.current.set(
-      point.token,
-      point.preparation === 'ready' ? point.viewToken : null,
-    );
-    setSeen((previous) => {
-      const cached = previous.get(point.token);
-      if (
-        cached === undefined ||
-        (point.preparation === 'ready' && cached.viewToken === point.viewToken)
-      )
-        return previous;
-      const next = new Map(previous);
-      next.delete(point.token);
-      return next;
-    });
+    const author = point.form.author.trim();
+    if (author !== '') setReviewer((previous) => previous ?? author);
     setData((value) =>
       value === null
         ? null
@@ -74,27 +66,69 @@ export function AnnotationApp({
       active = false;
     };
   }, [open, transport]);
+  const assisted = data?.mode === 'assisted';
+  const opinions = useWebOpinions(
+    editor.readOpinions,
+    assisted && point?.preparation === 'ready' ? point.token : null,
+    point?.viewToken ?? null,
+  );
+  const editingDisabled = editor.busy || opinions.pending;
+  const busy = editingDisabled || editor.saving;
+  useEffect(() => {
+    if (!assisted) return;
+    let active = true;
+    transport
+      .consensus()
+      .then((rows) => {
+        if (active)
+          setStatus(new Map(rows.map((row) => [row.token, row.status])));
+      })
+      .catch(() => {
+        if (active) setStatusError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assisted, statusAttempt, transport]);
+  const visible = useMemo(
+    () =>
+      data?.points.filter((item) =>
+        pointMatches(item, progress, consensus, status),
+      ) ?? [],
+    [consensus, data, progress, status],
+  );
   const navigate = useCallback(
     (delta: number) => {
-      const index =
-        data?.points.findIndex((value) => value.token === point?.token) ?? -1;
-      const next = data?.points[index + delta];
+      if (data === null) return;
+      const index = data.points.findIndex(
+        (item) => item.token === point?.token,
+      );
+      const next =
+        delta > 0
+          ? data.points.slice(index + 1).find((item) => visible.includes(item))
+          : data.points
+              .slice(0, index)
+              .findLast((item) => visible.includes(item));
       if (next !== undefined) open(next.token).catch(failure);
     },
-    [data, failure, open, point?.token],
+    [data, failure, open, point?.token, visible],
+  );
+  const confirmCurrent = useCallback(
+    () => confirm(reviewer ?? ''),
+    [confirm, reviewer],
   );
   const confirmNext = async () => {
-    if (await confirm()) navigate(1);
+    if (await confirmCurrent()) navigate(1);
   };
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (event.repeat || editor.busy) return;
+      if (event.repeat || busy) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         save().catch(failure);
       } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
-        confirm().catch(failure);
+        confirmCurrent().catch(failure);
       } else if (
         event.altKey &&
         ['ArrowLeft', 'ArrowRight'].includes(event.key)
@@ -107,83 +141,83 @@ export function AnnotationApp({
     return () => {
       window.removeEventListener('keydown', keyboard);
     };
-  }, [confirm, editor.busy, failure, navigate, save]);
-  const loadOpinions = async () => {
-    if (point === null || data?.mode !== 'assisted') return;
-    setOpinionLoading(true);
-    try {
-      await editor.flush();
-      const report = await transport.opinions(point.token);
-      if (
-        report.viewToken === point.viewToken &&
-        views.current.get(point.token) === report.viewToken
-      )
-        setSeen((previous) => new Map(previous).set(point.token, report));
-    } catch (error) {
-      failure(error);
-    } finally {
-      setOpinionLoading(false);
-    }
-  };
+  }, [confirmCurrent, busy, failure, navigate, save]);
   const selectOpinion = (opinion: WebOpinion) => {
     if (point !== null)
       editor.edit({
         ...point.form,
         noScores: false,
         pairs: opinion.pairs,
-        behaviour: opinion.behaviour,
-        rationale: opinion.rationale ?? '',
-        evidence: opinion.evidence,
       });
   };
-  const disagreements = new Set(
-    [...seen]
-      .filter(([, report]) => report.consensus.reasons.length > 0)
-      .map(([token]) => token),
-  );
   if (data === null)
     return (
       <p role={initialError === '' ? 'status' : 'alert'}>
         {initialError || copy.loading}
       </p>
     );
-  const cached = point === null ? undefined : seen.get(point.token);
-  const report =
-    point?.preparation === 'ready' && cached?.viewToken === point.viewToken
-      ? cached
-      : null;
-  const exposed = point !== null && (point.exposed || report !== null);
   return (
     <>
-      <header>
+      <header className="page-header">
         <h1>{copy.title}</h1>
-        <p>{data.mode === 'blind' ? copy.blind : copy.assisted}</p>
-        <p>{copy.shortcuts}</p>
+        <span className="mode-label">
+          {assisted ? copy.assisted : copy.blind}
+        </span>
+        <details className="keyboard-help">
+          <summary>{copy.keyboard}</summary>
+          <p>{copy.shortcuts}</p>
+        </details>
       </header>
       <main className="annotation-layout">
         <WorkflowList
           points={data.points}
           current={point?.token ?? null}
-          assisted={data.mode === 'assisted'}
-          disagreements={disagreements}
-          busy={editor.busy}
+          assisted={assisted}
+          visible={visible}
+          statuses={status}
+          statusError={statusError}
+          retryStatus={() => {
+            setStatusError(false);
+            setStatusAttempt((value) => value + 1);
+          }}
+          progress={progress}
+          consensus={consensus}
+          onProgress={setProgress}
+          onConsensus={setConsensus}
+          busy={busy}
           onOpen={(token) => {
             open(token).catch(failure);
           }}
         />
         {point !== null && (
           <>
-            <MaterialPane point={point} />
+            <MaterialPane point={point}>
+              {assisted && point.preparation === 'ready' && (
+                <OpinionPanel
+                  key={point.viewToken ?? point.token}
+                  report={opinions.report}
+                  failed={opinions.failed}
+                  busy={busy || editor.blocked}
+                  onRetry={opinions.retry}
+                  onSelect={selectOpinion}
+                />
+              )}
+            </MaterialPane>
             <section className="decision">
+              <h2>{copy.decision}</h2>
               <ScalePanel data={data} />
-              {exposed && <p>{copy.exposed}</p>}
               <LabelForm
                 form={point.form}
+                reviewer={reviewer ?? ''}
+                onReviewer={setReviewer}
                 date={point.decisionDate}
                 sampled={point.sampled}
                 disabled={
-                  editor.busy || point.preparation !== 'ready' || editor.blocked
+                  editingDisabled ||
+                  point.preparation !== 'ready' ||
+                  editor.blocked
                 }
+                confirmDisabled={editor.saving}
                 onChange={(form) => {
                   editor.edit(form);
                 }}
@@ -191,7 +225,7 @@ export function AnnotationApp({
                   editor.edit(point.form, sampled);
                 }}
                 onConfirm={() => {
-                  confirm().catch(failure);
+                  confirmCurrent().catch(failure);
                 }}
                 onConfirmNext={() => {
                   confirmNext().catch(failure);
@@ -200,19 +234,21 @@ export function AnnotationApp({
               <p role="status">{editor.message}</p>
               {editor.error !== '' && <p role="alert">{editor.error}</p>}
               <div className="actions">
-                <button
-                  type="button"
-                  disabled={editor.busy}
-                  onClick={() => {
-                    save().catch(failure);
-                  }}
-                >
-                  {copy.retry}
-                </button>
+                {editor.error !== '' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      save().catch(failure);
+                    }}
+                  >
+                    {copy.retry}
+                  </button>
+                )}
                 {editor.blocked && (
                   <button
                     type="button"
-                    disabled={editor.busy}
+                    disabled={busy}
                     onClick={() => {
                       confirm().catch(failure);
                     }}
@@ -222,7 +258,7 @@ export function AnnotationApp({
                 )}
                 <button
                   type="button"
-                  disabled={editor.busy}
+                  disabled={busy}
                   onClick={() => {
                     navigate(-1);
                   }}
@@ -231,7 +267,7 @@ export function AnnotationApp({
                 </button>
                 <button
                   type="button"
-                  disabled={editor.busy}
+                  disabled={busy}
                   onClick={() => {
                     navigate(1);
                   }}
@@ -245,7 +281,7 @@ export function AnnotationApp({
                   <p>{copy.settleHelp}</p>
                   <button
                     type="button"
-                    disabled={editor.busy}
+                    disabled={busy}
                     onClick={() => {
                       editor.settle().catch(failure);
                     }}
@@ -259,7 +295,7 @@ export function AnnotationApp({
                 <p>{copy.reviewWarning}</p>
                 <button
                   type="button"
-                  disabled={editor.busy}
+                  disabled={busy}
                   onClick={() => {
                     editor.rebase().catch(failure);
                   }}
@@ -270,21 +306,10 @@ export function AnnotationApp({
               {editor.newerDraft !== null && (
                 <DraftConflict
                   newer={editor.newerDraft}
-                  busy={editor.busy}
+                  busy={busy}
                   onResolve={(keepLocal) => {
                     editor.resolveDraft(keepLocal).catch(failure);
                   }}
-                />
-              )}
-              {data.mode === 'assisted' && point.preparation === 'ready' && (
-                <OpinionPanel
-                  key={point.viewToken ?? point.token}
-                  report={report}
-                  busy={editor.busy || opinionLoading || editor.blocked}
-                  onLoad={() => {
-                    loadOpinions().catch(failure);
-                  }}
-                  onSelect={selectOpinion}
                 />
               )}
             </section>

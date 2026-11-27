@@ -3,6 +3,7 @@ import {
   changedMaterial,
   formAnswer,
   humanTarget,
+  matrixPreview,
 } from '../../evals/src/annotation/web-form.js';
 import { webMutation } from '../../evals/src/annotation/web-validation.js';
 import { independentAnswer } from '../../evals/src/annotation/workflow-validation.js';
@@ -37,6 +38,27 @@ describe('annotation web form contracts', () => {
     expect(() =>
       independentAnswer(formAnswer({ ...EMPTY_FORM, pairs: '0,11' })),
     ).toThrow();
+  });
+  test('matrix preview follows every pair without filling an independent reference', () => {
+    const scored = { ...EMPTY_FORM, pairs: '2,2\n3,2' };
+    expect(matrixPreview(scored.pairs)).toEqual([
+      'review-allow',
+      'review-escalate',
+    ]);
+    expect(matrixPreview('9,1')).toEqual(['review-deny']);
+    expect(matrixPreview('9,1\n9,10')).toBeNull();
+    expect(
+      humanTarget(
+        independentAnswer(formAnswer(scored)),
+        'tester',
+        'confirmed',
+        '2026-11-02',
+      ),
+    ).toMatchObject({
+      behaviourReference: null,
+      rationale: '',
+      evidence: [],
+    });
   });
   test('explicit material-insufficient state retains null scores and behaviour', () => {
     expect(

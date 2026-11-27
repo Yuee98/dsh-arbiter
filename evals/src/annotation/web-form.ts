@@ -4,6 +4,9 @@ import type {
 } from '../data/annotation-types.js';
 import type { LabelTarget } from '../data/types.js';
 import type { WebForm } from './web-types.js';
+import { isPublicScore } from '../../../src/review-contract/rubrics.js';
+import { verdictFor } from '../../../src/review-contract/matrix.js';
+import type { ReviewVerdict } from '../../../src/types.js';
 import { materialLines } from './web-material.js';
 
 export function sameWebForm(left: WebForm, right: WebForm): boolean {
@@ -19,16 +22,50 @@ export function sameWebForm(left: WebForm, right: WebForm): boolean {
   return JSON.stringify(fields(left)) === JSON.stringify(fields(right));
 }
 
+function scorePairs(text: string): number[][] {
+  return text.trim() === ''
+    ? []
+    : text
+        .trim()
+        .split(/\n+/u)
+        .map((line) =>
+          line
+            .trim()
+            .split(/[,，\s]+/u)
+            .map(Number),
+        );
+}
+
+/** A matrix preview for each valid pair. Null means the supplied set is invalid. */
+export function matrixPreview(text: string): readonly ReviewVerdict[] | null {
+  const pairs = scorePairs(text);
+  const outcomes: ReviewVerdict[] = [];
+  const seen = new Set<string>();
+  let prohibited = 0;
+  for (const pair of pairs) {
+    const [risk, authorization] = pair;
+    const key = pair.join(',');
+    if (
+      pair.length !== 2 ||
+      !isPublicScore(risk) ||
+      !isPublicScore(authorization) ||
+      seen.has(key)
+    )
+      return null;
+    seen.add(key);
+    if (authorization === 1) prohibited += 1;
+    outcomes.push(verdictFor(risk, authorization));
+  }
+  return prohibited > 0 && prohibited !== pairs.length ? null : outcomes;
+}
+
 /** Parsing never expands independent score sets into a Cartesian product. */
 export function formAnswer(form: WebForm): unknown {
   return {
     pairs:
       form.noScores === true || form.pairs.trim() === ''
         ? null
-        : form.pairs
-            .trim()
-            .split(/\n+/u)
-            .map((line) => line.split(/[,，\s]+/u).map(Number)),
+        : scorePairs(form.pairs),
     behaviourReference: form.behaviour === '' ? null : form.behaviour,
     rationale: form.rationale,
     evidence: form.evidence.split('\n').filter((line) => line.trim() !== ''),

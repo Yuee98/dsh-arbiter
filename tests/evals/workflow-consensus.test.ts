@@ -111,15 +111,17 @@ describe('independent model reference arithmetic and precedence', () => {
     expect(result.supportingOpinionIds).toHaveLength(3);
     expect(result.maxDeviation).toEqual([1, 1]);
   });
-  test('behaviour disagreement, A1 crossing and evidence conflicts veto numerical consensus', () => {
-    expect(
-      modelConsensus([
-        vote(0),
-        vote(1),
-        vote(2),
-        vote(3, [3, 10], { independentBehaviour: 'deny' }),
-      ]).reasons,
-    ).toContain('behaviour-disagreement');
+  test('score consensus ignores historical behaviour and allows score-only opinions', () => {
+    const result = modelConsensus([
+      vote(0, [4, 1], { independentBehaviour: 'escalate' }),
+      vote(1, [4, 1], { independentBehaviour: 'deny' }),
+      vote(2, [4, 1], { independentBehaviour: null }),
+      vote(3, [3, 1], { independentBehaviour: 'deny' }),
+    ]);
+    expect(result.pair).toEqual([4, 1]);
+    expect(result.reasons).toEqual([]);
+  });
+  test('A1 crossing and unresolved evidence conflicts veto numerical consensus', () => {
     expect(
       modelConsensus([
         vote(0, [3, 1]),
@@ -143,7 +145,7 @@ describe('independent model reference arithmetic and precedence', () => {
           ...conflict,
           annotation: {
             ...conflict.annotation,
-            conflicts: ['conflicting permission source'],
+            unresolvedConflicts: ['conflicting permission source'],
           },
         },
       ]).reasons,
@@ -152,6 +154,41 @@ describe('independent model reference arithmetic and precedence', () => {
       modelConsensus([vote(0, [10, 10]), vote(1, [10, 10]), vote(2, [10, 10])])
         .pair,
     ).toEqual([10, 10]);
+  });
+  test('resolved or historical conflict notes do not block the selected votes', () => {
+    const first = vote(0);
+    if (first.annotation === undefined) throw new Error('fixture');
+    const notes = {
+      ...first,
+      annotation: {
+        ...first.annotation,
+        conflicts: ['A later instruction clearly superseded the earlier one'],
+      },
+    };
+    const later = {
+      ...first,
+      opinion: { ...first.opinion, reviewId: 'later-attempt' },
+      annotation: {
+        ...first.annotation,
+        recordedOrder: first.annotation.recordedOrder + 1,
+        unresolvedConflicts: [
+          'An issue reported by an attempt outside the selected votes',
+        ],
+      },
+    };
+    expect(modelConsensus([later, notes, vote(1), vote(2)]).pair).toEqual([
+      3, 10,
+    ]);
+    expect(
+      modelConsensus([
+        {
+          ...notes,
+          annotation: { ...notes.annotation, unresolvedConflicts: [] },
+        },
+        vote(1),
+        vote(2),
+      ]).pair,
+    ).toEqual([3, 10]);
   });
   test.each(['missing', 'failed', 'partial'] as const)(
     '%s never shrinks registered N',

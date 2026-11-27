@@ -1,5 +1,6 @@
 import type {
   WebBootstrap,
+  WebConsensusSummary,
   WebForm,
   WebOpinion,
   WebOpinionReport,
@@ -99,6 +100,25 @@ function bootstrap(value: unknown): value is WebBootstrap {
     bands(value['authorization'])
   );
 }
+function consensusSummary(
+  value: unknown,
+): value is readonly WebConsensusSummary[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item: unknown) =>
+        record(item) &&
+        typeof item['token'] === 'string' &&
+        ['agreed', 'disagreed', 'unavailable'].includes(String(item['status'])),
+    )
+  );
+}
+function stringList(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === 'string')
+  );
+}
 function opinionList(value: unknown): value is readonly WebOpinion[] {
   return (
     Array.isArray(value) &&
@@ -107,12 +127,12 @@ function opinionList(value: unknown): value is readonly WebOpinion[] {
         record(item) &&
         typeof item['id'] === 'string' &&
         typeof item['model'] === 'string' &&
-        (item['rawResponse'] === null ||
-          typeof item['rawResponse'] === 'string') &&
         (item['rationale'] === null || typeof item['rationale'] === 'string') &&
         typeof item['evidence'] === 'string' &&
         typeof item['pairs'] === 'string' &&
         typeof item['complete'] === 'boolean' &&
+        stringList(item['conflicts']) &&
+        stringList(item['unresolvedConflicts']) &&
         [
           '',
           'allow',
@@ -137,10 +157,7 @@ function opinions(value: unknown): value is WebOpinionReport {
     ['n', 'k', 'valid', 'missing', 'failed'].every(
       (key) => typeof consensus[key] === 'number',
     ) &&
-    Array.isArray(consensus['reasons']) &&
-    consensus['reasons'].every(
-      (reason: unknown) => typeof reason === 'string',
-    ) &&
+    stringList(consensus['reasons']) &&
     (consensus['draft'] === null || opinionList([consensus['draft']]))
   );
 }
@@ -175,6 +192,7 @@ export function webTransport(token: string): WebTransport {
   }
   return {
     bootstrap: () => request('/api/bootstrap', bootstrap),
+    consensus: () => request('/api/consensus', consensusSummary),
     point: (token) => request('/api/point', point, { token }),
     reload: (token) => request('/api/reload', point, { token }),
     settle: (token, revision) =>

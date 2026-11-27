@@ -105,6 +105,8 @@ export async function startAnnotationServer(
       let result: unknown;
       if (request.method === 'GET' && path === '/api/bootstrap')
         result = await workspace.bootstrap();
+      else if (request.method === 'GET' && path === '/api/consensus')
+        result = await workspace.consensus();
       else if (
         request.method === 'POST' &&
         [

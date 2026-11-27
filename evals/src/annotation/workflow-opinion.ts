@@ -58,10 +58,7 @@ export function responseOpinion(
       problems.push('evidence is absent or not reachable in the actual view');
   }
   const complete =
-    answer !== null &&
-    answer.pairs !== null &&
-    answer.behaviourReference !== null &&
-    problems.length === 0;
+    answer !== null && answer.pairs !== null && problems.length === 0;
   const pair = answer?.pairs?.length === 1 ? answer.pairs[0] : undefined;
   const error = response.error === null ? null : redactor.text(response.error);
   const failed = error !== null || parseFailed;
@@ -70,7 +67,7 @@ export function responseOpinion(
       ? 'missing'
       : failed
         ? 'failed'
-        : pair !== undefined && answer?.behaviourReference !== null
+        : pair !== undefined
           ? 'answered'
           : 'partial';
   const scores =
@@ -112,6 +109,9 @@ export function responseOpinion(
       parameters: redactor.value(model.parameters),
       pairs: answer?.pairs ?? null,
       conflicts: answer?.conflicts ?? [],
+      ...(answer?.unresolvedConflicts === undefined
+        ? {}
+        : { unresolvedConflicts: answer.unresolvedConflicts }),
       problems,
       complete: complete && !failed,
       sourceCommit: batch.sourceCommit,

@@ -229,12 +229,9 @@ export async function readReferenceSnapshot(
     if (
       humanState !== undefined &&
       (reference.target.decidedBy.trim() === '' ||
-        reference.target.rationale.trim() === '' ||
         reference.target.decidedAt === null)
     )
-      throw new Error(
-        'explicit human annotation requires author, date and rationale',
-      );
+      throw new Error('explicit human annotation requires author and date');
     if (
       entry.source === 'human-inherited' &&
       (reference.annotation.inheritedFrom?.trim().length ?? 0) === 0

@@ -1,83 +1,194 @@
-import { useState } from 'react';
 import type { WebOpinion, WebOpinionReport } from './web-types.js';
-import { copy } from './web-copy.js';
+import { matrixPreview } from './web-form.js';
+import {
+  behaviourLabels,
+  consensusReasons,
+  copy,
+  matrixLabels,
+} from './web-copy.js';
+
+function scoreLabel(pairs: string): string {
+  return pairs
+    .split('\n')
+    .filter(Boolean)
+    .map((pair) => {
+      const [risk, authorization] = pair.split(',');
+      return `R${risk ?? '–'} / A${authorization ?? '–'}`;
+    })
+    .join(' · ');
+}
+
+function ConflictNotes({
+  label,
+  notes,
+}: {
+  readonly label: string;
+  readonly notes: readonly string[];
+}) {
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <h4>{label}</h4>
+      <ul>
+        {notes.map((note, index) => (
+          <li key={String(index)}>{note}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function OpinionRow({
+  opinion,
+  busy,
+  onSelect,
+}: {
+  readonly opinion: WebOpinion;
+  readonly busy: boolean;
+  readonly onSelect: (opinion: WebOpinion) => void;
+}) {
+  const verdicts = matrixPreview(opinion.pairs) ?? [];
+  const result = [...new Set(verdicts)]
+    .map((verdict) => matrixLabels[verdict])
+    .join(' / ');
+  return (
+    <details className="model-row">
+      <summary>
+        <span className="model-name">{opinion.model}</span>
+        <span className="model-score">{scoreLabel(opinion.pairs) || '—'}</span>
+        <span className="model-behaviour">{result}</span>
+      </summary>
+      <div className="model-detail">
+        {!opinion.complete && (
+          <p className="material-muted">{copy.incomplete}</p>
+        )}
+        {opinion.rationale && (
+          <>
+            <h4>{copy.rationale}</h4>
+            <p className="event-text">{opinion.rationale}</p>
+          </>
+        )}
+        {opinion.evidence && (
+          <>
+            <h4>{copy.modelEvidence}</h4>
+            <ul>
+              {opinion.evidence
+                .split('\n')
+                .filter(Boolean)
+                .map((quote, index) => (
+                  <li key={String(index)}>{quote}</li>
+                ))}
+            </ul>
+          </>
+        )}
+        {opinion.behaviour !== '' && (
+          <p className="material-muted">
+            {copy.historicalModelBehaviour} {behaviourLabels[opinion.behaviour]}
+          </p>
+        )}
+        <ConflictNotes label={copy.modelConflicts} notes={opinion.conflicts} />
+        <ConflictNotes
+          label={copy.unresolvedConflicts}
+          notes={opinion.unresolvedConflicts}
+        />
+        {opinion.complete && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              onSelect(opinion);
+            }}
+          >
+            {copy.selectOpinion}
+          </button>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function OpinionPanel({
   report,
   busy,
-  onLoad,
+  failed,
+  onRetry,
   onSelect,
 }: {
   readonly report: WebOpinionReport | null;
   readonly busy: boolean;
-  readonly onLoad: () => void;
+  readonly failed: boolean;
+  readonly onRetry: () => void;
   readonly onSelect: (opinion: WebOpinion) => void;
 }) {
-  const [visible, setVisible] = useState(false);
+  const consensus = report?.consensus;
+  const draft = consensus?.draft;
+  const agreed = draft != null;
+  const state = agreed
+    ? copy.consensusAgreed
+    : consensus?.valid === 0
+      ? copy.consensusMissing
+      : copy.consensusDisagreed;
   return (
-    <section>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          if (report === null) {
-            setVisible(true);
-            onLoad();
-          } else {
-            if (!visible) onLoad();
-            setVisible((value) => !value);
-          }
-        }}
-      >
-        {visible && report !== null ? copy.hideOpinions : copy.opinions}
-      </button>
-      {visible && report !== null && (
+    <section className="model-opinions" aria-label={copy.opinions}>
+      <div className="opinion-heading">
+        <h3>{copy.opinions}</h3>
+        <span className="material-muted">{copy.modelMatrixBehaviour}</span>
+        {consensus !== undefined && (
+          <span className="consensus-badge" data-agreed={agreed}>
+            {state}
+            {consensus.n > 0 &&
+              ` · ${String(consensus.k)}/${String(consensus.n)}`}
+          </span>
+        )}
+      </div>
+      {report === null ? (
+        <p className="material-muted">
+          {failed ? copy.opinionError : copy.loading}
+          {failed && (
+            <button type="button" onClick={onRetry}>
+              {copy.retryRead}
+            </button>
+          )}
+        </p>
+      ) : (
         <>
-          <h3>{copy.consensus}</h3>
-          <p>
-            {copy.consensusCounts}: {report.consensus.k}/{report.consensus.n} /{' '}
-            {report.consensus.valid} / {report.consensus.missing} /{' '}
-            {report.consensus.failed}
-          </p>
-          {report.consensus.draft === null ? (
-            <>
-              <p>{copy.consensusUnavailable}</p>
-              <ul>
-                {report.consensus.reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            </>
-          ) : (
+          {report.opinions.length === 0 && (
+            <p className="material-muted">{copy.noOpinions}</p>
+          )}
+          {report.opinions.map((opinion) => (
+            <OpinionRow
+              key={opinion.id}
+              opinion={opinion}
+              busy={busy}
+              onSelect={onSelect}
+            />
+          ))}
+          {draft != null ? (
             <button
               type="button"
+              className="consensus-action"
               disabled={busy}
               onClick={() => {
-                if (report.consensus.draft !== null)
-                  onSelect(report.consensus.draft);
+                onSelect(draft);
               }}
             >
               {copy.consensusSelect}
             </button>
+          ) : (
+            consensus !== undefined &&
+            consensus.valid > 0 && (
+              <details className="consensus-detail">
+                <summary>{copy.consensusWhy}</summary>
+                <ul>
+                  {consensus.reasons.map((reason) => (
+                    <li key={reason}>
+                      {consensusReasons.get(reason) ?? reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )
           )}
-          {report.opinions.length === 0 && <p>{copy.noOpinions}</p>}
-          {report.opinions.map((opinion) => (
-            <article key={opinion.id}>
-              <h3>{opinion.model}</h3>
-              <pre>{opinion.rawResponse}</pre>
-              <p>{opinion.rationale}</p>
-              <pre>{opinion.evidence}</pre>
-              {!opinion.complete && <p>{copy.incomplete}</p>}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  onSelect(opinion);
-                }}
-              >
-                {copy.selectOpinion}
-              </button>
-            </article>
-          ))}
         </>
       )}
     </section>

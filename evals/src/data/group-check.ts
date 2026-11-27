@@ -87,15 +87,16 @@ function opinionProblems(
 ): readonly Finding[] {
   const problems: Finding[] = [];
   const { risk, authorization, model } = value.opinion;
+  const annotation = value.annotation;
   const full =
     risk !== null &&
     authorization !== null &&
-    value.independentBehaviour !== null;
+    (annotation !== undefined || value.independentBehaviour !== null);
   if (value.outcome === 'answered' && !full)
     problems.push({
       path,
       message:
-        'answered opinion needs both scores and an independent behaviour',
+        'answered opinion needs both scores. Unannotated opinions also need an independent behaviour',
     });
   if (
     (value.outcome === 'failed' || value.outcome === 'missing') &&
@@ -109,20 +110,22 @@ function opinionProblems(
     });
   if (value.outcome === 'failed' && value.error === undefined)
     problems.push({ path, message: 'failed opinion needs its actual error' });
-  if (value.outcome === 'partial' && full)
+  if (
+    value.outcome === 'partial' &&
+    full &&
+    (value.independentBehaviour !== null || annotation?.complete === true)
+  )
     problems.push({
       path,
       message: 'complete opinion must be recorded as answered',
     });
   if ((model.version === null) !== (model.versionSource === 'unknown'))
     problems.push({ path, message: 'model version and its source disagree' });
-  const annotation = value.annotation;
   if (annotation !== undefined) {
     if (
       annotation.complete &&
       (annotation.pairs === null ||
         annotation.rawResponse === null ||
-        value.independentBehaviour === null ||
         annotation.problems.length > 0)
     )
       problems.push({
@@ -249,13 +252,11 @@ function labelProblems(
   if (
     humanState !== undefined &&
     humanState !== 'draft' &&
-    (value.target.decidedBy.trim() === '' ||
-      value.target.rationale.trim() === '' ||
-      value.target.decidedAt === null)
+    (value.target.decidedBy.trim() === '' || value.target.decidedAt === null)
   )
     problems.push({
       path,
-      message: 'explicit human annotation requires author, date and rationale',
+      message: 'explicit human annotation requires author and date',
     });
   if (
     humanState !== undefined &&

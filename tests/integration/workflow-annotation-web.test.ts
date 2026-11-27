@@ -111,6 +111,7 @@ describe(
           await readFile(join(f.path, 'data/dev/f01/opinions.json'), 'utf8'),
         ).toBe(poison);
         await expect(second.opinions(token)).rejects.toThrow(/blind/u);
+        await expect(second.consensus()).rejects.toThrow(/blind/u);
         const batchFiles = (await readdir(second.directory)).filter((file) =>
           /^[a-f0-9-]{36}\.json$/u.test(file),
         );

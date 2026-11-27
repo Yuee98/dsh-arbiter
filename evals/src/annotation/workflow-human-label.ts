@@ -44,12 +44,9 @@ export async function humanBatchFill(value: unknown): Promise<HumanBatch> {
     if (
       decision.state !== 'draft' &&
       (decision.target.decidedBy.trim() === '' ||
-        decision.target.rationale.trim() === '' ||
         decision.target.decidedAt === null)
     )
-      throw new Error(
-        'explicit human decisions require an author, date and rationale',
-      );
+      throw new Error('explicit human decisions require an author and date');
   }
   if (
     new Set(fill.decisions.map((value) => value.questionId)).size !==

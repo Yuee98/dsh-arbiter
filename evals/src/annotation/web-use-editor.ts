@@ -11,6 +11,7 @@ export function useAnnotationEditor(
   const [point, setPoint] = useState<WebPoint | null>(null);
   const [newerDraft, setNewerDraft] = useState<WebPoint | null>(null);
   const [busy, setBusy] = useState(false),
+    [saving, setSaving] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
   const current = useRef<WebPoint | null>(null),
@@ -53,7 +54,7 @@ export function useAnnotationEditor(
       if (value === null || !dirty.current) return;
       if (blocked.current) throw new Error(copy.unknown);
       const before = generation.current;
-      setBusy(true);
+      setSaving(true);
       setMessage(copy.saving);
       try {
         const saved = await transport.save({
@@ -78,12 +79,23 @@ export function useAnnotationEditor(
         failure(error);
         throw error;
       } finally {
-        setBusy(false);
+        setSaving(false);
       }
     });
     queue.current = operation.catch(() => undefined);
     return operation;
   }, [accept, failure, transport]);
+  const readOpinions = useCallback(
+    (token: string) => {
+      const operation = queue.current.then(() => transport.opinions(token));
+      queue.current = operation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return operation;
+    },
+    [transport],
+  );
   const flush = useCallback(async () => {
     await queue.current;
     while (dirty.current) await save();
@@ -126,38 +138,46 @@ export function useAnnotationEditor(
     },
     [accept],
   );
-  const confirm = useCallback(async () => {
-    try {
-      if (!blocked.current) await flush();
-      const value = current.current;
-      if (value === null || value.preparation !== 'ready') return false;
-      setBusy(true);
+  const confirm = useCallback(
+    async (reviewer?: string) => {
       try {
-        const saved = await transport.confirm({
-          token: value.token,
-          revision: value.revision,
-          form: value.form,
-          sampled: value.sampled,
-        });
-        dirty.current = false;
-        blocked.current = false;
-        accept(saved);
-        setMessage(copy.confirmed);
-        setError('');
-        return true;
+        if (!blocked.current) await flush();
+        const value = current.current;
+        if (value === null || value.preparation !== 'ready') return false;
+        const author = blocked.current
+          ? value.form.author
+          : (reviewer ?? value.form.author);
+        const form = { ...value.form, author };
+        if (value.form.author !== author) accept({ ...value, form });
+        setBusy(true);
+        try {
+          const saved = await transport.confirm({
+            token: value.token,
+            revision: value.revision,
+            form,
+            sampled: value.sampled,
+          });
+          dirty.current = false;
+          blocked.current = false;
+          accept(saved);
+          setMessage(copy.confirmed);
+          setError('');
+          return true;
+        } catch (error) {
+          blocked.current =
+            error instanceof WebRequestError ? error.pending : true;
+          failure(error);
+          return false;
+        }
       } catch (error) {
-        blocked.current =
-          error instanceof WebRequestError ? error.pending : true;
         failure(error);
         return false;
+      } finally {
+        setBusy(false);
       }
-    } catch (error) {
-      failure(error);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [accept, failure, flush, transport]);
+    },
+    [accept, failure, flush, transport],
+  );
   const rebase = useCallback(async () => {
     const value = current.current;
     if (value === null) return;
@@ -270,14 +290,15 @@ export function useAnnotationEditor(
     [accept, failure, newerDraft, transport],
   );
   useEffect(() => {
-    if (!dirty.current || busy || blocked.current || failed.current) return;
+    if (!dirty.current || busy || saving || blocked.current || failed.current)
+      return;
     const timer = setTimeout(() => {
       save().catch(failure);
     }, 500);
     return () => {
       clearTimeout(timer);
     };
-  }, [point, busy, failure, save]);
+  }, [point, busy, saving, failure, save]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (dirty.current || blocked.current) event.preventDefault();
@@ -293,6 +314,7 @@ export function useAnnotationEditor(
     settle,
     point,
     busy,
+    saving,
     message,
     error,
     edit,
@@ -300,7 +322,7 @@ export function useAnnotationEditor(
     save,
     confirm,
     rebase,
-    flush,
+    readOpinions,
     failure,
     blocked: blocked.current,
   };
