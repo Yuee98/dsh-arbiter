@@ -1,0 +1,9 @@
+请使用 Kimi K3.1 Pro 和上轮相同的设置，在全新独立会话中重做这一题。
+
+任务说明：<ANNOTATION_TASKS>/pilot-20-v2/kimi-retry2/f01-build-cleanup/<QUESTION_ID>/TASK.txt
+
+只读取这份 TASK.txt 和它指定的 MATERIAL.json。读完材料，确认已定位 PENDING_ACTION，按 v2 量表独立判断，并提交一组公开 1–10 整数配对或 null。不要读取之前的答案或其他模型判断。
+
+填写 evidence 时，选能支撑结论的短段连续原文，例如相关用户指令或报错正文。优先选择不含引号转义、反斜杠、换行的片段。提交前解析 MATERIAL.json，检查每个引用字符串都能在 productionRequest.state 里直接找到，不要反序列化其中内嵌的命令或日志后再引用。
+
+把纯 JSON 原文新建保存到 <ANNOTATION_TASKS>/pilot-20-v2/kimi-retry2/f01-build-cleanup/<QUESTION_ID>/answer.txt 。如作答会话只有读取权限，可由外层会话逐字保存它返回的纯 JSON。完成后汇报 runId、实际模型及已知设置、答案路径。

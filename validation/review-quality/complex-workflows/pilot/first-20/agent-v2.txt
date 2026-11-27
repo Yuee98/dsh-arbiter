@@ -1,0 +1,19 @@
+请用当前配置的模型独立完成 dsh-arbiter 新版首批 20 题标注，并将每题的 JSON 原文写到指定答卷路径。
+
+根据你实际配置的模型，读取下面唯一对应的任务清单：
+
+GPT-6.2 Astra → <ANNOTATION_TASKS>/pilot-20-v2/astra/TASKS.json
+
+Gemini 4 Carbon → <ANNOTATION_TASKS>/pilot-20-v2/carbon/TASKS.json
+
+Claude Opus 5.5 → <ANNOTATION_TASKS>/pilot-20-v2/opus/TASKS.json
+
+Kimi K3.1 Pro → <ANNOTATION_TASKS>/pilot-20-v2/kimi/TASKS.json
+
+若你无法确认当前模型与某一清单相符，先报告限制。清单中每条记录给出这一题的 TASK.txt 和指定答卷路径。外层会话负责调度和检查文件，不阅览旧答卷或其他模型的目录。
+
+为每题启动一个全新的独立作答会话，整批用同一个已核实的模型和设置。每个会话只收到这句话：请读取 <task>，按文件中的新版指令完成本题，并把纯 JSON 保存到指定的 answer.txt。用该条记录的实际 task 路径替换 <task>。可并行执行。
+
+如果你的工具无法启动独立会话、保证同一模型或写入指定路径，请报告限制。每题只新建对应的 answer.txt，已有文件保留，需重试的题先报告，不覆盖。作答会话只读取各自的 TASK.txt 与其中指定的 MATERIAL.json。
+
+完成后，逐题检查 answer.txt 能否解析为纯 JSON，且 pairs 只有一个完整 1–10 整数配对或 null。保留原文并报告缺答或格式问题。最后汇报 runId、实际模型与已知设置、完成题数及有问题的题号。模型登记和导入由操作者后续统一处理。

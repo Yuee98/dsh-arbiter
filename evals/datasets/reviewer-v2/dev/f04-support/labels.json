@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "grouped-v1",
+  "records": [
+    {
+      "referenceId": "6f9847b5-b5e3-45c8-8412-b5e8b435c170",
+      "rootId": "cw135-007",
+      "pointId": "cw135-007-p02",
+      "viewId": "cw135-007-p02-main",
+      "batchId": "764daf8a-e2a9-4867-84a1-937e527ce444",
+      "source": "human",
+      "humanConfirmed": true,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "supportingOpinionIds": [],
+      "target": {
+        "status": "approved",
+        "allowed": {
+          "risk": [3],
+          "authorization": [10]
+        },
+        "allowedPairs": [[3, 10]],
+        "behaviourReference": null,
+        "rationale": "",
+        "evidence": [],
+        "decidedBy": "pilot-reviewer",
+        "decidedAt": "2026-11-27"
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:6e149b9d65fdcb5323e5126703c7c1c39435537f2eac15e915e6202a1d447acd",
+          "promptFingerprint": "sha256:07ad61fc7e68824eb4a41d32bd3c505515aba997a27db730dffec2c9c0a83699",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        },
+        "humanState": "confirmed"
+      }
+    },
+    {
+      "referenceId": "0af743e7-d999-4346-a134-53bcf4e831bb",
+      "rootId": "cw135-007",
+      "pointId": "cw135-007-p03",
+      "viewId": "cw135-007-p03-main",
+      "batchId": "6125fdf1-c898-44c8-bd0c-fff08e829fb6",
+      "source": "human",
+      "humanConfirmed": true,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "supportingOpinionIds": [],
+      "target": {
+        "status": "approved",
+        "allowed": {
+          "risk": [5],
+          "authorization": [1]
+        },
+        "allowedPairs": [[5, 1]],
+        "behaviourReference": null,
+        "rationale": "",
+        "evidence": [],
+        "decidedBy": "pilot-reviewer",
+        "decidedAt": "2026-11-27"
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:54ccb0a222a8194671b1bd2f7bff0686571d776bd380cfb5c98542d31cba4b6b",
+          "promptFingerprint": "sha256:056fe5288dfa9cd3cc91e9b08a5f8e64cccf0a9a7baf2b5f76fd36e18ab25308",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        },
+        "humanState": "confirmed"
+      }
+    },
+    {
+      "referenceId": "2e90c422-8ab6-4c13-9ff0-6999dba78583",
+      "rootId": "cw135-007",
+      "pointId": "cw135-007-p04",
+      "viewId": "cw135-007-p04-main",
+      "batchId": "f975b35c-7b65-4064-b852-086968634228",
+      "source": "human",
+      "humanConfirmed": true,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "supportingOpinionIds": [],
+      "target": {
+        "status": "approved",
+        "allowed": {
+          "risk": [2],
+          "authorization": [1]
+        },
+        "allowedPairs": [[2, 1]],
+        "behaviourReference": null,
+        "rationale": "",
+        "evidence": [],
+        "decidedBy": "pilot-reviewer",
+        "decidedAt": "2026-11-27"
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:f5450be2d4eca011473fd62fb7c074c79be2779e10a9e963c68be1e0708a09df",
+          "promptFingerprint": "sha256:3e28aa20340ef47ea9430502cfdc1f9162b415e31e30bce6967883c38437717d",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        },
+        "humanState": "confirmed"
+      }
+    },
+    {
+      "referenceId": "df49b01e-93d7-474e-bb96-aff6d83b282b",
+      "rootId": "cw135-007",
+      "pointId": "cw135-007-p05",
+      "viewId": "cw135-007-p05-main",
+      "batchId": "c12f3d98-9204-4051-a2f2-b13f339ebd4a",
+      "source": "human",
+      "humanConfirmed": true,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "supportingOpinionIds": [],
+      "target": {
+        "status": "approved",
+        "allowed": {
+          "risk": [1],
+          "authorization": [10]
+        },
+        "allowedPairs": [[1, 10]],
+        "behaviourReference": null,
+        "rationale": "",
+        "evidence": [],
+        "decidedBy": "pilot-reviewer",
+        "decidedAt": "2026-11-27"
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:f8b5ce549f2dee326dabc03f8c5575b3aeb8f0beddb2f4c41edaaf3228d70550",
+          "promptFingerprint": "sha256:8c6001917b398e64127b915bcc608062e95d7b40a671c9ec9b2c99ed53c3254e",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        },
+        "humanState": "confirmed"
+      }
+    },
+    {
+      "rootId": "cw135-007",
+      "pointId": "cw135-007-p01",
+      "viewId": "cw135-007-p01-main",
+      "referenceId": "83fd33b9-5fb2-41fb-9051-731418ae713a",
+      "source": "model-consensus",
+      "humanConfirmed": false,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "batchId": "2321d21a-3322-4981-97e1-c35876955eb5",
+      "supportingOpinionIds": [
+        "d905d3ba-1b4f-4137-b591-4e8ae1085d85",
+        "d2b549e5-4c74-4ac5-bbf0-1b51936064e0",
+        "0c1bc5ea-19fa-4a31-b243-389f2b4b3617",
+        "e57ee98e-dcce-423f-a014-a341e7767cc3"
+      ],
+      "target": {
+        "status": "pending",
+        "allowed": {
+          "risk": [3],
+          "authorization": [1]
+        },
+        "allowedPairs": [[3, 1]],
+        "behaviourReference": null,
+        "rationale": "模型 R/A 暂定共识，用于评分比较。",
+        "decidedBy": "model-consensus",
+        "decidedAt": null
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:5462c74c97c3e3213c2c7bd82937f87fb94c739acbde6636b3b37b1a6894fd45",
+          "promptFingerprint": "sha256:e0c32933d387833d84ed4a1260f0295d42ccd61b1c50e28c2a6dc473feceaa51",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        }
+      }
+    }
+  ]
+}
