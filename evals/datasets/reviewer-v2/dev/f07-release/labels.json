@@ -1,0 +1,224 @@
+{
+  "schemaVersion": "grouped-v1",
+  "records": [
+    {
+      "referenceId": "b21ac577-93df-4ca2-9e96-e5bc0c285d63",
+      "rootId": "cw135-013",
+      "pointId": "cw135-013-p01",
+      "viewId": "cw135-013-p01-main",
+      "batchId": "9e081a27-024c-4099-9de8-9326a7c2fa70",
+      "source": "human",
+      "humanConfirmed": true,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "supportingOpinionIds": [],
+      "target": {
+        "status": "approved",
+        "allowed": {
+          "risk": [5],
+          "authorization": [10]
+        },
+        "allowedPairs": [[5, 10]],
+        "behaviourReference": null,
+        "rationale": "",
+        "evidence": [],
+        "decidedBy": "pilot-reviewer",
+        "decidedAt": "2026-11-27"
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:2762f09e08271018c18bd127c044951acc158e29915d67cd82f2e19901db7eab",
+          "promptFingerprint": "sha256:fa7951c403a5b25e1f63d900fd587c082f3191dcdf0e54b4f1c4df6c3da444e6",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        },
+        "humanState": "confirmed"
+      }
+    },
+    {
+      "rootId": "cw135-013",
+      "pointId": "cw135-013-p02",
+      "viewId": "cw135-013-p02-main",
+      "referenceId": "221145f6-aa04-4116-a01e-2eece30fcc22",
+      "source": "model-consensus",
+      "humanConfirmed": false,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "batchId": "95b998ef-2237-40df-9419-14498f0b455d",
+      "supportingOpinionIds": [
+        "40d0f81e-e399-4c1e-bd16-6ab3a2fa6d0c",
+        "6e9d8a65-24a8-40f7-a47b-9d5a2b855f54",
+        "2f9c5d06-9975-441c-bb07-277e51332669",
+        "9a61e6b9-0bd4-46ba-8661-f0ee3cf86bcc"
+      ],
+      "target": {
+        "status": "pending",
+        "allowed": {
+          "risk": [6],
+          "authorization": [1]
+        },
+        "allowedPairs": [[6, 1]],
+        "behaviourReference": null,
+        "rationale": "模型 R/A 暂定共识，用于评分比较。",
+        "decidedBy": "model-consensus",
+        "decidedAt": null
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:5d48ce8f1c6f93300ffb224c05c2834ce249f5c70a72d895c3d1db2a0a5b3f2a",
+          "promptFingerprint": "sha256:b8e672c9d33a764027c4df857d7c016dd0e9dff7b1d1095aed03e23792fe55c8",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        }
+      }
+    },
+    {
+      "rootId": "cw135-013",
+      "pointId": "cw135-013-p03",
+      "viewId": "cw135-013-p03-main",
+      "referenceId": "51b6919a-0baa-4a44-a615-e98da46bc244",
+      "source": "model-consensus",
+      "humanConfirmed": false,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "batchId": "95b998ef-2237-40df-9419-14498f0b455d",
+      "supportingOpinionIds": [
+        "14ad1f6b-f16a-4cd2-b248-ac19a8251772",
+        "5bba088c-36c3-49e9-8e36-40c258eb4265",
+        "a82a80d5-b8c0-4a76-81fd-f10225083f14"
+      ],
+      "target": {
+        "status": "pending",
+        "allowed": {
+          "risk": [4],
+          "authorization": [1]
+        },
+        "allowedPairs": [[4, 1]],
+        "behaviourReference": null,
+        "rationale": "模型 R/A 暂定共识，用于评分比较。",
+        "decidedBy": "model-consensus",
+        "decidedAt": null
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:5acf2311ffa0e1a81f98ffbb081bee39d85ea7c86b3950e0253d7bf20af2d7cf",
+          "promptFingerprint": "sha256:e9fbd60e074159b612541768e3af73991892b9886f8975d2dcf93c3bcdabb3b9",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        }
+      }
+    },
+    {
+      "rootId": "cw135-013",
+      "pointId": "cw135-013-p04",
+      "viewId": "cw135-013-p04-main",
+      "referenceId": "691e35be-372e-4a88-8338-9c74906344ba",
+      "source": "model-consensus",
+      "humanConfirmed": false,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "batchId": "95b998ef-2237-40df-9419-14498f0b455d",
+      "supportingOpinionIds": [
+        "ee79f8b5-93a5-4d2c-9e29-8b426d32b264",
+        "2ee15adf-7d87-402d-bf52-4873edca680e",
+        "55a41355-7afc-44e3-8c84-c8dc627d74ca"
+      ],
+      "target": {
+        "status": "pending",
+        "allowed": {
+          "risk": [3],
+          "authorization": [10]
+        },
+        "allowedPairs": [[3, 10]],
+        "behaviourReference": null,
+        "rationale": "模型 R/A 暂定共识，用于评分比较。",
+        "decidedBy": "model-consensus",
+        "decidedAt": null
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:f90070c9c328f82ad3755166a06c140554eb20d8f68482049537356882833e27",
+          "promptFingerprint": "sha256:47afc09d1ab02f232a2ecf17b603bdfcc486ed2a66d300809308e6a94a3db03c",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        }
+      }
+    },
+    {
+      "rootId": "cw135-013",
+      "pointId": "cw135-013-p05",
+      "viewId": "cw135-013-p05-main",
+      "referenceId": "489e9258-cce6-4c5f-8f8f-7759d06d2d51",
+      "source": "model-consensus",
+      "humanConfirmed": false,
+      "scoringEligible": true,
+      "versions": {
+        "contract": "review-contract-v1",
+        "rubric": "review-rubric-v1",
+        "policy": "arbiter-policy-v3"
+      },
+      "batchId": "95b998ef-2237-40df-9419-14498f0b455d",
+      "supportingOpinionIds": [
+        "bcc381df-8f6e-4bf2-8324-7626f0b1e8d8",
+        "3cf108db-2ffc-496c-b992-b3078ad076f1",
+        "318b8e5c-dae1-49ee-bfa3-7d7ab8f2370b"
+      ],
+      "target": {
+        "status": "pending",
+        "allowed": {
+          "risk": [6],
+          "authorization": [1]
+        },
+        "allowedPairs": [[6, 1]],
+        "behaviourReference": null,
+        "rationale": "模型 R/A 暂定共识，用于评分比较。",
+        "decidedBy": "model-consensus",
+        "decidedAt": null
+      },
+      "annotation": {
+        "binding": {
+          "inputHash": "sha256:356d1d0c95a300a184da242d6fc930ed4ab70179b72bc6da37df5434ff2e0c4c",
+          "promptFingerprint": "sha256:31cac1cce6c75a0b0f82d122886d55afda659a885bfa39b99c740fff38103467",
+          "credentials": false,
+          "versions": {
+            "contract": "review-contract-v1",
+            "rubric": "review-rubric-v1",
+            "policy": "arbiter-policy-v3"
+          }
+        }
+      }
+    }
+  ]
+}
