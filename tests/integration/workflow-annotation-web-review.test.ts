@@ -280,13 +280,20 @@ describe('annotation PR regression contracts', { timeout: 30_000 }, () => {
         dataset: f.dataset,
         baseline: fourth.baseline,
         returned: returns(fourth.batch, {
-          conflicts: ['Synthetic permission evidence conflict'],
+          conflicts: ['Synthetic superseded instruction'],
+          unresolvedConflicts: ['Synthetic permission evidence conflict'],
         }),
         write: true,
       });
       const conflict = await workspace.opinions(token);
       expect(conflict.consensus.draft).toBeNull();
       expect(conflict.consensus.reasons).toContain('key-evidence-conflict');
+      expect(conflict.opinions).toContainEqual(
+        expect.objectContaining({
+          conflicts: ['Synthetic superseded instruction'],
+          unresolvedConflicts: ['Synthetic permission evidence conflict'],
+        }),
+      );
       const rebased = await workspace.rebase(token, point.revision);
       expect(rebased.viewToken).not.toBe(complete.viewToken);
       expect((await workspace.opinions(token)).viewToken).toBe(

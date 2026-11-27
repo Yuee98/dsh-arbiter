@@ -107,6 +107,8 @@ function fixture(
             pairs: '3,10',
             behaviour: 'deny',
             complete: true,
+            conflicts: ['A later instruction superseded the first'],
+            unresolvedConflicts: [],
           },
         ],
         consensus: {
@@ -441,6 +443,9 @@ describe('standalone workflow annotation production React page', () => {
     await user.click(name);
     expect(within(panel).getByText('<script>unsafe()</script>')).toBeVisible();
     expect(within(panel).getByText('VISIBLE_QUOTE')).toBeVisible();
+    expect(
+      within(panel).getByText('A later instruction superseded the first'),
+    ).toBeVisible();
     await user.click(
       within(panel).getByRole('button', { name: copy.selectOpinion }),
     );

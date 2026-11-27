@@ -113,6 +113,12 @@ function consensusSummary(
     )
   );
 }
+function stringList(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === 'string')
+  );
+}
 function opinionList(value: unknown): value is readonly WebOpinion[] {
   return (
     Array.isArray(value) &&
@@ -125,6 +131,8 @@ function opinionList(value: unknown): value is readonly WebOpinion[] {
         typeof item['evidence'] === 'string' &&
         typeof item['pairs'] === 'string' &&
         typeof item['complete'] === 'boolean' &&
+        stringList(item['conflicts']) &&
+        stringList(item['unresolvedConflicts']) &&
         [
           '',
           'allow',
@@ -149,10 +157,7 @@ function opinions(value: unknown): value is WebOpinionReport {
     ['n', 'k', 'valid', 'missing', 'failed'].every(
       (key) => typeof consensus[key] === 'number',
     ) &&
-    Array.isArray(consensus['reasons']) &&
-    consensus['reasons'].every(
-      (reason: unknown) => typeof reason === 'string',
-    ) &&
+    stringList(consensus['reasons']) &&
     (consensus['draft'] === null || opinionList([consensus['draft']]))
   );
 }

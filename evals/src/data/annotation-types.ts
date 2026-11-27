@@ -28,6 +28,7 @@ export interface OpinionAnnotation {
   readonly parameters: unknown;
   readonly pairs: readonly ScorePair[] | null;
   readonly conflicts: readonly string[];
+  readonly unresolvedConflicts?: readonly string[];
   readonly problems: readonly string[];
   readonly complete: boolean;
   readonly recordedOrder: number;
@@ -50,4 +51,5 @@ export interface IndependentAnswer {
   /** Exact quotes from the actual rendered material, never hidden source IDs. */
   readonly evidence: readonly string[];
   readonly conflicts: readonly string[];
+  readonly unresolvedConflicts?: readonly string[];
 }

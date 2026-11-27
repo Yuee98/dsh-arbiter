@@ -112,6 +112,9 @@ export function responseOpinion(
       parameters: redactor.value(model.parameters),
       pairs: answer?.pairs ?? null,
       conflicts: answer?.conflicts ?? [],
+      ...(answer?.unresolvedConflicts === undefined
+        ? {}
+        : { unresolvedConflicts: answer.unresolvedConflicts }),
       problems,
       complete: complete && !failed,
       sourceCommit: batch.sourceCommit,

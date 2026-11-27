@@ -41,6 +41,8 @@ export function opinionReport(
       opinion.annotation?.pairs?.map((pair) => pair.join(',')).join('\n') ?? '',
     behaviour: opinion.independentBehaviour ?? '',
     complete,
+    conflicts: opinion.annotation?.conflicts ?? [],
+    unresolvedConflicts: opinion.annotation?.unresolvedConflicts ?? [],
   });
   const reference = current.reference,
     consensus = current.consensus;
@@ -93,6 +95,8 @@ export function opinionReport(
                   .join('\n') ?? '',
               behaviour: reference.target.behaviourReference ?? '',
               complete: true,
+              conflicts: [],
+              unresolvedConflicts: [],
             },
     },
   };

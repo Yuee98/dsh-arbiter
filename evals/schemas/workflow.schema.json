@@ -1015,6 +1015,13 @@
                 "type": "string"
               }
             },
+            "unresolvedConflicts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            },
             "problems": {
               "type": "array",
               "items": {

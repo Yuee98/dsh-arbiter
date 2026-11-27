@@ -60,6 +60,10 @@ export const answerSchema = {
     rationale: { type: 'string' },
     evidence: { type: 'array', items: { ...textSchema, pattern: '\\S' } },
     conflicts: { type: 'array', items: textSchema },
+    unresolvedConflicts: {
+      type: 'array',
+      items: { ...textSchema, pattern: '\\S' },
+    },
   },
 };
 export function independentAnswer(value: unknown): IndependentAnswer {

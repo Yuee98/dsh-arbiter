@@ -55,6 +55,8 @@ export interface WebOpinion {
   readonly pairs: string;
   readonly behaviour: BehaviourReference | '';
   readonly complete: boolean;
+  readonly conflicts: readonly string[];
+  readonly unresolvedConflicts: readonly string[];
 }
 export interface WebBootstrap {
   readonly mode: 'blind' | 'assisted';

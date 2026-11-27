@@ -116,7 +116,11 @@ export function modelConsensus(
   if (votes.length !== n) reasons.push('incomplete-opinions');
   if (votes.some((value) => value.annotation?.pairs?.length !== 1))
     reasons.push('multiple-reasonable-pairs');
-  if (opinions.some((value) => (value.annotation?.conflicts.length ?? 0) > 0))
+  if (
+    votes.some(
+      (value) => (value.annotation?.unresolvedConflicts?.length ?? 0) > 0,
+    )
+  )
     reasons.push('key-evidence-conflict');
   const behaviours = new Set(votes.map((value) => value.independentBehaviour));
   if (behaviours.size !== 1 || behaviours.has(null))

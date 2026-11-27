@@ -143,7 +143,7 @@ describe('independent model reference arithmetic and precedence', () => {
           ...conflict,
           annotation: {
             ...conflict.annotation,
-            conflicts: ['conflicting permission source'],
+            unresolvedConflicts: ['conflicting permission source'],
           },
         },
       ]).reasons,
@@ -152,6 +152,41 @@ describe('independent model reference arithmetic and precedence', () => {
       modelConsensus([vote(0, [10, 10]), vote(1, [10, 10]), vote(2, [10, 10])])
         .pair,
     ).toEqual([10, 10]);
+  });
+  test('resolved or historical conflict notes do not block the selected votes', () => {
+    const first = vote(0);
+    if (first.annotation === undefined) throw new Error('fixture');
+    const notes = {
+      ...first,
+      annotation: {
+        ...first.annotation,
+        conflicts: ['A later instruction clearly superseded the earlier one'],
+      },
+    };
+    const later = {
+      ...first,
+      opinion: { ...first.opinion, reviewId: 'later-attempt' },
+      annotation: {
+        ...first.annotation,
+        recordedOrder: first.annotation.recordedOrder + 1,
+        unresolvedConflicts: [
+          'An issue reported by an attempt outside the selected votes',
+        ],
+      },
+    };
+    expect(modelConsensus([later, notes, vote(1), vote(2)]).pair).toEqual([
+      3, 10,
+    ]);
+    expect(
+      modelConsensus([
+        {
+          ...notes,
+          annotation: { ...notes.annotation, unresolvedConflicts: [] },
+        },
+        vote(1),
+        vote(2),
+      ]).pair,
+    ).toEqual([3, 10]);
   });
   test.each(['missing', 'failed', 'partial'] as const)(
     '%s never shrinks registered N',

@@ -12,6 +12,26 @@ function scoreLabel(pairs: string): string {
     .join(' · ');
 }
 
+function ConflictNotes({
+  label,
+  notes,
+}: {
+  readonly label: string;
+  readonly notes: readonly string[];
+}) {
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <h4>{label}</h4>
+      <ul>
+        {notes.map((note, index) => (
+          <li key={String(index)}>{note}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 function OpinionRow({
   opinion,
   busy,
@@ -53,6 +73,11 @@ function OpinionRow({
             </ul>
           </>
         )}
+        <ConflictNotes label={copy.modelConflicts} notes={opinion.conflicts} />
+        <ConflictNotes
+          label={copy.unresolvedConflicts}
+          notes={opinion.unresolvedConflicts}
+        />
         {opinion.complete && (
           <button
             type="button"
