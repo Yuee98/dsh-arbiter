@@ -22,13 +22,7 @@ export const idSchema = {
 export const answerSchema = {
   type: 'object',
   additionalProperties: false,
-  required: [
-    'pairs',
-    'behaviourReference',
-    'rationale',
-    'evidence',
-    'conflicts',
-  ],
+  required: ['pairs', 'rationale', 'evidence', 'conflicts'],
   properties: {
     pairs: {
       anyOf: [
@@ -67,7 +61,11 @@ export const answerSchema = {
   },
 };
 export function independentAnswer(value: unknown): IndependentAnswer {
-  return checked<IndependentAnswer>(answerSchema, value);
+  const answer = checked<
+    Omit<IndependentAnswer, 'behaviourReference'> &
+      Partial<Pick<IndependentAnswer, 'behaviourReference'>>
+  >(answerSchema, value);
+  return { ...answer, behaviourReference: answer.behaviourReference ?? null };
 }
 export function registeredModels(value: unknown): readonly RegisteredModel[] {
   const models = checked<readonly RegisteredModel[]>(

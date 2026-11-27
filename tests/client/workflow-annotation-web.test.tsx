@@ -437,12 +437,16 @@ describe('standalone workflow annotation production React page', () => {
     const panel = within(material).getByRole('region', { name: copy.opinions });
     const name = await within(panel).findByText('synthetic-model');
     expect(within(panel).getByText('R3 / A10')).toBeVisible();
+    expect(within(panel).getByText('允许', { exact: true })).toBeVisible();
     expect(
       within(panel).getByText('<script>unsafe()</script>'),
     ).not.toBeVisible();
     await user.click(name);
     expect(within(panel).getByText('<script>unsafe()</script>')).toBeVisible();
     expect(within(panel).getByText('VISIBLE_QUOTE')).toBeVisible();
+    expect(
+      within(panel).getByText(`${copy.historicalModelBehaviour} 拒绝`),
+    ).toBeVisible();
     expect(
       within(panel).getByText('A later instruction superseded the first'),
     ).toBeVisible();

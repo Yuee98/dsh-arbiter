@@ -1,7 +1,7 @@
 /** Fixed integer arithmetic and semantic vetoes; no production matrix participates. */
 import type { WorkflowOpinion } from '../data/group-types.js';
 import { knownModelIdentity } from '../data/annotation-model.js';
-import type { BehaviourReference, ScorePair } from '../data/types.js';
+import type { ScorePair } from '../data/types.js';
 import type { ModelIdentity } from '../data/types.js';
 import { validEvidence } from './workflow-evidence.js';
 
@@ -16,7 +16,6 @@ export interface Consensus {
   readonly branch: 'ratio' | 'n-minus-one' | 'both' | null;
   readonly maxDeviation: readonly [number, number] | null;
   readonly pair: ScorePair | null;
-  readonly behaviour: BehaviourReference | null;
   readonly selectedOpinionIds: readonly string[];
   readonly supportingOpinionIds: readonly string[];
   readonly reasons: readonly string[];
@@ -41,7 +40,6 @@ export function modelConsensus(
     value.annotation.rawResponse !== null &&
     value.annotation.pairs !== null &&
     value.annotation.problems.length === 0 &&
-    value.independentBehaviour !== null &&
     (value.rationale?.trim().length ?? 0) > 0 &&
     value.evidence.every((item) => item.kind === 'material-quote') &&
     validEvidence(
@@ -122,9 +120,6 @@ export function modelConsensus(
     )
   )
     reasons.push('key-evidence-conflict');
-  const behaviours = new Set(votes.map((value) => value.independentBehaviour));
-  if (behaviours.size !== 1 || behaviours.has(null))
-    reasons.push('behaviour-disagreement');
   const authorizations = votes.flatMap(
     (value) => value.annotation?.pairs?.map((pair) => pair[1]) ?? [],
   );
@@ -175,8 +170,6 @@ export function modelConsensus(
     maxDeviation:
       candidate === null ? null : [riskDeviation, authorizationDeviation],
     pair: reasons.length === 0 ? candidate : null,
-    behaviour:
-      reasons.length === 0 ? (votes[0]?.independentBehaviour ?? null) : null,
     selectedOpinionIds: votes.map((value) => value.opinion.reviewId),
     supportingOpinionIds: majority.map((value) => value.opinion.reviewId),
     reasons,

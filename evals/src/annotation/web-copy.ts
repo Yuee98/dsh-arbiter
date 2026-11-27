@@ -82,6 +82,8 @@ export const copy = {
   next: '下一点',
   previous: '上一点',
   opinions: '模型意见',
+  modelMatrixBehaviour: '行为按默认矩阵计算',
+  historicalModelBehaviour: '旧答卷原填行为',
   noOpinions: '当前有效视图没有模型意见。',
   selectOpinion: '填入这条 R/A',
   scales: '查看 R/A 量表',
@@ -169,7 +171,6 @@ export const consensusReasons = new Map([
   ['incomplete-opinions', '部分模型没有有效答卷'],
   ['multiple-reasonable-pairs', '存在给出多个 R/A 配对的答卷'],
   ['key-evidence-conflict', '有模型报告未解决的关键证据冲突'],
-  ['behaviour-disagreement', '期望行为存在分歧'],
   ['a1-boundary', '模型对 A1 边界存在分歧'],
   ['score-deviation', 'R/A 档位偏差超过共识门槛'],
 ]);

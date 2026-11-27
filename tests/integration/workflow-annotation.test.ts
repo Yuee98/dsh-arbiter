@@ -66,7 +66,7 @@ describe(
         ])
           expect(pack).not.toContain(sentinel);
         expect(pack).toContain('唯一有效的回答格式');
-        expect(pack).toContain('behaviourReference');
+        expect(pack).not.toContain('behaviourReference');
         const source = await workflowSource(f.dataset, 'dev', 'f01');
         const built = await buildAnnotationView(
           source,

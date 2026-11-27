@@ -1,5 +1,11 @@
 import type { WebOpinion, WebOpinionReport } from './web-types.js';
-import { behaviourLabels, consensusReasons, copy } from './web-copy.js';
+import { matrixPreview } from './web-form.js';
+import {
+  behaviourLabels,
+  consensusReasons,
+  copy,
+  matrixLabels,
+} from './web-copy.js';
 
 function scoreLabel(pairs: string): string {
   return pairs
@@ -41,14 +47,16 @@ function OpinionRow({
   readonly busy: boolean;
   readonly onSelect: (opinion: WebOpinion) => void;
 }) {
+  const verdicts = matrixPreview(opinion.pairs) ?? [];
+  const result = [...new Set(verdicts)]
+    .map((verdict) => matrixLabels[verdict])
+    .join(' / ');
   return (
     <details className="model-row">
       <summary>
         <span className="model-name">{opinion.model}</span>
         <span className="model-score">{scoreLabel(opinion.pairs) || '—'}</span>
-        <span className="model-behaviour">
-          {behaviourLabels[opinion.behaviour]}
-        </span>
+        <span className="model-behaviour">{result}</span>
       </summary>
       <div className="model-detail">
         {!opinion.complete && (
@@ -72,6 +80,11 @@ function OpinionRow({
                 ))}
             </ul>
           </>
+        )}
+        {opinion.behaviour !== '' && (
+          <p className="material-muted">
+            {copy.historicalModelBehaviour} {behaviourLabels[opinion.behaviour]}
+          </p>
         )}
         <ConflictNotes label={copy.modelConflicts} notes={opinion.conflicts} />
         <ConflictNotes
@@ -119,6 +132,7 @@ export function OpinionPanel({
     <section className="model-opinions" aria-label={copy.opinions}>
       <div className="opinion-heading">
         <h3>{copy.opinions}</h3>
+        <span className="material-muted">{copy.modelMatrixBehaviour}</span>
         {consensus !== undefined && (
           <span className="consensus-badge" data-agreed={agreed}>
             {state}

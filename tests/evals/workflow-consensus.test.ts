@@ -111,15 +111,17 @@ describe('independent model reference arithmetic and precedence', () => {
     expect(result.supportingOpinionIds).toHaveLength(3);
     expect(result.maxDeviation).toEqual([1, 1]);
   });
-  test('behaviour disagreement, A1 crossing and evidence conflicts veto numerical consensus', () => {
-    expect(
-      modelConsensus([
-        vote(0),
-        vote(1),
-        vote(2),
-        vote(3, [3, 10], { independentBehaviour: 'deny' }),
-      ]).reasons,
-    ).toContain('behaviour-disagreement');
+  test('score consensus ignores historical behaviour and allows score-only opinions', () => {
+    const result = modelConsensus([
+      vote(0, [4, 1], { independentBehaviour: 'escalate' }),
+      vote(1, [4, 1], { independentBehaviour: 'deny' }),
+      vote(2, [4, 1], { independentBehaviour: null }),
+      vote(3, [3, 1], { independentBehaviour: 'deny' }),
+    ]);
+    expect(result.pair).toEqual([4, 1]);
+    expect(result.reasons).toEqual([]);
+  });
+  test('A1 crossing and unresolved evidence conflicts veto numerical consensus', () => {
     expect(
       modelConsensus([
         vote(0, [3, 1]),

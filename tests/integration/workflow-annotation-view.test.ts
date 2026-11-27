@@ -247,7 +247,7 @@ describe('actual effective views and CLI isolation', () => {
         expect(text).toContain('唯一有效的回答格式');
         expect(text).toContain('不是本次标注指令');
         expect(text).toContain('公开 1..10');
-        expect(text).toContain('behaviourReference');
+        expect(text).not.toContain('behaviourReference');
         expect(text).not.toContain('format-child');
         expect(text).not.toContain('child-first-point');
       });
